@@ -104,5 +104,109 @@ console.log('-- no table the player sees changed; a player or a drone is never h
   fresh(); const P = man(0, 0, 0, 0); P.ai = null; const t = man(1, 5, 0, 0);
   ok($('notice')(P, t) === true && $('aware')(P, t, 3) === true, 'a soldier with no AI (the player) knows at once');
 }
+const ladder = [], duel = [];
+if ($('typeof LADDER !== "undefined"')) {
+  const g = $('grade');
+  /* seconds from the start until a has t detected (grade 1), recognized (2) and identified (3), the clock stepped by dt; Infinity for a rung not reached */
+  const rungs = (a, t, max, dt) => { dt = dt || .1; const t0 = S.t, r = [Infinity, Infinity, Infinity]; for (; S.t - t0 < max && r[2] === Infinity;) { S.t += dt; const k = g(a, t); for (let i = 0; i < k; i++) if (r[i] === Infinity) r[i] = S.t - t0; } return r; };
+  console.log('-- the ladder: detected, recognized, identified --');
+  {
+    const R = (kit, x, st) => { fresh(); const a = C.addMan(kit, 1, B.x, B.z, 0); a.ai = $('manBrain')(0); a.ai.gx = a.x; a.ai.gz = a.z; const t = man(0, x, 0, 0, st); t.ai = null; return rungs(a, t, 60); };
+    const r100 = R('redRifle', 100), r300 = R('redRifle', 300), r550 = R('redRifle', 550), s550 = R('redSniper', 550), p300 = R('redRifle', 300, 2);
+    ladder.push(['rifleman, soldier 100 m', r100], ['rifleman, soldier 300 m', r300], ['rifleman, soldier 550 m', r550], ['sniper (scope), soldier 550 m', s550], ['rifleman, soldier prone 300 m', p300]);
+    ok([r100, r300, r550, s550, p300].every(r => r[0] <= r[1] && r[1] <= r[2]), 'each rung comes after the one below it');
+    ok(r100[2] - r100[0] < 1.5, 'at 100 m a soldier is made out, class and side, within ' + f1(r100[2] - r100[0]) + ' s of being noticed');
+    ok(r550[1] - r550[0] > r100[1] - r100[0] && r550[2] - r550[1] > 4, 'at 550 m the class takes ' + f1(r550[1] - r550[0]) + ' s more and the side ' + f1(r550[2] - r550[1]) + ' s more than that');
+    ok(s550[2] < r550[2] - 3, 'a scope makes the side out sooner: ' + f1(s550[2]) + ' s against ' + f1(r550[2]) + ' s by eye');
+    ok(p300[1] > r300[1], 'a prone soldier is recognized later than a standing one: ' + f1(p300[1]) + ' s against ' + f1(r300[1]));
+    const T = (ax, h) => { fresh('modern'); const a = C.addUnit('tank', 1, B.x, B.z, side[1].tanks[0], true); a.f = { x: Math.cos(h), y: 0, z: -Math.sin(h) }; const t = C.addVehicle('tank', side[0].tanks[0], 0, B.x + ax, B.z, 0); return rungs(a, t, 60); };
+    const tOn = T(1500, 0), tOff = T(1500, .8);
+    ladder.push(['tank gunner sight, tank 1500 m', tOn], ['tank commander only, tank 1500 m', tOff]);
+    ok(tOn[2] < tOff[2], 'a tank\'s gunner sight identifies another at 1500 m in ' + f1(tOn[2]) + ' s; 46 deg off it, the commander in ' + f1(tOff[2]) + ' s');
+  }
+  console.log('-- reaction: nothing is acted on at once --');
+  {
+    const L = $('LADDER'); let worst = 9, best = 0;
+    for (let i = 0; i < 12; i++) {
+      fresh(); S.qsd = 7919 * (i + 1); const a = man(1, 0, 0, 0), t = man(0, 6, 0, 0); t.ai = null; let t1 = null, t2 = null; const t0 = S.t;
+      for (; S.t - t0 < 3 && t2 === null;) { S.t += .05; const k = g(a, t); if (k >= 1 && t1 === null) t1 = S.t; if (k >= 2) t2 = S.t; }
+      worst = Math.min(worst, t2 - t1); best = Math.max(best, t2 - t1);
+    }
+    ok(worst >= L.react[0] - .06 && best <= L.react[1] + .2, 'a soldier 6 m off is shot at only ' + worst.toFixed(2) + ' to ' + best.toFixed(2) + ' s after it is seen (react ' + L.react.join(' to ') + ' s)');
+    fresh(); const a = man(1, 0, 0, 0), t = man(0, 6, 0, 0); t.ai = null; $('notice')(a, t);
+    ok(!$('known')(a.ai, a, t), 'in that moment it is not a target (known is false)');
+  }
+  console.log('-- only what it made out is shot at --');
+  {
+    fresh(); const a = man(1, 0, 0, 0), t = man(0, 250, 0, 0); t.ai = null; const e = $('meter')(a, t);
+    Object.assign(e, { v: 1.2, kn: true, kt: S.t - 5, t: S.t, rc: 0, ic: 0 }); a.ln = null; S.t += .2;
+    $('manThink')(a);
+    ok(g(a, t) === 1 && a.ai.tgt === null, 'one only detected (no class yet) is not picked');
+    ok(!!a.ln && a.ln.of === t && Math.hypot(a.ln.x - t.x, a.ln.z - t.z) <= 250 * L_err() + 1, 'it looks that way instead, ' + (a.ln ? Math.hypot(a.ln.x - t.x, a.ln.z - t.z).toFixed(1) : '-') + ' m off where it is');
+    e.rc = 1; S.t += .2; $('manThink')(a);
+    ok(g(a, t) >= 2 && a.ai.tgt === t, 'once its class is made out it is the target');
+    fresh('modern'); const at = C.addMan('blueAT', 0, B.x, B.z, 0); at.ai = $('manBrain')(0); at.ai.gx = at.x; at.ai.gz = at.z;
+    const tk = C.addVehicle('tank', side[1].tanks[0], 1, B.x + 600, B.z, 0), ea = $('meter')(at, tk);
+    const kit = at.arms[1].d.k;
+    Object.assign(ea, { v: 1.2, kn: true, kt: S.t - 5, t: S.t, rc: 1, ic: 0 }); S.t += .2; $('manThink')(at);
+    if (kit === 'atgm') {
+      ok(g(at, tk) === 2 && !(at.ai.tgt === tk && at.ctl.w === 1), 'a guided missile is not laid on a tank only recognized');
+      ea.ic = 1; S.t += .2; $('manThink')(at);
+      ok(g(at, tk) === 3 && at.ai.tgt === tk && at.ctl.w === 1, 'identified, it is');
+    } else ok(false, 'blueAT carries ' + kit + ', not a guided missile');
+  }
+  console.log('-- first shot and hits, by distance --');
+  {
+    /* an AI rifleman against one standing still in the open, facing it: when it first fires, and what share of 20 s of fire hits */
+    let hits = 0; $('impact = (g => (...a) => { if (a[0] && a[0].__h) a[0].__h(); return g(...a); })(impact)');
+    const D = x => { fresh(); const E = S.base[1], L = Math.hypot(E.x - B.x, E.z - B.z), ux = (E.x - B.x) / L, uz = (E.z - B.z) / L;   // on its side's axis, where it looks
+      const a = C.addMan('blueRifle', 0, B.x + ux * 60, B.z + uz * 60, Math.atan2(-uz, ux)); a.ai = $('manBrain')(0); a.ai.gx = a.x; a.ai.gz = a.z; a.skill = .775;
+      const t = C.addMan('redRifle', 1, a.x + ux * x, a.z + uz * x, 0); t.ai = null; t.__h = () => { if (t.hT !== S.t) hits++; t.hT = S.t; }; hits = 0;
+      const t0 = S.t; let first = Infinity, n = 0, st = a.shotT; C.run(25, () => { if (a.shotT !== st) { st = a.shotT; n++; if (first === Infinity) first = S.t - t0; } t.hp = t.max; t.dead = false; return S.t - t0 < first + 20; });
+      return [first, n ? hits / n : 0]; };
+    for (const x of [100, 200, 330]) { const [f, h] = D(x); duel.push(['rifleman, standing soldier ' + x + ' m', f, h]); }
+    ok(duel.every(r => r[1] >= .3), 'the first shot is never at once: the soonest at ' + Math.min(...duel.map(r => r[1])).toFixed(1) + ' s');
+    ok(duel[0][1] < duel[1][1] && duel[1][1] < duel[2][1] && duel[2][1] < Infinity, 'it comes later the farther it is: ' + duel.map(r => f1(r[1])).join(', ') + ' s');
+    ok(duel[0][2] > duel[2][2], 'and hits less: ' + duel.map(r => (100 * r[2]).toFixed(0) + '%').join(', '));
+  }
+  console.log('-- told: the class goes round, the side does not --');
+  {
+    fresh(); const q = C.addSquad(1, B.x, B.z, 0, 0, [0, 0]); const [a, b] = q.men; for (const m of [a, b]) { m.ai.tgt = null; m.ctl.mx = m.ctl.mz = 0; }
+    a.x = B.x; a.z = B.z; a.f = { x: 1, y: 0, z: 0 }; b.x = B.x - 8; b.z = B.z; b.f = { x: -1, y: 0, z: 0 };
+    const t = man(0, 150, 0, 0); t.ai = null; t.v = { x: 0, y: 0, z: 3 }; let ga = 0, gb = 0;
+    for (let i = 0; i < 100 && !(ga >= 2 && gb >= 1); i++) { S.t += .1; ga = g(a, t); gb = g(b, t); }
+    const eb = b.pm.get(t); S.t += 1; gb = g(b, t); ga = g(a, t);
+    ok(ga >= 2 && eb && eb.told && gb === 2, 'the mate with its back turned has the class (' + gb + ') from the one who saw it (' + ga + '), not the side');
+  }
+  console.log('-- honesty: a battle of AI against AI, every shot checked --');
+  {
+    const SECS = +process.env.SECS || 90, SPOT = $('SPOT'), spotted = $('spotted'), SIGHT = $('SIGHT'), tclass = $('tclass');
+    for (const era of ['ww2', 'modern']) {
+      C.seed(3); const S2 = C.newState(era); S = S2; $('DAI').every = 1e9;   // no drones: one striking a supply base crashes droneSweep (a bug of its own, outside perception)
+      $('cmdArea = (g => (m, A, c) => { const r = g(m, A, c); if (r) A.areaT = S.t; return r; })(cmdArea)');
+      const mem = (o, t) => [o.ai, o.ai && o.ai.lm, o.ai && o.ai.im].some(M => M && M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem + .1);
+      let shots = 0, area = 0, indirect = 0, bad = [], gm = 0, gbad = [], nm = 0; const seen = new Set();
+      C.run(SECS, () => {
+        for (const l of [S.units, S.men, S.planes]) for (const o of l) {
+          if (o.dead || !o.ai) continue;
+          let f = o.shotT === S.t; if (o.arms) for (const a of o.arms) if (a.t === S.t) f = true;
+          if (!f) continue;
+          const A = o.ai, fm = A.fm && A.fm.t;
+          if (fm) { indirect++; if (!(fm.cm || spotted(fm) || S.t - fm.seenT < SPOT.keep + 1)) bad.push('fire mission on an unspotted ' + (fm.kind || (fm.sup ? 'base' : '?'))); continue; }
+          const ts = (o.man ? [A.tgt] : o.def && o.def.vmax ? [o.tgt, A.tgt] : [A.tgt, A.low, A.inf]).filter(Boolean);
+          if (!ts.length && A.areaT === S.t) { area++; continue; }
+          shots++;
+          if (!ts.some(t => !tclass(t) || g(o, t) >= 2 || mem(o, t))) bad.push((o.man ? 'soldier' : o.kind || 'aircraft') + ' at ' + (ts.map(t => (t.man ? 'soldier' : t.kind || 'aircraft') + ' g' + g(o, t)).join(', ') || 'nothing') + ' t=' + S.t.toFixed(1));
+        }
+        for (const m of S.missiles) { if (seen.has(m)) continue; seen.add(m); const b = m.by, t = m.target; if (!b || !b.ai || !t || !t.team === undefined) continue; nm++; if (t.kind === undefined && t.def === undefined) continue; gm++; if (g(b, t) < 3) gbad.push((b.man ? 'soldier' : b.kind || 'aircraft') + ' g' + g(b, t)); }
+      });
+      ok(shots > 50 && !bad.length, era + ', ' + SECS + ' s: ' + shots + ' aimed shots, ' + area + ' of covering fire into an objective, ' + indirect + ' indirect on the side\'s map; at what it had not made out: ' + bad.length + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
+      ok(!gbad.length, era + ': ' + gm + ' guided missiles at a target, every one identified first' + (gbad.length ? '; not: ' + gbad.slice(0, 3).join(', ') : ''));
+    }
+  }
+}
+function L_err() { return $('LADDER').err; }
 console.log('\n' + 'what                                     seconds to know'); for (const r of rows) console.log(r[0].padEnd(42) + f1(r[1]));
+if (ladder.length) { console.log('\n' + 'what'.padEnd(42) + 'detected  recognized  identified (s)'); for (const r of ladder) console.log(r[0].padEnd(42) + r[1].map(v => f1(v).padEnd(10)).join('  ')); }
+if (duel.length) { console.log('\n' + 'what'.padEnd(42) + 'first shot (s)  hits'); for (const r of duel) console.log(r[0].padEnd(42) + f1(r[1]).padEnd(16) + (100 * r[2]).toFixed(0) + '%'); }
 done();

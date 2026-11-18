@@ -873,6 +873,16 @@ const SHARE = { sq: .6, pl: 1.3, side: 4, near: 250, fresh: 2, reach: 1.3, repor
 const AIM = { max: .06, told: 1.6, man: { first: .045, settle: 2.2, on: .98, cross: .22, mv: 0, vm: 5, hit: 0, hitW: 0 }, tank: { first: .014, settle: 2.4, on: .98, cross: .2, mv: .004, vm: 8, hit: .003, hitW: 3 },
   aa: { first: .02, settle: 2, on: .98, cross: .06, mv: .004, vm: 8, hit: 0, hitW: 0 }, plane: { first: .007, settle: 1.5, on: .9, cross: .015, mv: 0, vm: 1, hit: .005, hitW: 1.5 }, heli: { first: .012, settle: 2, on: .9, cross: .03, mv: 0, vm: 1, hit: .006, hitW: 1.5 } };
 const AK = { man: 'man', snp: 'man', tank: 'tank', lav: 'tank', car: 'tank', truck: 'tank', art: 'tank', aa: 'aa', aag: 'aa', plane: 'plane', heli: 'heli' };
+/* the perception ladder: knowing a target (notice) is only being sure something is there (detected). While it stays in sight its class is made out
+   (recognized) and then its model and side (identified). q: how far inside a sensor's reach the target is, as it looks (the reach over the distance, by
+   the gaze and the sensor's m, times the target's SIZE^.5, a soldier's stance and cover, woods). The class fills by rate * (q * rec)^pw per s and the model
+   by rate * (q * id)^pw, at most cap per s: at once inside about rec (60%) and id (35%) of the reach, slowly farther off. An optic, the sensor opt[class]
+   (a scope, a gunner's or a helicopter's sight, a radar's IFF, a pilot's pod; a soldier's eyes only while it carries a guided special), makes the model
+   out as if optF times nearer. One told of a target has the class if the one who told it had it, never the model. Whatever is made out is acted on only
+   react s after (rolled per pair): until then, and until the class, the AI looks at it, err of the distance off where it is, and reports it, and shoots at
+   nothing. Only the model lets a guided weapon go. A sniper, whose shot is its choice of target, holds it up to wait s while a soldier in its reach is
+   only detected, and looks at him */
+const LADDER = { rec: .6, id: .35, pw: 3, rate: 1, cap: 4, opt: { snp: 1, tank: 0, heli: 1, aa: 0, plane: 0, man: 0 }, optF: 1.75, react: [.3, .6], err: .06, wait: 4 };
 /* ---------- infantry ----------
    A soldier is not a vehicle: no turret, no armour, a body of zones and a stance. SARMS, what is carried. A small arm fires a round every
    rate s from a magazine of mag with mags spare, spread sp rad standing and unsighted; auto: it fires while the trigger is held; lmg: the
@@ -2939,7 +2949,7 @@ function aiRun(p, t, dt) {
   if (o.k === 'agm') {   // stand-off: a missile or two from the far side of the target's guns, then away
     if (hd < C.fire[1]) { p.egress = C.egress; return lvl; }
     if (hd > C.fire[0]) return lvl;
-    if (on > .97 && p.ocool[wi] <= 0 && !t.lost && los(p, p.y, t, t.y + 2.5) && !ffHeld(p, p.tgt, o.r, p.ffA || (p.ffA = {})) && release(p, wi)) { p.ocool[wi] = C.gap; if (t.sup) S.missiles[S.missiles.length - 1].target = t; }
+    if (on > .97 && p.ocool[wi] <= 0 && !t.lost && idd(p, p.tgt) && los(p, p.y, t, t.y + 2.5) && !ffHeld(p, p.tgt, o.r, p.ffA || (p.ffA = {})) && release(p, wi)) { p.ocool[wi] = C.gap; if (t.sup) S.missiles[S.missiles.length - 1].target = t; }
     return aim;
   }
   const far = p.V * ASPD * C.lead;   // rockets: a shallow dive, half the load in a ripple with the guns, and off before the target
@@ -2980,7 +2990,7 @@ function aiPlane(p, dt) {
     const cosOff = dot(dir, p.f);
     if (cosOff > .999 && rng < PAI.gun && p.ammo > 0 && !ffHeld(p, t)) p.fire = true;
     const mi = d.ord[1] && d.ord[1].k === 'aam' ? 1 : -1;
-    if (mi > 0 && p.mcool <= 0 && rng > PAI.aam[0] && rng < PAI.aam[1] && cosOff > .9 && !t.lost && MSL.aiShot(p, t, mi) && release(p, mi)) p.mcool = rand(7, 12);
+    if (mi > 0 && p.mcool <= 0 && rng > PAI.aam[0] && rng < PAI.aam[1] && cosOff > .9 && !t.lost && idd(p, t) && MSL.aiShot(p, t, mi) && release(p, mi)) p.mcool = rand(7, 12);
     if (rng < 120) dir = toward(p, p.x + p.f.x * 500, p.z + p.f.z * 500 + 300, p.y + 150);   // avoid a ram
   } else {   // nothing in reach: cover a friendly attack plane, or patrol my side of the middle
     let e = null, ed = 1e9;
@@ -3115,7 +3125,7 @@ function los(a, ay, b, by) {
 const ZERO = { x: 0, y: 0, z: 0 }, eyeY = o => o.y + (o.man ? STANCE[o.st].eye * MAN.sc : o.kind ? o.def.mh : 0), bodyY = o => o.y + (o.man ? o.fy || STANCE[o.st].h * MAN.sc * .6 : o.sup ? 1.6 : o.kind ? 2.5 : 0);
 const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);
 const sees = (a, t) => los(a, eyeY(a), t, bodyY(t)) && !hid(a, t);
-const known = (M, a, t) => (!hid(a, t) && notice(a, t)) || (!!M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem);
+const known = (M, a, t) => (!hid(a, t) && grade(a, t) >= 2) || (!!M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem);
 function sight(M, a, t) {
   let m = M.mem;
   if (!t || t.dead || t.gone) return (M.mem = null);
@@ -3163,7 +3173,7 @@ function told(a, t, oc, d, air) {   // has one of its side that knows t told a, 
 function meter(a, t) {
   const M = a.pm || (a.pm = new Map());
   let e = M.get(t);
-  if (!e) { e = { v: 0, t: -99, kn: false, kt: 0, told: false, los: true, lt: -9 }; M.set(t, e); if (M.size > 48) for (const [k, q] of M) if (k !== t && (S.t - q.t > 8 || k.dead)) M.delete(k); }
+  if (!e) { e = { v: 0, t: -99, kn: false, kt: 0, told: false, los: true, lt: -9, rc: 0, ic: 0, rt: 0, k0: -1, ex: 0, ez: 0 }; M.set(t, e); if (M.size > 48) for (const [k, q] of M) if (k !== t && (S.t - q.t > 8 || k.dead)) M.delete(k); }
   return e;
 }
 function notice(a, t) {
@@ -3174,22 +3184,26 @@ function notice(a, t) {
   if (dt > PERC.gap) { e.v = Math.max(0, e.v - PERC.dec * Math.min(dt, 30)); if (e.v < PERC.lose) e.kn = e.told = false; dt = e.t < 0 ? .35 : .1; } else dt = Math.min(dt, .6);
   e.t = S.t;
   const dx = t.x - a.x, dz = t.z - a.z, dy = t.y - a.y, hd = Math.hypot(dx, dz) || 1, d = Math.hypot(hd, dy) || 1, air = tc === 'plane' || tc === 'heli', tv = t.v || ZERO, spd = Math.hypot(tv.x, tv.z);
-  let sr = 0, hr = 0, cap = HEAR.cap[0];
+  let sr = 0, hr = 0, cap = HEAR.cap[0], qa = 0, qo = 0;
   {   // sight: the best of its sensors
     let off = Math.abs(wrap(Math.atan2(-dz, dx) - gaze(a, oc))), best = 0;
     if ((a.ai.tgt || a.tgt) === t) off = Math.min(off, PERC.focus);   // what it is fighting it keeps its eyes on
-    for (const v of VIEW[oc]) {
-      const R = air ? v[1] : v[0]; if (!R) continue;
-      const fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw);
+    const oi = oc === 'man' && !(a.arms && a.arms[1] && (a.arms[1].d.k === 'atgm' || a.arms[1].d.k === 'sam')) ? -1 : LADDER.opt[oc];   // the optic, for the model
+    VIEW[oc].forEach((v, i) => {
+      const R = air ? v[1] : v[0]; if (!R) return;
+      const fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw), q = v[4] * fa * R / d;
       if (r > best) best = r;
-    }
+      if (q > qa) qa = q;
+      if (i === oi && q > qo) qo = q;
+    });
     if (best > .01 && !hid(a, t)) {
-      const cv = t.man ? cover(t) : null;
-      sr = best * SIZE[tc] * (PERC.still + Math.min(PERC.run[1], spd / PERC.run[0])) * (S.t - shotAt(t) < PERC.fire[1] ? PERC.fire[0] : 1) * (t.man ? STANCE[t.st].vis * (1 - (cv.all || t.st ? cv.c : 0)) : !air && kindAt(t.x, t.z) === 1 ? PERC.woods : 1)
+      const cv = t.man ? cover(t) : null, look = (t.man ? STANCE[t.st].vis * (1 - (cv.all || t.st ? cv.c : 0)) : !air && kindAt(t.x, t.z) === 1 ? PERC.woods : 1)
         * (!air && (oc === 'plane' || oc === 'heli') && -dy / hd > PERC.low[0] ? PERC.low[1] : 1);
+      sr = best * SIZE[tc] * (PERC.still + Math.min(PERC.run[1], spd / PERC.run[0])) * (S.t - shotAt(t) < PERC.fire[1] ? PERC.fire[0] : 1) * look;
       if (hd < PERC.near[a.man ? 0 : 1]) sr = Math.max(sr, 2);
       sr = Math.min(sr, PERC.cap);
-    }
+      const k = Math.sqrt(SIZE[tc]) * look; qa *= k; qo *= k;
+    } else qa = qo = 0;
   }
   if (sr > .02 || e.kn) { if (S.t - e.lt > PERC.los) { e.los = los(a, eyeY(a), t, bodyY(t)); e.lt = S.t; } if (!e.los) sr = 0; }
   let hz = air ? HEAR.mv[tc] : tc === 'man' ? HEAR.mv.man[spd > 4 ? 1 : 0] * (spd > 1.5 ? 1 : 0) : spd > 1.5 ? HEAR.mv[tc] : 0;   // sound: a mover, a shooter
@@ -3197,13 +3211,31 @@ function notice(a, t) {
   if (hz && !e.los) hz *= HEAR.wall;
   if (d < hz) { hr = HEAR.rate * (1 - d / hz) + .15; if (d < hz * HEAR.close) cap = HEAR.cap[1]; if (!a.ln || S.t - a.ln.t > .5 || a.ln.of !== t) a.ln = { x: t.x + qr(-1, 1) * d * HEAR.err, z: t.z + qr(-1, 1) * d * HEAR.err, t: S.t, of: t }; }
   e.v = clamp(e.v + (sr + (e.v < cap ? hr : 0) - PERC.dec - (e.los ? 0 : PERC.blind) - (e.told ? PERC.told : 0)) * dt, 0, PERC.hold);
-  if (!(e.kn && !e.told) && told(a, t, oc, d, air)) { e.v = Math.max(e.v, 1); if (!e.kn) { e.kn = true; e.kt = S.t; e.told = true; } }
+  if (!(e.kn && !e.told) && told(a, t, oc, d, air)) {
+    e.v = Math.max(e.v, 1); if (!e.kn) { e.kn = true; e.kt = S.t; e.told = true; }
+    const k = t.kn && t.kn[a.team], be = k && k.by.pm && k.by.pm.get(t); if (be && be.rc >= 1) e.rc = 1;   // the class is passed on, the model is not
+  }
   else if (e.told && sr > .25) e.told = false;
   if (!e.kn && e.v >= 1) { e.kn = true; e.kt = S.t; e.told = false; }
   else if (e.kn && e.v < PERC.lose) e.kn = e.told = false;
+  if (!e.kn) e.rc = e.ic = 0;
+  else {   // the ladder: the class, then the model, while it is in sight
+    const L = LADDER, f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * dt;
+    if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); }
+    if (sr > 0) { e.rc = Math.min(1, e.rc + f(qa * L.rec)); e.ic = Math.min(1, e.ic + f(Math.max(qa, qo * L.optF) * L.id)); if (e.ic >= 1) e.rc = 1; }
+    if (e.rc < 1 && !(a.ai.tgt || a.tgt) && (!a.ln || S.t - a.ln.t > HEAR.ln * .5)) a.ln = { x: t.x + e.ex, z: t.z + e.ez, t: S.t, of: t };   // something there: it looks
+  }
   if (e.kn && !e.told && sr > .15) claim(a, t);
   return e.kn;
 }
+/* how far up the ladder the AI a has t: 0 not known, 1 detected (or not yet reacted to), 2 recognized (its class), 3 identified (model and side).
+   A player, a drone, or what is not a soldier, vehicle or aircraft is always 3 */
+function grade(a, t) {
+  if (!a.ai || t.drone || !oclass(a) || !tclass(t)) return 3;
+  if (!notice(a, t)) return 0;
+  const e = a.pm.get(t); return S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1;
+}
+const idd = (a, t) => !!t && grade(a, t) >= 3;   // identified: a guided weapon may go
 /* has o made t out (for the map of what the side knows): a player's own eyes always count, an AI's only once it knows, and age s after it did */
 function aware(o, t, age) {
   if (!o.ai || t.drone || !oclass(o) || !tclass(t)) return true;
@@ -3669,7 +3701,7 @@ function aiAA(u, dt) {
     const s = lead(u, t, a1.d.spd, true), closing = (u.x - t.x) * t.v.x + (u.y - t.y) * t.v.y + (u.z - t.z) * t.v.z;
     c.aim = s.d; c.sp[1] = G.sp + blind + aimErr(u, A.tgt, rng); c.lock = blind ? null : t;
     c.fire[1] = A.los && rng < G.ciws && onAim(u, s.d, G.tol);
-    c.fire[0] = A.los && !blind && S.t > A.wait && rng > G.sam[0] && rng < G.sam[1] && (closing > 0 || rng < G.aspect) && MSL.aaShot(u, a0.d, t);
+    c.fire[0] = A.los && !blind && S.t > A.wait && rng > G.sam[0] && rng < G.sam[1] && (closing > 0 || rng < G.aspect) && idd(u, t) && MSL.aaShot(u, a0.d, t);
   } else if (rng < G.auto) {   // tracer bursts with lead
     const s = lead(u, t, a0.d.spd, true);
     c.aim = s.d; c.sp[0] = G.sp + blind + aimErr(u, A.tgt, rng);
@@ -4209,11 +4241,11 @@ function manThink(m) {
   let best = null, bs = 1e9;
   if (k === 'sam') for (const p of S.planes) {
     const d = dist(p, m);
-    if (!p.dead && p.team !== m.team && !(p.inv > 0) && d < sp.d.rng * IAI.ad.rng && p.y - m.y < IAI.ad.alt && d < bs && known(A, m, p)) { bs = d; best = p; }
+    if (!p.dead && p.team !== m.team && !(p.inv > 0) && d < sp.d.rng * IAI.ad.rng && p.y - m.y < IAI.ad.alt && d < bs && known(A, m, p) && idd(m, p)) { bs = d; best = p; }
   }
   if (k === 'heat' || k === 'atgm') for (const u of S.units) {
     const d = hdist(u, m) + (u.kind === 'tank' ? 0 : u.kind === 'truck' ? 300 : 120) - cmdAT(m, u);
-    if (!u.dead && u.team !== m.team && d < (k === 'atgm' ? sp.d.rng * IAI.at.atgm : IAI.at.see) && d < bs && known(A, m, u)) { bs = d; best = u; }
+    if (!u.dead && u.team !== m.team && d < (k === 'atgm' ? sp.d.rng * IAI.at.atgm : IAI.at.see) && d < bs && known(A, m, u) && (k !== 'atgm' || idd(m, u))) { bs = d; best = u; }
   }
   c.w = best ? 1 : 0;
   if (!best) {
@@ -5981,7 +6013,9 @@ function aiSniper(m, dt) {
       if (u.dead || u.team === m.team || !K || (K === 'open' && !u.def.open) || d > G.rng || !known(A, m, u)) continue;
       const v = snipeVal(m, u, d); if (v > bs && los(m, eyeY(m), u, bodyY(u))) { bs = v; best = u; }
     }
-    A.tgt = best;
+    const pend = S.men.some(o => !o.dead && o.team !== m.team && !o.in && dist(o, m) < G.rng && grade(m, o) === 1);   // one only detected: what it is decides the shot
+    if (!pend) A.lw = undefined; else if (A.lw === undefined) A.lw = S.t;
+    A.tgt = pend && S.t - A.lw < LADDER.wait ? null : best;
   }
   const t = obs || rout ? null : sight(A, m, A.tgt), dx = A.gx - m.x, dz = A.gz - m.z, d = Math.hypot(dx, dz), go = d > 1.5 && !(m.sup > S.t && !rout);
   if (!t) A.tgt = null;
@@ -7585,7 +7619,7 @@ function heliPick(p, A) {
   const B = HAI.bias, agm = p.ord[1] > 0; let best = null, bs = 1e9;
   const crowd = o => { let n = 0; for (const q of S.planes) if (q !== p && q.heli && q.ai && !q.dead && q.team === p.team && q.ha && q.ha.tgt === o) n++; return n * 1500; };
   for (const u of S.units) {
-    if (u.dead || u.team === p.team || !(spotted(u) || (dist(u, p) < HAI.see && sees(p, u) && notice(p, u)))) continue;
+    if (u.dead || u.team === p.team || !(spotted(u) || (dist(u, p) < HAI.see && sees(p, u) && grade(p, u) >= 2))) continue;
     const sc = hdist(u, p) + (B[tk(u)] || 0) + (u.fixed ? HAI.fixed : 0) + (u.kind === 'tank' && !agm ? 2500 : 0) + (smoked(p.x, p.y, p.z, u.x, u.y + 2, u.z) ? HAI.smoked : 0) + crowd(u) - cmdBias(p.team, u);
     if (sc < bs) { bs = sc; best = u; }
   }
@@ -7650,7 +7684,7 @@ function aiAttack(p, A, dt, msl) {
   }
   /* fire: a little higher than where the target came into sight, so that what it fires clears the mask; the nose on the target */
   c.vs = clamp((A.hy - p.y) * .8, -2, HAI.vs[0]);
-  const hot = heliAgm(p, t) && rng > HAI.agm[0] && rng < HAI.agm[1], dir = vnorm({ x: t.x - p.x, y: bodyY(t) - p.y, z: t.z - p.z });
+  const hot = heliAgm(p, t) && rng > HAI.agm[0] && rng < HAI.agm[1] && idd(p, t), dir = vnorm({ x: t.x - p.x, y: bodyY(t) - p.y, z: t.z - p.z });
   if (hot) { if (p.ocool[1] <= 0 && A.n < HAI.salvo && p.y > A.hy - 1.5 && dot(dir, p.f) > Math.cos(HAI.cone) && A.vis && !hid(p, t) && heliRelease(p, 1, t)) { A.n++; p.ocool[1] = HAI.gap; } }
   else if (p.ord[0] > 0 && rng < HAI.rk[0] && (t.kind !== 'tank' || !heliAgm(p, t))) {
     const tt = rng / 450, ar = vnorm({ x: t.x - p.x, y: bodyY(t) + .125 * GR * tt * tt - p.y, z: t.z - p.z });
@@ -7702,7 +7736,7 @@ AI.aa = (old => (u, dt) => {
   const A = u.ai; old(u, dt);
   if (A.tgt || A.msl || u.dead) return;
   let best = null, bd = HREACT.aa;
-  for (const p of S.planes) { if (!p.heli || p.dead || p.team === u.team || p.inv > 0) continue; const d = dist(p, u); if (d < bd && !hid(u, p) && los(u, eyeY(u), p, p.y) && notice(u, p)) { bd = d; best = p; } }
+  for (const p of S.planes) { if (!p.heli || p.dead || p.team === u.team || p.inv > 0) continue; const d = dist(p, u); if (d < bd && !hid(u, p) && los(u, eyeY(u), p, p.y) && grade(u, p) >= 2) { bd = d; best = p; } }
   if (best) { A.tgt = best; A.los = true; }
 })(AI.aa);
 AI.tank = (old => (u, dt) => {

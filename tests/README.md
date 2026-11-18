@@ -4,6 +4,7 @@ Rodam no Node, sem navegador. `harness.js` carrega a parte da página que não u
 
 ```
 node tests/smoke-sight.js   # a IA e a fumaça: tiros no alvo escondido, memória, retomada (TRIALS=12)
+node tests/perception.js    # percepção da IA: campo de visão, tempo para notar, partilha, mira; a escada (detectado, reconhecido, identificado), tempo de reação, primeiro tiro e acertos por distância, e a suíte de honestidade: uma batalha só de IA nas duas épocas em que nenhum tiro vai a alvo não percebido e nenhum míssil guiado a alvo não identificado (SECS=90)
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento
 node tests/squads.js        # pelotões: caminhão, desembarque, comportamento, reação da outra IA
 node tests/field.js         # infantaria de campo: quem começa onde, ordens (guardar, patrulhar, assaltar, escoltar), reforços do planejador, caminhão sob ameaça, conquista: reforços do diretor, tíquetes, captura, ligação, relógio (SECS=240)

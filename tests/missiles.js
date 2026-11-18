@@ -159,7 +159,7 @@ const g5 = gnd('Hellfire (laser) from a hover at 3 km', HEL.ah64.ord[1], 'heli',
 const g6 = gnd('Ataka (command) from a hover at 3 km', HEL.mi28.ord[1], 'heli', 3000), g6s = gnd('Ataka, smoke 4 s before impact', HEL.mi28.ord[1], 'heli', 3000, { move: 7, smoke: 4 });
 const g7 = gnd('Javelin from 1 km', SARMS.javelin, 'man', 1000), g7s = gnd('Javelin, smoke 3 s before impact', SARMS.javelin, 'man', 1000, { move: 7, smoke: 3 });
 ok([g1, g2, g3, g4, g5, g6, g7].every(r => r.hit > TRIALS * .8), 'every ground-attack missile hits a tank standing in the open');
-ok(g1s.kill < g1.kill * .5 && g6s.kill < g6.kill * .5 && g5s.kill < g5.kill * .5 && g7s.kill < g7.kill, 'smoke defeats the imaging, command and laser ones when the tank then moves off at 7 m/s');
+ok(g1s.kill < g1.kill * .5 && g6s.kill < g6.kill * .5 && g5s.kill < g5.kill * .5 && g7s.hit < g7.hit * .5, 'smoke defeats the imaging, command and laser ones when the tank then moves off at 7 m/s');   // the Javelin by its hits: one leaves a T-90 (hp 150) at 7 hp
 ok(g4s.hit >= g4.hit - 2, 'and does nothing to the one that flies to a place');
 
 console.log('launch zones (m): rmin / no escape / rmax');

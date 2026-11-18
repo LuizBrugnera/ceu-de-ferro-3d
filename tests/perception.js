@@ -98,6 +98,14 @@ console.log('-- aim --');
   ok($('aimErr')(m, s, 40) === 0, 'a soldier settled on a still target 40 m away adds nothing');
   const mm = man(1, 0, 20, 0), ts = man(0, 40, 20, 0); ts.ai = null; mm.skill = .775; const en = $('meter')(mm, ts); en.kn = true; en.kt = S.t; en.on = S.t; en.told = true; const et = $('aimErr')(mm, ts, 40); en.told = false; const eo = $('aimErr')(mm, ts, 40);
   ok(et > eo, 'one told of a target aims worse than one that saw it: ' + et.toFixed(4) + ' against ' + eo.toFixed(4));
+  fresh(); const g = C.addUnit('tank', 1, B.x, B.z, side[1].tanks[0], true), gs = man(0, 0, -150, 0); gs.ai = null; g.skill = .775; g.f = { x: 1, y: 0, z: 0 };
+  const eg = $('meter')(g, gs); eg.kn = true; eg.kt = S.t; const mg = $('vnorm')({ x: gs.x - g.x, y: gs.y - g.y, z: gs.z - g.z }), f0 = $('aimErr')(g, gs, 150, mg); S.t += 8; const f8 = $('aimErr')(g, gs, 150, mg), b8 = $('aimErr')(g, gs, 150);
+  ok(f0 > 0 && f8 === 0 && b8 > 0, 'a free gun laid on its target settles by its own line, the turret turned away: ' + f0.toFixed(4) + ' rad, ' + f8.toFixed(4) + ' after 8 s (by the turret\'s line ' + b8.toFixed(4) + ')');
+  fresh(); const u = C.addUnit('tank', 1, B.x, B.z, side[1].tanks[0], true), v = C.addVehicle('tank', side[0].tanks[0], 0, B.x + 700, B.z, Math.PI), w = man(0, 0, -150, 0);
+  v.ai = null; v.inv = 1e9; w.ai = null; w.inv = 1e9; w.hp = 1e9; u.skill = .775;
+  C.run(14);
+  const xs = u.ctl.sp[1] - $('IAI').tank.sp;
+  ok(u.ai.tgt && u.ai.inf && u.ctl.aim2 && u.f.x > .9 && xs < 1e-3, 'an AI tank\'s roof gun settles on a soldier to its side while the turret holds on a tank ahead: ' + xs.toFixed(4) + ' rad over its spread');
 }
 console.log('-- no table the player sees changed; a player or a drone is never held back --');
 {

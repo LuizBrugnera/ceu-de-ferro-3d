@@ -159,8 +159,20 @@ const g5 = gnd('Hellfire (laser) from a hover at 3 km', HEL.ah64.ord[1], 'heli',
 const g6 = gnd('Ataka (command) from a hover at 3 km', HEL.mi28.ord[1], 'heli', 3000), g6s = gnd('Ataka, smoke 4 s before impact', HEL.mi28.ord[1], 'heli', 3000, { move: 7, smoke: 4 });
 const g7 = gnd('Javelin from 1 km', SARMS.javelin, 'man', 1000), g7s = gnd('Javelin, smoke 3 s before impact', SARMS.javelin, 'man', 1000, { move: 7, smoke: 3 });
 ok([g1, g2, g3, g4, g5, g6, g7].every(r => r.hit > TRIALS * .8), 'every ground-attack missile hits a tank standing in the open');
-ok(g1s.kill < g1.kill * .5 && g6s.kill < g6.kill * .5 && g5s.kill < g5.kill * .5 && g7s.hit < g7.hit * .5, 'smoke defeats the imaging, command and laser ones when the tank then moves off at 7 m/s');   // the Javelin by its hits: one leaves a T-90 (hp 150) at 7 hp
+ok(g7.kill > TRIALS * .8, 'a Javelin that hits destroys a T-90 (hp 150) with one missile');
+ok(g1s.kill < g1.kill * .5 && g6s.kill < g6.kill * .5 && g5s.kill < g5.kill * .5 && g7s.kill < g7.kill * .5, 'smoke defeats the imaging, command and laser ones when the tank then moves off at 7 m/s');
 ok(g4s.hit >= g4.hit - 2, 'and does nothing to the one that flies to a place');
+
+console.log('the ground behind a low helicopter (MSL.evade, the track break and wander, by who fired)');
+{
+  S = C.sandbox('modern');
+  const hx = far, hz = 0, h = C.addHeli('mi28', 1, hx, C.hgt(hx, hz) + 80, hz, 0, false); h.inv = 0; h.q = h.q || yawQ(0);
+  const K = { k: 'ir', dt: .1 }, ev = (dx, y, sam) => { const m = { x: hx - dx, y, z: hz, tg0: h, sam, age: 0, cl: 0 }; MSL.evade(m, K); return m.ew; };
+  const g = C.hgt(hx, hz), jet = ev(6000, g + 900, false), sam6 = ev(6000, g + 900, true), samUp = ev(2500, g + 5, true), samDown = ev(1000, g + 900, true);
+  console.log('  from 6 km and 900 m up: air-launched ' + jet.toFixed(1) + ' m, ground-launched ' + sam6.toFixed(1) + ' m; a SAM from the ground at 2.5 km ' + samUp.toFixed(1) + ' m, one diving on it from 1 km ' + samDown.toFixed(1) + ' m');
+  ok(jet > 0 && jet === ev(6000, g + 900, undefined), 'a missile from the air sees the helicopter against the ground at a long, shallow look down');
+  ok(sam6 === 0 && samUp === 0 && samDown > 0, 'one from the ground only as its seeker looks steeply down on it');
+}
 
 console.log('launch zones (m): rmin / no escape / rmax');
 {

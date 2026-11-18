@@ -887,7 +887,8 @@ const LADDER = { rec: .6, id: .35, pw: 3, rate: 1, cap: 4, opt: { snp: 1, atg: 1
    A soldier is not a vehicle: no turret, no armour, a body of zones and a stance. SARMS, what is carried. A small arm fires a round every
    rate s from a magazine of mag with mags spare, spread sp rad standing and unsighted; auto: it fires while the trigger is held; lmg: the
    squad's base of fire. A special has a kind k, n rounds, rl s between two and a range rng the AI trusts it to:
-   heat, an unguided shaped-charge rocket that hits the plate it strikes by its facing, like a shell, and bursts over r m;
+   heat, an unguided shaped-charge rocket that hits the plate it strikes by its facing, like a shell, and bursts over r m (pen: the plate its charge
+   defeats, in ARMOR.mm's units: a modern tank's side, rear and roof, not its front; without it, its damage decides);
    atgm, guided: a lock inside cone rad held for lockT s and a line clear of smoke, not nearer than min m, coming down on the roof;
    sam, a shoulder-fired heat seeker for aircraft, decoyed by flares like any missile */
 const SARMS = {
@@ -901,8 +902,8 @@ const SARMS = {
   pkp: { name: 'PKP Pecheneg', rate: .092, dmg: 9.5, spd: 825, mag: 100, mags: 3, sp: .01, rl: 6, auto: 1, lmg: 1 },
   pzf: { name: 'Panzerfaust 60', k: 'heat', spd: 60, dmg: 105, r: 5, n: 2, rl: 4, rng: 70, sp: .02 },
   bazooka: { name: 'Bazooka M9', k: 'heat', spd: 85, dmg: 88, r: 5, n: 4, rl: 5, rng: 120, sp: .014 },
-  javelin: { name: 'FGM-148 Javelin', k: 'atgm', dmg: 200, r: 7, n: 2, rl: 9, rng: 2000, min: 75, cone: .12, lockT: 1.5 },
-  rpg: { name: 'RPG-7 (PG-7VR)', k: 'heat', spd: 140, dmg: 140, r: 6, n: 4, rl: 5.5, rng: 250, sp: .012 },
+  javelin: { name: 'FGM-148 Javelin', k: 'atgm', dmg: 215, r: 7, n: 2, rl: 9, rng: 2000, min: 75, cone: .12, lockT: 1.5 },
+  rpg: { name: 'RPG-7 (PG-7VR)', k: 'heat', spd: 140, dmg: 140, pen: 43, r: 6, n: 4, rl: 5.5, rng: 250, sp: .012 },
   stinger: { name: 'FIM-92 Stinger', k: 'sam', dmg: 70, n: 2, rl: 7, rng: 3800, cone: .2, lockT: 1.2 },
   igla: { name: '9K38 Igla', k: 'sam', dmg: 68, n: 2, rl: 7, rng: 3600, cone: .2, lockT: 1.2 }
 };
@@ -3261,15 +3262,16 @@ impact = (g => (...a) => {
   return r;
 })(impact);
 explode = (g => (x, y, z, r, dmg, by, team, ...a) => { boom(x, z, team, r); return g(x, y, z, r, dmg, by, team, ...a); })(explode);
-/* the spread an AI adds to its gun's own at t, rad: a target just made out (or only heard of), one crossing fast, a shooter that is moving or has just been hit */
-function aimErr(a, t, rng) {
+/* the spread an AI adds to its gun's own at t, rad: a target just made out (or only heard of), one crossing fast, a shooter that is moving or has just been hit.
+   f: the line the gun points along when it is not the shooter's own (a free mount's aim2) */
+function aimErr(a, t, rng, f) {
   if (!t || t.drone || t.dead || !a.ai) return 0;
   const oc = oclass(a), q = AIM[AK[oc]]; if (!q) return 0;
   const e = a.pm && a.pm.get(t), r = rng || dist(a, t) || 1, av = a.v || ZERO, tv = t.v || ZERO;
   if (a.skill === undefined) a.skill = qr(.6, .95);
   const ux = (t.x - a.x) / r, uy = (t.y - a.y) / r, uz = (t.z - a.z) / r;
   let k = 1;
-  if (e && e.kn) { if (a.f.x * ux + a.f.y * uy + a.f.z * uz > q.on) { if (e.on === undefined || e.on < e.kt) e.on = Math.max(S.t, e.kt); } else e.on = undefined; k = e.on !== undefined ? Math.min(1, (S.t - e.on) / (q.settle * (e.told ? AIM.told : 1))) : 0; }   // the clock runs from when the gun is on it
+  if (e && e.kn) { const F = f || a.f; if (F.x * ux + F.y * uy + F.z * uz > q.on) { if (e.on === undefined || e.on < e.kt) e.on = Math.max(S.t, e.kt); } else e.on = undefined; k = e.on !== undefined ? Math.min(1, (S.t - e.on) / (q.settle * (e.told ? AIM.told : 1))) : 0; }   // the clock runs from when the gun is on it
   const  rx = tv.x - av.x, ry = tv.y - av.y, rz = tv.z - av.z, al = rx * ux + ry * uy + rz * uz;
   let w = Math.hypot(rx - al * ux, ry - al * uy, rz - al * uz) / r;
   w = q.cross * w * (1 - .5 * k);
@@ -3625,9 +3627,9 @@ function aiTank(u, dt) {
       puff(u.x + u.f.x * d.bl, u.y + d.mh, u.z + u.f.z * d.bl, 'dust', 1.2);
     }
   } else c.aim = scanDir(u, 'tank');   // nothing to shoot at: the turret sweeps
-  if (low) { c.aim2 = lead(u, low, u.arms[1].d.spd, true).d; c.sp[1] = dSp(low, G.mgSp, 'mg') + (low.lost ? SIGHT.sp : 0) + aimErr(u, A.low, dist(low, u)); c.fire[1] = true; }
+  if (low) { c.aim2 = lead(u, low, u.arms[1].d.spd, true).d; c.sp[1] = dSp(low, G.mgSp, 'mg') + (low.lost ? SIGHT.sp : 0) + aimErr(u, A.low, dist(low, u), ldW(u.arms[1]).free && c.aim2); c.fire[1] = true; }
   else if (inf && los(u, eyeY(u), inf, bodyY(inf))) {   // or on soldiers in the open
-    c.aim2 = lead(u, inf, u.arms[1].d.spd, true).d; c.sp[1] = IAI.tank.sp + (inf.lost ? SIGHT.sp : 0) + aimErr(u, A.inf, dist(inf, u)); c.fire[1] = true;
+    c.aim2 = lead(u, inf, u.arms[1].d.spd, true).d; c.sp[1] = IAI.tank.sp + (inf.lost ? SIGHT.sp : 0) + aimErr(u, A.inf, dist(inf, u), ldW(u.arms[1]).free && c.aim2); c.fire[1] = true;
     if (!t) { c.aim = c.aim2; aiMen(u, inf); }
   }   // roof gun on a low plane
 }
@@ -4974,7 +4976,7 @@ const MSL = {
   evade(m, K) {
     const c = m.tg0, E = MSL.EV; m.ew = 0;
     if (!c || !c.q || c.dead || (K.k !== 'ir' && K.k !== 'ar' && K.k !== 'rc')) return;
-    const lo = m.y - c.y > dist(m, c) * .15 ? clamp(1 - (c.y - hgt(c.x, c.z)) / E.h, 0, 1) : 0, g = Math.max(0, Math.abs(c.g || 1) - E.g0);   // low: only against the ground behind it, as the seeker looks down on it
+    const lo = !m.sam || m.y - c.y > dist(m, c) * .15 ? clamp(1 - (c.y - hgt(c.x, c.z)) / E.h, 0, 1) : 0, g = Math.max(0, Math.abs(c.g || 1) - E.g0);   // low: a missile from the ground breaks only as its seeker looks down on the target, against the ground behind it; one from the air at any angle
     m.ew = lo * E.wl + g * E.wg;
     if (!(m.cl > m.age) && Math.random() < (lo * E.pl + g * E.pg) * K.dt) m.cl = m.age + E.brk;
   },

@@ -68,6 +68,23 @@ console.log('-- armour: calibre, angle, plate --');
   ok(hc.res === 2 && Math.abs(hc.dmg - 62 * DMG.pen.thru) < .01, 'a tank shell goes right through a light vehicle: "' + RES[2] + '", ' + f2(hc.dmg) + ' of 62');
   ok(h0 === u.hp, 'strike itself changes nothing');
 }
+{
+  const pen = $('SARMS').rpg.pen, rpg = (kind, id, ang, tur) => {   // the RPG-7's rocket square on the middle of a face, as the rocket's flight hands it to strike
+    let p = 0, n = 0;
+    for (let i = 0; i < N; i++) {
+      const u = veh(kind, id, 0), d = u.def.parts[tur ? ix(u, 'trav') : 0], y = u.y + 1.5 + (tur ? d.box[1] : u.def.parts[0].box[1]), by = { x: u.x + Math.cos(ang) * 150, y: u.y, z: u.z - Math.sin(ang) * 150 };
+      const h = C.strike(u, HK.heat, 140, by, u.x + Math.cos(ang) * 6, y, u.z - Math.sin(ang) * 6, -Math.cos(ang), 0, Math.sin(ang), pen);
+      S.units.length = 0; if (!h || h.res === 3) continue; n++; if (h.res === 0 || h.res === undefined) p++;
+    }
+    return n ? p / n : -1;
+  };
+  const M = ['abrams', 'leo2', 't90', 't72'], fr = M.map(id => [rpg('tank', id, 0, false), rpg('tank', id, 0, true)]), rr = M.map(id => [rpg('tank', id, Math.PI, false), rpg('tank', id, Math.PI, true)]);
+  const sd = M.map(id => rpg('tank', id, Math.PI / 2, false)).filter(v => v >= 0), lt = [rpg('lav', 'lav25', 0, false), rpg('car', 'tigr', 0, false)];
+  console.log('   RPG-7 (pen ' + pen + ') goes in: hull and turret front ' + M.map((id, i) => id + ' ' + fr[i].map(f2).join('/')).join(', ') + '; rear ' + rr.map(r => r.map(f2).join('/')).join(', ') + '; hull side (no reactive plate) ' + sd.map(f2) + '; LAV-25 and Tigr from the front ' + lt.map(f2));
+  ok(fr.every(r => r[0] === 0 && r[1] === 0), 'the RPG-7 does not go through the front of a modern tank, hull or turret');
+  ok(rr.every(r => r[0] === 1 && r[1] === 1) && sd.length && sd.every(v => v === 1), 'it goes through the side and the rear');
+  ok(lt.every(v => v === 1), 'and a light armoured vehicle anywhere');
+}
 
 console.log('-- ammunition, crew, fire --');
 {

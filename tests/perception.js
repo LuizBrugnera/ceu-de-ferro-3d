@@ -185,7 +185,7 @@ if ($('typeof LADDER !== "undefined"')) {
       C.seed(3); const S2 = C.newState(era); S = S2; $('DAI').every = 1e9;   // no drones: one striking a supply base crashes droneSweep (a bug of its own, outside perception)
       $('cmdArea = (g => (m, A, c) => { const r = g(m, A, c); if (r) A.areaT = S.t; return r; })(cmdArea)');
       const mem = (o, t) => [o.ai, o.ai && o.ai.lm, o.ai && o.ai.im].some(M => M && M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem + .1);
-      let shots = 0, area = 0, indirect = 0, bad = [], gm = 0, gbad = [], nm = 0; const seen = new Set();
+      let shots = 0, area = 0, indirect = 0, bad = [], gm = 0, gbad = []; const seen = new Set();
       C.run(SECS, () => {
         for (const l of [S.units, S.men, S.planes]) for (const o of l) {
           if (o.dead || !o.ai) continue;
@@ -198,10 +198,10 @@ if ($('typeof LADDER !== "undefined"')) {
           shots++;
           if (!ts.some(t => !tclass(t) || g(o, t) >= 2 || mem(o, t))) bad.push((o.man ? 'soldier' : o.kind || 'aircraft') + ' at ' + (ts.map(t => (t.man ? 'soldier' : t.kind || 'aircraft') + ' g' + g(o, t)).join(', ') || 'nothing') + ' t=' + S.t.toFixed(1));
         }
-        for (const m of S.missiles) { if (seen.has(m)) continue; seen.add(m); const b = m.by, t = m.target; if (!b || !b.ai || !t || !t.team === undefined) continue; nm++; if (t.kind === undefined && t.def === undefined) continue; gm++; if (g(b, t) < 3) gbad.push((b.man ? 'soldier' : b.kind || 'aircraft') + ' g' + g(b, t)); }
+        for (const m of S.missiles) { if (seen.has(m)) continue; seen.add(m); const b = m.by, t = m.target; if (!b || !b.ai || !t || !tclass(t)) continue; gm++; if (g(b, t) < 3) gbad.push((b.man ? 'soldier' : b.kind || 'aircraft') + ' g' + g(b, t)); }
       });
       ok(shots > 50 && !bad.length, era + ', ' + SECS + ' s: ' + shots + ' aimed shots, ' + area + ' of covering fire into an objective, ' + indirect + ' indirect on the side\'s map; at what it had not made out: ' + bad.length + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
-      ok(!gbad.length, era + ': ' + gm + ' guided missiles at a target, every one identified first' + (gbad.length ? '; not: ' + gbad.slice(0, 3).join(', ') : ''));
+      ok((era === 'ww2' || gm > 0) && !gbad.length, era + ': ' + gm + ' guided missiles at a target, every one identified first' + (gbad.length ? '; not: ' + gbad.slice(0, 3).join(', ') : ''));
     }
   }
 }

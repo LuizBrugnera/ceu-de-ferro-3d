@@ -681,19 +681,22 @@ function anaHttp(req, res) {
   }
   if (req.method !== 'GET') return out(404, { ok: 0 });
   if (u === '/ana/list') {
-    const l = [];
+    const all = [];
     for (const era of Object.keys(MODELS)) {
       let f = []; try { f = fs.readdirSync(path.join(ANA.dir, era)); } catch (e) { continue; }
-      for (const n of f) {
-        if (!n.endsWith('.ndjson.gz') || !fs.existsSync(anaFile(era, n.slice(0, -10), '.json'))) continue;
-        const base = n.slice(0, -10), o = { id: base, era, size: 0, sum: null };
-        try { o.size = fs.statSync(anaFile(era, base, '.ndjson.gz')).size; o.mt = fs.statSync(anaFile(era, base, '.ndjson.gz')).mtimeMs; } catch (e) {}
-        try { const j = JSON.parse(fs.readFileSync(anaFile(era, base, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net }; } catch (e) {}
-        l.push(o);
-      }
+      for (const n of f) if (n.endsWith('.ndjson.gz')) all.push({ id: n.slice(0, -10), era });
     }
-    l.sort((a, b) => (b.mt || 0) - (a.mt || 0));
-    return out(200, { on: 1, m: l.slice(0, ANA.list).map(o => ({ id: o.id, era: o.era, size: o.size, sum: o.sum })) });
+    all.sort((a, b) => (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    const l = [];
+    for (const o of all) {
+      if (l.length >= ANA.list) break;
+      if (!fs.existsSync(anaFile(o.era, o.id, '.json'))) continue;
+      o.size = 0; o.sum = null;
+      try { o.size = fs.statSync(anaFile(o.era, o.id, '.ndjson.gz')).size; } catch (e) {}
+      try { const j = JSON.parse(fs.readFileSync(anaFile(o.era, o.id, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net }; } catch (e) {}
+      l.push(o);
+    }
+    return out(200, { on: 1, m: l.map(o => ({ id: o.id, era: o.era, size: o.size, sum: o.sum })) });
   }
   if ((p[2] === 'm' || p[2] === 'r') && p.length === 5 && Object.hasOwn(MODELS, p[3]) && anaName.test(p[4])) {
     if (p[2] === 'r') return fs.readFile(anaFile(p[3], p[4], '.json'), 'utf8', (er, t) => (er ? out(404, { ok: 0 }) : out(200, t)));

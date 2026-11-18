@@ -49,6 +49,11 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   const m = await get('/ana/m/ww2/' + J.m[0].id); ok(m.code === 200 && /ndjson/.test(m.type) && m.b.trim().split('\n').length === lines(F).length, 'GET /ana/m: the whole match as ndjson');
   const r = await get('/ana/r/ww2/' + J.m[0].id); ok(r.code === 200 && JSON.parse(r.b).rep.dur === 300, 'GET /ana/r: its summary');
   ok((await get('/ana/m/ww2/..%2F..%2Fserver')).code === 404 && (await get('/ana/m/xx/' + J.m[0].id)).code === 404 && (await get('/ana/m/ww2/2026-01-01-000000000000')).code === 404, 'a bad name, era or a missing match: 404');
+  const fake = i => '2026-05-01-' + i.toString(16).padStart(12, '0');
+  for (let i = 0; i < 205; i++) { fs.writeFileSync(path.join(DIR, 'ww2', fake(i) + '.ndjson.gz'), zlib.gzipSync('{"k":"hdr","t":0}\n')); fs.writeFileSync(path.join(DIR, 'ww2', fake(i) + '.json'), JSON.stringify({ src: 'online', end: { win: 0 }, hdr: { fac: ['A', 'B'] } })); }
+  const big = JSON.parse((await get('/ana/list')).b).m.map(o => o.id);
+  ok(big.length === 200 && big[0] === J.m[0].id && big[1] === fake(204) && big[199] === fake(6) && !big.includes(fake(5)), 'GET /ana/list: at most 200 entries, the newest by name');
+  for (let i = 0; i < 205; i++) { fs.unlinkSync(path.join(DIR, 'ww2', fake(i) + '.ndjson.gz')); fs.unlinkSync(path.join(DIR, 'ww2', fake(i) + '.json')); }
   /* a new match in the room is a new file; the next host carries the same match on */
   h.send({ t: 'cq', n: 1, ph: 0, T: 100, k: [600, 600], k0: 600, len: 0, p: [], l: [0, 0, 0, 0, 0, 0] }); await N.sleep(100);
   h.send({ t: 'ana', n: 1, e: [hdr] }); await N.sleep(150);

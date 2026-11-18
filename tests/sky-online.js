@@ -6,8 +6,11 @@ const all = [], dt = 1 / 60;
 async function client(name, cls, model, sky, wx) {
   const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5 }), $ = c.$, Net = $('Net');
   c.name = name; c.$ = $; c.Net = Net;
+  /* the state is built before the socket opens (the room's map is the page's MAPV): a newState holds this one process for seconds, and an open
+     socket that long would miss the server's heartbeat (10 s); the welcome only says who hosts */
+  c.newState('ww2', model, { net: true, cls, mouse: true, host: !all.length, sky, wx });
   await new Promise((res, rej) => {
-    Net.ui.welcome = () => { c.newState('ww2', model, { net: true, cls, mouse: true, host: Net.host === Net.id, sky, wx }); res(); };
+    Net.ui.welcome = () => { $('S').host = Net.host === Net.id; res(); };
     Net.ui.refused = code => rej(new Error(name + ' refused: ' + code)); Net.connect('ww2', name, cls, model);
   });
   Object.defineProperty(c, 'S', { get: () => $('S') }); all.push(c); return c;
@@ -20,9 +23,7 @@ const until = async (f, ms) => { for (let t = Date.now(); !f() && Date.now() - t
 
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER + '\npage:   ' + H.PAGE);
-  /* each client's newState holds this one process for seconds: the event loop turns between the two, so that both answer the server's heartbeat (10 s) */
-  const host = await client('Host', 'tank', 'tiger', 'noite', 'chuva'); await N.sleep(300);
-  const g = await client('Guest', 'inf', 'rifleman', 'dia', 'limpo'); await N.sleep(300);
+  const host = await client('Host', 'tank', 'tiger', 'noite', 'chuva'), g = await client('Guest', 'inf', 'rifleman', 'dia', 'limpo');
   await run(1);
   ok(host.Net.sky && g.Net.sky && host.S.host && !g.S.host, 'the server knows the sky (sky)');
   const same = () => Math.abs(g.$('skyHour()') - host.$('skyHour()')) < .02 && g.S.wx.pre === 'chuva' && Math.abs(g.S.wx.r - host.S.wx.r) < .01 && Math.abs(g.S.wx.wx - host.S.wx.wx) < .1;

@@ -20,12 +20,14 @@ const until = async (f, ms) => { for (let t = Date.now(); !f() && Date.now() - t
 
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER + '\npage:   ' + H.PAGE);
-  const host = await client('Host', 'tank', 'tiger', 'noite', 'chuva'), g = await client('Guest', 'inf', 'rifleman', 'dia', 'limpo');
+  /* each client's newState holds this one process for seconds: the event loop turns between the two, so that both answer the server's heartbeat (10 s) */
+  const host = await client('Host', 'tank', 'tiger', 'noite', 'chuva'); await N.sleep(300);
+  const g = await client('Guest', 'inf', 'rifleman', 'dia', 'limpo'); await N.sleep(300);
   await run(1);
   ok(host.Net.sky && g.Net.sky && host.S.host && !g.S.host, 'the server knows the sky (sky)');
   const same = () => Math.abs(g.$('skyHour()') - host.$('skyHour()')) < .02 && g.S.wx.pre === 'chuva' && Math.abs(g.S.wx.r - host.S.wx.r) < .01 && Math.abs(g.S.wx.wx - host.S.wx.wx) < .1;
   const sm = await until(same);   // on a miss, say what each socket got, to tell a network hiccup from the sync
-  if (!sm) console.log('   sockets ' + host.Net.ws.readyState + ' ' + g.Net.ws.readyState + ', host ' + host.Net.id + ' (guest thinks ' + g.Net.host + '), sim ' + host.S.t.toFixed(1) + ' s and ' + g.S.t.toFixed(1) + ' s');
+  if (!sm) console.log('   sockets ' + (host.Net.ws ? host.Net.ws.readyState : 'closed') + ' ' + (g.Net.ws ? g.Net.ws.readyState : 'closed') + ', host ' + host.Net.id + ' (guest thinks ' + g.Net.host + '), sim ' + host.S.t.toFixed(1) + ' s and ' + g.S.t.toFixed(1) + ' s');
   ok(sm, 'the guest that chose a clear day takes the host\'s night and rain: ' + g.$('skyHour()').toFixed(2) + ' h, rain ' + g.S.wx.r);
   ok(await until(() => g.S.sky.L === 0 && g.S.sky.pre === 'noite'), 'and its light is the night\'s');
   await run(6); ok(Math.abs(g.$('skyHour()') - host.$('skyHour()')) < .02, 'the two clocks keep together');

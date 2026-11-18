@@ -37,12 +37,12 @@ for (const team of [0, 1]) {
   ok(tu > 0 && sq && S.men.length === $('SQUAD').modern.length && p.gone && !p.dead && hd(lz, line) < 900, id + ' delivers its squad near the line and goes home');
 }
 console.log('what the other AI does to a helicopter hovering in the open, ' + N + ' trials each (it does nothing but hover' + ', and throw flares as the AI does where said)');
-function trial(name, secs, h, flares, setup) {
+function trial(name, secs, h, flares, setup, spot) {
   let kills = 0, tsum = 0, hpsum = 0;
   for (let i = 0; i < N; i++) {
     C.seed(500 + i * 13 + name.length); S = C.sandbox('modern'); const q = C.heliPad(0, 8), p = C.addHeli('ah64', 0, q.x, C.hgt(q.x, q.z) + HELIS.ah64.gh + h, q.z, q.h, false); p.inv = 0; p.ctl.vs = 0; p.ctl.free = true; p.flares = p.def.flares;
     setup(p, i);
-    C.run(secs, dt => { if (flares) { const m = S.missiles.find(o => o.target === p && Math.hypot(o.x - p.x, o.y - p.y, o.z - p.z) < HAI.msl); if (m && p.flares > 0 && p.fcool <= 0 && Math.random() < dt * 2.5) { p.ai = true; C.dropFlare(p); p.ai = false; } } if (p.dead) return false; });
+    C.run(secs, dt => { if (spot) { p.seenT = S.t; p.sx = p.x; p.sz = p.z; } if (flares) { const m = S.missiles.find(o => o.target === p && Math.hypot(o.x - p.x, o.y - p.y, o.z - p.z) < HAI.msl); if (m && p.flares > 0 && p.fcool <= 0 && Math.random() < dt * 2.5) { p.ai = true; C.dropFlare(p); p.ai = false; } } if (p.dead) return false; });
     if (p.dead) { kills++; tsum += S.t; } else hpsum += p.hp / p.def.hp;
   }
   console.log('  ' + name + ': ' + kills + '/' + N + ' shot down in ' + secs + ' s' + (kills ? ', after ' + f1(tsum / kills) + ' s on average' : '') + (kills < N ? '; survivors at ' + Math.round(hpsum / (N - kills) * 100) + '% of structure' : ''));
@@ -54,8 +54,10 @@ const at = (p, d, a) => { const h = Math.atan2(-p.f.z, p.f.x) + (a || 0); return
   const a = trial('Pantsir at 2.5 km, helicopter 60 m up, no flares', 40, 60, false, fx('aa', 'pantsir', 2500)), b = trial('Pantsir at 2.5 km, 60 m up, flares', 40, 60, true, fx('aa', 'pantsir', 2500));
   const c = trial('Pantsir at 1.2 km, helicopter 12 m up, flares: its guns', 40, 12, true, fx('aa', 'pantsir', 1200));
   const d = trial('T-90 at 500 m, helicopter 30 m up: roof machine gun and main gun', 30, 30, false, fx('tank', 't90', 500)), d2 = trial('T-90 at 950 m, 30 m up: the roof machine gun alone', 30, 30, false, fx('tank', 't90', 950));
-  const jet = (p, i) => { const o = at(p, 6000, i * .6); C.addPlane('su57', 1, o.x, C.hgt(o.x, o.z) + 900, o.z, Math.atan2(-(p.z - o.z), p.x - o.x), true, 'fighter'); };
-  const e = trial('Su-57 from 6 km, helicopter 80 m up, no flares (missiles only: it does not come down for a gun pass)', 120, 80, false, jet), e2 = trial('Su-57, flares', 120, 80, true, jet);
+  const jet = (p, i) => { const o = at(p, 6000, i * .6); if (o.x < 0) o.x = 2 * p.x - o.x; if (Math.abs(o.z) > S.HW) o.z = 2 * p.z - o.z;   // a start off the map is mirrored across the helicopter onto it
+    C.addPlane('su57', 1, o.x, C.hgt(o.x, o.z) + 900, o.z, Math.atan2(-(p.z - o.z), p.x - o.x), true, 'fighter'); };
+  // the helicopter is on the jet's side's map the whole time, as the column above is: a fighter is tasked by the map (told) and does not find a still helicopter in an empty sky by itself
+  const e = trial('Su-57 from 6 km, helicopter 80 m up, no flares (missiles only: it does not come down for a gun pass)', 120, 80, false, jet, true), e2 = trial('Su-57, flares', 120, 80, true, jet, true);
   void ((p, i) => { const o = at(p, 6000, i * .6); C.addPlane('su57', 1, o.x, C.hgt(o.x, o.z) + 900, o.z, Math.atan2(-(p.z - o.z), p.x - o.x), true, 'fighter'); });
   const f = trial('a squad with one Igla at 700 m, helicopter 60 m up, no flares', 60, 60, false, (p, i) => { const o = at(p, 700, i * .6); C.addSquad(1, o.x, o.z, 0, 0); });
   const g = trial('the same squad, flares', 60, 60, true, (p, i) => { const o = at(p, 700, i * .6); C.addSquad(1, o.x, o.z, 0, 0); });

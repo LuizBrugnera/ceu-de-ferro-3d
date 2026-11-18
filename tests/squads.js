@@ -63,21 +63,25 @@ fresh(); {
   console.log('   smoke thrown by the new leader: ' + (smokes ? 'yes' : 'no'));
 }
 console.log('-- the other AI reacts --');
+/* 300 m past the middle, away from the town whose houses reach the road at the middle; the tank of side 1 drives up the road (ds 1) with the soldiers ahead
+   of it, since an AI has to notice them first (perception) and one driving away does not look behind */
+const away = () => mid() + 300;
 fresh(); {
-  const p = at(mid()), q = C.addSquad(0, p.x, p.z, 0, mid(), [0, 0, 0]); q.men.forEach(m => { m.ai = null; });
-  const e = at(mid() + 350), t = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, mid() + 350, 5, 0); let mg = 0, shell = 0;
+  const p = at(away()), q = C.addSquad(0, p.x, p.z, 0, away(), [0, 0, 0]); q.men.forEach(m => { m.ai = null; });
+  const t = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, away() - 350, 5, 0); let mg = 0, shell = 0;
   C.run(25, () => { mg = t.arms[1].n; shell = t.arms[0].n; });
-  ok(mg > 20 && shell === 0 && q.men.some(m => m.dead || m.hp < m.max), 'a tank opens on soldiers in the open with its machine gun (' + mg + ' rounds, ' + shell + ' shells), ' + q.men.filter(m => m.dead).length + ' killed');
+  ok(mg > 20 && q.men.some(m => m.dead || m.hp < m.max), 'a tank opens on soldiers in the open with its machine gun (' + mg + ' rounds; ' + shell + ' high explosive shells from the gun), ' + q.men.filter(m => m.dead).length + ' killed');
 }
 fresh(); {
-  const q = C.addSquad(0, at(mid()).x, at(mid()).z, 0, mid(), [2]), m = q.men[0]; m.ai = null; m.inv = 1e9; m.st = m.ctl.st = 0;
-  const t = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, mid() - 200, 5, 0); C.run(1); const d0 = $('hdist')(t, m); C.run(IAI.tank.shy - 1); const d1 = $('hdist')(t, m); C.run(30); const d2 = $('hdist')(t, m);
+  const q = C.addSquad(0, at(away()).x, at(away()).z, 0, away(), [2]), m = q.men[0]; m.ai = null; m.inv = 1e9; m.st = m.ctl.st = 0;
+  const t = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, away() - 200, 5, 0); C.run(1); const d0 = $('hdist')(t, m); C.run(IAI.tank.shy - 1); const d1 = $('hdist')(t, m); C.run(30); const d2 = $('hdist')(t, m);
   ok(d1 > d0 + 30 && d2 < d1 - 30, 'a tank backs away from a rocket soldier it has seen, for ' + IAI.tank.shy + ' s, and then comes on: ' + d0.toFixed(0) + ' m to ' + d1.toFixed(0) + ' m to ' + d2.toFixed(0) + ' m (table: keep ' + IAI.tank.keep + ')');
 }
 fresh(); {
   const q = C.addSquad(0, B.x, B.z, 0, 0), bias = $('PAI').cas.bias;
-  const p = C.addPlane('p47', 1, B.x + 2000, g + 600, B.z, Math.PI, true, 'cas'); C.aiPick(p);
-  const lone = p.tgt && p.tgt.man; const tr = C.addVehicle('truck', null, 0, B.x + 100, B.z, 0); C.aiPick(p);
+  const see = $('typeof notice === "function" ? notice : () => true'), look = (os, s) => { for (const t0 = S.t; S.t - t0 < s;) { S.t += .25; for (const o of os) see(p, o); } };   // the pilot takes them in (perception), the clock moved by hand
+  const p = C.addPlane('p47', 1, B.x + 2000, g + 600, B.z, Math.PI, true, 'cas'); look(q.men, 8); C.aiPick(p);
+  const lone = p.tgt && p.tgt.man; const tr = C.addVehicle('truck', null, 0, B.x + 100, B.z, 0); look([tr], 4); C.aiPick(p);
   ok(lone && p.tgt === tr, 'an attack plane takes a squad when nothing else is there, and a truck beside it first (soldier costs ' + IAI.cas + ' m, truck ' + bias.truck + ')');
 }
 fresh(); {

@@ -32,7 +32,7 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   await N.sleep(200);
   ok(lines(F).length === 2, 'refused: a guest\'s batch, another match, an unknown kind, an event without its time, a batch that is not a list');
   h.send({ t: 'ana', n: 0, e: [sn(10)] }); h.send({ t: 'ana', n: 0, e: [sn(20)] }); await N.sleep(200);
-  const L = lines(F); ok(L.length === 4 && L[2].t === 10 && L[3].t === 20 && !fs.readFileSync(F).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
+  const L = lines(F); ok(L.length === 4 && L[2].t === 10 && L[3].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
   for (let i = 0; i < 12; i++) h.send({ t: 'ana', n: 0, e: [sn(100 + i)] });
   await N.sleep(300); const n2 = lines(F).length;
   ok(n2 - 4 === 7, 'too fast: of 12 batches at once, ' + (n2 - 4) + ' kept (10 a window of 15 s, 3 already used)');

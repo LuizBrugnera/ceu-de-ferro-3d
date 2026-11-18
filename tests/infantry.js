@@ -89,10 +89,10 @@ ok(j0.launched > 1.4 && j0.dmg > 80, 'it locks, flies and hits');
 ok(!j1.launched, 'no lock and no launch through smoke');
 ok(j2.launched && j2.lost && j2.dmg < j0.dmg, 'smoke after the launch breaks the lock');
 
-console.log('-- shoulder SAM: a plane crossing at 1500 m, without and with flares (20 each) --');
+console.log('-- shoulder SAM: a plane crossing at 1500 m, without and with flares (60 each) --');
 const sam = flares => {
   let kills = 0, hits = 0, n = 0;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 60; i++) {
     fresh('modern'); const p = C.addPlane('su25', 1, B.x + 1500, g + 500, B.z - 1500, -Math.PI / 2, false), m = C.addMan('blueAD', 0, B.x, B.z, 0), hp = p.hp; let fired = false;
     p.flares = flares ? 40 : 0; m.ctl.w = m.w = 1; m.ctl.fire = true; p.ctl.thr = .8;
     C.run(7, () => { aimAt(m, p); p.y = g + 500; p.v.y = 0; if (S.missiles.length) fired = true; if (flares && fired && S.missiles.length) C.dropFlare(p); return !p.dead; });
@@ -100,9 +100,10 @@ const sam = flares => {
   }
   return { kills, hits, n };
 };
+C.seed(100); // flare trials get their own dice so earlier sections cannot shift them
 const s0 = sam(false), s1 = sam(true);
 console.log('   no flares: ' + s0.n + ' launched, ' + s0.hits + ' hit, ' + s0.kills + ' shot down; with flares: ' + s1.n + ' launched, ' + s1.hits + ' hit');
-ok(s0.n >= 18 && s0.hits >= 14, 'it locks and hits a plane');
+ok(s0.n >= 54 && s0.hits >= 42, 'it locks and hits a plane');
 ok(s1.hits < s0.hits * .85, 'flares decoy it part of the time (target out of afterburner)');
 
 console.log('-- run over --');

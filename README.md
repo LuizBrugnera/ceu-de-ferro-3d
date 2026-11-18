@@ -139,6 +139,12 @@ Cada veículo é feito de peças, e o tiro vale pelo lugar onde acerta: lagartas
 
 Casas, hangares, árvores e carcaças têm volume: param tiro, estilhaço e linha de visão, e podem ser destruídos. Nas vilas dá para entrar nos prédios pelas portas, janelas do térreo e buracos, subir pela escada e atirar das janelas; sem apoio as lajes caem. A mata densa esconde o soldado pela metade da distância; tanque e obuseiro derrubam árvores, veículo de rodas passa pelos vãos. Nenhum veículo de solo entra na água, a não ser o blindado anfíbio.
 
+## Dia, noite e clima
+
+O hangar escolhe também a hora e o tempo da partida. A hora é um relógio de luz que anda dez minutos de jogo por hora do dia: Dia começa às 9 h, Entardecer às 17 h (anoitece por volta da meia hora), Noite às 23 h, e Ciclo passa um dia inteiro em uma hora. O tempo é Limpo (calmo), Chuva (com vento), Neblina (baixa, rente ao chão) ou Variável (muda durante a partida). Online, vale a escolha do anfitrião.
+
+À noite cada um vê pela óptica que tem: a olho nu a 30% do alcance de dia, com visão noturna a 60%, com mira térmica (blindados, aeronaves e a luneta do atirador de hoje) a 80%; o radar das antiaéreas não perde nada. Em 1944 não há visão noturna: a luz vem de sinalizadores, das granadas iluminativas da artilharia e dos holofotes das antiaéreas, que seguem o cano. O clarão do tiro revela quem atira. A chuva tira visão e audição, a neblina baixa esconde o que está dentro dela (a térmica vê mais longe nela) e o vento leva fumaça e sinalizadores. A regra é a mesma para a IA e para o jogador: o que você mesmo vê só entra no mapa do seu lado dentro desse alcance. À noite a IA lança sinalizadores e iluminativas sobre o que ouve.
+
 ## A IA
 
 Cada lado tem um comandante que joga pelos pontos: reúne os pelotões a 720 m do objetivo, pede fumaça e fogo de morteiro e artilharia, e ataca com os blindados da estrada. Mantém guarnições nas vilas, guarda nas bases de suprimento e no veículo-rádio, emboscadas junto das estradas e uma equipe de morteiro. Uma linha sob o mapa e marcas nele mostram o que o comando do seu lado pretende: X o objetivo, círculo cinza a fumaça, círculo laranja o fogo, triângulo verde uma emboscada à espera. A IA não enxerga através de fumaça nem de paredes, conserta os veículos quando ninguém atira neles e usa drones (hoje).
@@ -213,6 +219,8 @@ Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos.
 | U | Requisitar um veículo, dentro de um depósito |
 | Y, L | Operador de drone: escolher e lançar |
 | V | Morteiro: explosiva ou fumaça |
+| 7 | Sinalizador (também nos veículos de solo): ilumina uns 260 m à frente por 28 s, seis por vida |
+| 6 | Visão noturna (só hoje), em qualquer classe |
 
 **Controle e rádio de FPV.** O jogo lê qualquer controle pela Gamepad API: ligue, aperte um botão e ele aparece em Controles, com sensibilidade, zona morta e o botão de cada ação por classe. Um rádio de FPV em modo joystick USB voa os drones em acro; o assistente de mapeamento descobre os canais.
 

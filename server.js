@@ -6,7 +6,7 @@
    trn (transport: the class trn, the sniper kits, and the messages board, seats, eject and cargo), cmd (the commander: the mortar kits,
    toss k 3 and 4, s on shot and aishot, and the message cmd), eco (the economy: eco, ecs, keep) and gen (the general: gen, glog, gclaim,
    gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
-   messages mine, mboom, mreq and dint) and ana (analytics: the host's events of the match, kept on disk; see below).
+   messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -128,7 +128,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -524,6 +524,18 @@ RX.gres = (c, m) => {
     c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : { id: m.id }));
   };
 }
+/* day, night and weather (welcome says sky: 1). sky: the host's light clock and weather, to the room: h the hour now (0 to 24), rt s of day a
+   second, p and w the presets' indices, r rain and f low fog (0 to 1), wx wz the wind m/s. ill: a light anyone put up, k 0 a hand flare 1 an
+   illumination round, from p [x, y, z] to burst over q [x, z] after d s; to the rest of the room, a guest's 400 ms apart at least (the host's carry its AI's too) */
+RX.sky = (c, m) => {
+  if (!host(c) || !num(m.h) || m.h < 0 || m.h > 24 || !num(m.rt) || m.rt < 0 || m.rt > 600 || !int(m.p, -1, 3) || !int(m.w, -1, 3) || ![m.r, m.f].every(v => num(v) && v >= 0 && v <= 1) || ![m.wx, m.wz].every(v => num(v) && Math.abs(v) <= 30)) return;
+  cast(c, { t: 'sky', h: m.h, rt: m.rt, p: m.p, w: m.w, r: m.r, f: m.f, wx: m.wx, wz: m.wz });
+};
+RX.ill = (c, m) => {
+  const now = Date.now();
+  if (!int(m.k, 0, 1) || !vec(m.p, 3) || !vec(m.q, 2) || !num(m.d) || m.d < 0 || m.d > 30 || (!host(c) && now - (c.ilt || 0) < 400)) return;
+  c.ilt = now; cast(c, { t: 'ill', k: m.k, p: m.p, q: m.q, d: m.d });
+};
 function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) || 1; for (let i = 0; i < n; i++) send(room.host.ws, { t: 'mine', q: K.q, i, n, e: K.e.slice(i * 40, (i + 1) * 40), s: K.s }); }
 /* suspended matches (welcome says rs: 1). The battle lives in the host's browser, so the server keeps the last word of each kind the host
    sent the room (snapIn: the ai rows, cq, the objects' stages, the buildings, bases, forts, eco, ecs, gen, glog, rad; keep is room.keep),

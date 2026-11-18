@@ -38,6 +38,7 @@ node tests/damage.js  damage-relay.js  missiles.js       # dano por peças, blin
 node tests/drone.js  drone-relay.js  drone-online.js  pad.js   # drones (o FPV na frente e no teto de um tanque) e controles
 node tests/ana.js          # analytics e revisão pós-batalha: a batalha igual com a coleta ligada, os eventos de uma partida IA × IA (MIN=2), tíquetes, sangria, a revisão de um lado, tools/balance.js
 node tests/ana-online.js   # analytics pelo servidor de verdade: lotes do anfitrião, recusas, arquivo por partida, resumo, HTTP, POST, 90 dias, ANALYTICS=0 e uma página anfitriã de verdade
+node tests/sky.js  sky-relay.js  sky-online.js   # dia, noite e clima: o relógio de luz e os presets, o que o escuro deixa de cada óptica, o clarão do tiro, sinalizadores, iluminativas e holofotes, chuva, neblina baixa e vento, os olhos do jogador no mapa do lado e as luzes da IA à noite
 node tests/oldserver.js     # a página nova contra um servidor antigo, SERVER=<server.js antigo>. Sem infantaria: sem pelotões. Sem bases: ninguém constrói e a entrada continua na estrada do meio
 ```
 

@@ -185,7 +185,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .over p{margin:0;max-width:60ch} #overNext:empty{display:none}
 .score{display:grid;grid-template-columns:minmax(0,1fr) repeat(3,auto);gap:3px 16px;width:100%;font-family:var(--f-data);font-size:14px;font-variant-numeric:tabular-nums}
 .score .h{color:var(--mute);font-size:12px;margin-top:8px} .score .f{color:#6fc3b2} .score .e{color:#e2604f} .score span{overflow-wrap:anywhere}
-.len-seg .tab{min-width:0}
+.len-seg .tab,.sky-seg .tab{min-width:0}
 .len-seg{margin-left:auto}
 .row{display:flex;flex-wrap:wrap;gap:10px}
 .aar{z-index:8;background:var(--bg)}
@@ -476,6 +476,18 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
           <button class="tab" role="tab" type="button" data-len="0" aria-selected="false"><b>Curta</b><span>30 min</span></button>
           <button class="tab" role="tab" type="button" data-len="1" aria-selected="true"><b>Padrão</b><span>45 min</span></button>
           <button class="tab" role="tab" type="button" data-len="2" aria-selected="false"><b>Longa</b><span>60 min</span></button>
+        </div>
+        <div class="seg sky-seg" id="skies" role="tablist" aria-label="Hora do dia">
+          <button class="tab" role="tab" type="button" data-sky="dia" aria-selected="true"><b>Dia</b><span>9 h</span></button>
+          <button class="tab" role="tab" type="button" data-sky="tarde" aria-selected="false"><b>Entardecer</b><span>17 h</span></button>
+          <button class="tab" role="tab" type="button" data-sky="noite" aria-selected="false"><b>Noite</b><span>23 h</span></button>
+          <button class="tab" role="tab" type="button" data-sky="ciclo" aria-selected="false"><b>Ciclo</b><span>1 dia/h</span></button>
+        </div>
+        <div class="seg sky-seg" id="wxs" role="tablist" aria-label="Tempo">
+          <button class="tab" role="tab" type="button" data-wx="limpo" aria-selected="true"><b>Limpo</b><span>calmo</span></button>
+          <button class="tab" role="tab" type="button" data-wx="chuva" aria-selected="false"><b>Chuva</b><span>e vento</span></button>
+          <button class="tab" role="tab" type="button" data-wx="neblina" aria-selected="false"><b>Neblina</b><span>baixa</span></button>
+          <button class="tab" role="tab" type="button" data-wx="variavel" aria-selected="false"><b>Variável</b><span>muda</span></button>
         </div>
         <button class="chip" id="btnKeys" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="keysPanel">Controles</button>
       </div>
@@ -3190,9 +3202,10 @@ function notice(a, t) {
     let off = Math.abs(wrap(Math.atan2(-dz, dx) - gaze(a, oc))), best = 0;
     if ((a.ai.tgt || a.tgt) === t) off = Math.min(off, PERC.focus);   // what it is fighting it keeps its eyes on
     const oi = oc === 'man' && !(a.arms && a.arms[1] && a.arms[1].d.k === 'sam') ? -1 : LADDER.opt[oc];   // the optic, for the model
+    const dark = S.sky && S.sky.on, lt = dark ? skyLit(t) : 1;   // the night and the weather take their share of each sensor (SKY), for every rung of the ladder
     VIEW[oc].forEach((v, i) => {
       const R = air ? v[1] : v[0]; if (!R) return;
-      const fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw), q = v[4] * fa * R / d;
+      const sk = dark ? skySee(a, t, oc, i, d, lt) : 1, fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw) * sk, q = v[4] * fa * R / d * sk;
       if (r > best) best = r;
       if (q > qa) qa = q;
       if (i === oi && q > qo) qo = q;
@@ -3210,6 +3223,7 @@ function notice(a, t) {
   let hz = air ? HEAR.mv[tc] : tc === 'man' ? HEAR.mv.man[spd > 4 ? 1 : 0] * (spd > 1.5 ? 1 : 0) : spd > 1.5 ? HEAR.mv[tc] : 0;   // sound: a mover, a shooter
   if (S.t - shotAt(t) < 1.5) hz = Math.max(hz, HEAR.fire[tc] || 0);
   if (hz && !e.los) hz *= HEAR.wall;
+  if (hz && S.wx && S.wx.r) hz *= skyEar();   // rain covers sound
   if (d < hz) { hr = HEAR.rate * (1 - d / hz) + .15; if (d < hz * HEAR.close) cap = HEAR.cap[1]; if (!a.ln || S.t - a.ln.t > .5 || a.ln.of !== t) a.ln = { x: t.x + qr(-1, 1) * d * HEAR.err, z: t.z + qr(-1, 1) * d * HEAR.err, t: S.t, of: t }; }
   e.v = clamp(e.v + (sr + (e.v < cap ? hr : 0) - PERC.dec - (e.los ? 0 : PERC.blind) - (e.told ? PERC.told : 0)) * dt, 0, PERC.hold);
   if (!(e.kn && !e.told) && told(a, t, oc, d, air)) {
@@ -3240,7 +3254,8 @@ const foe = (a, t) => t.team !== a.team || (ffOn() && !!a.ai && dist(a, t) > LAD
 const idd = (a, t) => !!t && grade(a, t) >= 3;   // identified: a guided weapon may go
 /* has o made t out (for the map of what the side knows): a player's own eyes always count, an AI's only once it knows, and age s after it did */
 function aware(o, t, age) {
-  if (!o.ai || t.drone || !oclass(o) || !tclass(t)) return true;
+  if (!o.ai) return t.drone || skyNear(o, t);   // a player's eyes, by the light and the weather (SKY)
+  if (t.drone || !oclass(o) || !tclass(t)) return true;
   if (!notice(o, t)) return false;
   const e = o.pm.get(t); return !age || S.t - e.kt >= age;
 }
@@ -14069,6 +14084,164 @@ Net.rx.welcome = (old => m => { Net.ana = m.ana === 1; old(m); })(Net.rx.welcome
 ANA.post = null;
 ANA.sink = (e, last) => { if (S.net) { if (S.host && Net.ana && !Net.isSpec) Net.send('ana', Object.assign({ n: Net.cqn, e }, last && { end: 1 })); } else if (ANA.post) ANA.post(e, last); };
 
+/* ---------- day, night and weather ----------
+   The match has a light clock: S.sky.h0 the hour (0 to 24) at sim time t0, running rate s of day a second; pre: the presets, [start hour, rate]
+   (Dia, Entardecer, Noite, Ciclo: a whole day in an hour). The light L (0 night to 1 day) rises as the sun's height, the sine of the hour,
+   goes from sun[0] to sun[1]. In the dark a sensor of VIEW is worth opt[its optic] of itself, toward 1 as the light on the target rises:
+   the naked eye .3, night vision .6, a thermal sight .8, a radar 1. gear: each era's optics, by observer class and sensor of VIEW (none in 1944).
+   A target lit by a flare or an illumination round (ill), caught in a 1944 searchlight (beam: the AA gun's bore, within cone rad and r m) or
+   showing its muzzle flash (for PERC.fire[1] s after a shot: flash) is seen as in that much light, whatever the clock says.
+   Weather (S.wx): rain r 0 to 1 takes rain[optic] of sight at r 1, and ear of hearing; low fog f 0 to 1 is a layer top m deep over the ground,
+   and sight through it lasts as exp(-m inside / (vis[optic] / f)); a radar ignores both. wind m/s (wx, wz) carries smoke screens (by
+   smoke), smoke, flares and rain. wxs: the weather presets, [rain, fog, wind m/s] (Limpo is calm); Variável picks one of its rows every vary s
+   and goes there in blend s. ill: the kinds of light, [radius m, life s, height of the burst m, fall m/s] (0 a hand flare, 1 an illumination
+   round). ai: in the dark (L under dark) every `every` s a squad that heard the enemy within heard s fires a hand flare toward it (at most
+   reach m off, once in sq s, and a side's squads once in side s), and a side's gun or launcher an illumination round over a contact its soldiers or vehicles heard (once in art
+   s, flying at spd m/s), unless a light is already up within near of its radius. The player fires a hand flare with 7 (n a life, cool s
+   apart) and in the modern era turns night vision on and off with 6 */
+const SKY = {
+  pre: { dia: [9, 6], tarde: [17, 6], noite: [23, 6], ciclo: [12, 24] }, def: 'dia', sun: [-.1, .25], dark: .35,
+  opt: { eye: .3, nv: .6, th: .8, rad: 1 },
+  gear: { ww2: {}, modern: { man: ['nv'], atg: ['nv', 'th'], snp: ['nv', 'th'], tank: ['th', 'th'], lav: ['th'], car: ['nv'], truck: ['nv'], art: ['nv'], aa: ['rad', 'th'], aag: ['th'], plane: ['th'], heli: ['th', 'th'] } },
+  flash: .85, beam: { r: 4500, cone: .07, lit: .9, up: 4 },
+  rain: { eye: .6, nv: .65, th: .85, rad: 1, ear: .7 }, fog: { top: 70, vis: { eye: 450, nv: 450, th: 1400, rad: 1e9 } },
+  wxs: { limpo: [0, 0, 0], chuva: [.85, 0, 7], neblina: [0, .9, 1], variavel: [[0, 0, 2], [.5, 0, 5], [1, 0, 9], [0, .6, 1], [.3, .4, 3], [0, 0, 6]] }, wxDef: 'limpo', vary: 300, blend: 90,
+  ill: [[260, 28, 120, 2.5], [800, 45, 350, 4]],
+  ai: { every: 2, heard: 3, sq: 50, side: 8, reach: 280, art: 40, spd: 400, near: .6 },
+  me: { n: 6, cool: 8 }
+};
+const skyRand = () => { let x = S.skd || 0x9e3779b9; x ^= x << 13; x >>>= 0; x ^= x >> 17; x ^= x << 5; x >>>= 0; S.skd = x; return x / 4294967296; };
+/* the clock and the weather of a new match: the presets' names (unknown ones are the defaults) */
+function skyInit(pre, wx) {
+  const p = SKY.pre[pre] ? pre : SKY.def, w = SKY.wxs[wx] ? wx : SKY.wxDef, P = SKY.pre[p];
+  S.sky = { pre: p, h0: P[0], rate: P[1], t0: S.t, L: 1, on: false, nv: false, my: 0, myT: -99 };
+  S.wx = { pre: w, r: 0, f: 0, wx: 0, wz: 0, to: null, at: 0 }; S.ill = []; S.beams = []; S.skyT = 0;
+  if (w === 'variavel') { S.skd = (Math.random() * 4294967295) >>> 0 || 1; skyPick(); Object.assign(S.wx, S.wx.to); }
+  else { const q = SKY.wxs[w], a = Math.PI * .3; Object.assign(S.wx, { r: q[0], f: q[1], wx: Math.cos(a) * q[2], wz: -Math.sin(a) * q[2] }); }
+  skyLight();
+}
+function skyPick() {   // the next weather of Variável
+  const rows = SKY.wxs.variavel, q = rows[Math.floor(skyRand() * rows.length) % rows.length], a = skyRand() * Math.PI * 2;
+  S.wx.to = { r: q[0], f: q[1], wx: Math.cos(a) * q[2], wz: -Math.sin(a) * q[2] }; S.wx.at = S.t + SKY.vary;
+}
+const skyHour = () => { const k = S.sky; return (((k.h0 + (S.t - k.t0) * k.rate / 3600) % 24) + 24) % 24; };
+function skyLight() {
+  const k = S.sky, el = Math.sin((skyHour() - 6) / 12 * Math.PI);
+  k.L = clamp((el - SKY.sun[0]) / (SKY.sun[1] - SKY.sun[0]), 0, 1);
+  k.on = k.L < 1 || S.wx.r > 0 || S.wx.f > 0;   // anything to take from sight at all
+}
+/* how much light falls on t: the clock's, a flare's or round's, a searchlight's, its own muzzle flash */
+function skyLit(t) {
+  let L = S.sky.L; if (L >= 1) return 1;
+  if (S.t - shotAt(t) < PERC.fire[1]) L = Math.max(L, SKY.flash);
+  for (const i of S.ill) { if (S.t < i.t0) continue; const d = Math.hypot(t.x - i.x, t.y - i.y, t.z - i.z), q = SKY.ill[i.k]; if (d < q[0]) L = Math.max(L, Math.min(1, 1.6 * (1 - d / q[0])) * clamp((i.end - S.t) / 4, 0, 1)); }
+  if (S.beams.length && t.y - hgt(t.x, t.z) > 30) for (const b of S.beams) {
+    const dx = t.x - b.x, dy = t.y - b.y, dz = t.z - b.z, d = Math.hypot(dx, dy, dz);
+    if (d < SKY.beam.r && (dx * b.f.x + dy * b.f.y + dz * b.f.z) / (d || 1) > Math.cos(SKY.beam.cone)) { L = Math.max(L, SKY.beam.lit); break; }
+  }
+  return L;
+}
+const skyOpt = (oc, j) => (SKY.gear[S.era][oc] || [])[j] || 'eye';
+/* what is left of sensor j of an observer of class oc looking at t over d m, in this light and weather (1 by a clear day) */
+function skySee(a, t, oc, j, d, lt) {
+  const o = skyOpt(oc, j); if (o === 'rad') return 1;
+  const W = S.wx, m0 = SKY.opt[o];
+  let k = m0 + (1 - m0) * lt;
+  if (W.r > 0) k *= 1 - (1 - SKY.rain[o]) * W.r;
+  if (W.f > 0) {   // the length of the line inside the layer of low fog
+    const top = SKY.fog.top, ha = a.y - hgt(a.x, a.z), ht = t.y - hgt(t.x, t.z), lo = Math.min(ha, ht), hi = Math.max(ha, ht);
+    const inn = hi <= top ? d : lo >= top ? 0 : d * (top - Math.max(lo, 0)) / Math.max(1, hi - Math.max(lo, 0));
+    k *= Math.exp(-inn * W.f / SKY.fog.vis[o]);
+  }
+  return k;
+}
+const skyEar = () => 1 - (1 - SKY.rain.ear) * S.wx.r;
+/* a player's own eyes count for the side's map (spot) only inside what its best sensor still makes out of the spotting range */
+function skyNear(o, t) {
+  if (!S.sky || !S.sky.on) return true;
+  const oc = oclass(o), tc = tclass(t); if (!oc || !tc) return true;
+  const air = tc === 'plane' || tc === 'heli', d = dist(o, t), lt = skyLit(t); let k = 0;
+  VIEW[oc].forEach((v, j) => { if (air ? v[1] : v[0]) k = Math.max(k, skySee(o, t, oc, j, d, lt)); });
+  return d < (air ? SPOT.air : SPOT.gnd) * k;
+}
+/* a light goes up: k its kind, from (x, y, z) to burst over (tx, tz) after dl s; told: it came over the network, so not sent again */
+function skyIll(k, x, y, z, tx, tz, team, dl, told) {
+  const q = SKY.ill[k], i = { k, x: tx, z: tz, y: hgt(tx, tz) + q[2], t0: S.t + (dl || 0), end: S.t + (dl || 0) + q[1], team, fx: x, fy: y, fz: z };
+  S.ill.push(i); if (S.ill.length > 24) S.ill.shift();
+  if (S.net && !told) Net.send('ill', { k, p: [Math.round(x), Math.round(y), Math.round(z)], q: [Math.round(tx), Math.round(tz)], d: Math.round((dl || 0) * 10) / 10 });
+  return i;
+}
+/* the player's hand flare: ahead of where it looks, reach m off at most */
+function skyFire() {
+  const P = S.my, K = S.sky; if (!P || P.dead || !K || K.my >= SKY.me.n || S.t - K.myT < SKY.me.cool || P.def.vmax) return false;
+  const a = S.aim, h = a ? a.h : P.h || 0, r = SKY.ai.reach * .8;
+  K.my++; K.myT = S.t; skyIll(0, P.x, P.y + 2, P.z, clamp(P.x + Math.cos(h) * r, 0, S.W), clamp(P.z - Math.sin(h) * r, -S.HW, S.HW), P.team, 1.5);
+  return true;
+}
+/* the AI's lights in the dark */
+function skyAI() {
+  const A = SKY.ai, lit = (x, z) => S.ill.some(i => Math.hypot(i.x - x, i.z - z) < SKY.ill[i.k][0] * A.near);
+  const one = S.illSq || (S.illSq = [0, 0]);   // a side's squads fire one flare in side s
+  for (const q of S.squads) {
+    if (q.net || S.t < one[q.team] || S.t < (q.illT || 0)) continue;
+    const m = q.men.find(m => !m.dead && m.ai && m.ln && S.t - m.ln.t < A.heard && m.ln.of && m.ln.of.team !== m.team); if (!m) continue;
+    const dx = m.ln.x - m.x, dz = m.ln.z - m.z, d = Math.hypot(dx, dz) || 1, r = Math.min(d, A.reach), x = m.x + dx / d * r, z = m.z + dz / d * r;
+    if (lit(x, z)) continue;
+    q.illT = S.t + A.sq; one[q.team] = S.t + A.side; skyIll(0, m.x, m.y + 1.5, m.z, x, z, m.team, 1.5);
+  }
+  S.illArt = S.illArt || [0, 0];
+  for (let t = 0; t < 2; t++) {
+    if (S.t < S.illArt[t]) continue;
+    const gun = S.units.find(u => !u.dead && u.ai && u.team === t && u.kind === 'art'); if (!gun) continue;
+    let p = null;
+    for (const l of [S.men, S.units]) { for (const o of l) if (!o.dead && o.ai && o.team === t && o.ln && S.t - o.ln.t < A.heard && o.ln.of && o.ln.of.team !== t && !(o.ln.of.def && o.ln.of.def.vmax) && !lit(o.ln.x, o.ln.z)) { p = o.ln; break; } if (p) break; }
+    if (!p) continue;
+    S.illArt[t] = S.t + A.art; skyIll(1, gun.x, gun.y + 3, gun.z, p.x, p.z, t, Math.hypot(p.x - gun.x, p.z - gun.z) / A.spd);
+  }
+}
+function skyStep(dt) {
+  const K = S.sky, W = S.wx; if (!K) return;
+  if (W.to) {   // Variável: toward the next weather
+    const k = Math.min(1, dt / SKY.blend * 3); for (const f of ['r', 'f', 'wx', 'wz']) W[f] += (W.to[f] - W[f]) * k;
+    if (!S.net || S.host) { if (S.t > W.at) skyPick(); }
+  }
+  if ((S.skyT -= dt) <= 0) {
+    S.skyT = SKY.ai.every; skyLight();
+    if (K.L < SKY.dark && (!S.net || S.host) && !S.over) { const a0 = AIB.now(); skyAI(); AIB.g += AIB.now() - a0; }   // the commanders' lights count in the AI's frame (AIB)
+  }
+  if (W.wx || W.wz) {   // the wind carries the smoke and the lights
+    for (const s of S.smokes) { s.x += W.wx * dt; s.z += W.wz * dt; }
+    for (const q of S.parts) if (q.k === 'smoke') { q.x += W.wx * dt; q.z += W.wz * dt; }
+  }
+  for (const i of S.ill) if (S.t >= i.t0) { const q = SKY.ill[i.k]; i.y -= q[3] * dt; i.x += W.wx * dt; i.z += W.wz * dt; }
+  if (S.ill.length && S.ill.some(i => S.t > i.end || i.y < hgt(i.x, i.z))) S.ill = S.ill.filter(i => S.t <= i.end && i.y >= hgt(i.x, i.z));
+  S.beams.length = 0;   // the 1944 AA guns' searchlights, along the bore, in the dark
+  if (!S.modern && K.L < .5) for (const u of S.units) if (!u.dead && u.kind === 'aa' && u.f) S.beams.push({ x: u.x, y: u.y + SKY.beam.up, z: u.z, f: u.f, u });
+}
+step = (g => dt => { g(dt); skyStep(dt); })(step);
+newState = (g => (e, m, o) => { const s = g(e, m, o); skyInit(o && o.sky, o && o.wx); return s; })(newState);
+/* online: the sky is the host's. sky: h the hour now, rt the rate, p and w the presets' indices, r f wx wz the weather now, every SYNC s and to
+   whoever joins; ill: a light anyone put up (k, from p, over q, after d s). welcome says sky: 1 */
+const SKYNET = { every: 5, pre: Object.keys(SKY.pre), wx: Object.keys(SKY.wxs) };
+Net.skyacc = 0;
+Net.skySend = () => {
+  const K = S.sky, W = S.wx; Net.skyacc = 0; if (!K) return;
+  Net.send('sky', { h: Math.round(skyHour() * 1000) / 1000, rt: K.rate, p: SKYNET.pre.indexOf(K.pre), w: SKYNET.wx.indexOf(W.pre), r: Math.round(W.r * 100) / 100, f: Math.round(W.f * 100) / 100, wx: Math.round(W.wx * 10) / 10, wz: Math.round(W.wz * 10) / 10 });
+};
+Net.rx.welcome = (old => m => { Net.sky = m.sky === 1; old(m); })(Net.rx.welcome);
+Net.rx.joined = (old => m => { old(m); if (S && S.net && S.host && Net.sky) Net.skySend(); })(Net.rx.joined);
+Net.rx.sky = m => {
+  if (!S || !S.net || S.host || !S.sky || ![m.h, m.rt, m.r, m.f, m.wx, m.wz].every(v => typeof v === 'number' && isFinite(v))) return;
+  const K = S.sky, W = S.wx; K.h0 = ((m.h % 24) + 24) % 24; K.rate = clamp(m.rt, 0, 600); K.t0 = S.t; K.pre = SKYNET.pre[m.p] || K.pre;
+  W.pre = SKYNET.wx[m.w] || W.pre; W.to = null; W.r = clamp(m.r, 0, 1); W.f = clamp(m.f, 0, 1); W.wx = clamp(m.wx, -30, 30); W.wz = clamp(m.wz, -30, 30); skyLight();
+};
+Net.rx.ill = m => {
+  if (!S || !S.sky || !Array.isArray(m.p) || !Array.isArray(m.q) || !SKY.ill[m.k]) return;
+  skyIll(m.k, m.p[0], m.p[1], m.p[2], clamp(m.q[0], 0, S.W), clamp(m.q[1], -S.HW, S.HW), -1, clamp(+m.d || 0, 0, 30), true);
+};
+Net.tick = (tick => dt => { tick(dt); if (S.net && S.host && Net.sky && S.sky && (Net.skyacc += dt) >= SKYNET.every) Net.skySend(); })(Net.tick);
+Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host && Net.sky) Net.skySend(); })(Net.rx.host);
+
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -16759,7 +16932,7 @@ function buildHangar() {
     gen: ['Tab', 'Visão de General: o mapa do comandante, suas ordens e o que ele pensa. O jogo continua enquanto o mapa está aberto'],
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
-  for (const [key, v] of (LEGEND[k] || LEGEND.plane)(d, o).concat(d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
+  for (const [key, v] of (LEGEND[k] || LEGEND.plane)(d, o).concat(d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], skyKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
   $('#briefing').textContent = text.slice(0, cut); $('#mission').textContent = text.slice(cut).trim() + ' ' + CQBRIEF(pvp);
   $('#btnInv').textContent = (k === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa'); ffChip();
   for (const b of document.querySelectorAll('#ctrls .tab')) b.lastChild.textContent = CTRLTXT[k === 'heli' ? 1 : 0][b.dataset.ctrl === 'mouse' ? 1 : 0];
@@ -16781,7 +16954,7 @@ function launch(again) {
   closeSwap(); sw.of = seated = null;
   if (re) { for (const g of Net.ghosts.values()) g.gone = true; Net.ghosts.clear(); Net.ai.clear(); Net.msl.clear(); Net.oq = []; Net.oh.clear(); }   // a new match in the same room: nothing of the old world is kept
   genOpen(false);
-  newState(era, id, { net, cls: k, mouse: mouseAim(), host: net && Net.host === Net.id, len: matchLen }); S.invert = invertY; buildWorld(); playMode = 'play'; paused = false; overShown = false;
+  newState(era, id, { net, cls: k, mouse: mouseAim(), host: net && Net.host === Net.id, len: matchLen, sky: skyPre, wx: wxPre }); S.invert = invertY; buildWorld(); playMode = 'play'; paused = false; overShown = false;
   hangar.hidden = true; overEl.hidden = true; $('#btnPause').hidden = net; $('#btnLeave').hidden = !net; $('#btnCam').hidden = false; $('#btnSwap').hidden = false; $('#btnPause').textContent = 'Pausar';
   if (re) { S.banner = { text: 'Nova partida', sub: 'Mesma sala, mesmos lados, tudo de volta ao começo', life: 4 }; Net.roll(); }
   lockPtr();
@@ -17837,7 +18010,7 @@ $('#genHome').addEventListener('click', () => { genOpen(false); Net.close(); bui
 function startWatch() {
   playMode = 'watch'; paused = false; overShown = false; GV.spd = 1; SPC.mode = 'auto'; SPC.tgt = null; SPC.init = false; $('#specEnd').hidden = true;
   if (document.pointerLockElement) document.exitPointerLock();
-  newState(era, null, { watch: 1, len: matchLen });
+  newState(era, null, { watch: 1, len: matchLen, sky: skyPre, wx: wxPre });
   for (let i = 0; i < 240; i++) step(1 / 30);
   buildWorld();
   closeSwap(); hangar.hidden = true; overEl.hidden = true; touchEl.hidden = true; $('#btnPause').hidden = true; $('#btnCam').hidden = true; $('#btnSwap').hidden = true; $('#btnLeave').hidden = false;
@@ -19222,6 +19395,133 @@ function padPanel() {
 }
 buildHangar = (g => () => { padLegends(); g(); padPanel(); })(buildHangar);
 let lastT = 0;
+/* ---------- day, night and weather: what is seen of them ----------
+   The scene's lights, sky, clouds and distance fog follow the light where the camera is (the clock's, or a flare's it stands under; a floor
+   of moon, so the field stays readable); night vision (6, modern era) brightens it green. LOOK: night: the colours of the dark; nv: of night
+   vision; fog: distance fog's far end, times far by night, by rain at r 1, by low fog at f 1 with the camera under low m over the ground (hi above);
+   rain: drops n in a box of box m around the camera, len m long, falling fall m/s; glow: a light's halo, m across by kind; beam: the searchlight's
+   cone opacity. All of it is a handful of objects: no lights are added, so no material changes its shader at night */
+const LOOK = { moon: .14, night: { sky: 0x0b1220, hemi: 0x6b7ca8, dome: 0x18203a }, nv: { sky: 0x0c2a12, hemi: 0x8dffa0, dome: 0x1c5a26, L: .75 },
+  fog: { far: [.22, 1], rain: .45, low: 150, f: [.97, .6], gray: 0x8a9096 }, rain: { n: 1400, box: 90, len: 2.2, fall: 26 }, glow: [70, 160], beam: .07 };
+const SKY3 = { at: null, hemi: null, sun: null, dome: null, clouds: [], rain: null, drops: null, ill: null, beams: null, cols: {}, glow: null };
+function sky3Init() {
+  const K = SKY3; K.at = scene; K.clouds = []; K.hemi = K.sun = K.dome = null;
+  scene.traverse(o => { if (o.isHemisphereLight) K.hemi = o; else if (o.isDirectionalLight) K.sun = o; else if (o === skyDome) K.dome = o; else if (o.isMesh && o.geometry && o.geometry.type === 'IcosahedronGeometry' && o.material.opacity === .7) K.clouds.push(o); });
+  K.base = { hemi: K.hemi ? K.hemi.intensity : .78, sun: K.sun ? K.sun.intensity : .85, hc: K.hemi ? K.hemi.color.getHex() : 0xffffff, cm: K.clouds[0] ? K.clouds[0].material : null };
+  K.cols = { sky: new THREE.Color(S.E.sky[1]), night: new THREE.Color(), hemi: new THREE.Color(K.base.hc), c: new THREE.Color(), g: new THREE.Color(LOOK.fog.gray) };
+  if (!K.glow) {   // a soft round halo, drawn once
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), r = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    r.addColorStop(0, 'rgba(255,250,230,1)'); r.addColorStop(.25, 'rgba(255,236,190,.55)'); r.addColorStop(1, 'rgba(255,220,160,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64);
+    K.glow = new THREE.CanvasTexture(c);
+  }
+  const R = LOOK.rain, rg = new THREE.BufferGeometry(); K.drops = new Float32Array(R.n * 3);
+  for (let i = 0; i < R.n; i++) K.drops.set([Math.random() * 2 - 1, Math.random(), Math.random() * 2 - 1], i * 3);
+  rg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(R.n * 6), 3));
+  K.rain = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: 0xaeb8c4, transparent: true, opacity: .4, depthWrite: false, fog: false }));
+  K.rain.frustumCulled = false; K.rain.visible = false;
+  K.ill = new THREE.Group(); K.beams = new THREE.Group(); scene.add(K.rain, K.ill, K.beams);
+  /* the unlit materials of the world (roads, holes, flags) darken with the light by hand */
+  K.basic = []; K.lr = -1;
+  scene.traverse(o => { const m = o.material; if (o.isMesh && m && m.isMeshBasicMaterial && m.fog !== false && !m.transparent && !m.vertexColors && !K.basic.some(q => q[0] === m)) K.basic.push([m, m.color.clone()]); });
+  /* the ground, the trees and the houses glow where a flare lights them: up to 4 lights, nearest the camera first, in uniforms they share */
+  K.u = K.u || { uIll: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uIllK: { value: 0 } };
+  const lit = [];
+  scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.geometry.type === 'PlaneGeometry') lit.push(o.material); });
+  if (wo) for (const k of ['trees', 'houses', 'roofs']) if (wo[k]) lit.push(wo[k].material);
+  for (const m of lit) {
+    m.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, K.u);
+      sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+      sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
+    };
+    m.needsUpdate = true;
+  }
+}
+const skyMix = (out, a, b, k) => out.copy(a).lerp(b, clamp(k, 0, 1));
+function skyScene() {
+  if (!S.sky || !scene) return;
+  if (SKY3.at !== scene) sky3Init();
+  const K = SKY3, cp = camera.position, W = S.wx, nv = S.sky.nv && S.modern && playMode === 'play' && S.my && !S.my.dead;
+  let L = Math.max(S.sky.L, skyLit({ x: cp.x, y: cp.y, z: cp.z, shotT: -99 }) * .8);
+  const N = nv ? LOOK.nv : LOOK.night; if (nv) L = Math.max(L, LOOK.nv.L);
+  const Lr = LOOK.moon + (1 - LOOK.moon) * L, wet = Math.max(W.r * .6, W.f * .7);
+  /* lights: the sun rides the clock, the sky and the haze darken toward the night's colours, and grey toward the weather's */
+  if (K.hemi) { K.hemi.intensity = K.base.hemi * Lr * (1 - W.r * .25); K.hemi.color.copy(skyMix(K.cols.c, K.cols.night.setHex(N.hemi), K.cols.hemi.setHex(K.base.hc), nv ? 0 : L)); }
+  if (K.sun) { const a = (skyHour() - 6) / 12 * Math.PI; K.sun.intensity = K.base.sun * (nv ? .3 : S.sky.L) * (1 - wet * .7); K.sun.position.set(-Math.cos(a) * .8, Math.max(.05, Math.sin(a)), .35); }
+  const bg = skyMix(K.cols.c, K.cols.night.setHex(N.sky), K.cols.sky.setHex(S.E.sky[1]), nv ? 0 : L).lerp(K.cols.g.setHex(LOOK.fog.gray).multiplyScalar(Lr), wet);
+  if (scene.background && scene.background.isColor) scene.background.copy(bg);
+  if (scene.fog) {
+    scene.fog.color.copy(bg);
+    const low = cp.y - hgt(cp.x, cp.z) < LOOK.fog.low, F = LOOK.fog, far = S.E.fog * (F.far[0] + (F.far[1] - F.far[0]) * Lr) * (1 - F.rain * W.r) * (1 - (low ? F.f[0] : F.f[1]) * W.f);
+    scene.fog.far = Math.max(250, far); scene.fog.near = scene.fog.far * (W.f > .3 ? .02 : .12);
+  }
+  if (K.dome) K.dome.material.color.copy(skyMix(K.cols.c, K.cols.night.setHex(N.dome), K.cols.hemi.setHex(0xffffff), nv ? 0 : L)).lerp(K.cols.g.setHex(LOOK.fog.gray), wet);
+  if (K.base.cm) { K.base.cm.color.setScalar(.25 + .75 * Lr); K.base.cm.opacity = .7 + .25 * W.r; }
+  if (Math.abs(Lr - K.lr) > .004) { K.lr = Lr; for (const [m, c] of K.basic) m.color.copy(c).multiplyScalar(.15 + .85 * Lr); }
+  { /* the flares' light on the ground: the 4 nearest the camera that burn */
+    const U = K.u.uIll.value, q = S.ill.filter(i => S.t >= i.t0).sort((a, b) => Math.hypot(a.x - cp.x, a.z - cp.z) - Math.hypot(b.x - cp.x, b.z - cp.z));
+    for (let j = 0; j < 4; j++) { const i = q[j]; if (i) U[j].set(i.x, i.y, i.z, SKY.ill[i.k][0] * 1.1 * clamp((i.end - S.t) / 4, 0, 1)); else U[j].set(0, -1e5, 0, 0); }
+    K.u.uIllK.value = nv ? .2 : 1.8 * (1 - S.sky.L);
+  }
+  /* rain: the drops fall through a box that follows the camera, slanted by the wind */
+  const R = LOOK.rain, on = W.r > .05 && cp.y - hgt(cp.x, cp.z) < 600; K.rain.visible = on;
+  if (on) {
+    const n = Math.round(R.n * W.r), p = K.rain.geometry.attributes.position.array, B = R.box, sx = W.wx / R.fall * R.len, sz = W.wz / R.fall * R.len, ph = (S.t * R.fall / (B * 2)) % 1;
+    for (let i = 0; i < n; i++) {
+      const d = K.drops, x = cp.x + d[i * 3] * B, z = cp.z + d[i * 3 + 2] * B, y = cp.y + B - (((d[i * 3 + 1] + ph) % 1) * B * 2);
+      p[i * 6] = x; p[i * 6 + 1] = y; p[i * 6 + 2] = z; p[i * 6 + 3] = x - sx; p[i * 6 + 4] = y + R.len; p[i * 6 + 5] = z - sz;
+    }
+    K.rain.geometry.setDrawRange(0, n * 2); K.rain.geometry.attributes.position.needsUpdate = true; K.rain.material.opacity = .15 + .3 * Lr;
+  }
+  /* the lights in the air: a bright core and a halo, from when it bursts until it burns out */
+  sync(S.ill, K.ill, i => {
+    const g = new THREE.Group(), s = new THREE.Sprite(new THREE.SpriteMaterial({ map: K.glow, color: 0xfff1cc, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, transparent: true }));
+    s.scale.setScalar(LOOK.glow[i.k] || 70); g.add(s, new THREE.Mesh(new THREE.SphereGeometry(i.k ? 2.2 : 1.3, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }))); return g;
+  }, (i, m) => { m.visible = S.t >= i.t0; m.position.set(i.x, i.y, i.z); m.children[0].material.opacity = clamp((i.end - S.t) / 4, 0, 1) * (.55 + .45 * (1 - S.sky.L)); });
+  /* the 1944 searchlights: a pale cone along each AA gun's bore, from a pool (S.beams is made again every step) */
+  const bs = S.beams, r = SKY.beam.r;
+  while (K.beams.children.length < bs.length) {
+    const g = new THREE.CylinderGeometry(.8, r * Math.tan(SKY.beam.cone), r, 14, 1, true); g.translate(0, r / 2, 0);
+    K.beams.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xfff4d6, transparent: true, opacity: LOOK.beam, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, side: THREE.DoubleSide })));
+  }
+  K.beams.children.forEach((m, i) => {
+    const b = bs[i]; m.visible = !!b; if (!b) return;
+    m.position.set(b.x, b.y, b.z); TV.set(b.f.x, b.f.y, b.f.z); if (TV.lengthSq() > 1e-6) m.quaternion.setFromUnitVectors(YA, TV.normalize()); m.material.opacity = LOOK.beam * clamp(1 - S.sky.L * 2, 0, 1);
+  });
+}
+syncScene = (g => dt => { g(dt); skyScene(); })(syncScene);
+/* the HUD: the hour, the light and the weather, under the match's bar, and what the keys 6 and 7 give */
+const SKYTXT = { pre: { dia: ['Dia', 'começa às 9 h'], tarde: ['Entardecer', 'anoitece na partida'], noite: ['Noite', 'começa às 23 h'], ciclo: ['Ciclo', 'um dia por hora'] },
+  wx: { limpo: ['Limpo', 'sem vento'], chuva: ['Chuva', 'e vento'], neblina: ['Neblina', 'baixa, nos vales'], variavel: ['Variável', 'muda na partida'] } };
+function skyHud() {
+  if (playMode !== 'play' || !S.my || !S.sky) return;
+  const u = clamp(cw / 1000, .62, 1), h = skyHour(), W = S.wx, L = S.sky.L, ink = S.modern ? '#c4f1f7' : '#f3ead2';
+  const part = L >= 1 ? 'dia' : L <= 0 ? 'noite' : h < 12 ? 'amanhecer' : 'anoitecer', ws = Math.hypot(W.wx, W.wz);
+  const wx = [W.r > .5 ? 'chuva forte' : W.r > .05 ? 'chuva' : '', W.f > .5 ? 'neblina densa' : W.f > .05 ? 'neblina' : '', ws >= 1 ? 'vento ' + Math.round(ws) + ' m/s' : ''].filter(Boolean).join(' · ');
+  const s = String(h | 0).padStart(2, '0') + ':' + String((h % 1) * 60 | 0).padStart(2, '0') + ' · ' + part + (wx ? ' · ' + wx : '') + (S.sky.nv && S.modern ? ' · VISÃO NOTURNA' : '');
+  txt(s, cw / 2, 50 * u, 11 * u, ink, 'center');
+}
+drawHud = (g => () => { g(); skyHud(); })(drawHud);
+/* 6: night vision on and off (modern era); 7: a hand flare (on the ground) */
+addEventListener('keydown', e => {
+  if (e.repeat || playMode !== 'play' || sw.on || GV.on || !S || !S.my || !S.sky || /INPUT|TEXTAREA/.test(e.target.tagName || '')) return;
+  if (e.code === 'Digit6') {
+    if (!S.modern) { S.banner = { text: 'Sem visão noturna em 1944', sub: 'Use sinalizadores (7), iluminativas e holofotes', life: 2 }; return; }
+    S.sky.nv = !S.sky.nv; S.banner = { text: 'Visão noturna ' + (S.sky.nv ? 'ligada' : 'desligada'), sub: 'Tecla 6 liga e desliga', life: 2 };
+  } else if (e.code === 'Digit7') {
+    const K = S.sky, ok = skyFire();
+    S.banner = ok ? { text: 'Sinalizador no ar', sub: (SKY.me.n - K.my) + ' restantes', life: 2 } : { text: 'Sem sinalizador agora', sub: K.my >= SKY.me.n ? 'Acabaram nesta vida' : S.my.def.vmax ? 'Só em solo' : 'Espere ' + Math.ceil(SKY.me.cool - (S.t - K.myT)) + ' s', life: 2 };
+  }
+});
+const skyKeys = () => [['6', 'Visão noturna, na época atual: liga e desliga. À noite, a olho nu se vê a 30% do alcance; com visão noturna, a 60%; a mira térmica dos blindados e das aeronaves vê a 80%'],
+  ['7', 'Sinalizador (a pé ou em veículo de solo): ilumina uns ' + SKY.ill[0][0] + ' m por ' + SKY.ill[0][1] + ' s à sua frente, para os dois lados; ' + SKY.me.n + ' por vida. O clarão do seu tiro também revela você']];
+/* the hangar: the sky and the weather of the match, kept for the next visit */
+let skyPre = SKY.def, wxPre = SKY.wxDef;
+try { const a = localStorage.getItem('ceu-de-ferro-3d-ceu'), b = localStorage.getItem('ceu-de-ferro-3d-tempo'); if (SKY.pre[a]) skyPre = a; if (SKY.wxs[b]) wxPre = b; } catch (e) {}
+for (const b of document.querySelectorAll('.tab[data-sky]')) b.addEventListener('click', () => { skyPre = b.dataset.sky; try { localStorage.setItem('ceu-de-ferro-3d-ceu', skyPre); } catch (e) {} buildHangar(); });
+for (const b of document.querySelectorAll('.tab[data-wx]')) b.addEventListener('click', () => { wxPre = b.dataset.wx; try { localStorage.setItem('ceu-de-ferro-3d-tempo', wxPre); } catch (e) {} buildHangar(); });
+buildHangar = (g => () => { g(); for (const b of document.querySelectorAll('.tab[data-sky]')) b.setAttribute('aria-selected', String(b.dataset.sky === skyPre)); for (const b of document.querySelectorAll('.tab[data-wx]')) b.setAttribute('aria-selected', String(b.dataset.wx === wxPre)); })(buildHangar);
+
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(.05, (now - lastT) / 1000 || .016); lastT = now;

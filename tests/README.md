@@ -7,6 +7,7 @@ node tests/smoke-sight.js   # a IA e a fumaça: tiros no alvo escondido, memóri
 node tests/perception.js    # percepção da IA: campo de visão, tempo para notar, partilha, mira; a escada (detectado, reconhecido, identificado), tempo de reação, primeiro tiro e acertos por distância, e a suíte de honestidade: uma batalha só de IA nas duas épocas em que nenhum tiro vai a alvo não percebido e nenhum míssil guiado a alvo não identificado (SECS=90)
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento
 node tests/squads.js        # pelotões: caminhão, desembarque, comportamento, reação da outra IA
+node tests/mission.js       # contrato de missão e Despacho: toda unidade nasce com u.mis, a IA só entra em campo por ordem, relatórios rep (PARITY=<página antiga>: a mesma batalha)
 node tests/field.js         # infantaria de campo: quem começa onde, ordens (guardar, patrulhar, assaltar, escoltar), reforços do planejador, caminhão sob ameaça, conquista: reforços do diretor, tíquetes, captura, ligação, relógio (SECS=240)
 node tests/bases.js         # bases de suprimento: onde pode, construção, kit e limite, reabastecimento por classe, entrada, tiros para destruir por arma, carga, IA que constrói, guarda, refaz, recua e ataca
 node tests/world.js         # casas, árvores, base e carcaças: o que para na parede, tabela de dano, estágios, colisão, visão, IA nas vilas (DRIVE=300)

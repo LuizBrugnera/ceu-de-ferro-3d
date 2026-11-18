@@ -1754,9 +1754,8 @@ function newState(eraId, model, o) {
   fortInit();
   ecoInit();
   if (!S.net) {
-    addUnit('aa', 0, S.base[0].x + 420, S.base[0].z + 170, null, true);
-    addUnit('aa', 1, S.base[1].x - 420, S.base[1].z - 170, null, true);
-    deploy(0); deploy(1);
+    for (const t of [0, 1]) dispatch(t, { why: 'antiaérea da base', area: { x: S.base[t].x, z: S.base[t].z, r: 900 } }, () => addUnit('aa', t, S.base[t].x + (t ? -420 : 420), S.base[t].z + (t ? -170 : 170), null, true));
+    for (const t of [0, 1]) dispatch(t, { why: 'abertura' }, () => deploy(t));
   }
   if (!S.demo) spawnPlayer();
   return S;
@@ -1956,25 +1955,145 @@ function colAxis(t) {
   for (let i = 0; i < w.length; i++) if ((x -= w[i]) < 0) return i;
   return w.length - 1;
 }
+/* ---------- the mission contract and Dispatch (phase F1 of the General's design) ----------
+   Every soldier, squad, vehicle and aircraft has a mission, o.mis, from the moment it is born: what it is for, where, since when and with what freedom.
+   kind: attack defend ambush recon escort garrison patrol interdict support cap cas lift build reserve; op: the commander's operation it serves (its id, 0: a
+   standing mission); area { x z r }: the leash; target { ri s } (a stretch of road) or null; when { H, until } (s of the battle; until 0: no end); lat 0 strict,
+   1 normal, 2 free; roe hold | return | free; brk: the strength below which it falls back; pri: its priority for support; why: the general's words.
+   st: way (on its way), exec (doing it), done, inviable, lost. d: the Dispatch order that put it in the field (0: none: a player's, or a copy of the host's).
+   Dispatch: whatever the AI fields it fields through an order (dispatch(t, order, fn): what fn brings to life is born with the order's mission). The order
+   may name the kind, or the kind by class (by); else MIS.cls gives the kind of the class. S.dsp.log[t]: the side's last MIS.keep orders that fielded something.
+   Reports up (rep(o, k, data)): contact, done, inviable, losses, need, stuck; S.rep[t] until the side's commander reads them (misRead, every FIELD.every s:
+   C.rep the last MIS.rep of them, C.repN how many of each kind). Phase F1 keeps today's battle: nothing decides by the mission or the reports yet, and none of
+   this draws from the sim's random stream */
+const MIS = { lat: 1, roe: 'free', brk: .5, pri: 1, r: 300, keep: 48, rep: 64, scan: 1, ct: 10,
+  cls: { fighter: 'cap', cas: 'cas', lift: 'lift', atk: 'cas', drone: 'recon', owa: 'attack', tank: 'attack', lav: 'attack', aa: 'escort', aaf: 'defend', art: 'support', truck: 'support', cargo: 'lift', car: 'patrol', man: 'defend', squad: 'reserve' },
+  col: { tank: 'attack', lav: 'attack', aa: 'escort', truck: 'lift', cargo: 'lift', art: 'support', car: 'patrol' },
+  ord: { hold: 'defend', assault: 'attack', build: 'build', supply: 'support', patrol: 'patrol', escort: 'escort', ambush: 'ambush', flank: 'attack', bait: 'attack', overwatch: 'support', withdraw: 'reserve', scout: 'recon', mortar: 'support', move: 'attack', observe: 'recon' },
+  job: { rec: 'recon', lp: 'recon', egd: 'garrison', guard: 'garrison', garr: 'garrison', fpost: 'garrison', mort: 'support', air: 'defend' } };
+const misCls = o => (o.man ? 'man' : o.men ? 'squad' : o.drone ? (o.ai && o.ai.job === 'owa' ? 'owa' : 'drone') : o.heli ? (o.def.lift ? 'lift' : 'atk')
+  : o.kind ? (o.fixed && o.kind === 'aa' ? 'aaf' : o.cargo ? 'cargo' : o.kind) : o.role || 'fighter');
+/* the mission o is born with: the current Dispatch order's for its side, else its class's own (d 0). was: a mission it already has (addUnit over addVehicle) */
+function misBirth(o, was) {
+  const D = S.dsp, c = D && D.cur && (D.cur.team === o.team || D.cur.team < 0) ? D.cur : null, k = misCls(o), at = o.men ? o.men[0] || routeAt(S.T.routes[o.ri] || S.T.routes[0], o.s || 0) : o;
+  if (c && !c.id) c.id = ++D.n;
+  if (c && !was && !o.man) { if (!c.n++) { const L = D.log[o.team]; if (L) { L.push(c); if (L.length > MIS.keep) L.shift(); } } }
+  return { id: was ? was.id : (S.misN = (S.misN || 0) + 1), kind: (c && (c.by && c.by[k] || c.kind)) || MIS.cls[k] || 'reserve', op: (c && c.op) || 0,
+    area: (c && c.area) || { x: at.x, z: at.z, r: MIS.r }, target: (c && c.target) || (o.rail && o.ri !== undefined ? { ri: o.ri, s: o.s } : null), when: { H: S.t, until: (c && c.until) || 0 },
+    lat: MIS.lat, roe: MIS.roe, brk: MIS.brk, pri: (c && c.pri) || MIS.pri, why: (c && c.why) || '', st: 'way', d: c ? c.id : 0 };
+}
+/* Dispatch: fn's newborn take order M's mission (t: the side, -1 either). dispatchIf: inside an order already open for t, fn is part of it */
+function dispatch(t, M, fn) {
+  const D = S.dsp || (S.dsp = { n: 0, cur: null, log: [[], []] }), was = D.cur;
+  D.cur = Object.assign({ id: 0, t: S.t, team: t, n: 0 }, M);
+  try { return fn(); } finally { D.cur = was; }
+}
+const dispatchIf = (t, M, fn) => (S.dsp && S.dsp.cur && (S.dsp.cur.team === t || S.dsp.cur.team < 0) ? fn() : dispatch(t, M, fn));
+/* a squad put together by hand (a militia, a squad found again after a change of host): born with the order of the moment, its men with it */
+function misSq(q) { q.mis = misBirth(q); for (const m of q.men) m.mis = q.mis; return q.mis; }
+/* a squad's mission follows its order (kind, leash, target, operation); a copy of its carrier's when it gets out of one */
+function misOrd(q, O) {
+  const M = q.mis; if (!M || !O) return;
+  q.mo = O;
+  const k = MIS.job[q.job] || (O.b || O.es ? 'garrison' : MIS.ord[O.k]) || M.kind, R = S.T.routes[O.ri], p = O.x !== undefined ? O : R && O.s !== undefined ? routeAt(R, clamp(O.s, 0, R.len)) : null;
+  if (M.kind === 'build' && k !== 'build') rep(q, 'done', { k: 'build' });
+  if (O.k === 'supply') rep(q, 'need', { k: 'ammo' });
+  M.kind = k; M.op = O.op ? O.op.id || 0 : 0; M.st = 'way';
+  if (p) M.area = { x: p.x, z: p.z, r: MIS.r };
+  if (O.ri !== undefined) M.target = { ri: O.ri, s: O.s };
+}
+function misFrom(q, M) {
+  if (!q || !M) return q;
+  q.mis = Object.assign({}, M, { id: q.mis ? q.mis.id : (S.misN = (S.misN || 0) + 1), when: { H: S.t, until: M.when.until }, st: 'way' });
+  for (const m of q.men) m.mis = q.mis;
+  misOrd(q, q.ord); return q;
+}
+/* a report up to the side's commander (only where the battle is simulated) */
+function rep(o, k, data) {
+  if ((S.net && !S.host) || !o || !o.mis) return;
+  const M = o.mis, R = S.rep || (S.rep = [[], []]), L = R[o.team]; if (!L) return;
+  if (k === 'done' || k === 'inviable') M.st = k;
+  const at = o.men ? o.men.find(m => !m.dead) || o.men[0] : o;
+  L.push({ t: S.t, k, mis: M.id, kind: M.kind, d: M.d, op: M.op, x: at ? Math.round(at.x) : 0, z: at ? Math.round(at.z) : 0, data: data || null });
+  if (L.length > MIS.rep) L.shift();
+}
+/* a loss: a vehicle or aircraft of the AI is lost with its mission; a squad reports each man, and is lost with the last */
+function misLost(o) {
+  if (!o || !o.mis || o.mq || (!o.ai && !o.aid)) return;
+  o.mq = 1;
+  if (o.man) { const q = o.sq; if (!q || !q.mis) return; const left = q.men.reduce((a, m) => a + (m.dead || m === o ? 0 : 1), 0); rep(q, 'losses', { men: 1, left }); if (!left) q.mis.st = 'lost'; return; }
+  rep(o, 'losses', { lost: 1 }); o.mis.st = 'lost';
+}
+/* the unit's own word, read off what it is doing every MIS.scan s: contact when it takes a target (once every MIS.ct s at most), stuck when it has to work
+   itself free, a squad's arrival (exec; done for a walk or a withdrawal) */
+const misSee = (o, c, j) => { const M = o.mis; if (c && !M.c && S.t - (M.ct || -1e9) >= MIS.ct) { M.ct = S.t; rep(o, 'contact'); } if (j && !M.j) rep(o, 'stuck'); M.c = c; M.j = j; };
+function misScan() {
+  for (const u of S.units) if (u.ai && u.mis && !u.dead && !u.net) misSee(u, !!u.ai.tgt, u.ai.free > S.t);
+  for (const p of S.planes) if (p.ai && p.mis && !p.dead && !p.net) misSee(p, !!(p.tgt || p.bandit), false);
+  for (const q of S.squads) if (!q.net && q.live > 0 && (q.mis || misSq(q))) {
+    for (const m of q.men) if (m.mis !== q.mis) m.mis = q.mis;
+    if (q.ord && q.mo !== q.ord) misOrd(q, q.ord);   // an order given without setOrd
+    misSee(q, q.men.some(m => !m.dead && m.ai && m.ai.tgt), false);
+    if (q.at && q.mis.st === 'way') { q.mis.st = 'exec'; if (q.ord && (q.ord.k === 'move' || q.ord.k === 'withdraw')) rep(q, 'done', { k: q.ord.k }); }
+  }
+}
+/* the commander of side t reads its reports */
+function misRead(t) {
+  const C = S.cmd && S.cmd[t], L = S.rep && S.rep[t]; if (!C || !L || !L.length) return;
+  const R = C.rep || (C.rep = []), N = C.repN || (C.repN = {});
+  for (const r of L) { R.push(r); N[r.k] = (N[r.k] || 0) + 1; }
+  if (R.length > MIS.rep) R.splice(0, R.length - MIS.rep);
+  L.length = 0;
+}
+function misTick(dt) {
+  if ((S.misT = (S.misT || 0) - dt) <= 0) { S.misT = MIS.scan; misScan(); }
+  if ((S.misR = (S.misR || 0) - dt) <= 0) { S.misR = FIELD.every; misRead(0); misRead(1); }
+}
+/* every way into the world gives a mission; the AI's ways in are Dispatch orders */
+addPlane = (g => (...a) => { const p = g(...a); p.mis = misBirth(p); return p; })(addPlane);
+addHeli = (g => (...a) => { const p = g(...a); p.mis = misBirth(p); return p; })(addHeli);
+addVehicle = (g => (...a) => { const u = g(...a); u.mis = misBirth(u); return u; })(addVehicle);
+addUnit = (g => (...a) => { const u = g(...a); u.mis = misBirth(u, u.mis); return u; })(addUnit);
+addMan = (g => (...a) => { const m = g(...a); m.mis = misBirth(m); return m; })(addMan);
+addSquad = (g => (...a) => { const q = g(...a); misSq(q); return q; })(addSquad);
+addDrone = (g => (...a) => { const o = g(...a); o.mis = misBirth(o); const M = o.op && o.op.mis; if (M && !o.mis.d) Object.assign(o.mis, { d: M.d, op: M.op }); return o; })(addDrone);   // an operator's: by his order
+setOrd = (g => (q, O) => { if (!q.mis) misSq(q); g(q, O); if (q.ord !== O && O && O.k !== 'hold') rep(q, 'inviable', { k: O.k }); misOrd(q, q.ord); })(setOrd);
+dismount = (g => u => { const M = u.mis, q = g(u); return M && q && !u.mr ? misFrom(q, M) : q; })(dismount);
+heliUnload = (g => (p, ord) => { const M = p.mis, q = g(p, ord); return p.ai && M ? misFrom(q, M) : q; })(heliUnload);
+cqDead = (g => o => { misLost(o); return g(o); })(cqDead);
+spawnColumn = (g => (t, ...a) => dispatchIf(t, { by: MIS.col, why: 'coluna' }, () => g(t, ...a)))(spawnColumn);
+fieldSquad = (g => (t, job, ...a) => dispatchIf(t, { why: 'posto: ' + job }, () => g(t, job, ...a)))(fieldSquad);
+reinforce = (g => (t, job, k) => dispatch(t, { by: { cargo: 'lift', truck: 'lift' }, why: 'reforço: ' + job }, () => g(t, job, k)))(reinforce);
+errand = (g => (t, ...a) => dispatch(t, { why: 'serviço de transporte' }, () => g(t, ...a)))(errand);
+trnPlan = (g => (t, sq) => { dispatch(t, { kind: 'reserve', why: 'veículos para quem os tomar' }, () => g(t, sq)); for (const q of sq) if (q.mis) for (const m of q.men) m.mis = q.mis; })(trnPlan);   // a sniper put in a squad: of the squad
+heliAir = (g => (t, ...a) => dispatch(t, { why: 'helicóptero de ataque' }, () => g(t, ...a)))(heliAir);
+heliGround = (g => (id, t, i, ai) => (ai ? dispatchIf(t, { why: 'transporte aéreo' }, () => g(id, t, i, ai)) : g(id, t, i, ai)))(heliGround);
+reqOpen = (g => (C, kind, id, ri) => dispatch(C.t, { why: 'requisição', target: { ri } }, () => g(C, kind, id, ri)))(reqOpen);
+radScan = (g => () => dispatch(-1, { kind: 'support', why: 'rádio da frente' }, g))(radScan);
+postGarr = (g => f => dispatch(f.team, { kind: 'garrison', why: 'guarnição do posto' }, () => g(f)))(postGarr);
+civTake = (g => (w, t) => dispatch(t, { kind: 'garrison', why: 'milícia da vila' }, () => g(w, t)))(civTake);
+demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeepAlive);
+/* Dispatch on the clock of today (F1: the same battle as before): per side the base AA, the planes and the columns, each by an order with its mission */
 function director(dt) {
+  misTick(dt);
   const first = !S.dir, D = S.dir || (S.dir = [0, 1].map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
   for (let t = 0; t < 2; t++) {
     const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3), ds = t ? 1 : -1;
     const cnt = (l, f) => l.reduce((a, o) => a + (o.team === t && !o.dead && !!o.ai && f(o) ? 1 : 0), 0), need = k => (cqFree(t, k) ? Math.max(0, DIR[k][n] - cnt(S.units, u => u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq))) : 0);
     T.air -= dt; T.col -= dt;
-    if (cnt(S.units, u => u.fixed && !u.es)) T.fix = DIR.fix; else if ((T.fix -= dt) <= 0 && ecoUse(t, 'aaf')) addUnit('aa', t, b.x + (t ? -420 : 420), b.z + (t ? -170 : 170), null, true);
+    if (cnt(S.units, u => u.fixed && !u.es)) T.fix = DIR.fix; else if ((T.fix -= dt) <= 0 && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => addUnit('aa', t, b.x + (t ? -420 : 420), b.z + (t ? -170 : 170), null, true));
     for (let i = first ? 4 : 1; i-- > 0;) for (const role of ['fighter', 'cas']) {
       if (T.air > 0 || !cqFree(t, role) || cnt(S.planes, p => p.role === role) >= DIR[role][n] || !ecoUse(t, role)) continue;
       const x = b.x + rand(-600, 600), z = b.z + rand(-1500, 1500);
-      addPlane(side[role], t, x, hgt(x, z) + rand(700, 1300), z, headTo(x, z, S.W / 2, 0), true, role); T.air = first ? 0 : DIR.air;
+      dispatch(t, { why: role === 'cas' ? 'apoio aéreo à frente' : 'superioridade aérea', area: { x: S.W / 2, z: 0, r: 3000 } }, () => addPlane(side[role], t, x, hgt(x, z) + rand(700, 1300), z, headTo(x, z, S.W / 2, 0), true, role)); T.air = first ? 0 : DIR.air;
     }
     const nq = inf ? Math.max(0, DIR.squad[n] - squadsOf(t)) : 0;
     if (T.col <= 0 && need('tank') + need('aa') + nq > 0) {   // with points the columns take the roads in turn, the first from the side's line on road 0
       const ri = S.cq && !first ? (T.ri = S.T.mv >= 4 ? colAxis(t) : (T.ri + 1) % R.length) : 0, r = R[ri];
       const c = ecoCol(t, need('tank'), need('aa'), need('truck'), need('art'), nq, ri, first ? (S.cq ? lineS(t, ri) : r.len / 2 - ds * DIR.start) : sb ? entryS(t, ri) : r.len / 2 - ds * DIR.back);
-      if (c) spawnColumn(t, c.nt, c.na, c.ntr, ri, c.s0, c.nar, c.nsq); T.col = c ? DIR.col : ECO.col.retry;
+      if (c) dispatch(t, { by: MIS.col, why: 'coluna pela rota ' + (ri + 1), target: { ri, s: c.s0 } }, () => spawnColumn(t, c.nt, c.na, c.ntr, ri, c.s0, c.nar, c.nsq)); T.col = c ? DIR.col : ECO.col.retry;
     }
-    if (first) { T.air = DIR.air; if (S.net && Net.inf && !S.took) deploy(t); }   // not again under a host that took the battle over
+    if (first) { T.air = DIR.air; if (S.net && Net.inf && !S.took) dispatch(t, { why: 'abertura' }, () => deploy(t)); }   // not again under a host that took the battle over
   }
   if (first && S.eco) S.eco.open = false;
 }
@@ -12254,7 +12373,7 @@ function ecoStep(dt) {
     for (const s of E.l) {   // a finished site with a fixed AA asked for and none within reach: one from the reserve, a little toward the enemy
       if (s.team !== t || s.dead || s.prog < 1 || !s.gd.aa || S.units.some(u => !u.dead && u.fixed && u.kind === 'aa' && u.team === t && hdist(u, s) < ECO.gd.r) || !ecoUse(t, 'aaf')) continue;
       const b = S.base[1 - t], h = headTo(s.x, s.z, b.x, b.z), sq = s.lot >= 0 && (S.T.lots || []).find(l => l.team === t && l.k === 'aa' && hdist(l, s) < ECO.gd.r * 2 && !(l.hi >= 0 && S.os[S.T.houses[l.hi].id] >= 2) && !S.units.some(u => !u.dead && u.fixed && hdist(u, l) < ECO.lot.at * 4));   // in the seat town: on its square or a roof
-      const u = sq ? addUnit('aa', t, sq.x, sq.z, null, true) : addUnit('aa', t, s.x + Math.cos(h) * ECO.gd.off, s.z - Math.sin(h) * ECO.gd.off, null, true);
+      const u = dispatch(t, { kind: 'defend', why: 'guarda da instalação', area: { x: s.x, z: s.z, r: ECO.gd.r } }, () => (sq ? addUnit('aa', t, sq.x, sq.z, null, true) : addUnit('aa', t, s.x + Math.cos(h) * ECO.gd.off, s.z - Math.sin(h) * ECO.gd.off, null, true)));
       if (sq && sq.hi >= 0) { u.roof = S.T.houses[sq.hi]; u.y = u.roof.y + u.roof.hh; }
       u.es = s; gLog(t, 'eco', 'Antiaérea fixa instalada junto à ' + s.name.toLowerCase(), s);
     }

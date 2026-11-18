@@ -59,6 +59,13 @@ const rows = [];
   S.t = i.end + 1; C.run(.1); ok(!S.ill.includes(i), 'and burns out');
 }
 
+if ($('typeof grade === "function"')) {   // the perception ladder: the dark slows every rung, not only the first
+  const up = (era, sky, x) => { fresh(era, sky); const a = man(1, 0, 0, 0), t = man(0, x, 0, 0); t.ai = null; const t0 = S.t; let k = Infinity;
+    for (; S.t - t0 < 60;) { S.t += .25; if ($('grade')(a, t) >= 3) { k = S.t - t0; break; } } return k; };
+  const d = up('ww2', 'dia', 150), n = up('ww2', 'noite', 150);
+  rows.push(['1944 soldier identified at 150 m, day', d], ['1944 soldier identified at 150 m, night', n]);
+  ok(d < Infinity && n > d, 'the ladder: a soldier at 150 m is identified by day in ' + f1(d) + ' s, at night in ' + f1(n) + ' s');
+}
 console.log('-- searchlights --');
 {
   fresh('ww2', 'noite'); S.over = true;

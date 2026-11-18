@@ -45,9 +45,9 @@ console.log('-- a truck unloads under threat --');
   fresh(); t = until(() => C.damageUnit(tr, 3, null)); ok(t !== null && t < 1 && S.men.length === 5, 'hit: unloaded in ' + (t || 0).toFixed(1) + ' s');
   fresh(); t = until(() => { const p = C.addPlane('p47', 0, tr.x - 900, tr.y + 500, tr.z, 0, false); p.v = { x: 130, y: -70, z: 0 }; p.V = 148; p.inv = 99; p.ctl.thr = 0; }); ok(t !== null && t < 2, 'a plane diving on it: unloaded in ' + (t || 0).toFixed(1) + ' s');
   fresh(); t = until(() => C.explode(tr.x + 90, tr.y, tr.z, 30, 10, null, 0, true)); ok(t !== null && t < .1, 'a shell bursting 90 m away: unloaded at once');
-  fresh(); const s0 = tr.s; t = until(() => { const k = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, tr.s + 60, 5, 0), p = $('routeAt')(r, tr.s + 60 + 1400); C.addVehicle('truck', null, 0, p.x, p.z, 0).inv = 99; }, 10);
+  fresh(); t = until(() => { const k = C.addUnit('tank', 1, 0, 0, 'tiger', false, 0, tr.s + 60, 5, 0), p = $('routeAt')(r, tr.s + 60 + 1400); C.addVehicle('truck', null, 0, p.x, p.z, 0).inv = 99; }, 10);
   ok(t !== null, 'a tank of its column in contact 1400 m from the enemy: unloaded in ' + (t || 0).toFixed(1) + ' s' + ' (dismount distance ' + IAI.dismount + ' m)');
-  C.run(25); ok((s0 - tr.s) > IAI.away[0] - 40, 'and the empty truck backed ' + Math.round(s0 - tr.s) + ' m away'); }
+  const s0 = tr.s; C.run(25); ok((s0 - tr.s) > IAI.away[0] - 40, 'and the empty truck backed ' + Math.round(s0 - tr.s) + ' m away from where it let its squad off'); }   // from there: the tank takes seconds to notice the enemy (PERC), the truck rolls on meanwhile
 
 console.log('-- the planner refills a post --');
 for (const bases of [false, true]) { const C = H.load({ seed: 9 }), $ = C.$; if (!bases) C.planSup = () => {}; const S = solo(C, 'ww2'), F = $('FIELD'), q = S.squads.find(q => q.team === 0 && q.job === 'line' && q.jk === 0), post = { x: q.ord.x, z: q.ord.z };

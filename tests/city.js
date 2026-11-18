@@ -41,7 +41,7 @@ console.log('-- what a wall stops and what an opening lets through --');
   /* rounds: a rifle bullet through a window reaches the man inside, one at the wall beside it does not */
   const fire = (i, v, sa) => { const a = W(o, (i + .5) * B.bw, (1 + v) * sh, -30), d = W(o, (i + .5) * B.bw, (1 + v) * sh, 0), L = Math.hypot(d.x - a.x, d.z - a.z); S.bullets.push({ x: a.x, y: a.y, z: a.z, vx: (d.x - a.x) / L * 800, vy: 0, vz: (d.z - a.z) / L * 800, life: 1, team: 1, dmg: 12, ap: 0, sa, by: null, tr: 0 }); C.run(.3); };
   const m = man(0, 0, 0), p = W(o, (iw + .5) * B.bw, sh, 2.2); Object.assign(m, { x: p.x, z: p.z, y: p.y, cbo: o, cbl: 1, cbh: sh, cby: p.y, cbin: true, cbpx: p.x, cbpz: p.z });
-  m.hp = m.max = 1e4; C.run(.1); const h0 = m.hp; fire(iw, .6, 1); const h1 = m.hp; m.hp = h0;
+  m.hp = m.max = 1e4; C.run(.1); const h0 = m.hp; fire(iw, .6, 1); const h1 = m.hp; m.hp = h0; m.bl = 0;   // the wound bleeds (DMG.man.bleed): stanch it so the hp left reads the second round alone
   const jw = [0, 1, 2, 3, 4].find(i => i < B.nx && B.kd[wz(B, 1, 0, i)] === 2 && i !== iw);
   S.cbh[B.off + eW] = 255; fire(iw, .1, 1);
   if (process.env.DBG) console.log(h0, h1, m.hp, m.y - o.y, sh, m.cbl, m.cbin, st(o, eW));

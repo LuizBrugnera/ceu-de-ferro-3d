@@ -50,7 +50,7 @@ Foi provado contra o jogo de verdade (anfitrião rodando a página, economia lig
 - Economia: `build_site` (pow, mine, fab), `produce_unit`, `cancel_order`, `set_priority`, `scrap_site`, `set_site_defence`, `set_reserve`, `scout`, `strike`.
 - Tática, por `send_command` (`d: "cmd"`): `atk`, `stop`, `man`, `amb`, `res`, `ctr`, `hold`, `raid`, `sup`, `work`, `req`, `fire`, `recon`/`move`/`assault`, `free`, `doc`, `pos`, `focus`, `rally`, `mark`, `posts`, `ctl`. A descrição da ferramenta traz o JSON de cada uma.
 - Ritmo: `wait` (até 60 s de tempo de partida) volta antes se algo notável acontecer: operação ou assalto começou/terminou, ponto trocou de dono, instalação sua destruída ou pronta, reforço, relatório. Traz um resumo do que mudou.
-- Revisão: `get_match_report` traz a revisão pós-batalha da partida em curso (só o seu lado enquanto ela corre; os dois depois do fim), `match: "list"` lista as partidas que o servidor guarda e `match: "<época>/<nome>"` traz a de uma delas.
+- Revisão: `get_match_report` traz a revisão pós-batalha da partida em curso (só o seu lado enquanto ela corre; os dois depois do fim), `match: "list"` lista as partidas terminadas que o servidor guarda e `match: "<época>/<nome>"` traz a de uma delas.
 - Cadeira: `seat` (`claim` toma a cadeira e a economia; `release` devolve tudo à IA, que reassume na hora).
 
 ## O que não pode

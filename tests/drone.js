@@ -80,11 +80,16 @@ console.log('   ' + seen.join(' -> ') + '; target hp ' + bh + ' -> ' + base.hp.t
 ok(o.end === 'boom' && (base.dead || base.hp < bh), 'it cruises, loiters, dives on the picked target and hits it');
 
 console.log('-- counters: rifles, an AA gun, flak, a blast --');
-fresh(); tap('mlock'); o = S.dr; o.def = Object.assign(Object.create(o.def), { bat: 1e9 }); o.bat = 1e9;
-P.inv = 1e9; const sq = C.addSquad(1, P.x + 260, P.z, 0, 0); for (const m of sq.men) if (m.ai) m.ai.dsh = 1;   // only some soldiers shoot at a small drone (DSHOT.share): here all of them do (tests/drone-shot.js has the shares) S.input.thrUp = true; C.run(1.5); S.input.thrUp = false; S.input.up = true; S.aim.p = 0;
-C.run(25, () => { if (o.x > P.x + 190) S.input.up = false; return !o.dead && !o.gone; }); S.input.up = false;
-console.log('   FPV flown over an enemy squad: ' + (o.end || 'alive') + ' after ' + S.t.toFixed(1) + ' s, hp ' + o.hp.toFixed(1));
-ok(o.dead || o.end === 'shot' || o.hp < o.def.hp || o.end === 'boom', 'the squad shoots at it (or it reached them)');
+fresh(); tap('mlock'); o = S.dr; o.def = Object.assign(Object.create(o.def), { bat: 1e9 }); o.bat = 1e9; P.inv = 1e9;
+/* six riflemen holding their ground 260 m out, facing the operator (a squad with its own orders walks off, and its other men pick what they
+   shoot at by things this test is not about). Only some soldiers shoot at a small drone (DSHOT.share): here all of them do (tests/drone-shot.js
+   has the shares). The FPV climbs a little, flies at them and hovers about 25 m short and 12 m up, well inside the reach at which a rifleman
+   facing it notices it; a hit is a matter of chance, so it hovers long enough that the dice do not save it (over 200 seeds it was down within 23 s of hovering, the median 5 s) */
+const X = P.x + 260, rif = [0, 1, 2, 3, 4, 5].map(k => { const m = C.addMan('rifleman', 1, X + (k % 3) * 4, P.z + (k >> 1) * 4 - 4, Math.PI); m.ai = $('manBrain')(k); m.ai.gx = m.x; m.ai.gz = m.z; m.ai.dsh = 1; return m; });
+S.input.thrUp = true; C.run(.7); S.input.thrUp = false; S.input.up = true; S.aim.p = 0; let held = 1e9;
+C.run(40, () => { if (o.x > X - 50) S.input.up = false; if (!S.input.up) held = Math.min(held, ...rif.map(m => $('dist')(o, m))); return !o.dead && !o.gone; }); S.input.up = false;
+console.log('   FPV hovering ' + held.toFixed(0) + ' m from six riflemen: ' + (o.end || 'alive') + ' after ' + S.t.toFixed(1) + ' s, hp ' + o.hp.toFixed(1) + ' of ' + o.def.hp);
+ok(o.dead || o.end === 'shot' || o.hp < o.def.hp, 'the riflemen shoot at it');
 fresh(); const aa = C.addUnit('aa', 1, P.x + 900, P.z, null, true); o = C.addDrone('owa', 0, P.x - 600, C.hgt(P.x, P.z) + 220, P.z, 0, null, { job: 'owa' }); o.nav = { st: 'cruise', x: P.x + 4000, z: P.z, tgt: null, pt: null, T: 0, look: 0 }; o.V = 46; o.armed = true;
 let shots = 0, lt = -9; C.run(40, () => { const t = Math.max(aa.arms[0].t, aa.arms[1].t); if (t > lt) { lt = t; shots++; } return !o.dead && !o.gone; });
 console.log('   delta past an AI ' + aa.def.name + ': ' + shots + ' rounds and missiles fired at it, ' + (o.end || 'alive') + ', hp ' + o.hp.toFixed(1) + ' of ' + o.def.hp);

@@ -40,6 +40,8 @@ function args(a) {
   }
   return o;
 }
+/* where a stored match came from (online, tourney, local), from its summary */
+const srcOf = f => { try { return JSON.parse(fs.readFileSync(f.replace(/\.ndjson\.gz$/, '.json'), 'utf8')).src; } catch (e) { return null; } };
 /* one stored match: its events, from a file of gzip members */
 const readMatch = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
 function files(dirs, era) {
@@ -135,9 +137,10 @@ async function main() {
   const C = H.load({ ana: true }), reps = [];
   for (const f of list) { try { const ev = readMatch(f); if (ev.some(e => e.k === 'hdr')) reps.push(Object.assign(C.anaReport(ev), { file: f })); } catch (e) { console.error('skip ' + f + ': ' + e.message); } }
   if (!reps.length) { console.log('Nenhuma partida em ' + (o.dirs.length ? o.dirs.join(', ') : DIR) + '.'); return; }
-  const A = aggregate(reps);
+  const loc = reps.filter(r => srcOf(r.file) === 'local'), real = reps.filter(r => !loc.includes(r)), A = aggregate(real), AL = loc.length ? aggregate(loc) : null;
   console.log(print(A, title));
-  if (o.json) fs.writeFileSync(o.json, JSON.stringify(Object.assign({ files: reps.map(r => r.file) }, A), null, 1));
+  if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)'));
+  if (o.json) fs.writeFileSync(o.json, JSON.stringify(Object.assign({ files: real.map(r => r.file), local: AL && Object.assign({ files: loc.map(r => r.file) }, AL) }, A), null, 1));
 }
 if (require.main === module) main().catch(e => { console.error(e.stack); process.exit(1); });
-module.exports = { aggregate, readMatch, files, save, plan, playOne, print, ALERT };
+module.exports = { srcOf, aggregate, readMatch, files, save, plan, playOne, print, ALERT };

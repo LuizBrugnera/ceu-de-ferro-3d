@@ -611,7 +611,7 @@ const partidas = () => {
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep']), list: 200, keys: new Map() };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
 /* a batch is a list of events, each an object of a known kind with its match time */
@@ -625,8 +625,10 @@ function anaRate(o) {
 /* append the events to match M ({ era, base, bytes, end }); the summary when the end is in */
 function anaWrite(M, e, end) {
   const txt = e.map(o => JSON.stringify(o)).join('\n') + (e.length ? '\n' : '');
-  if (M.bytes + txt.length > ANA.max) return false;
-  M.bytes += txt.length;
+  const today = new Date().toISOString().slice(0, 10);
+  if (ANA.day.d !== today) ANA.day = { d: today, bytes: 0 };
+  if (M.bytes + txt.length > ANA.max || ANA.day.bytes + txt.length > ANA.dayMax) return false;
+  M.bytes += txt.length; ANA.day.bytes += txt.length;
   try {
     fs.mkdirSync(path.join(ANA.dir, M.era), { recursive: true });
     if (txt) fs.appendFileSync(anaFile(M.era, M.base, '.ndjson.gz'), zlib.gzipSync(txt));
@@ -636,6 +638,14 @@ function anaWrite(M, e, end) {
   return true;
 }
 const anaNew = (era, src) => ({ era, src, base: new Date().toISOString().slice(0, 10) + '-' + crypto.randomBytes(6).toString('hex'), bytes: 0, hdr: null, end: null, rep: null });
+/* the entry of a bounded map, made if missing; the one least recently used goes when the map is full */
+function anaTouch(map, k, make) {
+  let v = map.get(k); map.delete(k);
+  if (v === undefined) v = make();
+  map.set(k, v);
+  if (map.size > ANA.keyMax) map.delete(map.keys().next().value);
+  return v;
+}
 RX.ana = (c, m) => {
   const room = c.room;
   if (!ANA.on || !host(c) || !int(m.n, 0, 1e6) || m.n !== (room.cqn || 0) || !anaOk(m.e) || !anaRate(c)) return;
@@ -661,13 +671,10 @@ function anaHttp(req, res) {
     req.on('end', () => {
       if (big) return;
       let m; try { m = JSON.parse(body); } catch (e) { return out(400, { ok: 0 }); }
-      const ip = req.socket.remoteAddress || '', who = ANA.keys.get('ip:' + ip) || { };
+      const ip = req.socket.remoteAddress || '', who = anaTouch(ANA.ips, ip, () => ({}));
       if (!m || !rec(m) || typeof m.k !== 'string' || !/^[0-9a-f]{12}$/.test(m.k) || !Object.hasOwn(MODELS, m.era) || !anaOk(m.e)) return out(400, { ok: 0 });
-      ANA.keys.set('ip:' + ip, who);
       if (!anaRate(who)) return out(429, { ok: 0 });
-      let M = ANA.keys.get(m.k);
-      if (!M) { M = anaNew(m.era, 'local'); M.base = M.base.slice(0, 11) + m.k; ANA.keys.set(m.k, M); }
-      if (ANA.keys.size > 4096) ANA.keys.clear();
+      const M = anaTouch(ANA.keys, m.k, () => { const o = anaNew(m.era, 'local'); o.base = o.base.slice(0, 11) + m.k; return o; });
       out(anaWrite(M, m.e, m.end === 1) ? 200 : 413, { ok: 1 });
     });
     return;
@@ -678,7 +685,7 @@ function anaHttp(req, res) {
     for (const era of Object.keys(MODELS)) {
       let f = []; try { f = fs.readdirSync(path.join(ANA.dir, era)); } catch (e) { continue; }
       for (const n of f) {
-        if (!n.endsWith('.ndjson.gz')) continue;
+        if (!n.endsWith('.ndjson.gz') || !fs.existsSync(anaFile(era, n.slice(0, -10), '.json'))) continue;
         const base = n.slice(0, -10), o = { id: base, era, size: 0, sum: null };
         try { o.size = fs.statSync(anaFile(era, base, '.ndjson.gz')).size; o.mt = fs.statSync(anaFile(era, base, '.ndjson.gz')).mtimeMs; } catch (e) {}
         try { const j = JSON.parse(fs.readFileSync(anaFile(era, base, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net }; } catch (e) {}
@@ -690,6 +697,7 @@ function anaHttp(req, res) {
   }
   if ((p[2] === 'm' || p[2] === 'r') && p.length === 5 && Object.hasOwn(MODELS, p[3]) && anaName.test(p[4])) {
     if (p[2] === 'r') return fs.readFile(anaFile(p[3], p[4], '.json'), 'utf8', (er, t) => (er ? out(404, { ok: 0 }) : out(200, t)));
+    if (!fs.existsSync(anaFile(p[3], p[4], '.json'))) return out(404, { ok: 0 });
     return fs.readFile(anaFile(p[3], p[4], '.ndjson.gz'), (er, b) => {
       if (er) return out(404, { ok: 0 });
       zlib.gunzip(b, (e2, t) => (e2 ? out(500, { ok: 0 }) : out(200, t.toString('utf8'), 'application/x-ndjson; charset=utf-8')));

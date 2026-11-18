@@ -37,6 +37,8 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   await N.sleep(300); const n2 = lines(F).length;
   ok(n2 - 4 === 7, 'too fast: of 12 batches at once, ' + (n2 - 4) + ' kept (10 a window of 15 s, 3 already used)');
   ok(!fs.existsSync(F.replace('.ndjson.gz', '.json')), 'no summary before the end');
+  const lp = JSON.parse((await get('/ana/list')).b), inProg = f[0].slice(0, -10);
+  ok(lp.m.length === 0 && (await get('/ana/m/ww2/' + inProg)).code === 404 && (await get('/ana/r/ww2/' + inProg)).code === 404, 'a match still in progress is neither listed nor served');
   await N.sleep(15100);
   h.send({ t: 'ana', n: 0, e: [{ k: 'end', t: 300, win: 1, why: 1, tk: [0, 100], lost: [[1, 2, 3], [4, 5, 6]], T: 300 }, { k: 'rep', t: 300, win: 1, dur: 300, dec: [] }], end: 1 });
   await N.sleep(200);
@@ -87,6 +89,20 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   const w0 = got.find(m => m.t === 'welcome');
   ok(w0 && w0.ana === 0 && fs.readdirSync(D0).length === 0 && (await get('/ana/list', port)).code === 404 && (await post('/ana', { k, era: 'ww2', e: [hdr] }, port)).code === 404, 'ANALYTICS=0: welcome ana: 0, nothing written, nothing served');
   ws.close(); kid.kill();
+  /* key rotation does not lift the caps: a map of 3 keys and 30 keys from one sender; then a day's cap of 2 KB across keys */
+  const srv = async env => { const port = N.PORT + 2, d = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-ana-rot-')), kd = spawn(process.execPath, [N.SERVER], { env: Object.assign({}, process.env, { PORT: String(port), ANA_DIR: d, HOST: '127.0.0.1' }, env), stdio: ['ignore', 'pipe', 'inherit'] });
+    await new Promise(res => kd.stdout.on('data', x => { if (String(x).includes('no ar')) res(); })); return { port, d, kd }; };
+  const size = d => { let n = 0; try { for (const e of fs.readdirSync(d)) for (const f of fs.readdirSync(path.join(d, e))) n += fs.statSync(path.join(d, e, f)).size; } catch (e) {} return n; };
+  const keyN = i => i.toString(16).padStart(12, '0');
+  { const R = await srv({ ANA_KEYS: '3' }), codes = [];
+    for (let i = 0; i < 30; i++) codes.push((await post('/ana', { k: keyN(i), era: 'ww2', e: [hdr] }, R.port)).code);
+    const files = fs.readdirSync(path.join(R.d, 'ww2')).length;
+    ok(codes.filter(c => c === 200).length === 10 && codes.filter(c => c === 429).length === 20 && files === 10, 'rotating keys through a map of 3 does not reset the rate: ' + codes.filter(c => c === 200).length + ' of 30 accepted, ' + files + ' files');
+    R.kd.kill(); fs.rmSync(R.d, { recursive: true, force: true }); }
+  { const R = await srv({ ANA_DAY_MB: '0.002' }), codes = [], pad = [Object.assign({}, hdr, { pad: 'x'.repeat(700) })];
+    for (let i = 0; i < 8; i++) codes.push((await post('/ana', { k: keyN(i), era: 'ww2', e: pad }, R.port)).code);
+    ok(codes.filter(c => c === 200).length === 2 && codes[2] === 413 && R.d && fs.readdirSync(path.join(R.d, 'ww2')).length === 2, 'the day\'s cap holds across keys: ' + codes.join(','));
+    R.kd.kill(); fs.rmSync(R.d, { recursive: true, force: true }); }
   fs.rmSync(DIR, { recursive: true, force: true }); fs.rmSync(D0, { recursive: true, force: true });
   done(); setTimeout(() => process.exit(), 100);
 })().catch(e => { console.error(e); N.stop(); process.exit(1); });

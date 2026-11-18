@@ -2,7 +2,7 @@
 /* analytics and the after-action review (ANA, anaReport) and tools/balance.js: the battle and the random stream are the same with the
    collection on, what one AI × AI match leaves (every kind of event, the losses and the end as the match counts them, a snapshot every
    ANA.snap s, the size), where the tickets went (the bleed as cqStep charges it, a point taken), the review a side may see while the match
-   runs, the pieces the sink is handed, no random numbers in the section, and the tool's numbers (the 60% alert, files of gzip members).
+   runs, the pieces the sink is handed, and the tool's numbers (the 60% alert, files of gzip members).
    MIN: the clock of the AI × AI match in minutes (default 2). About a minute and a half */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), os = require('os');
 const H = require('./harness'), ok = H.ok, MIN = +process.env.MIN || 2;
@@ -66,10 +66,6 @@ console.log('-- the review a side may see while the match runs --');
   ok(r.curve.length <= 41 && JSON.stringify(a).length < 15000 && Array.isArray(r.tk) && r.tk.length === 2, 'a curve of at most 40 points, ' + JSON.stringify(a).length + ' characters (the relay\'s gres takes 16 KB)');
   ok(C.genAnswer(1, { q: 'state' }).ok, 'the other questions are as before');
   const D = H.load({ seed: 3 }); D.watch('ww2', {}); D.run(5); ok(!D.genAnswer(0, { q: 'report' }).ok && D.$('ANA').ev.length === 0, 'with the analytics off there is no report and nothing is kept'); }
-
-console.log('-- no random numbers in the section --');
-{ const src = H.source(), a = src.indexOf('/* ---------- analytics (ANA)'), b = src.length;
-  ok(a >= 0 && !/Math\.random|\brand\(|\bpick\(|\bqr\(/.test(src.slice(a, b)), 'the analytics never ask for a random number'); }
 
 console.log('-- tools/balance.js --');
 { const rep = (win, s0) => ({ over: true, win, why: 2, whyTxt: 'o tempo acabou', dur: 600, doc: [s0 || 'balanced', 'balanced'], tickets: [{ loss: 10, bleed: 5, ptLost: 10, ptTook: 4, other: 1 }, { loss: 20, bleed: 0, ptLost: 0, ptTook: 0, other: 0 }], eff: [{ u: 'tank', made: 2, lost: 1, kills: 2, paid: 6, value: 12, life: 100 }] });

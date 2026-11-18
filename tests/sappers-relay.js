@@ -35,9 +35,9 @@ const N = require('./net'), { ok, done } = require('./harness');
   ok(ba && bb && ba.id === 13 && ba.p.join() === '50,5' && ba.s === 1 && await none(h, 'mboom'), 'mboom from the host reaches the room');
   a.send({ t: 'mboom', id: 13, k: 0, s: 1, p: [50, 5] }); ok(await none(b, 'mboom'), 'mboom from a guest is dropped');
 
-  a.send({ t: 'mreq', k: 1, p: [10.5, 20.5] }); const q1 = await h.wait('mreq');
+  a.send({ t: 'mreq', k: 1, p: [10.5, 20.5] }); a.send({ t: 'mreq', k: 2, id: 13 }); const q1 = await h.wait('mreq');   // the second right behind the first: no wait between them for a loaded machine to stretch past 300 ms
   ok(q1 && q1.from === a.id && q1.k === 1 && q1.p.join() === '10.5,20.5' && await none(b, 'mreq'), 'mreq (lay) from a soldier goes to the host alone, with its sender');
-  a.send({ t: 'mreq', k: 2, id: 13 }); ok(await none(h, 'mreq'), 'a second one within 300 ms is dropped');
+  ok(await none(h, 'mreq'), 'a second one within 300 ms is dropped');
   await N.sleep(320); a.send({ t: 'mreq', k: 2, id: 13 }); const q2 = await h.wait('mreq'); ok(q2 && q2.k === 2 && q2.id === 13 && !('p' in q2), 'then a lift passes, with the mine\'s id');
   await N.sleep(320); h.send({ t: 'mreq', k: 3, id: 11 }); ok(await none(a, 'mreq') && await none(h, 'mreq'), 'the host\'s own goes nowhere');
   await N.sleep(320); for (const m of [{ k: 4, id: 1 }, { k: 0 }, { k: 2 }, { k: 3, id: 70000 }, { k: 1, p: [1] }]) { a.send(Object.assign({ t: 'mreq' }, m)); await N.sleep(320); }

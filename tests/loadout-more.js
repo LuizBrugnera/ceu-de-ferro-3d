@@ -56,18 +56,21 @@ console.log('-- missiles for aircraft --');
   const shot = (id, key, rng, off) => {
     const p = fly(id, one(id, key), 4000, 0, 2000, 250), q = c.addPlane(PLANES[id].side ? 'f22' : 'su57', 1 - p.team, 4000 + Math.cos(off) * rng, p.y, Math.sin(off) * rng, 0, true, 'fighter');
     q.flares = 0; q.think = 1e9; const i = slotOf(p, key); S().input = {}; c.run(.1, () => { q.think = 1e9; c.steer(p, flat, 1); c.steer(q, flat, 1); });
-    const lock = S().lockAir === q; c.release(p, i); const m = S().missiles[0], tg = !!m && m.target === q;
+    const lock = S().lockAir === q, M = $('MSL'), z = M.dlz(M.def(p.def.ord[i]), p, q); c.release(p, i); const m = S().missiles[0], tg = !!m && m.target === q;
+    q.ai = false;   // from the launch the test flies it level in afterburner: an AI pilot would put the missile on its beam (MSL.aiDef) whatever its think
     c.run(14, () => { q.think = 1e9; q.flares = 0; c.steer(q, flat, 1); c.steer(p, flat, 1); return S().missiles.length > 0 && !q.dead; });
-    return { lock, tg, hit: q.dead || q.hp < q.def.hp };
+    return { lock, tg, hit: q.dead || q.hp < q.def.hp, ne: z.R < z.rne };
   };
   const rows = [['f22', 'aim120'], ['f22', 'aim9x'], ['a10', 'aim9'], ['su57', 'r77'], ['su57', 'r73']].map(([id, key]) => {
     const s = STORES[key], a = shot(id, key, 3000, .3), far = shot(id, key, 6000, .3), wide = shot(id, key, 3000, .65);
     return { key, s, a, far, wide };
   });
   const med = rows.filter(r => !r.s.sk), ir = rows.filter(r => r.s.sk);
+  for (const r of med) r.near = shot(r.key === 'r77' ? 'su57' : 'f22', r.key, 2000, .3);   // 3 km behind a fighter in afterburner is outside their no-escape range (MSL.dlz rne); 2 km is inside it
+  for (const r of med) console.log('   ' + r.s.name.padEnd(8) + ' 2 km, 17° off, inside its no-escape range: ' + (r.near.ne ? 'yes' : 'no') + ', ' + (r.near.lock && r.near.hit ? 'locks and hits' : 'no'));
   for (const r of rows) console.log('   ' + r.s.name.padEnd(8) + ' 3 km, 17° off: ' + (r.a.lock && r.a.hit ? 'locks and hits' : 'no') + ' | 6 km: ' + (r.far.lock ? (r.far.hit ? 'locks and hits' : 'locks, misses') : 'no lock') + ' | 3 km, 37° off: ' + (r.wide.lock ? (r.wide.hit ? 'locks and hits' : 'locks, misses') : 'no lock'));
   
-  ok(rows.every(r => r.a.lock && r.a.tg) && med.every(r => r.a.hit), 'every missile locks on a plane 3 km ahead, and the radar ones catch it though it runs in afterburner');
+  ok(rows.every(r => r.a.lock && r.a.tg) && med.every(r => r.near.ne && r.near.lock && r.near.tg && r.near.hit), 'every missile locks on a plane 3 km ahead, and the radar ones catch it though it runs in afterburner from 2 km, inside their no-escape range');
   ok(med.every(r => r.far.lock && !r.wide.lock) && ir.every(r => !r.far.lock && r.wide.lock === ($('MSL').SK[$('MSL').def(r.s).sk].hob > .65)), 'the radar ones lock at 6 km but only near the nose; no heat seeker locks that far, and only those that look far off the nose (R-73, AIM-9X) take a target 37° off');
 }
 

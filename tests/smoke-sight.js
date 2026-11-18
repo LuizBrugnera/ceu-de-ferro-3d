@@ -1,5 +1,6 @@
 'use strict';
-/* Part A: can an AI shoot at what smoke hides? Every scenario runs on the flat disc of base 0, many seeded trials each.
+/* Part A: can an AI shoot at what smoke hides? Every scenario runs on the flat disc of base 0 (o.patrol: where an attack plane with nothing
+   to do patrols, S.W * .58, as an AI only goes for what its own eyes (VIEW) have made out), many seeded trials each.
    A target drives across; at T1 smoke hides it (a corridor of screens over its path, or one screen on the shooter itself).
    Rounds are binned by when they were fired: pre (before T1), mem (the memory window), late (hidden, after the memory), post (visible again).
    For each round: how near it came to the target itself (dTrue) and to where the target was last seen (dLast).
@@ -9,7 +10,7 @@ const C = H.load(), fixed = C.$('typeof SIGHT !== "undefined"'), DU = C.damageUn
 console.log('page: ' + H.PAGE + (fixed ? '' : '   (no SIGHT table: before the fix, numbers only)'));
 
 function trial(seed, o) {
-  const c = C; c.seed(seed); const S = c.sandbox(o.era), $ = c.$, hd = $('hdist'), B = S.base[0], g = c.hgt(B.x, B.z), SM = $('SMOKE'), mem = fixed ? $('SIGHT').mem : 4;
+  const c = C; c.seed(seed); const S = c.sandbox(o.era), $ = c.$, hd = $('hdist'), B = o.patrol ? { x: S.W * .58, z: 0 } : S.base[0], g = c.hgt(B.x, B.z), SM = $('SMOKE'), mem = fixed ? $('SIGHT').mem : 4;
   const side = S.E.sides, R = { pre: 0, mem: 0, late: 0, post: 0, hitMem: 0, hitLate: 0, dTrue: [], dLast: [], dropped: null, launchHid: 0 };
   let tgt, sh, L = null, T1 = o.T1, vis = null;
   const hits = [], log = (o2, dmg) => { if (o2 === tgt && dmg > 0) hits.push(S.t); return o2 === tgt; };
@@ -69,7 +70,7 @@ const blind = A => { H.ok(A.late === 0, 'nothing released after the memory'); H.
 console.log('\n-- ground guns on a ground target crossing at 450 m; hidden at T1 = 9 s --');
 for (const era of ['ww2', 'modern']) {
   scenario(era + ' tank, screen fades', { era, kind: 'tank', d: 450, T1: 9, T: 34, tk: 'aa' }, gnd);
-  scenario(era + ' tank, target leaves screen', { era, kind: 'tank', d: 450, T1: 9, T: 30, len: 90, tk: 'aa' }, gnd);
+  scenario(era + ' tank, target leaves screen', { era, kind: 'tank', d: 450, T1: 9, T: 30, len: era === 'modern' ? 135 : 90, tk: 'aa' }, gnd);   // the faster modern target needs the longer screen to stay hidden past the memory
 }
 console.log('\n-- shooter inside its own screen, drone circling (radius m, height m, speed m/s) --');
 scenario('ww2 tank roof MG, low plane', { era: 'ww2', kind: 'tank', id: 'sherman', air: [500, 200, 90], T1: 8, T: 34 }, air);
@@ -79,11 +80,11 @@ scenario('modern AA (fixed), SAM + 30 mm', { era: 'modern', kind: 'aa', air: [25
 console.log('\n-- artillery: target stands 14 s in sight of a spotter, then drives off under smoke --');
 for (const era of ['ww2', 'modern']) scenario(era + ' battery at 1200 m', { era, kind: 'art', d: 600, z: -600, T1: 14, T: 44, tk: 'aa', still: 1, spotter: 1, all: 1, fly: 30 },
   A => { H.ok(A.pre > 0, 'the mission began on the spotted target'); H.ok(!(A.mem + A.late > 0) || A.mL < 80, 'rounds after the smoke fall on the last spotted place (mean ' + f1(A.mL) + ' m)'); H.ok(!(A.mem + A.late > 0) || A.mL < A.mT, 'and not on the target'); });
-console.log('\n-- attack planes: target hidden from the start for 70 s, then the smoke is left to fade --');
-scenario('ww2 Stuka, bombs', { era: 'ww2', plane: 'stuka', T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
-scenario('ww2 P-47, rockets and guns', { era: 'ww2', plane: 'p47', wi: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
-scenario('modern A-10, AGM-65', { era: 'modern', plane: 'a10', T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
-scenario('modern Su-25, rockets and guns', { era: 'modern', plane: 'su25', wi: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
+console.log('\n-- attack planes: target hidden from the start for 70 s, then the smoke is left to fade; where the plane patrols --');
+scenario('ww2 Stuka, bombs', { era: 'ww2', plane: 'stuka', patrol: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
+scenario('ww2 P-47, rockets and guns', { era: 'ww2', plane: 'p47', wi: 1, patrol: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
+scenario('modern A-10, AGM-65', { era: 'modern', plane: 'a10', patrol: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
+scenario('modern Su-25, rockets and guns', { era: 'modern', plane: 'su25', wi: 1, patrol: 1, T1: 0, T: 200, keep: 70, len: 1, still: 1, park: 1 }, never);
 console.log('\n-- attack planes: target goes under smoke when the plane is close (m) --');
 scenario('ww2 Stuka, bombs, at 1100 m', { era: 'ww2', plane: 'stuka', trig: 1100, T1: 1e9, T: 90, all: 1, fly: 12 }, blind);
 scenario('ww2 P-47, rockets, at 2100 m', { era: 'ww2', plane: 'p47', wi: 1, trig: 2100, T1: 1e9, T: 90, all: 1, fly: 6 }, blind);

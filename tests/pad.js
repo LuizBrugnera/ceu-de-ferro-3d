@@ -10,7 +10,7 @@ const ctx = vm.createContext({ console, performance: { now: () => T }, navigator
   addEventListener: (n, f) => { (LS[n] || (LS[n] = [])).push(f); }, document: { hidden: false, activeElement: null, body: {}, querySelector: () => null, head: { append() {} }, createElement: () => elStub() }, KeyboardEvent: function () {}, Event: function () {} });
 let T = 0, PADS = [], LS = {};
 vm.runInContext(`'use strict'; const clamp = (v, a, b) => (v < a ? a : v > b ? b : v); let S = { input: {}, my: null, dr: null, aim: null, shake: 0 }, playMode = 'play', paused = false, ready = true, overShown = false, reduced = false, CAM = 0, SLOW = null;
-const sw = { on: false }, swEl = {}, overEl = {}, hangar = {}, camSt = { sens: 1 }, LEGEND = { plane: () => [['W', 'x']], inf: () => [['W', 'x']] }, KP = { hidden: true }, $ = () => KP, seatsOf = P => (P.fcm ? ['inf', 'fcm'] : ['inf']);
+const sw = { on: false }, GV = { on: false }, swEl = {}, overEl = {}, hangar = {}, camSt = { sens: 1 }, LEGEND = { plane: () => [['W', 'x']], inf: () => [['W', 'x']] }, KP = { hidden: true }, $ = () => KP, seatsOf = P => (P.fcm ? ['inf', 'fcm'] : ['inf']);
 var frame = now => {}, setPause = v => { paused = v; }, txt = (s, ...r) => { LAST = s; }, buildHangar = () => { BH++; }, LAST = '', BH = 0;
 function nextCam() { CMD.push('cam'); } function zoomBy() { CMD.push('zoom'); } function mapKey() { CMD.push('map'); } function openSwap() { CMD.push('swap'); } function keysPanel() {} const CMD = [];
 const manEye = P => P, eye = P => P, lockOn = () => SLOW;` + keys + html.slice(a, b) + '\n;globalThis.$$ = s => eval(s);', ctx, { filename: 'pad.js' });

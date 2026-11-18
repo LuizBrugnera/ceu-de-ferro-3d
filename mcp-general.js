@@ -216,6 +216,27 @@ async function runCmd(c, d) {
   if (r.r !== undefined) out.detail = r.r;
   return { text: JSON.stringify(out), error: !r.ok };
 }
+/* the after-action review of a match the server keeps (GET /ana/list, /ana/r/<era>/<name> on the relay's own address) */
+function httpGet(p) {
+  return new Promise(res => {
+    let u; try { u = new globalThis.URL(p, URL.replace(/^ws/, 'http')); } catch (e) { return res({ ok: false, why: 'url' }); }
+    const req = require(u.protocol === 'https:' ? 'https' : 'http').get(u, r => { let b = ''; r.setEncoding('utf8'); r.on('data', d => { if (b.length < 1 << 20) b += d; }); r.on('end', () => { try { res({ ok: r.statusCode === 200, code: r.statusCode, j: JSON.parse(b) }); } catch (e) { res({ ok: false, code: r.statusCode, why: 'json' }); } }); });
+    req.on('error', e => res({ ok: false, why: e.message })); req.setTimeout(TIMEOUT, () => { req.destroy(); res({ ok: false, why: 'timeout' }); });
+  });
+}
+async function matchReport(a) {
+  const m = (a && a.match) || 'current';
+  if (m === 'current') return runAsk({ q: 'report' });
+  if (m === 'list') {
+    const r = await httpGet('/ana/list');
+    if (!r.ok) return { text: JSON.stringify({ answered: false, result: r.code === 404 ? 'the server keeps no matches (ANALYTICS=0 or an older server)' : 'could not read the list: ' + (r.why || r.code) }), error: true };
+    return { text: JSON.stringify({ answered: true, matches: r.j.m.slice(0, 30).map(o => ({ match: o.era + '/' + o.id, src: o.sum && o.sum.src, sides: o.sum && o.sum.fac, doctrines: o.sum && o.sum.doc, winner: o.sum && o.sum.end ? o.sum.end.win : null, why: o.sum && o.sum.end ? o.sum.end.why : null, seconds: o.sum && o.sum.end ? o.sum.end.t : null })) }) };
+  }
+  if (!/^(ww2|modern)\/\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/.test(m)) throw new Error('match must be "current", "list" or an era/name from the list');
+  const r = await httpGet('/ana/r/' + m);
+  if (!r.ok) return { text: JSON.stringify({ answered: false, result: 'no review for ' + m + ' (unfinished, deleted after 90 days, or analytics off)' }), error: true };
+  return { text: JSON.stringify({ answered: true, match: m, data: r.j.rep || { end: r.j.end, hdr: r.j.hdr } }) };
+}
 async function runAsk(q) {
   await ready();
   const r = await enqueue('ask', n => ({ t: 'gask', q, n }));
@@ -227,7 +248,7 @@ async function runAsk(q) {
 /* ---------------------------------------------------------------- input checks (mirror the relay's gcmd whitelist) */
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n' };
-const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire'];   // the relay's gask kinds; it passes on k, x, z, a
+const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report'];   // the relay's gask kinds; it passes on k, x, z, a
 const isNum = v => typeof v === 'number' && Number.isFinite(v), isInt = v => Number.isInteger(v);
 function rawCmd(c) {   // returns an error string or null
   if (!c || typeof c !== 'object' || Array.isArray(c)) return 'command must be an object';
@@ -426,6 +447,9 @@ const TOOLS = [
   { name: 'ask_view', description: 'Ask the host for the complete fog-limited view of your side right now: economy (stock, caps, sites with output and guards, deposits, queue, costs per unit kind with names), commander fields and the last 20 log lines. Bigger and slower than get_state (one question per second); use it for the cost table by unit and site kind, the resource deposits (dep: position, rich, own) and the production slots.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'view' }) },
+  { name: 'get_match_report', description: 'The after-action review of a match. match "current" (default) asks the host about the match on: while it runs, your side only (tickets and where they went, losses by kind, cost-effectiveness, the decisions that weighed most with how much they moved the margin, a ticket curve); once it is over, both sides. match "list" lists the matches the server keeps (newest first, kept 90 days; played and AI x AI tournaments); match "<era>/<name>" from that list returns that match\'s review. One host question a second, like the other asks.',
+    inputSchema: { type: 'object', properties: { match: { type: 'string', description: 'current (default), list, or era/name from the list' } }, additionalProperties: false },
+    annotations: { readOnlyHint: true }, run: matchReport },
   { name: 'seat', description: 'Claim or release the general\'s seat of your side, or just report who holds it. Commands are refused unless this bridge holds the seat; one general per side (a human or this bridge), first come first served. A claim also takes over the domains you list (default ["eco"]: the economy; the attack is yours with the seat; defence and support stay with the AI unless you list "def" and "sup", and the AI then no longer decides there). Release hands every domain back to the AI at once.',
     inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['claim', 'release', 'status'], description: 'default status' }, domains: { type: 'array', items: { type: 'string', enum: ['eco', 'atk', 'def', 'sup'] }, description: 'with claim: domains to decide yourself (default ["eco"])' } }, additionalProperties: false },
     run: async a => {

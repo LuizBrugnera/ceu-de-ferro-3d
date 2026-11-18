@@ -218,6 +218,17 @@ Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos.
 
 **Telas de toque.** O hangar oferece só os aviões, porque as classes de solo pedem mira com mouse. Os botões na tela são o manche, motor, fogo, os dois armamentos, ARMA (próximo armamento), FLARE, FREIO e ZOOM; os botões das outras classes (entrar e sair, obra, rádio, fumaça, requisitar) aparecem conforme o que você está usando.
 
+## Revisão pós-batalha e dados das partidas
+
+No fim de cada partida de conquista, "Revisão pós-batalha" mostra a curva de tíquetes dos dois lados com os pontos tomados e as perdas caras marcados, para onde foram os tíquetes (perdas, sangria, pontos e o resto, como requisições), as decisões do general que mais mexeram na margem nos 2 minutos seguintes, a custo-efetividade e a vida média de cada tipo de unidade e o custo da simulação. "Partidas anteriores", no hangar, lista as últimas 12 deste computador e as que o servidor guarda.
+
+Quem simula a partida (o anfitrião, ou a página numa partida IA × IA local) registra os eventos e uma foto a cada 10 s e os manda ao servidor em lotes. O servidor grava um arquivo por partida em `data/matches/<época>/<data>-<id>.ndjson.gz` (uns 30 KB por 45 min), com um id sorteado e nenhum nome de jogador, e apaga o que tiver mais de 90 dias. Nada vai para fora do servidor.
+
+- `ANALYTICS=0 npm start` desliga a gravação; `ANA_DIR=<pasta>` grava em outra pasta; `ANA_DAYS=<n>` muda a retenção; `HOST=127.0.0.1` deixa o servidor só neste computador.
+- `node tools/balance.js` junta as partidas guardadas e imprime vitória por lado (um lado acima de 60% em 40 partidas é alerta), por doutrina, como e quando as partidas acabam, para onde foram os tíquetes e a custo-efetividade por tipo.
+- `node tools/balance.js --torneio 40` joga 40 partidas IA × IA sem tela na simulação de verdade, cada par de doutrinas dos dois lados, grava como o servidor grava e mostra os mesmos números. `--era`, `--docs`, `--min` (relógio curto), `--eco`, `--jobs` e `--save` ajustam; `--help` explica. Uma partida Curta leva uns 6 min de um núcleo.
+- O MCP do general tem `get_match_report` (§ `MCP.md`).
+
 ## PvP online
 
 No hangar, escolha "PvP online", um nome, a época, a classe e o veículo, e entre na sala. Cada época é uma sala e o lado do veículo é o time. A IA mantém a batalha dos dois lados, e quanto mais gente entra num lado, menos IA ele recebe. Quem simula a IA, os pontos e os tíquetes é o navegador do jogador mais antigo (o anfitrião); se ele sai, o seguinte continua a mesma batalha. Quem sai da sala ao volante deixa o veículo estacionado.

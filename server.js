@@ -5,10 +5,10 @@
    welcome names what this server knows, so that a page can tell an older one: swap, inf, obj, sup (supply bases: base and build),
    trn (transport: the class trn, the sniper kits, and the messages board, seats, eject and cargo), cmd (the commander: the mortar kits,
    toss k 3 and 4, s on shot and aishot, and the message cmd), eco (the economy: eco, ecs, keep) and gen (the general: gen, glog, gclaim,
-   gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too) and sap (the sapper kits and the
-   messages mine, mboom, mreq and dint).
+   gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
+   messages mine, mboom, mreq and dint) and ana (analytics: the host's events of the match, kept on disk; see below).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
-const http = require('http'), fs = require('fs'), os = require('os'), path = require('path');
+const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Ferro 3D.html'), MAXLEN = 2048, MAXAI = 16384, AICAP = 64, CAP = 16;
@@ -128,7 +128,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -413,7 +413,7 @@ RX.grant = (c, m) => {
 /* spectators (welcome spec: 1 to the spectator): SPEC=0 off, SPEC=1 on and live (the default). A spectator's every message is dropped. */
 const SPEC = process.env.SPEC === undefined ? 1 : Math.max(0, +process.env.SPEC || 0), SPECMAX = 8, sendSpec = (o, m) => send(o.ws, m);
 const GENKEY = process.env.GENKEY || '', GENRX = new Set(['gclaim', 'gcmd', 'gask']);
-const BIG = { ai: MAXAI, gen: 8192, glog: MAXAI, keep: MAXAI, gres: MAXAI };
+const BIG = { ai: MAXAI, gen: 8192, glog: MAXAI, keep: MAXAI, gres: MAXAI, ana: MAXAI };
 const sideOf = o => (o.spec ? -1 : o.gen ? o.player.side : pside(o.room.models, o.player)), sd = v => v === 0 || v === 1;
 const ints = (l, n, k) => Array.isArray(l) && l.length <= n && l.length % k === 0 && l.every(v => Number.isInteger(v) && Math.abs(v) < 1e6);
 const txt = (v, n) => typeof v === 'string' && v.length <= n, rec = v => v === null || (typeof v === 'object' && !Array.isArray(v)), lst = (v, n) => Array.isArray(v) && v.length <= n;
@@ -481,7 +481,7 @@ RX.gcmd = (c, m) => {
 };
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });
@@ -592,7 +592,7 @@ function suspend(room) {
 }
 /* the match is over for good: whoever comes next starts a new one, under a new number */
 function snapDrop(room) {
-  clearTimeout(room.sut); room.sut = null; room.keep = room.mines = room.mbuf = null; room.snap = snapNew();
+  clearTimeout(room.sut); room.sut = null; room.keep = room.mines = room.mbuf = room.ana = null; room.snap = snapNew();
   if (room.sus) room.cqn = (room.cqn || 0) + 1;
   room.sus = 0;
 }
@@ -601,7 +601,104 @@ const partidas = () => {
   for (const era in rooms) { const r = rooms[era], q = r.snap.cq; o[era] = r.sus > now && !r.size ? { s: Math.ceil((r.sus - now) / 1000), T: q ? q.T : 0, n: r.cqn || 0, ph: q ? q.ph : 0 } : null; }
   return o;
 };
+/* analytics (welcome ana: 1): the page that simulates a match (the host online; a solo or watch page by POST /ana) sends its events in
+   batches, and the server keeps one file a match, data/matches/<era>/<date>-<id>.ndjson.gz (ANA_DIR another folder): one JSON event a line,
+   each batch a gzip member appended. id is a random name the server gives the match (online: the room's match, which a new host carries on;
+   by POST: the page's own random key), never a player's id or name. ana { n the room's match, e the events, end 1 the last batch }: from the
+   host only, at most ANA.rate[0] a window of ANA.rate[1] ms, events of the known kinds, ANA.max bytes a match. At the end (an end event) a
+   summary goes beside it, <date>-<id>.json (the header, the end and the review the page sent as rep). ANALYTICS=0: welcome says ana: 0 and
+   nothing is written or served. Files older than ANA_DAYS days (default 90) are deleted at start and every six hours.
+   HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
+   its summary; POST /ana { k the page's key, era, e, end } */
+const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep']), list: 200, keys: new Map() };
+const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
+const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
+/* a batch is a list of events, each an object of a known kind with its match time */
+const anaOk = e => lst(e, 2000) && e.every(o => rec(o) && o !== null && typeof o.k === 'string' && ANA.kinds.has(o.k) && num(o.t));
+/* the rate of one sender: true when it may send now */
+function anaRate(o) {
+  const now = Date.now(), r = o.anaR || (o.anaR = { t: now, n: 0 });
+  if (now - r.t > ANA.rate[1]) { r.t = now; r.n = 0; }
+  return ++r.n <= ANA.rate[0];
+}
+/* append the events to match M ({ era, base, bytes, end }); the summary when the end is in */
+function anaWrite(M, e, end) {
+  const txt = e.map(o => JSON.stringify(o)).join('\n') + (e.length ? '\n' : '');
+  if (M.bytes + txt.length > ANA.max) return false;
+  M.bytes += txt.length;
+  try {
+    fs.mkdirSync(path.join(ANA.dir, M.era), { recursive: true });
+    if (txt) fs.appendFileSync(anaFile(M.era, M.base, '.ndjson.gz'), zlib.gzipSync(txt));
+    for (const o of e) { if (o.k === 'hdr' && !M.hdr) M.hdr = o; if (o.k === 'end') M.end = o; if (o.k === 'rep') M.rep = o; }
+    if ((end || e.some(o => o.k === 'end' || o.k === 'rep')) && M.end) fs.writeFileSync(anaFile(M.era, M.base, '.json'), JSON.stringify({ id: M.base, era: M.era, src: M.src, hdr: M.hdr || null, end: M.end, rep: M.rep || null }));
+  } catch (er) { console.error('analytics: ' + er.message); return false; }
+  return true;
+}
+const anaNew = (era, src) => ({ era, src, base: new Date().toISOString().slice(0, 10) + '-' + crypto.randomBytes(6).toString('hex'), bytes: 0, hdr: null, end: null, rep: null });
+RX.ana = (c, m) => {
+  const room = c.room;
+  if (!ANA.on || !host(c) || !int(m.n, 0, 1e6) || m.n !== (room.cqn || 0) || !anaOk(m.e) || !anaRate(c)) return;
+  if (!room.ana || room.ana.n !== m.n) room.ana = Object.assign(anaNew(Object.keys(rooms).find(k => rooms[k] === room), 'online'), { n: m.n });
+  anaWrite(room.ana, m.e, m.end === 1);
+};
+/* the files older than ANA.days, gone */
+function anaPrune() {
+  if (!ANA.on) return;
+  const old = Date.now() - ANA.days * 86400e3;
+  for (const era of Object.keys(MODELS)) {
+    let l = []; try { l = fs.readdirSync(path.join(ANA.dir, era)); } catch (e) { continue; }
+    for (const f of l) { const p = path.join(ANA.dir, era, f); try { if (fs.statSync(p).mtimeMs < old) fs.unlinkSync(p); } catch (e) {} }
+  }
+}
+function anaHttp(req, res) {
+  const out = (code, body, type) => { res.writeHead(code, { 'content-type': type || 'application/json; charset=utf-8', 'cache-control': 'no-store' }); res.end(typeof body === 'string' ? body : JSON.stringify(body)); };
+  const u = req.url.split('?')[0], p = u.split('/');
+  if (!ANA.on) return out(404, { on: 0 });
+  if (req.method === 'POST' && u === '/ana') {
+    let body = '', big = false;
+    req.on('data', d => { body += d; if (body.length > MAXAI) { big = true; req.destroy(); } });
+    req.on('end', () => {
+      if (big) return;
+      let m; try { m = JSON.parse(body); } catch (e) { return out(400, { ok: 0 }); }
+      const ip = req.socket.remoteAddress || '', who = ANA.keys.get('ip:' + ip) || { };
+      if (!m || !rec(m) || typeof m.k !== 'string' || !/^[0-9a-f]{12}$/.test(m.k) || !Object.hasOwn(MODELS, m.era) || !anaOk(m.e)) return out(400, { ok: 0 });
+      ANA.keys.set('ip:' + ip, who);
+      if (!anaRate(who)) return out(429, { ok: 0 });
+      let M = ANA.keys.get(m.k);
+      if (!M) { M = anaNew(m.era, 'local'); M.base = M.base.slice(0, 11) + m.k; ANA.keys.set(m.k, M); }
+      if (ANA.keys.size > 4096) ANA.keys.clear();
+      out(anaWrite(M, m.e, m.end === 1) ? 200 : 413, { ok: 1 });
+    });
+    return;
+  }
+  if (req.method !== 'GET') return out(404, { ok: 0 });
+  if (u === '/ana/list') {
+    const l = [];
+    for (const era of Object.keys(MODELS)) {
+      let f = []; try { f = fs.readdirSync(path.join(ANA.dir, era)); } catch (e) { continue; }
+      for (const n of f) {
+        if (!n.endsWith('.ndjson.gz')) continue;
+        const base = n.slice(0, -10), o = { id: base, era, size: 0, sum: null };
+        try { o.size = fs.statSync(anaFile(era, base, '.ndjson.gz')).size; o.mt = fs.statSync(anaFile(era, base, '.ndjson.gz')).mtimeMs; } catch (e) {}
+        try { const j = JSON.parse(fs.readFileSync(anaFile(era, base, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net }; } catch (e) {}
+        l.push(o);
+      }
+    }
+    l.sort((a, b) => (b.mt || 0) - (a.mt || 0));
+    return out(200, { on: 1, m: l.slice(0, ANA.list).map(o => ({ id: o.id, era: o.era, size: o.size, sum: o.sum })) });
+  }
+  if ((p[2] === 'm' || p[2] === 'r') && p.length === 5 && Object.hasOwn(MODELS, p[3]) && anaName.test(p[4])) {
+    if (p[2] === 'r') return fs.readFile(anaFile(p[3], p[4], '.json'), 'utf8', (er, t) => (er ? out(404, { ok: 0 }) : out(200, t)));
+    return fs.readFile(anaFile(p[3], p[4], '.ndjson.gz'), (er, b) => {
+      if (er) return out(404, { ok: 0 });
+      zlib.gunzip(b, (e2, t) => (e2 ? out(500, { ok: 0 }) : out(200, t.toString('utf8'), 'application/x-ndjson; charset=utf-8')));
+    });
+  }
+  return out(404, { ok: 0 });
+}
 const server = http.createServer((req, res) => {
+  if (req.url.startsWith('/ana')) return anaHttp(req, res);
   if (req.method === 'GET' && req.url.split('?')[0] === '/partidas') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); return res.end(JSON.stringify(partidas()));
   }
@@ -647,8 +744,9 @@ const beat = setInterval(() => {
 }, 10000);
 wss.on('close', () => clearInterval(beat));
 
-server.listen(PORT, '0.0.0.0', () => {
+anaPrune(); setInterval(anaPrune, 6 * 3600e3).unref();
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => {   // HOST=127.0.0.1: this computer only
   console.log('Céu de Ferro 3D no ar.');
   console.log('  Neste computador: http://localhost:' + PORT);
-  for (const list of Object.values(os.networkInterfaces())) for (const a of list) if (a.family === 'IPv4' && !a.internal) console.log('  Na rede local:    http://' + a.address + ':' + PORT);
+  if (!process.env.HOST || process.env.HOST === '0.0.0.0') for (const list of Object.values(os.networkInterfaces())) for (const a of list) if (a.family === 'IPv4' && !a.internal) console.log('  Na rede local:    http://' + a.address + ':' + PORT);
 });

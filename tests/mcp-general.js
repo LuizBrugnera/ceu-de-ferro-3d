@@ -3,6 +3,11 @@
    driven over its stdio (initialize, tools/list, get_state, a command, a question, send_command), and a bridge with a wrong key is refused */
 const path = require('path'), { spawn } = require('child_process');
 process.env.SERVER = process.env.SERVER || path.join(__dirname, '..', 'server.js'); process.env.GENKEY = 'secret';
+/* a match the server keeps, for get_match_report (the server's analytics in a folder of its own) */
+const fs = require('fs'), os = require('os'), zlib = require('zlib'), ANAD = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-mcp-ana-')), MATCH = '2026-11-18-0123456789ab';
+process.env.ANA_DIR = ANAD; fs.mkdirSync(path.join(ANAD, 'ww2'));
+fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.ndjson.gz'), zlib.gzipSync('{"k":"hdr","t":0}\n'));
+fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.json'), JSON.stringify({ id: MATCH, era: 'ww2', src: 'tourney', hdr: { fac: ['A', 'B'], doc: ['cautious', 'aggressive'] }, end: { win: 0, why: 2, t: 1800 }, rep: { win: 0, dur: 1800, whyTxt: 'o tempo acabou' } }));
 const N = require('./net'), { ok, done } = require('./harness');
 const MCP = path.join(__dirname, '..', 'mcp-general.js'), kids = [];
 function bridge(env) {
@@ -23,7 +28,7 @@ function bridge(env) {
   h.ws.on('message', d => {
     const m = JSON.parse(d);
     if (m.t === 'gcmd') { seenCmd.push(m); const bad = m.c.c === 'nope'; h.send({ t: 'gres', to: m.from, n: m.n, ok: !bad, why: bad ? 'unknown' : '', id: bad ? 0 : 77 }); }
-    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : { t: m.s, stock: { en: 9, mt: 9 } } }); }
+    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, tickets: [{ loss: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 } } }); }
   });
 
   const b = bridge({});
@@ -36,7 +41,7 @@ function bridge(env) {
   const old = await b.rpc('tools/list', { _meta: { 'io.modelcontextprotocol/protocolVersion': '1900-01-01' } }); ok(old && old.error && old.error.code === -32022 && old.error.data.supported.length > 1, 'an unsupported per-request version: error -32022 with the supported list');
   const tl = await b.rpc('tools/list');
   const names = tl.result.tools.map(t => t.name);
-  ok(['get_state', 'get_log', 'build_site', 'produce_unit', 'cancel_order', 'set_priority', 'scrap_site', 'set_site_defence', 'set_reserve', 'scout', 'strike', 'send_command', 'ask_placement', 'seat'].every(x => names.includes(x)) && tl.result.tools.every(t => t.description && t.inputSchema && t.inputSchema.type === 'object'), 'tools/list: every tool with a description and an object schema');
+  ok(['get_state', 'get_log', 'build_site', 'produce_unit', 'cancel_order', 'set_priority', 'scrap_site', 'set_site_defence', 'set_reserve', 'scout', 'strike', 'send_command', 'ask_placement', 'seat', 'get_match_report'].every(x => names.includes(x)) && tl.result.tools.every(t => t.description && t.inputSchema && t.inputSchema.type === 'object'), 'tools/list: every tool with a description and an object schema');
   ok((await b.rpc('nosuch')).error.code === -32601 && (await b.rpc('tools/call', { name: 'nosuch' })).error.code === -32602, 'unknown method and unknown tool are protocol errors');
 
   /* the seat is claimed on connect: the host and everyone see gctl */
@@ -74,6 +79,10 @@ function bridge(env) {
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');
+  const mr = await b.call('get_match_report'); ok(!mr.isError && seenAsk[seenAsk.length - 1].q.q === 'report' && mr.json.data.side === 1 && mr.json.data.tickets[1] === null, 'get_match_report: the host is asked (gask report) about the match on, for this side');
+  const ml = await b.call('get_match_report', { match: 'list' }); ok(!ml.isError && ml.json.matches.length === 1 && ml.json.matches[0].match === 'ww2/' + MATCH && ml.json.matches[0].winner === 0 && ml.json.matches[0].doctrines[1] === 'aggressive', 'get_match_report list: the matches the server keeps');
+  const mo = await b.call('get_match_report', { match: 'ww2/' + MATCH }); ok(!mo.isError && mo.json.data.dur === 1800, 'get_match_report with a match from the list: its review');
+  const mb = await b.call('get_match_report', { match: '../x' }), mn = await b.call('get_match_report', { match: 'ww2/2026-01-01-000000000000' }); ok(mb.isError && mn.isError, 'a bad or missing match is an error');
   ok(b.bad.length === 0, 'nothing but JSON-RPC on stdout');
 
   /* a wrong key is refused: its tools say so instead of hanging */
@@ -92,5 +101,5 @@ function bridge(env) {
 
   b.p.stdin.end(); h.close();
   await N.sleep(200);
-  for (const k of kids) k.kill(); N.stop(); done();
+  for (const k of kids) k.kill(); N.stop(); fs.rmSync(ANAD, { recursive: true, force: true }); done();
 })().catch(e => { console.error(e); for (const k of kids) k.kill(); N.stop(); process.exit(1); });

@@ -21,9 +21,18 @@ function load(o) {
   ctx.seed = n => { ctx.$('Math').random = rng(n); };
   if (!o.eco) try { ctx.$('ECO').on = 0; } catch (e) {}   // the economy only where a test asks for it: every older test sees today's battle
   if (!o.ff) try { ctx.$('FF').on = 0; } catch (e) {}   // friendly fire only where a test asks for it or sets FF.on itself
+  if (!o.ana) try { ctx.$('ANA').on = 0; } catch (e) {}   // the analytics only where a test or tools/balance.js asks for it (load({ ana: true }))
   try { ctx.$('MAPV = ' + (+process.env.MAPV || o.mapv || 1)); } catch (e) {}   // the old map unless a test asks for the road network (MAPV=2 or load({ mapv: 2 }))
   if (o.seed) ctx.seed(o.seed);
   ctx.run = (secs, each, dt) => { dt = dt || 1 / 60; for (let n = Math.round(secs / dt); n-- > 0;) { ctx.step(dt); if (each && each(dt) === false) break; } };
+  /* an AI × AI conquest match (the hangar's "Assistir" with nobody in the room): w.len the preset (0 Curta), w.doc the doctrines of side 0 and 1,
+     w.min the clock in minutes (default the preset's) */
+  ctx.watch = (era, w) => {
+    w = w || {}; const CMD = ctx.$('CMD'); if (w.doc) CMD.use = w.doc.slice();
+    const S = ctx.newState(era, null, { watch: 1, len: w.len || 0 });
+    if (w.min) S.cq.T = S.cq.T0 = w.min * 60;
+    return S;
+  };
   /* an empty battlefield of that era: nothing spawns by itself */
   ctx.sandbox = era => { const S = ctx.newState(era); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; return S; };
   return ctx;

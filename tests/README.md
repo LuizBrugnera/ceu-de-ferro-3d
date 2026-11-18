@@ -24,6 +24,7 @@ node tests/heli-online.js    # anfitrião e dois convidados de helicóptero pelo
 node tests/heli-oldserver.js # SERVER=<server.js antigo>: sem helicópteros; com o servidor novo, o diretor põe os dele em campo
 node tests/loadout.js       # cargas dos aviões: tabelas e a cópia do servidor, peso e arrasto (aceleração, subida, curva), cada armamento em cada alvo, teclas B, V e G, rearmar, IA por papel e alvo (SEED=11; TRIALS=5 lançamentos na média da bomba de cacho)
 node tests/loadout-online.js # cargas pelo servidor de verdade: o que cada um voa e os outros veem, tanque de jogador morto por bomba de queda livre, troca de avião, perda, rearmar, IA do anfitrião, cargas recusadas; com SERVER=<servidor antigo>, todos na carga padrão
+node tests/frame-budget.js  # orçamento da IA (F0): o medidor por quadro (AIB), o plano e o olhar (spot) fatiados entre quadros e iguais ao inteiro, o LOD do pensamento do soldado no posto
 node tests/gen-loads.js     # escreve em server.js a cópia das tabelas de carga (LOADS, STW) a partir da página; loadout.js falha se as duas diferirem
 LOADS=1 node tests/soak.js  # 10 min solo por avião com cada carga pronta
 sh tests/all.sh             # as suites rápidas em sequência contra o par publicado (ou PAGE/SERVER), uma linha por suite e os logs em tests/logs/; SUITES="relay online" escolhe algumas. Ficam de fora soak, transport-battle e as *-oldserver

@@ -3754,22 +3754,56 @@ function shelled(x, z, team) {
   for (const q of S.squads) { const L = q.team !== team && !q.net ? q.men.find(m => !m.dead) : null; if (L && Math.abs(L.x - x) < 70 && Math.abs(L.z - z) < 70) q.shT = S.t; }   // the commander moves a squad that is shelled at its post
 }
 /* sx, sz: where it was when last seen, which is all the other side's batteries have to go on */
-function spot() {
+/* spot(): the look, whole, and after it what the radios, the drones and the economy add to it (they wrap spot). The step cuts the look:
+   it calls spot() with S.spotK set, and the look is then only begun, as the job S.spotJ (spotJob: a unit a piece, J.n pieces, the first
+   the hearing and the supply bases) that the step runs in SPOT.every / SLICE.spot s of steps; what wraps it runs at once, as before.
+   A look of SLICE.min pieces or fewer (a small battle, a test's sandbox) is not worth cutting and runs whole, as before */
+function spot() { const J = spotJob(); if (S.spotK && J.n > SLICE.min) { S.spotK = 0; S.spotJ = J; } else aiDrain(J); }
+function spotJob() { const J = spotRun(); J.n = S.units.length + S.men.length + S.squads.length + 2; return J; }
+function* spotRun() {
+  const all = [...S.units, ...S.men];
   listen();
-  for (const u of [...S.units, ...S.men]) {
+  for (const b of S.sup) {   // a supply base, by the other side's ground troops and aircraft
+    if (b.dead || S.t - b.seenT < 3) continue;
+    if (S.units.some(o => !o.dead && o.team !== b.team && hdist(o, b) < SPOT.gnd && sees(o, b)) || S.men.some(o => !o.dead && o.team !== b.team && hdist(o, b) < MAN.see && sees(o, b)) || S.planes.some(p => !p.dead && p.team !== b.team && dist(p, b) < SPOT.air && sees(p, b))) b.seenT = S.t;
+  }
+  yield;
+  for (const u of all) {
     if (u.dead) continue;
     let seen = false;
     for (const o of S.units) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { seen = true; break; }
     if (!seen) for (const o of S.men) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { seen = true; break; }
     if (!seen) for (const p of S.planes) if (!p.dead && p.team !== u.team && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
     if (seen) { const own = S.my && !S.my.dead && S.my.team !== u.team && sees(S.my, u); u.seenT = S.t; u.sx = u.x + (own ? 0 : qr(-SHARE.err, SHARE.err)); u.sz = u.z + (own ? 0 : qr(-SHARE.err, SHARE.err)); }   // what the others report is a little off
+    yield;
   }
-  for (const b of S.sup) {   // a supply base, by the other side's ground troops and aircraft
-    if (b.dead || S.t - b.seenT < 3) continue;
-    if (S.units.some(o => !o.dead && o.team !== b.team && hdist(o, b) < SPOT.gnd && sees(o, b)) || S.men.some(o => !o.dead && o.team !== b.team && hdist(o, b) < MAN.see && sees(o, b)) || S.planes.some(p => !p.dead && p.team !== b.team && dist(p, b) < SPOT.air && sees(p, b))) b.seenT = S.t;
-  }
+  for (const q of S.squads.slice()) { lodSquad(q); yield; }
 }
 const spotted = u => S.t - u.seenT < (u.sup === 1 ? BLD.keep : SPOT.keep);
+/* LOD: how often a soldier of the AI thinks, by what is round his squad (q.lod, set by each look, spot): 0 contact, an enemy on the ground
+   within near m or in the air within air m (a drone within near m), a player within pl m, or the squad hit, down, bleeding, pinned, shelled or hearing fire in the
+   last calm s; 1 on the march; 2 at its post, holding where it was sent. T: s between a soldier's thoughts by tier, 0 the usual (IAI.think).
+   Only the post thinks less: there, with nobody within near m, each thought finds what the last did, so the battle is the same; the march
+   keeps its usual pace (the proposal's 1.5 s waits for squads that move as one, F1). A squad that comes into contact thinks at once */
+const LOD = { on: 1, near: 2500, air: 6000, pl: 1500, calm: 20, T: [0, 0, 3] };
+function lodTier(q) {
+  const O = q.ord, L = q.men.find(m => !m.dead), K = LOD;
+  if (!L || q.net || q.state || q.op || q.lift || S.t - (q.shT || -1e9) < K.calm) return 0;
+  for (const m of q.men) if (!m.dead && (m.down || m.bl > 0 || m.sup > S.t || S.t - m.hitT < K.calm || (m.ln && S.t - m.ln.t < K.calm))) return 0;
+  for (const o of S.units) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
+  for (const o of S.men) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
+  for (const o of S.planes) if (!o.dead && o.team !== q.team && dist(o, L) < K.air) return 0;
+  for (const o of S.drones || []) if (!o.dead && !o.gone && o.team !== q.team && dist(o, L) < K.near) return 0;
+  const me = S.my && !S.my.dead && !S.watch ? S.my : null; if (me && hdist(me, L) < K.pl) return 0;
+  for (const g of Net.ghosts.values()) if (!g.dead && Number.isFinite(g.x) && hdist(g, L) < K.pl) return 0;
+  return q.at && O && O.k === 'hold' ? 2 : 1;
+}
+function lodSquad(q) {
+  const was = q.lod; q.lod = LOD.on ? lodTier(q) : 0;
+  if (q.lod < (was || 0)) for (const m of q.men) if (m.ai && m.ai.think > IAI.think) m.ai.think = IAI.think * ((m.ai.i || 0) % 5 + 1) / 5;   // woken: it thinks within the usual time
+}
+/* the s to a soldier's next thought: the usual, or his squad's LOD's */
+const lodThink = m => (m.sq && m.sq.lod && LOD.T[m.sq.lod]) || IAI.think;
 /* what a battery shells: the spotted vehicle worth most, standing ones and clusters first */
 function pickFire(u, w) {
   const G = GAI.art, V = G.val; let best = null, bs = G.min;
@@ -4274,7 +4308,7 @@ function aiMan(m, dt) {
   if (A.rsc && rescue(m, A, c)) return;
   if (m.def.snp) return aiSniper(m, dt);
   if (m.def.mort && !(m.sq && (m.sq.state === 1 || m.sq.fd < CMD.mort.self))) return aiMortar(m, dt);
-  if ((A.think -= dt) <= 0) { A.think = IAI.think; manThink(m); }
+  if ((A.think -= dt) <= 0) { A.think = lodThink(m); manThink(m); }
   const t = sight(A, m, A.tgt), pin = m.sup > S.t && !A.mv && !(A.brk > S.t), rout = !!m.sq && m.sq.state === 1, dx = A.gx - m.x, dz = A.gz - m.z, d = Math.hypot(dx, dz), w = (m.arms[c.w] || m.arms[0]).d;
   if (!t) A.tgt = null;
   if (d > 1.5 && (rout || !pin)) {
@@ -5454,7 +5488,32 @@ function resupply(P, dt) {   // beside the home airfield, as planes do over it, 
     if (P.rearmT > 2.5) { for (const m of P.arms) m.ammo = m.d.ammo; P.smk = SMOKE.n[P.kind] || 0; mend(P, 1); }
   } else { P.rearmT = 0; S.rearm = 0; }
 }
+/* ---------- the AI's frame budget on the host (F0) ----------
+   AIB, the meter: each step adds the time of the AI's parts of the frame, gen (the commander and its eyes: spot, plan, the squads' thinking,
+   the director) and u (the units: planes, helicopters, vehicles and soldiers stepped, which is their AI and their movement), and closes the
+   frame at the next step. stat(): over the last win frames, the mean and the worst of the total and of gen, against the budget: avg ms a
+   frame on average, worst ms in the worst frame, gen ms for the commander. Read only: nothing in the battle depends on it.
+   aiJob and aiDrain: a job is a generator that yields between pieces of work, and the step runs n pieces a frame (aiJob) or finishes it
+   (aiDrain); spot and plan run so, a piece a frame, instead of whole in one */
+const AIB = { avg: 4, worst: 8, gen: 1, win: 300, S: null, g: 0, u: 0, n: 0, i: 0, tot: new Float32Array(300), gn: new Float32Array(300), max: 0, gmax: 0,
+  now: () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()),
+  tick() {   // closes the frame the last step measured: a new battle starts the count again
+    if (AIB.S !== S) { AIB.S = S; AIB.n = AIB.i = AIB.max = AIB.gmax = 0; AIB.g = AIB.u = 0; return; }
+    const g = AIB.g, a = g + AIB.u; AIB.tot[AIB.i] = a; AIB.gn[AIB.i] = g; AIB.i = (AIB.i + 1) % AIB.win; AIB.n++;
+    if (a > AIB.max) AIB.max = a; if (g > AIB.gmax) AIB.gmax = g; AIB.g = AIB.u = 0;
+  },
+  stat() {
+    const n = Math.min(AIB.n, AIB.win), r = v => Math.round(v * 100) / 100; let a = 0, w = 0, g = 0, gw = 0, over = 0;
+    for (let i = 0; i < n; i++) { const t = AIB.tot[i], q = AIB.gn[i]; a += t; g += q; if (t > w) w = t; if (q > gw) gw = q; if (t > AIB.worst) over++; }
+    a = n ? a / n : 0; g = n ? g / n : 0;
+    return { frames: AIB.n, n, avg: r(a), worst: r(w), gen: r(g), genWorst: r(gw), over, max: r(AIB.max), genMax: r(AIB.gmax), ok: a <= AIB.avg && w <= AIB.worst && g <= AIB.gen };
+  } };
+/* SLICE: spot, the look is cut to end in SPOT.every / spot s of steps, when it has more than min pieces; plan, pieces of a commander's plan a step at 60 steps a second */
+const SLICE = { spot: 1.25, min: 60, plan: 1 };
+const aiJob = (J, n) => { while (J && n-- > 0) if (J.next().done) return null; return J; };
+const aiDrain = J => { while (J && !J.next().done); return null; };
 function step(dt) {
+  AIB.tick();
   S.t += dt;
   const P = S.my, I = S.input, aim = S.aim;
   if (aim) {
@@ -5465,17 +5524,29 @@ function step(dt) {
   }
   if (P && !P.dead) (P.man ? walk : P.kind ? drive : fly)(P, I, dt);
   else { S.lockAir = S.lockGnd = S.lead = S.sol = S.gf = null; S.rearm = 0; S.oob = false; }
-  if ((S.spotT -= dt) <= 0) { S.spotT = SPOT.every; spot(); }
+  let a0 = AIB.now();
+  if ((S.spotT -= dt) <= 0) {   // what is left of the last look first
+    S.spotT = SPOT.every; S.spotJ = aiDrain(S.spotJ); S.spotK = 1; spot(); S.spotK = 0;
+    S.spotN = S.spotJ ? Math.ceil(S.spotJ.n * Math.min(1, dt / SPOT.every * SLICE.spot)) : 0;
+  }
+  S.spotJ = aiJob(S.spotJ, S.spotN);
+  let a1 = AIB.now(); AIB.g += a1 - a0;
   for (const p of S.planes) { if (p.net) { stepGhost(p, dt); continue; } if (p.ai && !p.dead) aiPlane(p, dt); stepPlane(p, dt); }
   heliStep(dt);
   for (const u of S.units) if (!u.dead) stepUnit(u, dt);
   for (const m of S.men) { if (!m.dead) stepMan(m, dt); else if (S.t - m.deadT > MAN.body) m.gone = true; }
+  a0 = AIB.now(); AIB.u += a0 - a1;
   fortMen(dt);
   bldMen(dt);
   civStep(dt);
   LO.step(dt);
+  a0 = AIB.now();
   for (const q of S.squads) if (!q.net && (q.think -= dt) <= 0) { q.think = IAI.think; squadThink(q); }
-  if ((!S.net || S.host) && !S.over && (S.planT -= dt) <= 0) { S.planT = FIELD.every / 2; plan((S.planK ^= 1)); }
+  if ((!S.net || S.host) && !S.over) {   // the commanders, in turn, a piece of the plan a frame (the one that is not done when the next starts is finished first)
+    if ((S.planT -= dt) <= 0) { S.planT = FIELD.every / 2; if (S.planJ) plan(S.planK, S.planJ, Infinity); S.planJ = plan((S.planK ^= 1), true) || null; }
+    if (S.planJ) S.planJ = plan(S.planK, S.planJ, Math.max(1, Math.round(dt * 60 * SLICE.plan))) || null;
+  } else S.planJ = null;
+  AIB.g += AIB.now() - a0;
   trnStep(dt);
   bldStep(dt);
   stepShots(dt); supStep(dt);
@@ -5514,7 +5585,7 @@ function step(dt) {
     S.respawn -= dt;
     if (S.respawn <= 0) { if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
   }
-  if (!S.net || S.host) director(dt);
+  if (!S.net || S.host) { a0 = AIB.now(); director(dt); AIB.g += AIB.now() - a0; }
 }
 function endGame(why) { S.over = true; S.why = why; fx.over(); }
 
@@ -9918,7 +9989,8 @@ const manLive = q => q.men.reduce((a, m) => a + (m.dead ? 0 : 1), 0);
 const manEnded = (k, w) => GEN.man[k] + ' ' + w + (GEN.mfem[k] ? 'a' : 'o');
 /* every MAN.every s a side looks at what its manoeuvres could be and maybe starts one (5.2); and at once when an assault of its own has just begun to form up,
    which the kinds tied to an assault (flk, fnt) can only join while it forms. share: of the squads it could use (free, and those already in manoeuvres) */
-function cmdMan(C, sq) {
+function cmdMan(C, sq) { aiDrain(cmdManJob(C, sq)); }
+function* cmdManJob(C, sq) {   // a piece for each kind it weighs (plan's job); the squads free for it are looked at again before each
   const t = C.t;
   if (!(S.T.mv >= 4) || !S.cq || S.cq.ph || genBy(t, 'atk') !== 'ai') return;   // the manoeuvres are the points' war: none in the demo or a battle without points
   const fresh = C.mnT - S.t <= MAN.every && C.ops.find(o => o.k === 'atk' && !o.over && o.st === 'form' && !o.mseen);   // (a choice held off further, as a test does, stays held)
@@ -9931,6 +10003,7 @@ function cmdMan(C, sq) {
   for (const k of MANORD) {
     if (!MANG[k] || (C.mcd[k] || 0) > S.t) continue;
     for (const c of MANG[k](C, X)) all.push(c);
+    yield; X.free = manFree(X.free.filter(q => q.live > 0));
   }
   if (!all.length) { C.mev = []; return; }
   const taste = C.taste || (C.taste = Object.fromEntries(Object.keys(MANW.balanced).map(k => [k, MAN.taste[0] + (MAN.taste[1] - MAN.taste[0]) * Math.random()])));
@@ -10856,8 +10929,17 @@ function cmdPosts(C, sq, have) {
   if (C.gue) for (const e of P) if (e[0] === 'amb' && e[1] < MANT.gue.amb) e[1] = MANT.gue.amb;   // map version 4: harassing, it lies in ambush more (gue)
   return P;
 }
-function plan(t) {
-  const C = cmdOf(t), F = S.fld[t], Q = SQUAD[S.era].length, have = {}, sq = [], tag = (j, k) => (have[j] || (have[j] = [])).push(k);
+/* plan(t): the commander's plan, all of it now. plan(t, true): the plan as a job, a piece a step: what the side has and knows, each
+   operation, then each part of the commander's work (manoeuvres one kind a piece); squads lost on the way are left out of what comes
+   after. plan(t, J, n): n more pieces of J, which it returns, or null when it is through. The step goes through plan for each piece, so
+   that a plan put aside (a test's plan = () => {}) stops one half done too */
+function plan(t, J, n) {
+  if (J === true) return planJob(t);
+  if (J) return aiJob(J, n);
+  aiDrain(planJob(t));
+}
+function* planJob(t) {
+  const C = cmdOf(t), F = S.fld[t], Q = SQUAD[S.era].length, have = {}, sq = [], tag = (j, k) => (have[j] || (have[j] = [])).push(k), live = () => { for (let i = sq.length; i--;) if (!(sq[i].live > 0)) sq.splice(i, 1); };
   let men = 0;
   for (const m of S.men) if (!m.dead && m.team === t) men++;
   if (!S.cq) for (const w of towns()) { const n = [0, 0]; for (const m of S.men) if (!m.dead && Math.hypot(m.x - w.x, m.z - w.z) < FIELD.town) n[m.team]++; for (const a of [0, 1]) if (n[a] >= FIELD.held && !n[1 - a]) w.hold = a; }
@@ -10875,15 +10957,23 @@ function plan(t) {
     tag(q.job, q.jk);
     if (q.job === 'amb' && !q.op) { const op = cmdAmb(C, q.jk); if (op) { if (!C.ops.includes(op)) C.ops.push(op); q.op = op; op.sq.push(q); q.back = null; setOrd(q, ambOrd(op, op.sq.length - 1)); } }
   }
+  yield; live();
   cmdSense(C, sq);
+  yield; live();
   C.ops = C.ops.filter(op => !op.over);
-  for (const op of C.ops) { if (op.man && S.t - op.T0 > op.Tmax) { gLog(t, 'atk', manEnded(op.k, 'encerrad') + ': tempo esgotado', op.kz || null); opEnd(C, op); continue; } OPS[op.k](C, op); }
-  manRides(C);
-  cmdAttack(C, sq); cmdMan(C, sq); cmdDefend(C, sq); cmdPoints(C, sq); cmdColumns(C, sq); cmdFires(C);
+  for (const op of C.ops) { if (op.over) continue; if (op.man && S.t - op.T0 > op.Tmax) { gLog(t, 'atk', manEnded(op.k, 'encerrad') + ': tempo esgotado', op.kz || null); opEnd(C, op); continue; } OPS[op.k](C, op); yield; }
+  live(); manRides(C);
+  yield; live();
+  cmdAttack(C, sq);
+  yield; live();
+  yield* cmdManJob(C, sq);
+  live(); cmdDefend(C, sq); cmdPoints(C, sq); cmdColumns(C, sq); cmdFires(C);
+  yield; live();
   trnPlan(t, sq);
   planSup(t, sq, F);
   fortPlan(t, sq);
   cmdReq(C);
+  yield; live();
   if (S.t < F.next || S.men.length + Q > IAI.cap || men + Q > IAI.cap * FIELD.side) return;
   for (const [job, n, k0] of cmdPosts(C, sq, have)) for (let k = k0 || 0; k < (k0 || 0) + n; k++) if (!(have[job] || []).includes(k) && reinforce(t, job, k)) { F.next = S.t + (C.thr > 2 || C.want ? C.doc.reinf * .6 : C.doc.reinf); gLog(t, 'rf', 'Reforço a caminho: ' + (GEN.job[job] || job)); return; }
 }

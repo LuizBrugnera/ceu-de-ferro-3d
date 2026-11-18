@@ -17,7 +17,7 @@ const kitOf = (era, side, f) => $('INF')[era][side].find(id => f(KITS[id]));
 
 console.log('tables');
 for (const id in TRNS) { const d = TRNS[id]; if (!(d.era && d.parts.length >= 4 && d.lay.length === 1 + (d.seats.gun ? 1 : 0) + d.seats.pax && d.arms.length >= 1)) ok(false, id + ' is incomplete'); }
-ok(Object.keys(TRNS).length === 10, 'ten vehicles: ' + Object.values(TRNS).map(d => d.name + ' ' + d.kind + ' ' + Math.round(d.spd * 3.6) + ' km/h ' + d.lay.length + ' seats hp ' + d.hp).join('; '));
+ok(Object.keys(TRNS).length === 14, 'fourteen vehicles (a radio or command-post vehicle on each side): ' + Object.values(TRNS).map(d => d.name + ' ' + d.kind + ' ' + Math.round(d.spd * 3.6) + ' km/h ' + d.lay.length + ' seats hp ' + d.hp).join('; '));
 
 console.log('seats, solo');
 {
@@ -203,7 +203,7 @@ console.log('sniper');
   const fixed = (kind, id) => () => { const u = C.addUnit(kind, 1, BX + 300, BZ - 100, id, true); u.ai = null; u.h = 0; return u; };
   const row = [];
   for (const [nm, mk, d] of [['Ural', fixed('truck'), TRNS.ural], ['Tigr', fixed('car'), TRNS.tigr], ['BTR-82A', fixed('lav'), TRNS.btr82]]) {
-    const eng = am('modern', 'blueSniper', mk, d.l * .34 * GS, (.5 + d.hh / 2) * GS), wh = am('modern', 'blueSniper', mk, d.kind === 'lav' ? 0 : -d.l * .2 * GS, .35 * GS), hull = am('modern', 'blueSniper', mk, -d.l * .2 * GS, (.6 + d.hh * .7) * GS);
+    const eng = am('modern', 'blueSniper', mk, d.l * .34 * GS, (.5 + d.hh / 2) * GS), wh = am('modern', 'blueSniper', mk, d.kind === 'lav' ? 0 : -d.l * .32 * GS, .35 * GS), hull = am('modern', 'blueSniper', mk, -d.l * .2 * GS, (.6 + d.hh * .7) * GS);
     row.push(nm + ': engine shot -> ' + eng.pt + ' -' + f1(eng.d) + ' hp, drive ' + pct(eng.drive) + '; wheel shot -> ' + wh.pt + ', drive ' + pct(wh.drive) + '; body shot -> ' + hull.pt + ' -' + f1(hull.d) + ' hp');
     ok(eng.pt === 'engine' && /^w[FR][LR]$/.test(wh.pt) && hull.d > 0 && eng.drive < 1 && wh.drive < 1, nm + ': the round lands on the part aimed at (engine, wheels, hull) and hurts it');
   }
@@ -228,6 +228,7 @@ console.log('AI sniper');
   const still = o => { o.ai = null; return o; };
   let rf, lm, sn;
   const m = setup('ww2', () => { rf = still(C.addMan('rifleman', 1, BX + 250, BZ + 30, 0)); lm = still(C.addMan('bargunner', 1, BX + 330, BZ - 30, 0)); sn = still(C.addMan('sniper', 1, BX + 420, BZ, 0)); });
+  m.sq.ord.k = 'observe'; C.run(20); m.sq.ord.k = 'hold';   // it notices them first (they are made out over time), then picks by worth
   const order = []; C.run(120, () => { for (const [n, o] of [['sniper', sn], ['machine gunner', lm], ['rifleman', rf]]) if (o.dead && !order.includes(n)) order.push(n); return order.length < 3; });
   ok(order[0] === 'sniper' && order[1] === 'machine gunner', 'three targets at 250 to 420 m: it takes them in the order ' + order.join(', ') + ' (' + m.arms[0].t.toFixed(0) + ' s, ' + (m.ai.n || 0) + ' shots since its last move)');
   { const m = setup('ww2', () => { for (let i = 0; i < 12; i++) still(C.addMan('rifleman', 1, BX + 300 + i * 8, BZ - 40 + i * 7, 0)); }); const x0 = m.x, z0 = m.z; let moved = 0, shots = 0, t0 = -9;

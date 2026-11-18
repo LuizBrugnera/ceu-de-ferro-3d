@@ -882,7 +882,7 @@ const AK = { man: 'man', snp: 'man', atg: 'man', tank: 'tank', lav: 'tank', car:
    react s after (rolled per pair): until then, and until the class, the AI looks at it, err of the distance off where it is, and reports it, and shoots at
    nothing. Only the model lets a guided weapon go. A sniper, whose shot is its choice of target, holds it up to wait s while a soldier in its reach is
    only detected, and looks at him */
-const LADDER = { rec: .6, id: .35, pw: 3, rate: 1, cap: 4, opt: { snp: 1, atg: 1, tank: 0, heli: 1, aa: 0, plane: 0, man: 0 }, optF: 1.75, react: [.3, .6], err: .06, wait: 4 };
+const LADDER = { rec: .6, id: .35, pw: 3, rate: 1, cap: 4, opt: { snp: 1, atg: 1, tank: 0, heli: 1, aa: 0, plane: 0, man: 0 }, optF: 1.75, react: [.3, .6], err: .06, mis: .08, far: 200, wait: 4 };
 /* ---------- infantry ----------
    A soldier is not a vehicle: no turret, no armour, a body of zones and a stance. SARMS, what is carried. A small arm fires a round every
    rate s from a magazine of mag with mags spare, spread sp rad standing and unsighted; auto: it fires while the trigger is held; lmg: the
@@ -3221,7 +3221,7 @@ function notice(a, t) {
   if (!e.kn) e.rc = e.ic = 0;
   else {   // the ladder: the class, then the model, while it is in sight
     const L = LADDER, f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * dt;
-    if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); }
+    if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); e.mis = qr(0, 1) < L.mis; }
     if (sr > 0) { e.rc = Math.min(1, e.rc + f(qa * L.rec)); e.ic = Math.min(1, e.ic + f(Math.max(qa, qo * L.optF) * L.id)); if (e.ic >= 1) e.rc = 1; }
     if (e.rc < 1 && !(a.ai.tgt || a.tgt) && (!a.ln || S.t - a.ln.t > HEAR.ln * .5)) a.ln = { x: t.x + e.ex, z: t.z + e.ez, t: S.t, of: t };   // something there: it looks
   }
@@ -3235,6 +3235,7 @@ function grade(a, t) {
   if (!notice(a, t)) return 0;
   const e = a.pm.get(t); return S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1;
 }
+const foe = (a, t) => t.team !== a.team || (ffOn() && !!a.ai && dist(a, t) > LADDER.far && grade(a, t) === 2 && a.pm.get(t).mis);   // an enemy; or, at long range with friendly fire on, a friend only recognized that it took for one
 const idd = (a, t) => !!t && grade(a, t) >= 3;   // identified: a guided weapon may go
 /* has o made t out (for the map of what the side knows): a player's own eyes always count, an AI's only once it knows, and age s after it did */
 function aware(o, t, age) {
@@ -4249,7 +4250,7 @@ function manThink(m) {
   }
   c.w = best ? 1 : 0;
   if (!best) {
-    for (const o of S.men) { const d = hdist(o, m); if (!o.dead && !o.down && o.team !== m.team && d < IAI.see && d < bs && known(A, m, o)) { bs = d; best = o; } }
+    for (const o of S.men) { const d = hdist(o, m); if (!o.dead && !o.down && d < IAI.see && d < bs && foe(m, o) && known(A, m, o)) { bs = d; best = o; } }
     for (const u of S.units) { const d = hdist(u, m) + 150; if (!u.dead && u.team !== m.team && soft(u) && d < IAI.soft + 150 && d < bs && known(A, m, u)) { bs = d; best = u; } }
   }
   A.tgt = best;
@@ -6007,7 +6008,7 @@ function aiSniper(m, dt) {
     const sl = q ? slot(q, A.i) : { x: A.gx, z: A.gz }, g = clearOf(sl.x + (rout ? 0 : A.rx || 0), sl.z + (rout ? 0 : A.rz || 0), 1, {});
     let best = null, bs = -9;
     if (q) { A.gx = g.x; A.gz = g.z; }
-    for (const o of S.men) { const d = dist(o, m); if (o.dead || o.team === m.team || o.in || d > G.rng || !known(A, m, o)) continue; const v = snipeVal(m, o, d); if (v > bs && los(m, eyeY(m), o, bodyY(o))) { bs = v; best = o; } }
+    for (const o of S.men) { const d = dist(o, m); if (o.dead || o.in || d > G.rng || !foe(m, o) || !known(A, m, o)) continue; const v = snipeVal(m, o, d); if (v > bs && los(m, eyeY(m), o, bodyY(o))) { bs = v; best = o; } }
     if (w.am) for (const u of S.units) {
       const d = dist(u, m), K = SNIPE.hits[u.kind];
       if (u.dead || u.team === m.team || !K || (K === 'open' && !u.def.open) || d > G.rng || !known(A, m, u)) continue;

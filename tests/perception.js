@@ -178,6 +178,23 @@ if ($('typeof LADDER !== "undefined"')) {
     const eb = b.pm.get(t); S.t += 1; gb = g(b, t); ga = g(a, t);
     ok(ga >= 2 && eb && eb.told && gb === 2, 'the mate with its back turned has the class (' + gb + ') from the one who saw it (' + ga + '), not the side');
   }
+  console.log('-- confusion: a friend only recognized, far off, may be taken for a foe --');
+  {
+    const L = $('LADDER'), FFo = $('FF'), foe = $('foe'), m0 = L.mis, f0 = FFo.on;
+    const run = (dist, ff, face) => { fresh(); S.qsd = 12345; L.mis = 1; FFo.on = ff; const a = man(0, 0, 0, face), t = man(0, dist, 0, 0); t.ai = null; let seen = false, mistaken = false, id = false;
+      for (let i = 0; i < 400; i++) { S.t += .1; const k = g(a, t); if (k === 2) { seen = true; if (foe(a, t)) mistaken = true; } if (k === 3) { id = true; if (foe(a, t)) mistaken = 'identified'; } }
+      return { seen, mistaken, id }; };
+    try {
+      const far = run(300, 1, 0), off = run(300, 0, 0), near = run(60, 1, 0), blind = run(300, 1, Math.PI);
+      ok(far.seen && far.mistaken === true, 'far off, friendly fire on, only recognized: a friend can be taken for a foe');
+      ok(off.seen && !off.mistaken, 'never with friendly fire off');
+      ok(near.id && !near.mistaken, 'never up close, where it is identified');
+      ok(far.mistaken !== 'identified', 'never once identified');
+      ok(!blind.seen && !blind.mistaken, 'never a friend it has not made out (back turned: grade never reached 2)');
+      L.mis = 0; fresh(); FFo.on = 1; const a = man(0, 0, 0, 0), t = man(0, 300, 0, 0); t.ai = null; let any = false; for (let i = 0; i < 400; i++) { S.t += .1; g(a, t); if (foe(a, t)) any = true; }
+      ok(!any, 'and with no confusion rolled, never');
+    } finally { L.mis = m0; FFo.on = f0; }
+  }
   console.log('-- honesty: a battle of AI against AI, every shot checked --');
   {
     const SECS = +process.env.SECS || 90, SPOT = $('SPOT'), spotted = $('spotted'), SIGHT = $('SIGHT'), tclass = $('tclass');

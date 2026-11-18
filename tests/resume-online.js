@@ -8,8 +8,11 @@ const all = [], dt = 1 / 60;
 async function client(name, cls, model, fresh) {
   const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5, eco: true }), $ = c.$, Net = $('Net');
   c.name = name; c.$ = $; c.Net = Net; c.on = true;
+  /* the server sends welcome, the suspended copy and then host in one go, and ws hands over every frame of one read at once: the host
+     message may be in before the await below returns. So the guest is judged as welcome left it (atWelcome), and hosted is the host message */
+  const rh = Net.rx.host; Net.rx.host = m => { rh(m); if (m.id === Net.id) c.hosted = true; };
   await new Promise((res, rej) => {
-    Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); res(); };
+    Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); c.atWelcome = { host: $('S').host, sus: Net.sus }; res(); };
     Net.ui.refused = code => rej(new Error(name + ' refused: ' + code)); Net.fresh = !!fresh; Net.connect('modern', name, cls, model);
   });
   Object.defineProperty(c, 'S', { get: () => $('S') }); c.id = Net.id; all.push(c); return c;
@@ -50,10 +53,10 @@ const live = c => ({ planes: c.S.planes.filter(p => p.aid && !p.dead && !p.gone)
 
   console.log('-- back in: the match goes on where it stopped --');
   const b = await client('Volta', 'inf', 'blueRifle');
-  ok(!b.S.host && b.Net.sus, 'the one who comes back starts as a guest of the match that was');
-  await run(1);
+  ok(!b.atWelcome.host && b.atWelcome.sus, 'the one who comes back starts as a guest of the match that was');
+  const waited = await run(5, () => !b.hosted);   // play on until the server's host message, at most 5 s
   const now = live(b), Qb = b.S.cq;
-  ok(b.S.host && !b.Net.sus && b.Net.host === b.id, 'then it is the host: it adopted the battle');
+  ok(!waited && b.S.host && !b.Net.sus && b.Net.host === b.id, 'then it is the host: it adopted the battle');
   ok(b.S.banner && b.S.banner.text === 'Partida retomada', 'and is told so: "' + (b.S.banner && b.S.banner.text) + '"');
   ok(Qb.T < was.T && was.T - Qb.T < 2.5 && Qb.tk.map(Math.round).join() === was.tk, 'the clock goes on from ' + Math.round(was.T) + ' s (now ' + Math.round(Qb.T) + ' s), the tickets are the same (' + was.tk + ')');
   ok(b.Net.cqn === was.n, 'the same match number (' + b.Net.cqn + ')');

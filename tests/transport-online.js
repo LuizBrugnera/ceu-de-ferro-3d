@@ -57,19 +57,20 @@ const occ = (c, u) => u.occ.map(m => (m && m !== c.S.rider ? c.Net.ref(m) : 0)).
   const seen = c.S.men.filter(m => m.net && m.aid && !m.dead).length;
   ok(Ah.dead === aDead && (Ac.dead === aDead || gh(c, a).dead === aDead) && seen === live, 'every client agrees on her (' + (aDead ? 'dead' : 'alive') + ') and on the boxed squad: ' + live + ' of ' + boxed + ' got out, and the third client sees ' + seen);
   ok(score(a, c).kills === (hDead ? 1 : 0) + (aDead ? 1 : 0) && score(a, h).deaths === (hDead ? 1 : 0), 'the kills are Caio\'s, one for each who died: ' + score(a, c).kills);
-  /* LAV against LAV, both ways */
+  /* LAV against LAV, both ways; the squad has done its part and leaves the field first: its Javelin would take Caio's BTR-82A in the duels */
+  for (const m of h.S.men) if (m.aid && !m.dead) { m.inv = 0; h.$('damageMan')(m, 999, null, true, { k: 0, pt: 0 }); }
   const d = await client('Davi', 'trn', 'lav25'); await run(5);
   /* back in the vehicle of the class chosen: a driver who got out alive is put down first */
   const fresh = async x => { const P = x.S.my; if (P.man && !P.dead) { P.inv = 0; x.$('damageMan')(P, 999, null, true, { k: 0, pt: 0 }); } await run(6); return x.S.my.kind === 'lav'; };
-  const duel = async (x, y) => {   // x fires on y, which stands side on
+  const duel = async (x, y, z) => {   // x fires on y, which stands side on, in lane z: each duel its own, clear of the last one's wreck (a wreck stops rounds)
     if (x.S.my.man) await fresh(x); if (y.S.my.man) await fresh(y);
-    put(x, BX, BZ - 200, 0); put(y, BX + 160, BZ - 200, Math.PI / 2); await run(.5); const g = gh(x, y), v = y.S.my, k = score(a, x).kills, n = score(a, x).ai, dd = score(a, y).deaths; let t = 0;
+    put(x, BX, z, 0); put(y, BX + 160, z, Math.PI / 2); await run(.5); const g = gh(x, y), v = y.S.my, k = score(a, x).kills, n = score(a, x).ai, dd = score(a, y).deaths; let t = 0;
     x.S.input.fire = true; await run(40, () => { t += dt; x.S.my.inv = 0; if (!v.dead) v.inv = 0; aimAt(x, g, 2.6); return !v.dead; }); x.S.input.fire = false; await run(1); return { t, v, died: y.S.my.dead, k, n, dd };
   };
-  const r1 = await duel(d, c);
+  const r1 = await duel(d, c, BZ - 200);
   ok(r1.v.dead && c.S.my.man && score(a, d).ai === r1.n + 1 && score(a, d).kills === r1.k + (r1.died ? 1 : 0) && score(a, c).deaths === r1.dd + (r1.died ? 1 : 0), 'Davi\'s LAV-25 destroys Caio\'s BTR-82A from the side in ' + r1.t.toFixed(1) + ' s: a vehicle to his count, and Caio ' + (r1.died ? 'dies in it, a kill' : 'gets out on foot, no death'));
   ok(await fresh(c) && await fresh(d), 'Caio comes back in a BTR-82A');
-  const r2 = await duel(c, d);
+  const r2 = await duel(c, d, BZ - 240);
   ok(r2.v.dead && score(a, c).ai === r2.n + 1, 'and it destroys the LAV-25 in ' + r2.t.toFixed(1) + ' s, his');
   /* mid-match: Ana takes a sniper's rifle, Caio leaves his vehicle for a rifle */
   await run(6);

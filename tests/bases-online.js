@@ -12,7 +12,8 @@ async function client(name, cls, model, keep) {
     Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); res(); };
     Net.ui.refused = code => rej(new Error(name + ' refused: ' + code)); Net.connect('modern', name, cls, model);
   });
-  Object.defineProperty(c, 'S', { get: () => $('S') }); c.id = Net.id; if (!keep) { c.director = () => {}; c.plan = () => {}; } all.push(c); return c;
+  /* !keep: a quiet battle, no AI director, planner or helicopters (theirs would shell the bases under test from a few km off) */
+  Object.defineProperty(c, 'S', { get: () => $('S') }); c.id = Net.id; if (!keep) { c.director = () => {}; c.plan = () => {}; Object.assign($('HDIR'), { atk: [0, 0, 0, 0], lift: [0, 0, 0, 0] }); } all.push(c); return c;
 }
 async function run(secs, each) {
   for (let i = 0, n = Math.round(secs / dt); i < n; i++) {

@@ -69,11 +69,15 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   ok(boom && (P3.dead || P3.hp < hp0), 'a guest walks onto an AP mine his side does not know: the host sets it off and the burst hurts the guest on his own client');
   /* a machine-gun nest built on the host, with its garrison */
   const f = host.fortStart(4, 0, p.x - 300, p.z, 0); host.fortAt(f, 1);
-  const seen = await until(() => [g1, g2, g3].every(c => c.S.forts.some(q => q.id === f.id && q.prog >= 1)) && !!f.gm, 15000);
-  await run(2);
+  /* the garrison put 7 to 8 m behind the nest, not where it happened to come: it has to walk all the way in to man it */
+  const gq = f.garr, gmen = gq ? gq.men : [];
+  gmen.forEach((m, i) => { m.x = f.x - 7 - i; m.z = f.z + (i ? 3 : 0); m.y = host.hgt(m.x, m.z); });
+  const far = gmen.length === 2 && !f.gm && gmen.every(m => hd(m, f) > 6.5);
+  const seen = await until(() => [g1, g2, g3].every(c => c.S.forts.some(q => q.id === f.id && q.prog >= 1)), 15000);
+  await run(25);
   const gm = f.gm, onG = g1.S.forts.find(q => q.id === f.id), gun = onG && onG.gm;
-  console.log('   the nest\'s gunner: ' + (gm ? gm.def.name + ' (' + gm.aid + ')' : 'nobody') + ' on the host; on a guest ' + (gun ? gun.def.name + ' (' + gun.aid + ') with ' + gun.arms[0].d.name : 'nobody'));
-  ok(seen && gm && gun && gun.aid === gm.aid && gun.arms[0].d.name === gm.arms[0].d.name && gun.arms[0].d.lmg, 'a post built on the host is on every guest, its garrison at it and the same soldier at its gun');
+  console.log('   the nest\'s garrison from 7 m out: ' + gmen.map(m => hd(m, f).toFixed(1) + ' m' + (m.fc === f ? ' (at it)' : '')).join(', ') + '; its gunner: ' + (gm ? gm.def.name + ' (' + gm.aid + ')' : 'nobody') + ' on the host; on a guest ' + (gun ? gun.def.name + ' (' + gun.aid + ') with ' + gun.arms[0].d.name : 'nobody'));
+  ok(far && seen && gmen.every(m => !m.dead && m.fc === f) && gm && gmen.includes(gm) && gun && gun.aid === gm.aid && gun.arms[0].d.name === gm.arms[0].d.name && gun.arms[0].d.lmg, 'a post built on the host is on every guest; its garrison, set down 7 m out, walks in to it and the same soldier is at its gun everywhere');
   /* a BM-21 salvo of 40 at a dome built on the host, each round reaching the guest 150 to 250 ms after the host as over the wire: the host
      alone engages and rolls, and the guest stops the very same rounds */
   const POSTS = host.$('POSTS'); let dome = null;

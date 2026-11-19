@@ -38,8 +38,11 @@ load({ seed: 31 }); fresh('modern'); C.run(3);
   ok(S.feed.some(f => f.team === 1 && /um civil morto/.test(f.text) && f.text.includes('−' + CIV.toll)), 'the feed tells it: ' + (S.feed.find(f => /civil/.test(f.text)) || {}).text);
   ok(S.glog.l[1].some(e => e.k === 'rep' && /por fogo nosso/.test(e.s)) && S.glog.l[0].some(e => /por fogo nosso/.test(e.s)), 'and each side\'s general reads it in its log');
   ok(S.score === sc[0] && S.gndKills === sc[1], 'it is never scored');
-  S.cq.ph = 1; const tk1 = S.cq.tk.slice(); kill(out().find(c => hd(c, u) > 50), sh);
-  ok(S.cq.tk.every((v, i) => v === tk1[i]), 'once the match is over nothing is charged'); S.cq.ph = 0;
+  S.cq.ph = 1; const tk1 = S.cq.tk.slice(), f0 = S.feed.length, l0 = S.glog.l[1].length; kill(out().find(c => hd(c, u) > 50), sh);
+  ok(S.cq.tk.every((v, i) => v === tk1[i]), 'once the match is over nothing is charged');
+  C.run(CIV.say + .5);
+  const said = S.feed.slice(f0).find(f => f.team === 1 && /um civil morto/.test(f.text)), logged = S.glog.l[1].slice(l0).find(e => /por fogo nosso/.test(e.s));
+  ok(said && !/tíquetes/.test(said.text) && logged && !/tíquetes/.test(logged.s), 'and the feed and the log tell the death with no tickets: ' + (said && said.text)); S.cq.ph = 0;
 }
 
 console.log('-- a town that turns against a side --');
@@ -133,7 +136,7 @@ load({ seed: 34 }); fresh('modern'); C.run(2);
   ok(D().roe[0] === r0, 'a hold at the same place is written down once every ' + CIV.roe.note + ' s');
   const Cm = S.cmd[0], M = C.cmdMission(Cm, 'he', c.x + 5, c.z, 3, 90);
   ok(!M.tg && C.cmdFire(art, 250, w.range, false) === null, 'a fire mission on a bare point among civilians in sight waits');
-  M.usr = 1; ok(C.cmdFire(art, 250, w.range, false) === M, 'unless a person or a model ordered it (M.usr)');
+  M.usr = 1; ok(C.cmdFire(art, 250, w.range, false) === M, 'unless a person ordered it (M.usr)');
   M.dead = true;
   const sm = C.cmdMission(Cm, 'smk', c.x + 5, c.z, 1, 90); ok(C.cmdFire(art, 250, w.range, true) === sm, 'smoke is never held'); sm.dead = true;
   e.sx = e.x; e.sz = e.z; Cm.known = [e];
@@ -151,6 +154,37 @@ load({ seed: 34 }); fresh('modern'); C.run(2);
   C.run(CIV.roe.every * 1.5, () => { ob.x = c2.x + 4; ob.z = c2.z; });
   ok(c2.in || (c2.sn && S.t - c2.sn[0] < CIV.roe.every * 2 && !(S.t - c2.sn[1] < 1e8)), 'a soldier of side 0 beside a civilian: side 0 sees it, side 1 does not');
   ok(S.civs.filter(x => x.sn && S.t - x.sn[1] < 5).length === 0, 'and side 1, with nobody on the map, sees none');
+}
+
+console.log('-- a fire mission ordered among civilians in sight: a model is refused (roe), a person is warned and pays --');
+load({ seed: 37 }); fresh('modern'); C.run(2);
+{
+  const GEN = $('GEN'), { g, b } = bigTown(), L = ofTown(g).filter(c => !c.in).slice(0, 6), p = { x: L[0].x, z: L[0].z }, Cm = C.cmdOf(0);
+  const art = C.addUnit('art', 0, b.x > S.W / 2 ? b.x - 3000 : b.x + 3000, b.z, S.E.sides[S.fac[0]].art, true);
+  let seen = -1e9;
+  const pin = () => L.forEach((o, i) => { if (o.dead) return; o.mode = 2; o.goal = null; o.v = { x: 0, y: 0, z: 0 }; o.in = null; o.x = p.x + (i % 3) * 3; o.z = p.z + Math.floor(i / 3) * 3; o.sn = [seen, -1e9]; });
+  const live = () => Cm.fm.filter(M => !M.dead && S.t < M.T && M.k === 'he');
+  pin(); C.run(.05, pin);
+  C.genCtl(0, 'mcp', { eco: 0, atk: 0, def: 0, sup: 0 });
+  let r = C.genCmd(0, { c: 'fire', k: 'he', x: p.x, z: p.z, n: 3 }, 'mcp');
+  ok(r.ok && live().length === 1 && !live()[0].usr, 'a model\'s fire mission where its side has seen no civilian lately: accepted, and the rules of engagement still weigh it (no M.usr)');
+  for (const M of live()) M.dead = true;
+  seen = S.t; pin();
+  r = C.genCmd(0, { c: 'fire', k: 'he', x: p.x, z: p.z, n: 3 }, 'mcp');
+  ok(!r.ok && r.why === 'roe' && GEN.no.roe === 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento', 'with civilians its side saw there a moment ago and a bare point for a target: refused, ' + GEN.no.roe);
+  ok(live().length === 0 && S.gj.some(j => j.by === 'mcp' && j.c.c === 'fire' && !j.ok && j.why === 'roe'), 'no fire mission is queued, and the journal has the refusal');
+  r = C.genCmd(0, { c: 'fire', k: 'smk', x: p.x, z: p.z, n: 1 }, 'mcp');
+  ok(r.ok, 'smoke there is not barred by the rules (' + (r.ok ? 'accepted' : r.why) + ')');
+  for (const M of Cm.fm) M.dead = true;
+  C.genCtl(0, 'me', { eco: 0, atk: 0, def: 0, sup: 0 });
+  const n0 = S.glog.l[0].length;
+  r = C.genCmd(0, { c: 'fire', k: 'he', x: p.x, z: p.z, n: 8 }, 'me');
+  const M = live()[0], warn = S.glog.l[0].slice(n0).find(e => e.k === 'fire' && /civis à vista e alvo não identificado/.test(e.s));
+  ok(r.ok && M && M.usr, 'a person\'s order at the same spot: accepted, the mission theirs to answer for (M.usr)');
+  ok(warn && warn.s.includes(CIV.toll + ' tíquetes'), 'with a warning in the log: ' + (warn && warn.s));
+  const D = C.civD(), d0 = D.n[0], t0 = D.tk[0];
+  C.run(90, () => { seen = S.t; pin(); });
+  ok(D.n[0] > d0 && D.tk[0] - t0 === (D.n[0] - d0) * CIV.toll, 'the battery fires it among them, and side 0 pays ' + CIV.toll + ' tickets a civilian killed (' + (D.n[0] - d0) + ' killed, ' + (D.tk[0] - t0) + ' paid)');
 }
 
 console.log('-- the general\'s order: mil --');

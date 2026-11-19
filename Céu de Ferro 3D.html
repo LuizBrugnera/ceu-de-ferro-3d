@@ -2071,7 +2071,6 @@ heliGround = (g => (id, t, i, ai) => (ai ? dispatchIf(t, { why: 'transporte aér
 reqOpen = (g => (C, kind, id, ri) => dispatch(C.t, { why: 'requisição', target: { ri } }, () => g(C, kind, id, ri)))(reqOpen);
 radScan = (g => () => dispatch(-1, { kind: 'support', why: 'rádio da frente' }, g))(radScan);
 postGarr = (g => f => dispatch(f.team, { kind: 'garrison', why: 'guarnição do posto' }, () => g(f)))(postGarr);
-civTake = (g => (w, t, ...a) => dispatch(t, { kind: 'garrison', why: 'milícia da vila' }, () => g(w, t, ...a)))(civTake);
 demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeepAlive);
 /* Dispatch: the opening, then with an economy the general's (gpStep), else on the classic clocks: per side the base AA, the planes and the columns,
    each by an order with its mission */
@@ -7176,7 +7175,7 @@ Net.rx.civ = m => {
   if (!S.net || S.host || !Array.isArray(m.e)) return;
   if (!S.civs) civBegin();
   if (m.k === 1) { for (let i = 0; i + 2 < m.e.length; i += 3) S.civM.set(m.e[i], [m.e[i + 1], m.e[i + 2], S.t]); return; }
-  if (m.k === 2) { if (m.e.length === 4 && m.e.every(Number.isInteger)) civHeard(m.e[0], m.e[1], m.e[2], m.e[3]); return; }
+  if (m.k === 2) { if (m.e.length === 5 && m.e.every(Number.isInteger)) civHeard(m.e[0], m.e[1], m.e[2], m.e[3], m.e[4]); return; }
   for (const e of m.e) {
     if (!Array.isArray(e) || e.length !== 6) continue;
     const [id, x, z, h, f, pi] = e; let c = S.civI.get(id);
@@ -7208,7 +7207,7 @@ function civSend(dt) {
   if (S.civR === 0 && (S.civB = ((S.civB || 0) + 1) % 2) === 0) {
     const l = []; for (const m of S.men) if (m.mil && m.aid && !m.dead) l.push(m.aid, m.pi | 0, m.own === undefined ? 0 : m.own);
     for (let j = 0; j < l.length; j += 90) Net.send('civ', { k: 1, e: l.slice(j, j + 90) });
-    if (S.civD) for (const bi in S.civD.foe) Net.send('civ', { k: 2, e: [-1, 0, +bi, S.civD.foe[bi]] });
+    if (S.civD) for (const bi in S.civD.foe) Net.send('civ', { k: 2, e: [-1, 0, +bi, S.civD.foe[bi], 0] });
   }
 }
 /* a guest: what it owes the host (its own hits), and the militia it is told of, marked on the soldiers that came in the AI's snapshots */
@@ -7251,7 +7250,7 @@ function civStep(dt) {
    towns that turned (index in S.T.burgs: bits of the sides), hits the deaths by side in each town, say what the feed has yet to tell by side, mil the
    militia squads raised by side, rv when a town that turned arms its next squad, cl when a person's general may arm a town again (town:side), roe the holds by side (rT: when each place was last noted),
    evac and back the towns that emptied and came home */
-const civD = () => S.civD || (S.civD = { n: [0, 0], tk: [0, 0], dead: 0, foe: {}, hits: {}, say: [{ n: 0, T: 0 }, { n: 0, T: 0 }], mil: [0, 0], rv: {}, cl: {}, roe: [0, 0], rT: {}, evac: 0, back: 0 });
+const civD = () => S.civD || (S.civD = { n: [0, 0], tk: [0, 0], dead: 0, foe: {}, hits: {}, say: [{ n: 0, tk: 0, T: 0 }, { n: 0, tk: 0, T: 0 }], mil: [0, 0], rv: {}, cl: {}, roe: [0, 0], rT: {}, evac: 0, back: 0 });
 /* the town a civilian belongs to (its index in S.T.burgs, -1 none): its group's, else (a copy of the host's) where it stands */
 function civBi(c) {
   const B = S.T.burgs, b = (c.g && c.g.b) || B.find(b => hdist(b, c) < b.ru + 30);
@@ -7274,7 +7273,7 @@ function civToll(c, by) {
   if (t < 0) return;   // a death of no side's doing: nobody pays
   D.n[t]++;
   if (paid) { S.cq.tk[t] -= paid; D.tk[t] += paid; }
-  const s = D.say[t]; s.n++; if (!s.T) s.T = S.t + CIV.say;
+  const s = D.say[t]; s.n++; s.tk += paid; if (!s.T) s.T = S.t + CIV.say;
   if (bi < 0) return;
   const h = D.hits[bi] || (D.hits[bi] = [0, 0]); h[t]++;
   if (h[t] >= CIV.rage.n && !civHates(bi, t)) civTurn(bi, t);
@@ -7283,8 +7282,8 @@ function civToll(c, by) {
 function civTurn(bi, t) {
   const D = civD(), b = S.T.burgs[bi], nm = civName(b);
   D.foe[bi] = (D.foe[bi] | 0) | (1 << t);
-  civHeard(t, 0, bi, D.foe[bi]);
-  if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, 0, bi, D.foe[bi]] });
+  civHeard(t, 0, bi, D.foe[bi], 0);
+  if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, 0, bi, D.foe[bi], 0] });
   gLog(t, 'rep', 'A população de ' + nm + ' se voltou contra nós: ' + CIV.rage.n + ' civis mortos por fogo nosso', b, 'cvt' + bi);
   gLog(1 - t, 'rep', 'A população de ' + nm + ' se voltou contra o inimigo', b, 'cvt' + bi);
   anaCv('turn', t, { b: bi, nm });
@@ -7300,13 +7299,14 @@ function civRevolt(bi) {
 }
 /* the general of side t raises the town w's militia: its AI's choice where the AI holds the defence, else the town arms itself for the side */
 function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def') === 'ai' ? 'ai' : 'sys'); }
-/* what this page shows of it: the feed, and the general's log where the battle is simulated. t the side, n civilians it killed, bi a town, f the sides it hates */
-function civHeard(t, n, bi, f) {
+/* what this page shows of it: the feed, and the general's log where the battle is simulated. t the side, n civilians it killed, bi a town, f the sides it hates,
+   tk the tickets those deaths cost it */
+function civHeard(t, n, bi, f, tk) {
   const D = civD(), b = bi >= 0 && S.T.burgs[bi], was = b ? D.foe[bi] | 0 : 0;
   if (b && f >= 0 && f < 4) D.foe[bi] = was | f;
   if ((t === 0 || t === 1) && n > 0) {
-    cqSay(civSide(t) + ': ' + (n > 1 ? n + ' civis mortos' : 'um civil morto') + (CIV.toll && S.cq ? ' · −' + n * CIV.toll + ' tíquetes' : ''), t);
-    if (!S.net || S.host) gLog(t, 'rep', (n > 1 ? n + ' civis mortos' : 'Um civil morto') + ' por fogo nosso' + (CIV.toll && S.cq ? ': −' + n * CIV.toll + ' tíquetes' : ''));
+    cqSay(civSide(t) + ': ' + (n > 1 ? n + ' civis mortos' : 'um civil morto') + (tk > 0 ? ' · −' + tk + ' tíquetes' : ''), t);
+    if (!S.net || S.host) gLog(t, 'rep', (n > 1 ? n + ' civis mortos' : 'Um civil morto') + ' por fogo nosso' + (tk > 0 ? ': −' + tk + ' tíquetes' : ''));
   }
   if (b && (t === 0 || t === 1) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
 }
@@ -7315,9 +7315,9 @@ function civSays() {
   const D = S.civD; if (!D || (S.net && !S.host)) return;
   D.say.forEach((s, t) => {
     if (!s.n || S.t < s.T) return;
-    civHeard(t, s.n, -1, 0);
-    if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, s.n, -1, 0] });
-    s.n = 0; s.T = 0;
+    civHeard(t, s.n, -1, 0, s.tk);
+    if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, s.n, -1, 0, s.tk] });
+    s.n = 0; s.tk = 0; s.T = 0;
   });
 }
 /* evacuation, and the towns that turned arming their next squad: at each look of the planner */
@@ -7412,13 +7412,17 @@ function roeIdf(t, o) {
   const k = o.kn && o.kn[t], e = k && k.by && !k.by.dead && k.by.pm && k.by.pm.get(o);
   return !!e && e.kn && e.ic >= 1;
 }
-/* must the AI of side t hold a burst of radius r at x z on target o: a civilian it has seen there lately, and o not identified */
-function roeHeld(t, x, z, r, o) {
+/* do side t's rules of engagement bar a burst of radius r at x z on target o: a civilian it has seen there lately, and o not identified */
+function roeBar(t, x, z, r, o) {
   if (!CIV.roe.on || !S.civs || !S.civs.length || (t !== 0 && t !== 1)) return false;
   const K = CIV.roe, R = (r || 0) + K.pad;
   let near = false;
   for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
-  if (!near || roeIdf(t, o)) return false;
+  return near && !roeIdf(t, o);
+}
+/* must the AI of side t hold that burst (roeBar), written down when it does */
+function roeHeld(t, x, z, r, o) {
+  if (!roeBar(t, x, z, r, o)) return false;
   roeNote(t, x, z);
   return true;
 }
@@ -10057,7 +10061,7 @@ function cmdMission(C, k, x, z, n, life, op) {
   C.fm.push(M); return M;
 }
 /* the mission a shooter at u with range [lo, hi] takes: smoke first, then the nearest; smk: it has smoke rounds. A burst the rules of engagement hold
-   (roeHeld on its target M.tg) waits, unless a person or a model ordered it (M.usr) */
+   (roeHeld on its target M.tg) waits, unless a person ordered it (M.usr) */
 function cmdFire(u, lo, hi, smk) {
   const C = S.cmd && S.cmd[u.team]; let best = null, bd = 1e9;
   if (C) for (const M of C.fm) {
@@ -15721,15 +15725,17 @@ anaReport = (f => (ev, me) => {
    mil, the general's order { pi a point of the match on a town | x z within a town }: the town's civilians become a militia squad of the side that
    holds it, through a Dispatch order (civTake). Refused where the town turned against the side (hate), with nobody left to arm (nociv), and, for a
    person or a model, with fewer than FIELD.held soldiers of the side in the town (mil0) or within CIV.mil.every s of the last there (cool). The AI's
-   own choice is civPlan's (civRaise: a town held long enough with no enemy near). fire: a person's or a model's fire mission is theirs to answer for
-   (M.usr): the rules of engagement do not hold it, the toll still charges it. cmdMission: a burst on something the side knows (C.known standing
+   own choice is civPlan's (civRaise: a town held long enough with no enemy near). fire: a model is a general, held as the AI is: its burst the rules of
+   engagement would hold (roeHeld, by the widest burst of the side's mortars and batteries) is refused (roe). A person's is theirs to answer for (M.usr):
+   not held, with a warning in the log where the rules bar it, and the toll still charges it. cmdMission: a burst on something the side knows (C.known standing
    there, an economy site it has found) carries it as M.tg, which roeHeld weighs. The state (genState) carries civ: civilians the side killed and
    the enemy, the tickets it paid, its holds, and each town with people: home, away (evacuated), and whom it hates (us, them, both).
    Analytics, event cv { c, s the side or -1, b the town (S.T.burgs) }: kill (tk tickets it cost, x z), turn (nm), mil (n, why: ai, sys, me, mcp,
    turn), evac (n, x z the refuge, nm), back, roe (x z); the snapshot's cv: [alive, away, inside]. The review's civ: by side killed, tk, mil, roe;
    turned [{ t, s, nm }], evac, back, dead (all, by nobody's fire too); each side's tickets: civ, out of other */
 Object.assign(GEN.cn, { mil: 'milícia' });
-Object.assign(GEN.no, { hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila', mil0: 'Sem tropa nossa na vila para armar os civis' });
+Object.assign(GEN.no, { hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila', mil0: 'Sem tropa nossa na vila para armar os civis',
+  roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento' });
 GC.mil = { d: 'def', f(t, c, by) {
   let w = null, b = null;
   if (Number.isInteger(c.pi)) { w = gPts()[c.pi]; if (!w) return gBad('at'); b = S.T.burgs.find(o => hdist(o, w) < 150) || null; }
@@ -15748,7 +15754,18 @@ GC.mil = { d: 'def', f(t, c, by) {
   D.cl[k] = S.t + CIV.mil.every;
   return gYes();
 } };
-GC.fire.f = (f => (t, c, by, R) => { const C = cmdOf(t), n = C.fm.length, r = f(t, c, by, R); if (by !== 'ai') for (const M of C.fm.slice(n)) M.usr = 1; return r; })(GC.fire.f);
+GC.fire.f = (f => (t, c, by, R) => {
+  const C = cmdOf(t), n = C.fm.length, r = f(t, c, by, R);
+  if (!r.ok || by === 'ai') return r;
+  let w = 0;
+  for (const m of S.men) if (m.def.mort && !m.dead && m.team === t) w = Math.max(w, m.arms[1].d.r || 0);
+  for (const u of S.units) if (u.kind === 'art' && !u.dead && u.team === t) w = Math.max(w, u.arms[0].d.r || 0);
+  const L = C.fm.slice(n), me = by === 'me', bar = L.some(M => M.k !== 'smk' && (me ? roeBar : roeHeld)(t, M.x, M.z, w, M.tg));
+  if (!me) { if (bar) { C.fm.length = n; return gBad('roe'); } return r; }
+  for (const M of L) M.usr = 1;
+  if (bar) gLog(t, 'fire', 'Atenção: civis à vista e alvo não identificado. Fogo mantido por ordem sua; cada civil morto custa ' + CIV.toll + ' tíquetes', { x: c.x, z: c.z });
+  return r;
+})(GC.fire.f);
 cmdMission = (f => (C, k, x, z, n, life, op) => {
   const M = f(C, k, x, z, n, life, op);
   if (k !== 'smk') M.tg = (C.known || []).find(o => !o.dead && o.sx === x && o.sz === z) || (S.eco ? S.eco.l.find(e => !e.dead && e.team !== C.t && !ecoHid(e, C.t) && Math.hypot(e.x - x, e.z - z) < 30) : null) || null;

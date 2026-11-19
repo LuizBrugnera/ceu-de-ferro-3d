@@ -55,8 +55,8 @@ const N = require('./net'), { ok, done } = require('./harness');
   h.send({ t: 'obj', e: [7, 2], full: 1 }); const o3 = await a.wait('obj'); ok(o3 && o3.full === 1, 'obj with full: 1 keeps the mark');
   await N.sleep(60); for (const c of [h, a, b]) c.got.forEach(m => { m.seen = 1; });
   a.send({ t: 'obj', e: [12, 2] }); ok(await none(b, 'obj') && await none(h, 'obj'), 'obj from a guest is dropped');
-  for (const e of [[12], [12, 3], [12, 0], [-1, 1], [70000, 1], [1.5, 1], ['a', 1], [], new Array(202).fill(1)]) h.send({ t: 'obj', e }); h.send({ t: 'obj', e: 5 }); h.send({ t: 'obj' });
-  ok(await none(a, 'obj'), 'malformed obj is dropped: odd length, a stage other than 1 or 2, an id out of range, too long, not a list');
+  for (const e of [[12], [12, 3], [12, -1], [-1, 1], [70000, 1], [1.5, 1], ['a', 1], [], new Array(202).fill(1)]) h.send({ t: 'obj', e }); h.send({ t: 'obj', e: 5 }); h.send({ t: 'obj' });
+  ok(await none(a, 'obj'), 'malformed obj is dropped: odd length, a stage other than 0, 1 or 2, an id out of range, too long, not a list');
   h.send({ t: 'obj', e: new Array(200).fill(1) }); ok(!!(await a.wait('obj')), 'a list of 100 pairs passes');
   /* buildings: bld from the host to the room (states, fallen, storeys, snapshot), bhit from anyone else to the host alone */
   if (h.w.bld === 1) {

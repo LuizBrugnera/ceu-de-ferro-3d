@@ -14889,8 +14889,9 @@ DRILLS.push(
     man(q, d, m, A) { A.st = 1; drCtl(A, { face: { x: d.f.x + ((A.i % 5) - 2) * 6, y: d.f.y, z: d.f.z }, fire: 1 }); } },
   { id: 'com-carro', cls: 'inf', s: 'avançando com carro amigo: atrás dele como cobertura, protegê-lo do anticarro', min: 5, max: 90,
     when(q, bt, d, K) {
-      const G = DRILL.inf.esc, O = K.O; if (!K.mv || !(O.k === 'move' || O.k === 'assault' || O.k === 'escort')) return 0;
-      const D = drDest(q), L = K.L;
+      const G = DRILL.inf.esc, O = K.O; if (!K.mv || !(O.k === 'move' || O.k === 'assault' || O.k === 'escort') || O.lead) return 0;   // a squad its team sent ahead to clear (CA lead) goes on its own
+      const D = drDest(q), L = K.L, T = CA.on && q.caT, P = T && T.on && T.u && !T.u.dead && !T.u.cargo ? T.u : null;
+      if (P && hdist(P, L) < CA.near && (d ? d.of === P : Math.hypot((P.v || ZERO).x, (P.v || ZERO).z) > .5)) return { u: .95, of: P };   // its team's tank (CA), from farther and at any pace
       for (const u of S.units) if (!u.dead && u.team === q.team && (u.kind === 'tank' || u.kind === 'lav') && Math.abs(u.x - L.x) < G.r && Math.abs(u.z - L.z) < G.r && hdist(u, L) < G.r && (d ? d.of === u : true)) {
         const v = u.v || ZERO, sp = Math.hypot(v.x, v.z); if (sp > 1 && sp < G.v && v.x * (D.x - L.x) + v.z * (D.z - L.z) > 0) return { u: .9, of: u };   // at a walk: one racing ahead is no cover
       }
@@ -14898,7 +14899,8 @@ DRILLS.push(
     },
     man(q, d, m, A) {
       const G = DRILL.inf.esc, u = d.of; if (!u || u.dead) return;
-      const fx = Math.cos(u.h), fz = -Math.sin(u.h), b = G.back[0] + (A.i >> 1) * (G.back[1] - G.back[0]) / 3, s = (A.i & 1 ? 1 : -1) * G.side, p = { x: u.x - fx * b - fz * s, z: u.z - fz * b + fx * s };
+      const fx = Math.cos(u.h), fz = -Math.sin(u.h), b = G.back[0] + (A.i >> 1) * (G.back[1] - G.back[0]) / 3, s = (A.i & 1 ? 1 : -1) * G.side;
+      const T = q.caT, fb = CA.on && T && T.u === u && T.close ? CA.ahead + b : -b, p = { x: u.x + fx * fb - fz * s, z: u.z + fz * fb + fx * s };   // its team's tank in close terrain (CA): ahead of it, else behind
       drGo(m, A, p, hdist(m, p) > 8, 0);
       const at = belTop(q, b => b.c === 'at' && b.d < 300 && drFresh(b, 2));   // the anti-tank soldier first
       if (at && at.o !== A.tgt && known(A, m, at.o)) A.tgt = at.o;
@@ -15170,7 +15172,7 @@ DRILLS.push(
       const G = DRILL.veh.town; if (!dvOk(u) || !u.rail || u.fixed || u.run || u.trip || (u.ai.tgt && !u.ai.tgt.dead) || dvWay(u) < 0 || Math.abs(u.sp) < (d ? -1 : .5)) return 0;
       const R = S.T.routes[u.ri]; if (!R) return 0;
       if (!d) { const p = routeAt(R, clamp(u.s + u.ds * G.ahead, 0, R.len)), wood = [0, 1, 2, 3].every(k => kindAt(p.x + Math.cos(k * 1.57) * 60, p.z + Math.sin(k * 1.57) * 60) === 1); if (near(p.x, p.z, G.r).filter(o => o.B && S.os[o.id] < 2).length < G.bld && !wood) return 0; }   // a town, or a wood all round
-      const ahead = S.squads.some(q => q.team === u.team && q.live > 0 && q.ri === u.ri && (q.s - u.s) * u.ds > 0 && (q.s - u.s) * u.ds < G.mate);
+      const ahead = S.squads.some(q => q.team === u.team && q.live > 0 && q.ri === u.ri && (q.s - u.s) * u.ds > 0 && (q.s - u.s) * u.ds < G.mate) || (CA.on && !!u.caT && !!u.caT.on && u.caT.a >= CA.ahead);   // or its team's squad (CA), from any road
       return ahead ? 0 : .95;
     },
     act(u) { rep(u, 'need', { k: 'inf' }); },
@@ -29583,6 +29585,261 @@ function stkView(t) {
 }
 genState = (g => t => { const o = g(t); if (o) o.stk = stkView(t); return o; })(genState);
 genQuery = (g => (t, q) => (q && q.q === 'stk' ? stkView(t) || gBad('off') : g(t, q)))(genQuery);
+/* ---------- combined arms (CA; não testado, see docs/nao-testado/cf-armas-combinadas.md): tanks and infantry as teams, at the unit level ----------
+   The captain: "tanques devem apoiar a infantaria e vice versa". Every CA.every s each side's general pairs each of its tanks and armoured cars
+   (an AI one, or a player's) that has no team with the best free squad of its side within CA.r m (CA.rArm times as far while the strategy
+   Armas combinadas, M8 arm, is active): the squad the vehicle just let off first, then one on the same mission, on the same road, the nearest.
+   An AI tank with no squad near pairs with the player on foot, if he is near. A team (S.ca, u.caT and q.caT the same record) lasts until one of
+   them is gone or broken, a squad turns to work that is not a fight beside a tank (CA.skip, CA.mis), they are more than keep m apart for far s,
+   or one waited for the other more than wait s; a re-tasked squad keeps its tank (it follows, below) and the general never splits them for
+   a new order. What the team does, each CA.tick s (caKeep: where the squad is, ahead of the tank along its way (a) or behind, close terrain
+   ahead: a town (bld standing buildings within r m) or a wood all round, close.ahead m on) and in the controllers:
+     pace: the slower one sets it. An AI tank does not drive on while its squad is more than lag m behind it (in the open), or while it is not
+       ahead m in front of it in close terrain, and at a walk when it is near that; its squad does not walk on more than lag m (close: ahead +
+       lag m) ahead of its tank while the tank can follow. Neither waits more than wait s (swait the squad): then the team breaks;
+     lead: in close terrain with its squad not ahead, a free squad (not in an operation, a call or a ride) goes ahead to clear the buildings
+       (an assault to the point ahead, leadT s at most) and goes back to its order once the tank is there; the tank waits for it ('cidade');
+     escort: the squad's men ahead of the tank in close terrain and behind or beside it in the open (the drill 'com-carro', its spacing the
+       organic movement's); a squad with a player's tank moves up to it (every 10 s) when it is more than near m off;
+     tanks support infantry: an AI tank with nothing of its own to fight lays its guns on what has its squad under fire (the squad's freshest
+       ground contact within its reach, that the tank itself knows of); its squad's call for fire goes to it first, from any road;
+     infantry supports tanks: an anti-tank soldier believed (by the squad or by the tank) within hunt m of the tank: the drill 'escolta-ca',
+       half the squad out toward him, the rest by the tank, every man on him once he knows him; the tank's call to clear goes to its squad first;
+       an AI armoured car carrying a squad lets it off dis m short of close terrain or of an anti-tank soldier it believes, and they pair;
+     spotting: what one of the team makes out reaches the other in told s (the radio inside the team: SHARE.pl and SHARE.side for the rest);
+     the calls (W9): a partner's call comes first: its partner answering another's call drops it (helpRefuse) when it can answer this one;
+     re-tasked: an AI tank more than follow m from its squad (a new order took the squad away) drives to it by the network (tripTo), fcool s apart.
+   Only where the battle is simulated; CA.on 0: none of it. The counters in S.caN (made, broke by why, lead, follow, prio, dis, esc) */
+const CA = { on: 1, every: 4, tick: 1, r: 350, rArm: 1.5, keep: 700, far: 30, cool: 60, ahead: 30, lag: 40, wait: 120, swait: 90, near: 120, told: .7,
+  close: { ahead: 160, r: 110, bld: 3 }, hunt: 250, dis: 350, follow: 300, fcool: 60, leadT: 120,
+  skip: { mort: 1, rec: 1, lp: 1, sap: 1, eng: 1, garr: 1, amb: 1, fpost: 1, wood: 1 }, mis: { garrison: 1, ambush: 1, recon: 1, build: 1 } };
+const caN = () => S.caN || (S.caN = { made: 0, broke: {}, lead: 0, follow: 0, prio: 0, dis: 0, esc: 0 });
+const caAt = p => (p.men ? p.men.find(m => !m.dead && !m.down) || p.men.find(m => !m.dead) || p.men[0] : p);
+const caPlr = u => !u.ai;   // a player's vehicle (his own, or a guest's on the host)
+const caMate = o => { const T = o && o.caT; return T ? (T.u === o ? T.q : T.q === o ? T.u : null) : null; };
+/* a tank or an armoured car that may lead a team */
+const caArm = u => (u.kind === 'tank' || u.kind === 'lav') && !u.dead && !u.gone && !u.fixed && !u.imm && !u.cargo &&
+  (u.ai ? !u.net && !u.ai.park && !u.run : u === S.my || (!!u.net && !!u.pid));
+/* a squad that may fight beside one */
+const caInf = q => !!q.men && !q.net && !q.mil && q.live >= 3 && !q.state && !(q.rd && q.rd.st === 'ride') && !q.lift && !CA.skip[q.job] && !(q.mis && CA.mis[q.mis.kind]);
+/* the player on foot, of side t */
+const caPl = t => { const m = S.my; return m && m.man && !m.dead && !m.in && m.team === t ? m : null; };
+/* the way the vehicle goes: its road's (an AI on its road), else where it faces */
+function caFwd(u) {
+  const r = u.ai && !u.net && !u.trip && u.ri !== undefined ? S.T.routes[u.ri] : null;
+  if (r) { const p = routeAt(r, u.s), k = u.ds || 1; return { x: p.dx * k, z: p.dz * k }; }
+  return { x: Math.cos(u.h), z: -Math.sin(u.h) };
+}
+function caAhead(u, f) {
+  const r = u.ai && !u.net && !u.trip && u.ri !== undefined ? S.T.routes[u.ri] : null, A = CA.close.ahead;
+  return r ? routeAt(r, clamp(u.s + (u.ds || 1) * A, 0, r.len)) : { x: u.x + f.x * A, z: u.z + f.z * A };
+}
+/* close terrain at x z: a town (bld standing buildings within r m) or a wood all round */
+function caClose(x, z) {
+  const C = CA.close; let n = 0;
+  for (const o of near(x, z, C.r)) if (o.B && S.os[o.id] < 2 && ++n >= C.bld) return true;
+  return [0, 1, 2, 3].every(k => kindAt(x + Math.cos(k * 1.57) * 60, z + Math.sin(k * 1.57) * 60) === 1);
+}
+/* a squad the team may send somewhere of its own (the lead, a player's escort): not in an operation, a call, a ride or a post's work */
+const caFree = (q, T) => !!q.men && !q.net && !q.op && !q.help && !q.hprev && !q.state && !q.lift && !q.rd && !(q.mis && CA.mis[q.mis.kind]) &&
+  (!q.ord || (q.ord.ca === T.id) || !['withdraw', 'supply', 'build', 'mortar', 'ambush', 'overwatch', 'observe'].includes(q.ord.k));
+const caWho = o => (o.men ? helpWho(o) : o === S.my || o.pid ? 'o jogador' : helpWho(o));
+function caPair(u, q, why) {
+  const T = { id: (S.caId = (S.caId || 0) + 1), t: u.team, u, q, T0: S.t, ai: !!(u.ai && !u.net), pl: caPlr(u) || !q.men, a: 0, lat: 0, d: 0, close: 0, on: 1, held: 0, sh: 0, far: 0,
+    f: caFwd(u), kT: 0 };
+  u.caT = q.caT = T; (S.ca || (S.ca = [])).push(T); caN().made++;
+  gLog(u.team, 'ord', 'Armas combinadas: ' + caWho(u) + ' e ' + caWho(q) + ' formam uma equipe' + (why ? ' (' + why + ')' : ''), caAt(q), 'cam' + T.id);
+  caKeep(T);
+  return T;
+}
+/* the team is over: what it sent the squad to do goes back to its order, and (cd) neither pairs again for CA.cool s */
+function caBreak(T, why, cd) {
+  if (T.end) return;
+  T.end = S.t; const u = T.u, q = T.q, N = caN();
+  caBack(T, 'lead'); caBack(T, 'esc');
+  if (u.caT === T) u.caT = null;
+  if (q.caT === T) q.caT = null;
+  if (cd) { u.caNo = S.t + CA.cool; q.caNo = S.t + CA.cool; }
+  N.broke[why] = (N.broke[why] || 0) + 1;
+  if (S.ca) S.ca = S.ca.filter(o => o !== T);
+  if (cd) gLog(T.t, 'ord', 'Armas combinadas: ' + caWho(u) + ' e ' + caWho(q) + ' se separam (' + why + ')', caAt(q), 'cab' + T.id);
+}
+/* the order the team gave its squad (T.lead, T.esc), over: the one it had again, unless someone has given it another meanwhile */
+function caBack(T, k) {
+  const L = T[k], q = T.q; T[k] = null;
+  if (!L || !q.men || q.ord !== L.O || q.live <= 0 || q.state) return;
+  setOrd(q, L.prev || { k: 'hold', ri: q.ri, s: q.s });
+}
+/* a squad's own errand for the team: prev, the order it had */
+function caSend(T, k, O) {
+  const q = T.q, prev = T[k] ? T[k].prev : q.ord;
+  setOrd(q, Object.assign(O, { ca: T.id }));
+  T[k] = { prev, O: q.ord, T0: S.t };
+}
+/* side t's general makes its teams */
+function caSide(t) {
+  const arm = [], inf = [];
+  for (const u of S.units) if (u.team === t && !u.caT && S.t > (u.caNo || 0) && caArm(u)) arm.push(u);
+  if (!arm.length) return;
+  for (const q of S.squads) if (q.team === t && !q.caT && S.t > (q.caNo || 0) && caInf(q)) inf.push(q);
+  const P = caPl(t); if (P && !P.caT && S.t > (P.caNo || 0)) inf.push(P);
+  if (!inf.length) return;
+  const C = S.cmd && S.cmd[t], R = CA.r * (C && stgHas(C, 'arm') ? CA.rArm : 1);
+  arm.sort((a, b) => (caPlr(b) ? 1 : 0) - (caPlr(a) ? 1 : 0));   // a player's tank first
+  for (const u of arm) {
+    let best = null, bs = 1e9;
+    for (const q of inf) {
+      if (q.caT || (!q.men && (caPlr(u) || u.kind !== 'tank'))) continue;   // the player on foot: an AI tank's
+      const d = hdist(u, caAt(q)); if (d > R) continue;
+      const s = d + (u.sq === q ? -300 : 0) + (q.men && u.mis && q.mis && u.mis.id === q.mis.id ? 0 : 120) + (q.men && u.ri === q.ri ? 0 : 80) + (q.men ? 0 : -60);
+      if (s < bs) { bs = s; best = q; }
+    }
+    if (best) caPair(u, best, u.sq === best ? 'a esquadra que ele trouxe' : C && stgHas(C, 'arm') ? 'estratégia de armas combinadas' : '');
+  }
+}
+/* each CA.tick s: where the two of a team stand, and what the team does about it */
+function caKeep(T) {
+  const u = T.u, q = T.q;
+  const out = o => !o || o.dead || o.gone || (o.men ? o.live < 2 || !!o.state || o.net : false);
+  if (out(u) || out(q) || u.imm || u.fixed) return caBreak(T, 'baixa');
+  if (!u.ai && u !== S.my && !(u.net && u.pid)) return caBreak(T, 'o jogador saiu do veículo');
+  if (!q.men && (q !== S.my || q.in)) return caBreak(T, 'o jogador embarcou');
+  if (q.men && (q.mil || CA.skip[q.job] || (q.mis && CA.mis[q.mis.kind]))) return caBreak(T, 'outra tarefa');
+  const L = caAt(q), f = caFwd(u), dx = L.x - u.x, dz = L.z - u.z;
+  T.f = f; T.a = dx * f.x + dz * f.z; T.lat = Math.abs(dx * f.z - dz * f.x); T.d = Math.hypot(dx, dz);
+  T.on = !(q.men && ((q.rd && q.rd.st === 'ride') || q.lift)) && !u.cargo && T.d < CA.keep ? 1 : 0;
+  T.P = caAhead(u, f); T.close = caClose(T.P.x, T.P.z) || caClose(u.x, u.z) ? 1 : 0;
+  if (T.d > CA.keep && !(u.trip && T.fol)) { T.far = T.far || S.t; if (S.t - T.far > CA.far) return caBreak(T, 'longe demais', 1); } else T.far = 0;
+  if (T.held && S.t - T.held > CA.wait) return caBreak(T, 'a esquadra não acompanhou o carro', 1);
+  if (T.sh && S.t - T.sh > CA.swait) return caBreak(T, 'o carro não acompanhou a esquadra', 1);
+  if (u.trip !== T.fol) T.fol = null;
+  if (!q.men) return;
+  /* the lead: the squad ahead to clear close terrain the tank is coming to */
+  if (T.lead) { const D = T.lead; if (q.ord !== D.O) T.lead = null; else if (S.t - D.T0 > CA.leadT || hdist(u, D.P) < 50 || (!T.close && S.t - D.T0 > 20)) caBack(T, 'lead'); }
+  else if (T.close && T.on && T.a < CA.ahead && !T.esc && S.t > (T.leadT || 0) && caFree(q, T) && q.fd > IAI.hold &&
+    (T.ai ? !atLimit(u) && !u.trip && !(u.ai.m5) && u.ai.reloc === null : (u.sp || 0) > 1)) {
+    const P = T.P, rp = railOf(P.x, P.z);
+    caSend(T, 'lead', { k: 'assault', ri: rp.ri, s: rp.s, x: P.x, z: P.z, lead: 1 }); T.lead.P = { x: P.x, z: P.z }; T.leadT = S.t + CA.leadT + 30; caN().lead++;
+    gLog(T.t, 'ord', 'Armas combinadas: ' + caWho(q) + ' vai à frente de ' + caWho(u) + ' limpar os prédios e a mata', P, 'cal' + T.id);
+  }
+  /* a player's tank: its squad keeps up with it */
+  if (T.esc && q.ord !== T.esc.O) T.esc = null;
+  if (caPlr(u) && T.on && !T.lead && S.t > (T.eT || 0) && q.fd > IAI.hold && caFree(q, T) && T.d > CA.near * (T.esc ? .6 : 1)) {
+    T.eT = S.t + 10; const x = u.x - f.x * 15, z = u.z - f.z * 15, p = railOf(x, z);
+    caSend(T, 'esc', { k: 'move', ri: p.ri, s: p.s, x, z, R: 12, fast: 1 }); caN().esc++;
+  }
+  /* re-tasked: the AI tank goes to its squad */
+  if (T.ai && T.d > CA.follow && !T.fol && !(q.rd && q.rd.st === 'ride') && !q.lift && S.T.mv >= 4 && S.t > (T.fT || 0) && u.rail && !u.trip && !u.run && !u.ai.m5 && u.ai.reloc === null &&
+    !(u.ai.hs !== undefined && u.ai.hs !== null) && !(u.ai.tgt && !u.ai.tgt.dead) && !(u.mis && (u.mis.kind === 'defend' || u.mis.kind === 'garrison' || u.mis.kind === 'reserve'))) {
+    T.fT = S.t + CA.fcool;
+    const tr = tripTo(u, L.x, L.z, { why: 'armas combinadas: com ' + caWho(q) });
+    if (tr) { T.fol = tr; caN().follow++; gLog(T.t, 'ord', 'Armas combinadas: ' + caWho(u) + ' vai juntar-se a ' + caWho(q), L, 'caf' + T.id); }
+  }
+}
+function caStep(dt) {
+  if (!CA.on || !S || (S.net && !S.host)) return;
+  if ((S.caT = (S.caT || 0) - dt) <= 0) { S.caT = CA.tick; if (S.ca) for (const T of S.ca.slice()) caKeep(T); }
+  if ((S.caP = (S.caP || 0) - dt) <= 0) { S.caP = CA.every; for (const t of SIDES()) caSide(t); }
+}
+step = (g => dt => { g(dt); caStep(dt); })(step);
+/* an AI armoured car with a squad aboard lets it off short of close terrain or of an anti-tank soldier it believes, and they are a team */
+function caDis(u) {
+  const A = u.ai; if (u.mr || u.trip || u.run || A.park || !u.cargo) return;
+  const P = caAhead(u, caFwd(u));
+  if (!caClose(P.x, P.z) && !belTop(u, b => b.c === 'at' && b.d < CA.dis && S.t - b.t < 3)) return;
+  const q = letOff(u, false); if (!q) return;
+  caN().dis++;
+  if (u.caT) caBreak(u.caT, 'desembarque');
+  if (q.men && q.men.length >= 2) caPair(u, q, 'desembarque');
+}
+/* an AI tank with nothing of its own to fight lays its guns on what has its squad under fire, if it knows of it itself */
+function caSupport(u, T) {
+  const q = T.q, A = u.ai; if (!q.men || T.d > IAI.tank.mg || (A.tgt && !A.tgt.dead)) return;
+  if (!q.men.some(m => !m.dead && (m.sup > S.t || S.t - (m.hitT || -99) < 4))) return;
+  const b = belTop(q, (b, t) => S.t - b.t < 3 && b.g >= 2 && b.c !== 'plane' && b.c !== 'heli' && Math.hypot(b.x - u.x, b.z - u.z) < (t.man ? IAI.tank.mg : GAI.tank.fire)); if (!b) return;
+  const o = b.o;
+  if (o.man) { if (!o.in && known(A.im || {}, u, o)) A.inf = o; }
+  else if (known(A, u, o)) A.tgt = o;
+}
+/* the controllers of an AI tank and armoured car, with the team's pace */
+const caVeh = old => (u, dt) => {
+  if (!CA.on || !u.ai || u.net || (S.net && !S.host)) return old(u, dt);
+  const T = u.caT, s0 = u.s; old(u, dt);
+  if (u.dead) return;
+  const A = u.ai, think = A.think === GAI.think;
+  if (think && u.cargo && u.kind === 'lav') caDis(u);
+  if (!T || u.caT !== T || !T.on) { if (T) T.held = 0; return; }
+  if (think) caSupport(u, T);
+  const free = !A.m5 && !u.trip && !u.run && A.reloc === null && !(A.hs !== undefined && A.hs !== null) && !A.amb && !(u.dr && u.dr.id !== 'cidade') && !u.fixed;
+  let held = false;
+  if (free) {
+    const lim = T.close ? CA.ahead : -CA.lag, slow = lim + (T.close ? 15 : CA.lag / 2);
+    if (u.rail) { if (u.ctl.drive > 0) { if (T.a < lim) { u.ctl.drive = 0; held = true; } else if (T.a < slow) u.ctl.drive = Math.min(u.ctl.drive, FIELD.pace / u.def.spd); } }
+    else if (!(A.tgt && !A.tgt.dead) && (u.s - s0) * (u.ds || 1) > 0 && T.a < lim) { u.s = s0; held = true; }
+  }
+  T.held = held ? T.held || S.t : 0;
+};
+AI.tank = caVeh(AI.tank); AI.lav = caVeh(AI.lav);
+/* a squad with an AI tank does not walk on far ahead of it while the tank can follow */
+squadThink = (g => q => {
+  const T = CA.on && q.caT; if (!T || !T.on || !T.ai || T.end) return g(q);
+  const s0 = q.s, ts0 = q.ts, O0 = q.ord, tp0 = q.tp;
+  g(q);
+  const O = q.ord, u = T.u;
+  if (O !== O0 || q.tp !== tp0 || q.state || !O || O.rush || O.ca || O.help || !(O.k === 'move' || O.k === 'assault' || O.k === 'escort' || O.k === 'patrol') || q.fd < IAI.hold ||
+    T.a <= (T.close ? CA.ahead + CA.lag : CA.lag) || atLimit(u) || (u.mod && u.mod.drive < DRILL.veh.imm.drive) || (q.s === s0 && q.ts === ts0)) { T.sh = 0; return; }
+  const r = q.tp || S.T.routes[q.ri]; if (!r) return;
+  const a = routeAt(r, q.tp ? ts0 : s0), b = routeAt(r, q.tp ? q.ts : q.s);
+  if ((b.x - a.x) * T.f.x + (b.z - a.z) * T.f.z <= 0) return;   // on its way back toward the tank: on
+  q.s = s0; q.ts = ts0; T.sh = T.sh || S.t;
+})(squadThink);
+/* the calls (W9): a partner first, from any road; one answering another's call drops it for its partner's */
+helpCands = (g => R => {
+  const out = g(R), p = CA.on ? caMate(R.by) : null; if (!p || out.includes(p)) return out;
+  if (R.k === 'fire' && p.kind && p.ai && !p.net && !p.dead && !p.run && !p.help && !(p.mis && p.mis.lat === 0)) out.push(p);
+  if (R.k === 'clear' && p.men && !p.net && p.live >= 2 && !p.state && !p.lift && !p.rd && !p.help && !p.tp && !(p.mis && p.mis.lat === 0) && p.job !== 'mort') out.push(p);
+  return out;
+})(helpCands);
+helpUtil = (g => (R, c) => { const v = g(R, c); return v > -1 && CA.on && c && caMate(R.by) === c ? v + 1 : v; })(helpUtil);
+helpPick = (g => R => {
+  const p = CA.on && R.st !== 'on' ? caMate(R.by) : null, H = p && p.help;
+  if (H && H !== R && H.resp === p && caMate(H.by) !== p && (R.k === 'fire' ? !!p.kind && !!p.ai : R.k === 'clear' ? !!p.men : false) && helpUtil(R, p) > MIND.util && !helpVeto(R, p)) {
+    helpRefuse(H, p); caN().prio++;
+    gLog(R.team, 'help', helpWho(p) + ' deixa outro pedido para atender o parceiro ' + helpWho(R.by), helpAt(p), 'cap' + R.id);
+  }
+  return g(R);
+})(helpPick);
+/* spotting inside the team: what one of it makes out reaches the other in CA.told s */
+told = (g => (a, t, oc, d, air) => {
+  if (g(a, t, oc, d, air)) return true;
+  const T = CA.on && (a.caT || (a.man && a.sq && a.sq.men && a.sq.caT)); if (!T || !T.on) return false;
+  const k = t.kn && t.kn[a.team]; if (!k || k.by === a || k.by.dead || S.t - k.last > SHARE.fresh || S.t - k.t0 < CA.told) return false;
+  const b = k.by; if (!(a.man ? b === T.u : T.q.men ? b.sq === T.q : b === T.q)) return false;
+  let R = 0; for (const v of VIEW[oc]) R = Math.max(R, air ? v[1] : v[0]);
+  return d <= R * SHARE.reach;
+})(told);
+/* the anti-tank soldier nearest the team's tank, fresh within s s, that the squad or the tank believes */
+function caAT(q, u, s) {
+  const f = b => b.c === 'at' && b.g >= 2 && S.t - b.t < s && Math.hypot(b.x - u.x, b.z - u.z) < CA.hunt;
+  return belTop(q, f) || (u.bel ? belTop(u, f) : null);
+}
+DRILLS.push({ id: 'escolta-ca', cls: 'inf', s: 'anticarro inimigo perto do carro parceiro: caçar o atirador e cobrir o carro', min: 6, max: 60, cool: 6, lat: 1,
+  when(q, bt, d) {
+    const T = CA.on && q.caT; if (!T || !T.on || !T.u || T.u.dead || T.u.cargo) return 0;
+    const b = caAT(q, T.u, d ? 8 : 3); return b ? { u: 1.35, of: b.o, x: b.x, z: b.z } : 0;
+  },
+  act(q, d) {   // the odd men out toward him, the even ones beside the tank, each in the best cover from him there
+    const T = q.caT, u = T.u, e = { x: d.x, z: d.z }, dx = e.x - u.x, dz = e.z - u.z, dl = Math.hypot(dx, dz) || 1; d.p = []; d.at = S.t;
+    for (const m of drMen(q)) {
+      const k = m.ai.i & 1 ? .55 : .15, sd = ((m.ai.i >> 1) % 3 - 1) * 8, x = u.x + dx * k - dz / dl * sd, z = u.z + dz * k + dx / dl * sd;
+      d.p[m.ai.i] = drLeash(q, covBest(x, z, 10, e), m);
+    }
+  },
+  man(q, d, m, A) {
+    const p = d.p && d.p[A.i]; if (p) { const far = hdist(m, p) > 3; drGo(m, A, p, far && hdist(m, p) > 10, far ? 0 : 1); }
+    const t = d.of; if (t && !t.dead && t !== A.tgt && known(A, m, t)) A.tgt = t;
+    if (S.t - (d.at || 0) > 5) d.re = 1;   // he moves: the places again
+  } });
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -31714,6 +31971,19 @@ function fpEO(P, u, ink, acc, disp, blink) {
   }
   txt((w.range / 1000).toFixed(1) + ' km', px, py - r - 14 * u, 10 * u, G, 'center');
 }
+/* the rung (1 detected, 2 class recognized, 3 identified) each enemy has reached for the units of side me: the best of its AI's perception
+   ladders (pm, which SHARE passes on within the side). Read only, built at most once per tick; what no one of the side has in its ladder is not here */
+const CLSG = { tank: 'CC', lav: 'BL', aa: 'AA', aag: 'AA', art: 'AR', truck: 'CM', car: 'VT', rad: 'RD', man: 'SD', mg: 'MG', at: 'AC', snp: 'AE', plane: 'AV', heli: 'HE' };
+let ladMemo = { t: -1, me: -1, m: null };
+function sideLadder(me) {
+  if (ladMemo.t === S.t && ladMemo.me === me) return ladMemo.m;
+  const m = new Map(), eat = a => {
+    if (a.dead || a.team !== me || !a.pm) return;
+    for (const [t, e] of a.pm) { if (!e.kn || t.dead || t.team === me || S.t - e.t > 1) continue; const g = S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1; if (g > (m.get(t) || 0)) m.set(t, g); }
+  };
+  for (const a of S.units) eat(a); for (const a of S.men) eat(a); for (const a of S.planes) eat(a);
+  ladMemo = { t: S.t, me, m }; return m;
+}
 /* fire-control map: the ground in range from above, north up, centred on the gun and, zoomed in, on the aim point. Friends, what they
    have spotted (fading as contact is lost), the aim point with the spread of the fall, the rounds on the way with their time to go, and
    the firing data. mapMpp: metres per pixel, which the sim takes as S.mpp so that the mouse moves the aim point with the pointer */
@@ -31743,10 +32013,20 @@ function fpMap(P, u, ink, acc, disp, blink) {
   for (const b of S.eco ? S.eco.l : []) { const x = X(b.x), y = Y(b.z), col = b.team !== me ? FOE : FRIEND; if (!b.dead && (b.team === me || spotted(b, me)) && on(x, y)) { mark(x, y, 5, col, false); txt((b.prog < 1 ? 'OBRA' : { pow: 'USINA', mine: 'MINA', fab: 'FÁBRICA' }[b.k]) + (b.team !== me && (S.eco.d[me] || {}).tg === b.id ? ' · ALVO' : ''), x + 8, y - 6, 10 * u, col); } }
   cueMarks(X, Y, me, u, true);
   if (ma) for (const g of S.men) { const x = X(g.x), y = Y(g.z); if (!g.dead && g !== P && on(x, y) && (g.team === me || spotted(g, me))) mark(x, y, 2.5, g.team !== me ? FOE : FRIEND, g.team !== me); }
+  const lad = sideLadder(me);
   for (const g of S.units) {
-    const foe = g.team !== me, x = X(g.x), y = Y(g.z);
-    if (g === P || !on(x, y) || (foe && !spotted(g, me))) continue;
-    hx.globalAlpha = foe ? clamp(1.15 - (S.t - sT(g, me)) / SPOT.keep, .2, 1) : 1; mark(x, y, g.kind === 'truck' ? 3.5 : isAA(P, g) ? 6.5 : 5, isAA(P, g) ? AAC : foe ? FOE : FRIEND, foe);
+    const foe = g.team !== me;
+    if (g === P || (foe && !spotted(g, me))) continue;
+    const gx = foe ? sX(g, me) : g.x, gz = foe ? sZ(g, me) : g.z, x = X(gx === undefined ? g.x : gx), y = Y(gz === undefined ? g.z : gz);
+    if (!on(x, y)) continue;
+    const age = foe ? S.t - sT(g, me) : 0;
+    hx.globalAlpha = foe ? clamp(1.15 - age / SPOT.keep, .2, 1) : 1; mark(x, y, g.kind === 'truck' ? 3.5 : isAA(P, g) ? 6.5 : 5, isAA(P, g) ? AAC : foe ? FOE : FRIEND, foe);
+    if (foe) {   // the enemy at the rung the side's own perception has reached for it (the aircraft's ladder): ? detected, the class recognized, the class named when identified; and how long ago it was made out
+      const rg = lad.get(g) || (!P.dead && sees(P, g) ? 3 : 1), cl = belCls(g);
+      txt(rg < 2 ? '?' : CLSG[cl] || '?', x, y + 15 * u, 9 * u, FOE, 'center');
+      if (rg > 2) txt(W13.cls[cl] || '', x + 9, y - 6, 10 * u, FOE);
+      if (age > 4) txt(Math.round(age) + ' s', x, y - 10 * u, 9 * u, FOE, 'center');
+    }
     if (g.pid) txt(g.name, x, y - 18, 11 * u, foe ? FOE : FRIEND, 'center');
     hx.globalAlpha = 1;
   }

@@ -6707,7 +6707,7 @@ function spawnPlayer() {
   S.mouse = S.pref || S.cls !== 'plane';
   if (S.cls === 'heli') S.mouse = S.pref;
   S.aim = S.mouse ? { h, p: 0, d: { x: Math.cos(h), y: 0, z: -Math.sin(h) } } : null;
-  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = S.noLos = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
+  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = S.noLos = S.farGnd = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
@@ -7874,9 +7874,29 @@ const LO = {
     if (!kind) { for (const u of S.units) if (!u.dead && u.team !== team) { if (u.kind === 'tank') tank++; else soft++; } for (const m of S.men) if (!m.dead && m.team !== team) soft += 1 / 6; }
     return R.sets[(kind ? kind === 'tank' : tank >= soft) ? A.tank : A.soft];
   },
+  /* the lock of a guided bomb o (GBU): of what the seeker line sees within the cone, the NEAREST one the bomb can still reach from here
+     (LO.reach, by height, speed and fin limits); never one beyond it. LOCK.far: a visible target beyond the reach, when nothing is in it
+     (the HUD says FORA DE ALCANCE). LOCK.blk as in lockOn. Same line-of-sight rule as every guided weapon */
+  lockBomb(p, o, list) {
+    LOCK.blk = LOCK.far = null;
+    if (p.mod && !p.mod.lock) return null;
+    const R = LO.reach(p, o); let best = null, bd = 1e9, far = null, fd = 1e9, bb = null, bbo = .8;
+    for (const q of list || S.units) {
+      if (q.dead || q.team === p.team) continue;
+      const dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z, d = Math.hypot(dx, dy, dz);
+      if (d > GUIDE.rng || d < 1) continue;
+      const off = Math.acos(clamp((dx * p.f.x + dy * p.f.y + dz * p.f.z) / d, -1, 1));
+      if (off >= .8) continue;
+      if (hid(p, q) || !seekLine(p, eyeY(p), q, bodyY(q))) { if (off < bbo) { bbo = off; bb = q; } continue; }
+      const h = Math.hypot(dx, dz);
+      if (h < R) { if (h < bd) { bd = h; best = q; } } else if (h < fd) { fd = h; far = q; }
+    }
+    LOCK.blk = best || far ? null : bb; LOCK.far = best ? null : far;
+    return best;
+  },
   /* what a guided bomb is let go at: the vehicle in the sight (an AI's own target) or, with none, the ground under the nose, as a point */
   aim(p) {
-    const t = p.ai && p.tgt && !p.tgt.lost && (p.tgt.kind || p.tgt.man) ? p.tgt : lockOn(p, S.units, GUIDE.rng, .8, true), g = t ? null : LO.spot(p);
+    const t = p.ai && p.tgt && !p.tgt.lost && (p.tgt.kind || p.tgt.man) && hdist(p.tgt, p) < LO.reach(p, p.def.ord.find(o => o.gd) || p.def.ord[0]) ? p.tgt : LO.lockBomb(p, p.def.ord.find(o => o.gd && p.ord[p.def.ord.indexOf(o)] > 0) || p.def.ord.find(o => o.gd)), g = t ? null : LO.spot(p);
     return t || (g && { kind: 'pt', x: g.x, y: g.y - 2, z: g.z, v: ZERO });
   },
   /* the ground a guided bomb o let go now can still cover: the best of a few straight glides, each flown while its fins can hold the
@@ -7937,8 +7957,8 @@ const LO = {
   },
   /* what B and V can lock: the first of the two of that kind with rounds left */
   seek(P, k) {
-    const l = P.def.ord; LOCK.blk = null;
-    for (let i = 0; i < 2; i++) if (l[i] && (l[i].k === k || (l[i].gd && k === 'agm')) && P.ord[i] > 0) { if (k === 'agm') S.lockW = l[i]; else S.lockA = l[i]; return k === 'aam' ? MSL.pick(P, l[i]) : lockOn(P, S.units, 6500, .8, true); }
+    const l = P.def.ord; LOCK.blk = LOCK.far = null;
+    for (let i = 0; i < 2; i++) if (l[i] && (l[i].k === k || (l[i].gd && k === 'agm')) && P.ord[i] > 0) { if (k === 'agm') S.lockW = l[i]; else S.lockA = l[i]; return k === 'aam' ? MSL.pick(P, l[i]) : l[i].gd ? LO.lockBomb(P, l[i]) : lockOn(P, S.units, 6500, .8, true); }
     return null;
   },
   /* each step: cluster bombs open; the player's plane takes the loadout chosen meanwhile where it rearms, low
@@ -8365,7 +8385,7 @@ function seekLine(a, ay, t, ty, smk) {
 }
 /* LOCK.blk: what the last lock (lockOn, MSL.pick) found nearest its line but could not take for the seeker's line alone, when it took nothing:
    the player's HUD says SEM LINHA DE VISADA over it */
-const LOCK = { blk: null };
+const LOCK = { blk: null, far: null };
 const known = (M, a, t) => (!hid(a, t) && grade(a, t) >= 2) || (!!M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem);
 function sight(M, a, t) {
   let m = M.mem;
@@ -10910,7 +10930,7 @@ function fly(P, I, dt) {
   if ((I.flare || autoFlare(P)) && dropFlare(P) && S.net) Net.flare(P);
   if (I.smoke && !P.nxK) LO.next(P);
   P.nxK = !!I.smoke;
-  S.lockAir = LO.seek(P, 'aam'); const na = LOCK.blk; S.lockGnd = LO.seek(P, 'agm'); S.noLos = LOCK.blk || na;
+  S.lockAir = LO.seek(P, 'aam'); const na = LOCK.blk; S.lockGnd = LO.seek(P, 'agm'); S.noLos = LOCK.blk || na; S.farGnd = S.lockGnd ? null : LOCK.far;
 }
 /* where the ground player looks from: behind and above the turret along the aim, or from a seat (S.gv), given as t metres ahead, above
    and right of the turret pivot and turning with the turret. hatch: measured from the tank's own roof hatch */
@@ -19507,7 +19527,7 @@ function droneBrain(t) {
   }
   const C = S.cmd && S.cmd[t];
   if (C && (C.known.length < DAI.recon.blind || ecoScout(t)) && mine.filter(o => o.def.job === 'rec').length < DAI.cap[1]) {
-    const m = free.find(m => dstock(m).rec > 0), e = ecoScout(t) || S.base[1 - t];
+    const m = free.find(m => dstock(m).rec > 0), e = ecoScout(t) || lsFoeBase(t, S.base[t].x, S.base[t].z);
     if (m) { const h = headTo(m.x, m.z, e.x, e.z), o = droneLaunch(m, 'rec', { job: 'rec', x: clamp(m.x + Math.cos(h) * DAI.recon.d, 0, S.W), z: clamp(m.z - Math.sin(h) * DAI.recon.d, -S.HW, S.HW), T: S.t + DAI.recon.t }); if (o) m.fly = o; }
   }
 }
@@ -19754,6 +19774,33 @@ Net.mtell = (m, k) => {
 };
 Net.rx.msl = m => { const o = Net.msl.get(m.id); if (o && !o.gone && o.by.net) MSL.heard(o, m.k, m.p, m.d, m.v); };
 
+/* ---------- N sides for logistics, economy, radio and support (P6c of the three-sides plan) ----------
+   The plan's helpers (section 4: SIDES, S.rel, foes; 4.2: R.ends, dsOf, foeOn, myRoutes; P3's sdsOf) when the foundation and map version 7 define them,
+   else the same rule read from the data (S.N, S.rel, R.ends), else today's two sides. With two sides every one gives today's answer:
+   lsN [0, 1], lsFoes(t) [1 - t], lsFoeOn 1 - t, lsDs t ? 1 : -1, lsEndS endS, lsRail railOf, lsFoeBase S.base[1 - t] */
+const lsN = () => (typeof SIDES === 'function' ? SIDES() : typeof sdsOf === 'function' ? sdsOf() : [...Array(S && S.N > 2 ? S.N : 2).keys()]);
+const lsSide = t => Number.isInteger(t) && t >= 0 && t < lsN().length;
+const lsFoe = (a, b) => a !== b && !(S.rel && S.rel[a] && S.rel[a][b] === 'ally');
+const lsFoes = t => lsN().filter(s => lsFoe(t, s));
+const lsEnds = ri => { const r = S.T.routes[ri]; return r && Array.isArray(r.ends) ? r.ends : [0, 1]; };   // [the side at s = len, the side at s = 0]
+const lsFoeOn = (t, ri) => { if (typeof foeOn === 'function') return foeOn(t, ri); const e = lsEnds(ri); return e[0] === t ? e[1] : e[1] === t ? e[0] : -1; };
+const lsDs = (t, ri) => (typeof dsOf === 'function' ? dsOf(t, ri) : lsEnds(ri)[1] === t ? 1 : -1);
+const lsEndS = (t, ri, d) => (lsDs(t, ri) > 0 ? d : S.T.routes[ri].len - d);
+const lsRoutes = t => (typeof myRoutes === 'function' ? myRoutes(t) : S.T.routes.map((r, ri) => ri).filter(ri => lsFoeOn(t, ri) >= 0));
+/* side t's front road: the conquest's while it is one of t's, else t's first */
+const lsFront = t => { const fr = frontR(), my = lsRoutes(t); return !my.length || my.includes(fr) ? fr : my[0]; };
+/* railOf on side t's own roads only (its line and its depth are measured on them); every road with two sides */
+function lsRail(t, x, z) {
+  const p = railOf(x, z), my = lsRoutes(t); if (!my.length || my.includes(p.ri)) return p;
+  let b = null;
+  for (const ri of my) { const s = sOn(ri, x, z), q = routeAt(S.T.routes[ri], s), d = Math.hypot(q.x - x, q.z - z); if (!b || d < b.d) b = { d, ri, s, off: d }; }   // off: unsigned here (its callers read |off|)
+  return b;
+}
+/* the enemy base nearest x z (side t's foe) */
+const lsFoeBase = (t, x, z) => { const l = lsFoes(t).map(s => S.base[s]).filter(Boolean); return l.reduce((a, b) => (Math.hypot(b.x - x, b.z - z) < Math.hypot(a.x - x, a.z - z) ? b : a), l[0] || S.base[1 - t]); };
+/* the side that did it: by's when it is t's foe; with one foe, that one; else -1 (nobody to credit) */
+const lsBy = (t, by) => { const s = by && by.team; if (lsSide(s) && lsFoe(t, s)) return s; const f = lsFoes(t); return f.length === 1 ? f[0] : -1; };
+
 /* ---------- the economy of the general (ECO): sites, two resources, orders, and the commands that drive them; no DOM ----------
    Two resources a side: en (Energia) and mt (Metal), a stock capped at ECO.cap, an income a minute from the HQ and from every finished site
    (usina: en, mina: mt, only on a fixed deposit, fabrica: builds vehicles). Everything is paid as it is built (a short stock slows the
@@ -19828,8 +19875,8 @@ function ecoNear(x, z) {
 }
 /* the facing that lays a site's long side along the nearest road */
 function ecoFace(x, z) { const p = railOf(x, z), r = routeAt(S.T.routes[p.ri], p.s); return Math.atan2(-r.dz, r.dx); }
-/* how far behind side t's line on its nearest road a point is (negative: forward of it) */
-function ecoDepth(t, x, z) { const p = railOf(x, z); return (p.s - lineS(t, p.ri)) * (t ? -1 : 1); }
+/* how far behind side t's line on its nearest own road a point is (negative: forward of it); with three sides only the roads t is an end of count */
+function ecoDepth(t, x, z) { const p = lsRail(t, x, z); return (p.s - lineS(t, p.ri)) * -lsDs(t, p.ri); }
 /* flat dry ground free of roads and objects within r of a point */
 function ecoFlat(x, z, r) {
   if (!(x > 60 && x < S.W - 60 && Math.abs(z) < S.HW - 60)) return false;
@@ -19912,8 +19959,8 @@ function ecoWhy(t, k, x, z, a) {
 function ecoSpot(t, k) {
   const A = ECO.ai, G = A.spot, W = A.sc, R = S.T.routes, hq = S.base[t], E = S.eco, d = E.d[t], out = [], C = S.cmd ? S.cmd[t] : null;
   const obs = [];
-  for (let ri = 0; ri < R.length; ri++) { const p = routeAt(R[ri], lineS(1 - t, ri)); obs.push({ x: p.x, z: p.z }); }
-  for (const p of S.cq.p) if (p.hold === 1 - t && p.base < 0) obs.push({ x: p.x, z: p.z });
+  for (const ri of lsRoutes(t)) { const p = routeAt(R[ri], lineS(lsFoeOn(t, ri), ri)); obs.push({ x: p.x, z: p.z }); }   // each road's enemy: the other end
+  for (const p of S.cq.p) if (lsSide(p.hold) && lsFoe(t, p.hold) && p.base < 0) obs.push({ x: p.x, z: p.z });
   if (C) { let n = 0; for (const o of C.known) { if (n >= G.obs) break; if (!o.dead) { obs.push({ x: sX(o, C.t), z: sZ(o, C.t) }); n++; } } }
   const own = ecoLive(t), aaf = S.units.filter(u => !u.dead && u.fixed && u.kind === 'aa' && u.team === t);
   const score = (x, z, rich) => {
@@ -19945,12 +19992,13 @@ function ecoInit() {
   S.eco = null; IAI.cap = GP.cap0; S.popK = 1;
   if (!(ECO.on && S.cq && (!S.demo || S.watch) && (!S.net || Net.eco))) return;
   IAI.cap = GP.cap;   // with an economy each side has its population budget (GP.pop); the cap holds both
-  const E = (S.eco = { open: true, acc: 0, seq: 1, ctl: ['ai', 'ai'], l: [], dep: ecoDeps(), sim: !S.net || !!S.host,
-    d: [0, 1].map(() => ({ en: ECO.start.en, mt: ECO.start.mt, inc: { en: 0, mt: 0 }, use: { en: 0, mt: 0 }, bill: { en: 0, mt: 0 }, ba: { en: 0, mt: 0 }, pa: { en: 0, mt: 0 },
+  const E = (S.eco = { open: true, acc: 0, seq: 1, ctl: lsN().map(() => 'ai'), l: [], dep: ecoDeps(), sim: !S.net || !!S.host,
+    d: lsN().map(() => ({ en: ECO.start.en, mt: ECO.start.mt, inc: { en: 0, mt: 0 }, use: { en: 0, mt: 0 }, bill: { en: 0, mt: 0 }, ba: { en: 0, mt: 0 }, pa: { en: 0, mt: 0 },
       q: [], res: {}, keep: Object.assign({}, ECO.ai.res), miss: {}, lost: {}, kn: {}, sc: null, tg: null, aiT: 1, dead: [], n0: {}, made: 0, lk: [] })) });
   if (!E.sim) return;
-  for (const t of [0, 1]) {
-    const d = E.d[t], dp = E.dep.find(q => q.half === t);
+  for (const t of lsN()) {
+    const b = S.base[t], free = q => !E.l.some(e => e.k === 'mine' && Math.hypot(e.x - q.x, e.z - q.z) <= ECO.dep);
+    const d = E.d[t], dp = E.dep.find(q => q.half === t) || E.dep.filter(free).sort((p, q) => Math.hypot(p.x - b.x, p.z - b.z) - Math.hypot(q.x - b.x, q.z - b.z))[0];   // a side with no half of its own: the free deposit nearest its base
     if (dp) addEco(ecoSlot(), t, 'mine', dp.x, dp.z, ecoFace(dp.x, dp.z), 1);
     for (const k of ['pow', 'fab']) { const s = ecoSpot(t, k)[0], id = ecoSlot(); if (s && id) addEco(id, t, k, s.x, s.z, s.a, 1); }
     const fab = ecoLive(t, 'fab')[0];
@@ -19983,7 +20031,7 @@ function ecoStep(dt) {
   const e = E.acc; E.acc = 0;
   for (const s of E.l) if (s.dead && S.t - s.deadT > ECO.ruin) s.gone = true;
   if (E.l.some(s => s.gone)) E.l = E.l.filter(s => !s.gone);
-  for (const t of [0, 1]) {
+  for (const t of lsN()) {
     const d = E.d[t], inc = { en: ECO.hq.en * 60, mt: ECO.hq.mt * 60 }, pay = { en: 0, mt: 0 };
     for (const s of E.l) if (s.team === t && !s.dead && s.prog >= 1) { const o = ecoOut(s); inc.en += o.en * 60; inc.mt += o.mt * 60; }
     d.inc = inc;
@@ -20023,7 +20071,7 @@ function ecoStep(dt) {
     if (E.ctl[t] === 'ai' && S.t >= d.aiT) { d.aiT = S.t + ECO.ai.every; for (const c of ecoAI(t, ecoView(t))) genCmd(t, c, 'ai'); }
     for (const s of E.l) {   // a finished site with a fixed AA asked for and none within reach: one from the reserve, a little toward the enemy
       if (s.team !== t || s.dead || s.prog < 1 || !s.gd.aa || S.units.some(u => !u.dead && u.fixed && u.kind === 'aa' && u.team === t && hdist(u, s) < ECO.gd.r) || !ecoUse(t, 'aaf')) continue;
-      const b = S.base[1 - t], h = headTo(s.x, s.z, b.x, b.z), sq = s.lot >= 0 && (S.T.lots || []).find(l => l.team === t && l.k === 'aa' && hdist(l, s) < ECO.gd.r * 2 && !(l.hi >= 0 && S.os[S.T.houses[l.hi].id] >= 2) && !S.units.some(u => !u.dead && u.fixed && hdist(u, l) < ECO.lot.at * 4));   // in the seat town: on its square or a roof
+      const b = lsFoeBase(t, s.x, s.z), h = headTo(s.x, s.z, b.x, b.z), sq = s.lot >= 0 && (S.T.lots || []).find(l => l.team === t && l.k === 'aa' && hdist(l, s) < ECO.gd.r * 2 && !(l.hi >= 0 && S.os[S.T.houses[l.hi].id] >= 2) && !S.units.some(u => !u.dead && u.fixed && hdist(u, l) < ECO.lot.at * 4));   // in the seat town: on its square or a roof
       const u = dispatch(t, { kind: 'defend', why: 'guarda da instalação', area: { x: s.x, z: s.z, r: ECO.gd.r } }, () => (sq ? addUnit('aa', t, sq.x, sq.z, null, true) : addUnit('aa', t, s.x + Math.cos(h) * ECO.gd.off, s.z - Math.sin(h) * ECO.gd.off, null, true)));
       if (sq && sq.hi >= 0) { u.roof = S.T.houses[sq.hi]; u.y = u.roof.y + u.roof.hh; }
       u.es = s; gLog(t, 'eco', 'Antiaérea fixa instalada junto à ' + s.name.toLowerCase(), s);
@@ -20038,14 +20086,16 @@ function ecoDown(e, by, quiet) {
   if (ecoSim()) {
     n = ecoClear(e); ecoD(t).dead.push([e.x, e.z, S.t, e.k]);
     if (cqSim() && !S.cq.ph) S.cq.tk[t] -= ECO.site[e.k].tk;
-    const k = ecoD(1 - t).kn[e.id]; if (k) { k.dead = true; knew = true; }
     gLog(t, 'eco', 'Perdemos a ' + nm.toLowerCase() + ' ' + ecoNear(e.x, e.z) + (n ? '; ' + n + ' unidades prontas perdidas' : ''), e);
-    if (knew || (by && by.team === 1 - t)) gLog(1 - t, 'eco', nm + ' inimiga destruída ' + ecoNear(e.x, e.z), e);
+    for (const f of lsFoes(t)) {   // each enemy that knew it marks it gone; the one that did it, or knew it, logs it
+      const k = ecoD(f) && ecoD(f).kn[e.id], kf = !!k; if (k) k.dead = true; knew = knew || kf;
+      if (kf || (by && by.team === f)) gLog(f, 'eco', nm + ' inimiga destruída ' + ecoNear(e.x, e.z), e);
+    }
   }
   if (quiet) return;
   explode(e.x, e.y + 2, e.z, ECO.boom[0], ECO.boom[1], by, -1, false, 0);
   for (let i = 0; i < 4 && S.debris.length < 24; i++) S.debris.push({ k: 'chunk', sz: rand(.6, 1.6), x: e.x + rand(-3, 3), y: e.y + rand(1, 3), z: e.z + rand(-3, 3), vx: rand(-9, 9), vy: rand(6, 14), vz: rand(-9, 9), q: yawQ(rand(0, TAU)), w: { x: rand(-4, 4), y: rand(-2, 2), z: rand(-4, 4) }, drag: .2, h: .5, life: 6 });
-  if (!S.demo) { if (t === S.me) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' perdida', life: 3 }); else if (1 - t === S.me) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' inimiga destruída', life: 3 }); }
+  if (!S.demo) { if (t === S.me) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' perdida', life: 3 }); else if (lsSide(S.me) && lsFoe(t, S.me)) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' inimiga destruída', life: 3 }); }
 }
 /* the player's respawn through the reserve (ECO.me): true when it must wait for production. Free by default */
 function ecoMe() {
@@ -20075,7 +20125,7 @@ function ecoN(t, k, n) { let c = 0; while (c < n && ecoUse(t, k)) c++; return c;
 function ecoBack(t, k, n) { const d = ecoD(t); for (let i = 0; i < n; i++) (d.res[k] || (d.res[k] = [])).push('hq'); }
 /* where a column enters: a finished factory of its own on that road, behind the line by ECO.front; else where it would */
 function ecoEntry(t, ri, s0) {
-  const f = ecoLive(t, 'fab').find(e => e.prog >= 1 && e.ri === ri && e.off <= ECO.road && (e.s - lineS(t, ri)) * (t ? -1 : 1) >= ECO.front);
+  const f = ecoLive(t, 'fab').find(e => e.prog >= 1 && e.ri === ri && e.off <= ECO.road && (e.s - lineS(t, ri)) * -lsDs(t, ri) >= ECO.front);
   return f ? f.s : s0;
 }
 /* the director's column through the gate: what may enter and where, or null when nothing may */
@@ -20153,7 +20203,7 @@ function ecoCmd(t, c, by) {
     case 'scout': {
       if (!(c.x > 0 && c.x < S.W && Math.abs(c.z) < S.HW)) return no('map');
       d.sc = { x: c.x, z: c.z, T: S.t + ECO.ai.scout };
-      ECO.ai.look.forEach((l, i) => { const p = ecoLook(t, i); if (Math.hypot(p.x - c.x, p.z - c.z) < 200) d.lk[i] = S.t; });
+      for (let i = 0; i < ecoLookN(t); i++) { const p = ecoLook(t, i); if (Math.hypot(p.x - c.x, p.z - c.z) < 200) d.lk[i] = S.t; }
       return tail('Reconhecimento ' + ecoNear(c.x, c.z), { x: c.x, z: c.z });
     }
     case 'strike': {
@@ -20196,7 +20246,7 @@ function ecoView(t) {
     sl: d.dead.filter(q => S.t - q[2] < 300).map(q => ({ k: q[3], ago: ecoR(S.t - q[2]) })),
     air: C && C.airT !== undefined ? ecoR(S.t - C.airT) : -1, arm: known.filter(o => !o.man && (tk(o) === 'tank' || tk(o) === 'lav')).length,
     sc: d.sc ? { x: ecoR(d.sc.x), z: ecoR(d.sc.z), left: ecoR(Math.max(0, d.sc.T - S.t)) } : null, tg: d.tg === null ? null : d.tg,
-    lk: ECO.ai.look.map((l, i) => (typeof d.lk[i] === 'number' ? ecoR(S.t - d.lk[i]) : 99999)), costs,
+    lk: Array.from({ length: ecoLookN(t) }, (l, i) => (typeof d.lk[i] === 'number' ? ecoR(S.t - d.lk[i]) : 99999)), costs,
     pp: d.pp && E.sim ? { st: d.pp.st, f: Object.assign({}, d.pp.f), h: Object.fromEntries(Object.keys(d.pp.f).map(k => [k, gpHave(t, k)])), why: Object.assign({}, d.pp.why) } : null };
 }
 /* the mechanical general's economy: from the view, ecoAsk and the tables alone, at most two commands, each with its reason. Writes nothing */
@@ -20219,7 +20269,7 @@ function ecoAI(t, V) {
   const fresh = V.foe.filter(f => !f.dead && f.age < A.stale);
   if (out.length < 2 && !(V.sc && V.sc.left > 0) && fresh.length < A.find) {   // too few enemy sites known: look where they most likely are, the place least recently looked at and with none known near
     let bi = -1, ba = -1;
-    ECO.ai.look.forEach((l, i) => { const p = ecoLook(t, i); if (V.lk[i] > ba && !V.foe.some(f => !f.dead && Math.hypot(f.x - p.x, f.z - p.z) < 1000)) { ba = V.lk[i]; bi = i; } });
+    for (let i = 0; i < V.lk.length; i++) { const p = ecoLook(t, i); if (V.lk[i] > ba && !V.foe.some(f => !f.dead && Math.hypot(f.x - p.x, f.z - p.z) < 1000)) { ba = V.lk[i]; bi = i; } }
     if (bi >= 0) { const p = ecoLook(t, bi); out.push({ c: 'scout', x: p.x, z: p.z, why: 'procurar instalações inimigas' }); }
   }
   const tg = V.foe.find(f => f.id === V.tg);
@@ -20254,9 +20304,9 @@ function ecoVM(t, all) {
     const o = ecoOut(e);
     sites.push({ x: e.x, z: e.z, t: e.team, k: e.k, hp: clamp(Math.max(0, S.oh[e.id]) / ECO.site[e.k].hp, 0, 1), out: Math.round((o.en + o.mt) * 60), prog: e.prog, dead: e.dead, age: -1 });
   }
-  if (!all) for (const k of V.foe) { const s = E.d[t].kn[k.id]; if (s) sites.push({ x: s.x, z: s.z, t: 1 - t, k: s.k, hp: 1, out: 0, prog: 1, dead: !!s.dead, age: k.age }); }
+  if (!all) for (const k of V.foe) { const s = E.d[t].kn[k.id]; if (s) sites.push({ x: s.x, z: s.z, t: lsSide(s.t) ? s.t : lsFoes(t)[0], k: s.k, hp: 1, out: 0, prog: 1, dead: !!s.dead, age: k.age }); }
   for (const q of E.dep) {
-    const own = E.l.find(e => !e.dead && e.k === 'mine' && e.dep === q.i && (all || e.team === t)), kn = !own && V.dep[q.i].foe ? 1 - t : -1;
+    const own = E.l.find(e => !e.dead && e.k === 'mine' && e.dep === q.i && (all || e.team === t)), kn = !own && V.dep[q.i].foe ? (E.l.find(e => !e.dead && e.k === 'mine' && e.dep === q.i && e.team !== t) || { team: lsFoes(t)[0] }).team : -1;
     dep.push({ x: q.x, z: q.z, rich: q.rich, by: own ? own.team : kn });
   }
   const rows = [], r = ECO.tx.r, n = (k, c) => c + ' ' + (c === 1 ? tx.nm[k].toLowerCase() : tx.pl[k]);
@@ -20280,13 +20330,23 @@ function ecoVM(t, all) {
    side's memory from the ecs message. The enemy's sites are targets of the attack planes, tanks, batteries, drones and raids (ecoFoe) */
 const ecoFoe = t => (S.eco ? S.eco.l.filter(e => !e.dead && e.team !== t && !ecoHid(e, t)) : []);
 Object.assign(GAI.art.val, { eco: 3 });
-/* where side t looks for the other's sites: ECO.ai.look point i, in the other half (side 1's mirrored through the centre) */
-const ecoLook = (t, i) => { const [fx, fz] = ECO.ai.look[i]; return t ? { x: S.W - fx * S.W, z: -fz * S.HW } : { x: fx * S.W, z: fz * S.HW }; };
+/* where side t looks for its enemies' sites: ECO.ai.look holds side 0's points in side 1's half; for t against enemy f (the n-th of lsFoes(t), point
+   i % L with L = ECO.ai.look.length, i from 0 to ecoLookN(t) - 1) the same place carried by the turn and scale that take base 0 to base t and base 1
+   to base f. With two sides that is today's: side 1's mirrored through the centre. Kept inside the map */
+const ecoLookN = t => ECO.ai.look.length * Math.max(1, lsFoes(t).length);
+const ecoLook = (t, i) => {
+  const L = ECO.ai.look.length, [fx, fz] = ECO.ai.look[i % L], f = lsFoes(t)[(i / L) | 0], x = fx * S.W, z = fz * S.HW;
+  const B0 = S.base[0], B1 = S.base[1], Bt = S.base[t], Bf = S.base[f === undefined ? 1 - t : f];
+  if (!B0 || !B1 || !Bt || !Bf) return { x, z };
+  const ax = B1.x - B0.x, az = B1.z - B0.z, bx = Bf.x - Bt.x, bz = Bf.z - Bt.z, n = ax * ax + az * az || 1;
+  const kr = (bx * ax + bz * az) / n, ki = (bz * ax - bx * az) / n, px = x - B0.x, pz = z - B0.z;   // (Bf - Bt) / (B1 - B0) as a complex number
+  return { x: clamp(Bt.x + px * kr - pz * ki, 60, S.W - 60), z: clamp(Bt.z + px * ki + pz * kr, -S.HW + 60, S.HW - 60) };
+};
 /* the scout point of side t while it is ordered, else null */
 const ecoScout = t => { const d = S.eco && S.eco.d[t]; return d && d.sc && S.t < d.sc.T ? d.sc : null; };
 /* the observation post of the first reconnaissance team, moved toward the scout point, no more than ECO.ai.ahead m beyond the own line, and hidden */
 function ecoRec(t, O, sc) {
-  const R = S.T.routes, ri = O.ri, ds = t ? 1 : -1, ls = lineS(t, ri), ps = sOn(ri, sc.x, sc.z), s = ls + ds * Math.max(0, Math.min((ps - ls) * ds, ECO.ai.ahead)), p = routeAt(R[ri], clamp(s, 0, R[ri].len));
+  const R = S.T.routes, ri = lsRoutes(t).includes(O.ri) ? O.ri : lsRail(t, sc.x, sc.z).ri, ds = lsDs(t, ri), ls = lineS(t, ri), ps = sOn(ri, sc.x, sc.z), s = ls + ds * Math.max(0, Math.min((ps - ls) * ds, ECO.ai.ahead)), p = routeAt(R[ri], clamp(s, 0, R[ri].len));
   const dx = sc.x - p.x, dz = sc.z - p.z, d = Math.hypot(dx, dz) || 1, m = Math.min(d, 300), h = hideAt(p.x + dx / d * m, p.z + dz / d * m, INC.disp.hide);
   return { k: 'observe', ri, s: sOn(ri, h.x, h.z), x: h.x, z: h.z, R: 4, disp: O.disp };
 }
@@ -20306,16 +20366,17 @@ function ecoIdf(e, cams, f = 1 - e.team) {   // f: the side that looks
 function ecoSeen() {
   const E = S.eco; if (!E) return;
   const R = ECO.see, cams = drones().filter(o => !o.dead && !o.gone && o.def.job === 'rec' && (o.ai || o.net || o.link > .2));
-  for (const e of E.l) for (const f of sdsOf()) {   // each other side f looks for itself (with 2 sides, the other one)
-    if (e.dead || f === e.team || S.t - sT(e, f) < 3) continue;
+  for (const e of E.l) for (const f of lsFoes(e.team)) {   // each enemy side f looks for itself (with 2 sides, the other one)
+    if (e.dead || S.t - sT(e, f) < 3) continue;
     if (ecoHid(e, f) && !(ecoSim() && ecoIdf(e, cams, f))) continue;   // a building like any other until identified (the host decides; a guest is told in eco)
     const c = kindAt(e.x, e.z) === 1 || S.T.houses.some(o => S.os[o.id] < 2 && hdist(o, e) < 150) ? R.cov : 1;
     if (!(S.units.some(o => !o.dead && o.team === f && hdist(o, e) < R.gnd * c && sees(o, e)) || S.men.some(o => !o.dead && !o.in && o.team === f && hdist(o, e) < R.man * c && sees(o, e))
       || S.planes.some(o => !o.dead && o.team === f && dist(o, e) < R.air * c && sees(o, e)) || cams.some(o => o.team === f && hdist(o, e) < R.dr * c && sees(o, e)))) continue;
     seeBy(e, f, e.x, e.z);
     if (!ecoSim()) continue;
-    const d = E.d[f], k = d.kn[e.id], fresh = !k || k.dead || k.k !== e.k || S.t - k.T >= ECO.ai.stale;
-    d.kn[e.id] = { k: e.k, x: e.x, z: e.z, T: S.t, dead: false };
+    const d = E.d[f]; if (!d) continue;
+    const k = d.kn[e.id], fresh = !k || k.dead || k.k !== e.k || S.t - k.T >= ECO.ai.stale;
+    d.kn[e.id] = { k: e.k, x: e.x, z: e.z, T: S.t, dead: false, t: e.team };   // t: whose it is (the map's colour with three sides; not sent)
     if (fresh) gLog(f, 'eco', 'Localizada ' + e.name.toLowerCase() + ' inimiga ' + ecoNear(e.x, e.z), e, 'kn' + e.id);
   }
   if (!ecoSim()) return;
@@ -20351,9 +20412,11 @@ function gName(O) {
   return O.ri !== undefined ? 'a linha inimiga na rota ' + (O.ri + 1) : 'o objetivo';
 }
 /* side t's commander writes down what it decided: at, tg anything with x z, or nothing */
+/* the log of every side, one list and one key map each (S.glog), made or widened to the match's sides */
+const glogAll = () => { const L = S.glog || (S.glog = { l: [], k: [] }); for (const t of lsN()) { L.l[t] = L.l[t] || []; L.k[t] = L.k[t] || {}; } return L; };
 function gLog(t, k, s, at, key, tg) {
-  if (!GEN.log || !S || (t !== 0 && t !== 1) || (S.net && !S.host && Net.gen)) return;   // a guest's log is the host's, as glog brings it
-  const L = S.glog || (S.glog = { l: [[], []], k: [{}, {}] }), K = L.k[t];
+  if (!GEN.log || !S || !lsSide(t) || (S.net && !S.host && Net.gen)) return;   // a guest's log is the host's, as glog brings it
+  const L = glogAll(), K = L.k[t];
   if (key) { if (K[key] !== undefined && S.t - K[key] < GEN.dup) return; K[key] = S.t; }
   const e = { t: S.t, k, side: t, s };
   if (at && at.x !== undefined) { e.x = at.x; e.z = at.z; }
@@ -20612,7 +20675,7 @@ const glogEnt = (t, r) => { const e = { t: r[0] - (S.t0 || 0), k: String(r[1]), 
 function ecoPack() {
   const E = S.eco, I = ecoI(), ix = k => I.indexOf(k), age = T => enetR1(S.t - T), r4 = v => Math.round(v * 1e4) / 1e4;
   return { n: Net.cqn, T: enetR1(mclock()), seq: E.seq, open: E.open ? 1 : 0,
-    d: [0, 1].map(t => {
+    d: lsN().map(t => {
       const d = E.d[t], res = [], keep = [], miss = [], lost = [], kn = [], dead = [], n0 = [], gd = [];
       for (const k in d.res) for (const a of d.res[k]) res.push(ix(k), atE(a));
       for (const k in d.keep) keep.push(ix(k), d.keep[k]);
@@ -20624,15 +20687,15 @@ function ecoPack() {
       return { en: enetR1(d.en), mt: enetR1(d.mt),
         q: d.q.map(o => [o.id, ix(o.k), atE(o.at), r4(o.p), Math.max(0, EWHY.indexOf(o.why)), enetR1(o.paid.en), enetR1(o.paid.mt), o.site || 0]),
         res, keep, miss, lost, kn, sc: d.sc ? [Math.round(d.sc.x), Math.round(d.sc.z), enetR1(Math.max(0, d.sc.T - S.t))] : [], tg: d.tg || 0, ai: enetR1(d.aiT - S.t), dead, n0, made: d.made,
-        lk: ECO.ai.look.map((l, i) => age(typeof d.lk[i] === 'number' ? d.lk[i] : S.t - 1e6)), gd };
+        lk: Array.from({ length: ecoLookN(t) }, (l, i) => age(typeof d.lk[i] === 'number' ? d.lk[i] : S.t - 1e6)), gd };
     }),
-    log: [0, 1].map(t => glogRows(t).slice(-ENET.log)) };
+    log: lsN().map(t => glogRows(t).slice(-ENET.log)) };
 }
 /* the backup back into S.eco: everything is read first, so a broken one changes nothing (it throws) */
 function ecoUnpack(K) {
   const E = S.eco, I = ecoI(), num = v => { if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error('backup'); return v; }, A = v => { if (!Array.isArray(v)) throw new Error('backup'); return v; };
   const kind = i => { const k = I[num(i)]; if (!k) throw new Error('backup'); return k; }, site = i => { const k = ESK[num(i)]; if (!k) throw new Error('backup'); return k; };
-  const nd = [0, 1].map(t => {
+  const nd = lsN().map(t => {
     const B = K.d[t], o = E.d[t], d = { en: num(B.en), mt: num(B.mt), inc: { en: o.inc.en, mt: o.inc.mt }, use: { en: 0, mt: 0 }, bill: { en: 0, mt: 0 }, ba: { en: 0, mt: 0 }, pa: { en: 0, mt: 0 },
       q: [], res: {}, keep: {}, miss: {}, lost: {}, kn: {}, sc: null, tg: null, aiT: S.t + num(B.ai), dead: [], n0: {}, made: num(B.made), lk: [] }, gd = [];
     for (const r of A(B.q)) { const k = kind(r[1]), q = { id: num(r[0]), k, cat: ECO.site[k] ? 'site' : ECO.unit[k][3], at: atD(num(r[2])), p: num(r[3]), why: EWHY[num(r[4])] || '', paid: { en: num(r[5]), mt: num(r[6]) } }; if (num(r[7])) q.site = r[7]; d.q.push(q); }
@@ -20649,11 +20712,11 @@ function ecoUnpack(K) {
     for (let i = 0; i + 2 < g.length; i += 3) gd.push([num(g[i]), num(g[i + 1]), num(g[i + 2])]);
     return { d, gd };
   });
-  const seq = num(K.seq), logs = [0, 1].map(t => (Array.isArray(K.log) && Array.isArray(K.log[t]) ? K.log[t].filter(r => Array.isArray(r) && r.length >= 7).map(r => glogEnt(t, r)) : []));
-  [0, 1].forEach(t => {
+  const seq = num(K.seq), logs = lsN().map(t => (Array.isArray(K.log) && Array.isArray(K.log[t]) ? K.log[t].filter(r => Array.isArray(r) && r.length >= 7).map(r => glogEnt(t, r)) : []));
+  lsN().forEach(t => {
     E.d[t] = nd[t].d;
     for (const [id, inf, aa] of nd[t].gd) { const e = E.l.find(s => s.id === id && s.team === t); if (e) e.gd = { inf, aa }; }
-    const L = S.glog || (S.glog = { l: [[], []], k: [{}, {}] });
+    const L = glogAll();
     if (logs[t].length > L.l[t].length) L.l[t] = logs[t].slice(-GEN.log);
   });
   E.seq = seq; E.open = !!K.open;
@@ -20664,7 +20727,7 @@ const enetWho = (k, s) => (k === 0 ? 'IA' : k === 2 ? 'modelo (MCP)' : (Net.play
 /* ---- host: ticks ---- */
 /* who commands each side, from the server's gctl into S.eco.ctl: each tick, and at once when gctl arrives (a gcmd right behind it must find it) */
 function enetCtlSync() {
-  for (const s of [0, 1]) { const k = Net.gk[s] || 0; genCtl(s, enetCtl[k] || 'ai', (S.gast || [])[s], enetWho(k, s)); }
+  for (const s of lsN()) { const k = Net.gk[s] || 0; genCtl(s, enetCtl[k] || 'ai', (S.gast || [])[s], enetWho(k, s)); }
 }
 /* log rows within the relay's size for glog: the oldest go first */
 function glogFit(rows) { while (rows.length > 1 && JSON.stringify(rows).length > 7000) rows = rows.slice(Math.ceil(rows.length / 8)); return rows; }
@@ -20677,16 +20740,16 @@ function enetTick(dt) {
       const rows = ecoRows(), j = JSON.stringify(rows);
       if (now || j !== Net.ej || Net.eT >= ENET.live) { Net.ej = j; Net.eT = 0; Net.send('eco', { e: rows }); }
     }
-    if ((N.ecs += dt) >= ENET.ecs) { N.ecs = 0; for (const s of [0, 1]) Net.send('ecs', Object.assign({ s, T }, ecsOf(s))); }
+    if ((N.ecs += dt) >= ENET.ecs) { N.ecs = 0; for (const s of lsN()) Net.send('ecs', Object.assign({ s, T }, ecsOf(s))); }
     if ((N.keep += dt) >= ENET.keep) { N.keep = 0; Net.send('keep', { e: ecoPack() }); }
   }
   if (Net.gen) {
     enetCtlSync();
-    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of [0, 1]) Net.send('gen', { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) }); }
+    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of lsN()) Net.send('gen', { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) }); }
     if ((N.glog += dt) >= ENET.glog) {
       N.glog = 0;
-      if (Net.glS !== S.glog) { Net.glS = S.glog; Net.gl = [null, null]; }
-      if (S.glog) for (const s of [0, 1]) {
+      if (Net.glS !== S.glog) { Net.glS = S.glog; Net.gl = lsN().map(() => null); }
+      if (S.glog) for (const s of lsN()) {
         const L = S.glog.l[s], rows = glogRows(s, Net.gl[s]);
         if (rows.length) { Net.gl[s] = L[L.length - 1]; Net.send('glog', { s, T, e: glogFit(rows) }); }
       }
@@ -20710,7 +20773,7 @@ Net.rx.eco = m => {
   for (const e of m.e) {
     if (!Array.isArray(e) || e.length < 9) continue;
     const [id, team, k, x, z, a, pg, hp, st] = e, i = id - S.T.nid, kind = ESK[k];
-    if (!(i >= NDYN && i < NDYN + NECO) || !(team === 0 || team === 1) || !kind || ![x, z, a, pg, hp, st].every(Number.isFinite) || !(st === 0 || st === 1 || st === 2)) continue;
+    if (!(i >= NDYN && i < NDYN + NECO) || !lsSide(team) || !kind || ![x, z, a, pg, hp, st].every(Number.isFinite) || !(st === 0 || st === 1 || st === 2)) continue;
     seen.add(id);
     let r = E.l.find(q => q.id === id);
     if (r && (r.team !== team || r.k !== kind || Math.hypot(r.x - x, r.z - z) > 1)) { r.gone = true; if (!r.dead) dropObj(r.o); r = null; E.l = E.l.filter(q => !q.gone); }
@@ -20758,12 +20821,13 @@ Net.rx.gen = m => {
 Net.rx.glog = m => {
   if (!enetG() || (m.s !== S.me && !S.spec) || !Array.isArray(m.e)) return;
   enetT0(m);
-  const L = S.glog || (S.glog = { l: [[], []], k: [{}, {}] }), add = m.e.filter(r => Array.isArray(r) && r.length >= 7).map(r => glogEnt(m.s, r));
+  if (!lsSide(m.s)) return;
+  const L = glogAll(), add = m.e.filter(r => Array.isArray(r) && r.length >= 7).map(r => glogEnt(m.s, r));
   if (m.full === 1) L.l[m.s] = add; else for (const e of add) L.l[m.s].push(e);
   while (L.l[m.s].length > GEN.log) L.l[m.s].shift();
 };
 Net.rx.keep = m => { Net.kept = m.e && typeof m.e === 'object' ? m.e : null; };
-Net.rx.gctl = m => { if (Array.isArray(m.g) && Array.isArray(m.k)) { Net.gn = m.g.slice(0, 2); Net.gk = m.k.slice(0, 2); if (S && S.net && S.host && Net.gen) enetCtlSync(); } };
+Net.rx.gctl = m => { if (Array.isArray(m.g) && Array.isArray(m.k)) { Net.gn = m.g.slice(0, 3); Net.gk = m.k.slice(0, 3); if (S && S.net && S.host && Net.gen) enetCtlSync(); } };   // up to three sides' seats
 Net.rx.gres = m => {
   const c = Net.gq.get(m.n);
   for (const [n, o] of Net.gq) if (S && S.t - o.T > ENET.wait && n !== m.n) { Net.gq.delete(n); o.cb({ ok: false, why: 'wait', id: 0 }); }
@@ -20775,7 +20839,7 @@ Net.rx.gres = m => {
 /* ---- host: a guest's command and question ---- */
 function genAnswer(s, q) {
   const no = why => ({ ok: false, why, id: 0 });
-  if (!q || typeof q !== 'object' || (s !== 0 && s !== 1)) return no('shape');
+  if (!q || typeof q !== 'object' || !lsSide(s)) return no('shape');
   if (q.q === 'spots' || q.q === 'why') {
     if (!S.eco) return { ok: true, why: '', id: 0, r: q.q === 'spots' ? [] : { why: 'off' } };
     if (!ECO.site[q.k]) return no('kind');
@@ -20797,7 +20861,7 @@ Net.rx.gcmd = m => {
   if (!S || !S.net || !S.host) return;
   const ans = (ok, why, id) => Net.send('gres', { to: m.from, n: m.n, ok, why, id });
   if (m.d !== 'eco' && m.d !== 'cmd') return ans(false, 'shape', 0);
-  if ((m.s !== 0 && m.s !== 1) || !m.c || typeof m.c !== 'object') return ans(false, 'shape', 0);
+  if (!lsSide(m.s) || !m.c || typeof m.c !== 'object') return ans(false, 'shape', 0);
   const r = genCmd(m.s, m.c, m.g ? 'mcp' : 'me');
   ans(r.ok, r.why, r.id);
 };
@@ -20834,7 +20898,7 @@ function ecoAdopt() {
   if (kept && kept.n === Net.cqn) { try { ecoUnpack(kept); used = true; } catch (e) { used = false; } }
   if (!used) { E.d[S.me].q = []; E.open = false; }   // no usable backup: this side keeps its mirror, the other the start values
   E.seq = Math.max(E.seq, top + 1) + 256;   // past every id the old host may have handed out since its backup: no order id is used twice
-  for (const t of [0, 1]) E.d[t].q = E.d[t].q.filter(q => { if (q.cat !== 'site') return true; const s = E.l.find(e => e.id === q.site); if (!s || s.dead || s.prog >= 1) return false; q.p = Math.max(q.p, s.prog); return true; });   // a site finished or lost since the backup is not built again
+  for (const t of lsN()) E.d[t].q = E.d[t].q.filter(q => { if (q.cat !== 'site') return true; const s = E.l.find(e => e.id === q.site); if (!s || s.dead || s.prog >= 1) return false; q.p = Math.max(q.p, s.prog); return true; });   // a site finished or lost since the backup is not built again
   if (used && typeof mir.rT === 'number' && mir.rT >= kept.T) {   // the own side's mirror (ecs, each second) is newer than the backup: what was made or drawn since is not made or drawn twice
     const d = E.d[S.me], ids = new Set(mir.q.map(q => q.id));
     if (mir.q.length < 12) d.q = d.q.filter(q => q.cat === 'site' || ids.has(q.id));
@@ -20843,7 +20907,7 @@ function ecoAdopt() {
   for (const e of E.l) if (!e.dead && e.prog < 1) { const d = E.d[e.team]; if (!d.q.some(q => q.site === e.id)) d.q.push({ id: E.seq++, k: e.k, cat: 'site', at: null, p: e.prog, why: '', paid: { en: 0, mt: 0 }, site: e.id }); }
   for (const e of E.l) if (e.dead) ecoClear(e);
   for (const u of S.units) if (u.fixed && u.kind === 'aa' && !u.dead && !u.es) { const s = E.l.find(s => s.team === u.team && !s.dead && hdist(u, s) < ECO.gd.r); if (s) u.es = s; }   // a site's AA adopted from the old host: still not the base's (director)
-  for (const t of [0, 1]) E.d[t].aiT = S.t + 1;
+  for (const t of lsN()) E.d[t].aiT = S.t + 1;
   Net.eq = true; Net.ej = ''; Net.gl = [null, null]; Net.en = { ecs: ENET.ecs, gen: ENET.gen, glog: 0, keep: 0 };
 }
 Net.adopt = (f => () => { f(); S.gcm = S.gsq = null; ecoAdopt(); manAdopt(); })(Net.adopt);
@@ -20855,7 +20919,7 @@ function manAdopt() {
 }
 
 Net.rx.welcome = (old => m => {
-  Net.eco = m.eco === 1; Net.gen = m.gen === 1; Net.gc2 = m.gc === 2; Net.gn = Array.isArray(m.gn) ? m.gn.slice(0, 2) : [0, 0]; Net.gk = Array.isArray(m.gk) ? m.gk.slice(0, 2) : [0, 0];
+  Net.eco = m.eco === 1; Net.gen = m.gen === 1; Net.gc2 = m.gc === 2; Net.gn = Array.isArray(m.gn) ? m.gn.slice(0, 3) : [0, 0]; Net.gk = Array.isArray(m.gk) ? m.gk.slice(0, 3) : [0, 0];
   old(m);
 })(Net.rx.welcome);
 
@@ -20899,7 +20963,7 @@ Net.rx.sjoin = m => {
   if (!S || !S.net || !S.host || !m || !Number.isInteger(m.id)) return;
   Net.allObjs(); Net.bq = true; Net.fq = true; if (Net.yd) Net.yall(); if (S.cq) Net.cqSend();   // what each welcome-time resend of a joiner does, for the spectator
   Net.eq = true; if (Net.en) { Net.en.ecs = ENET.ecs; Net.en.gen = ENET.gen; }
-  if (Net.gen && S.glog) for (const s of [0, 1]) Net.send('glog', { s, T: enetR1(mclock()), e: glogFit(glogRows(s)), full: 1, to: m.id });
+  if (Net.gen && S.glog) for (const s of lsN()) Net.send('glog', { s, T: enetR1(mclock()), e: glogFit(glogRows(s)), full: 1, to: m.id });
 };
 Net.rx.host = (old => m => { old(m); if (S && S.spec && m.id === 0 && Net.ui.empty) Net.ui.empty(); })(Net.rx.host);
 
@@ -20948,7 +21012,7 @@ function genCtl(t, seat, asst, who) {
   asst = asst || GEN.asst;
   const n = { seat }, ds = ['eco', 'atk', 'def', 'sup'];
   for (const d of ds) n[d] = seat === 'ai' || asst[d] ? 'ai' : seat;
-  if (!S.gctl) { if (seat === 'ai') return; S.gctl = [0, 1].map(() => ({ seat: 'ai', eco: 'ai', atk: 'ai', def: 'ai', sup: 'ai' })); }
+  if (!S.gctl) { if (seat === 'ai') return; S.gctl = lsN().map(() => ({ seat: 'ai', eco: 'ai', atk: 'ai', def: 'ai', sup: 'ai' })); }
   const o = S.gctl[t];
   if (ds.every(d => o[d] === n[d]) && o.seat === n.seat) return;
   S.gctl[t] = n;
@@ -21037,7 +21101,7 @@ function gAtkPlan(t, c) {
   if (C.ops.some(o => o.k === 'atk' && !o.over && o.ri === P.ri)) return { why: 'busy' };
   if (C.ops.filter(o => o.k === 'atk' && !o.over).length >= campN(C)) return { why: 'max' };   // up to the side's fronts by doctrine (F4, D12 A)
   const named = Array.isArray(c.ids) && c.ids.length > 0;
-  let pool = named ? gSqs(t, c.ids) : null, sd = c.sd === 1 || c.sd === -1 ? c.sd : t ? 1 : -1;
+  let pool = named ? gSqs(t, c.ids) : null, sd = c.sd === 1 || c.sd === -1 ? c.sd : lsDs(t, P.ri);
   if (named) {
     if (!pool.length) return { why: 'sq' };
     pool = pool.filter(q => gOrdOk(q, P.ri)); if (!pool.length) return { why: 'reach' };
@@ -21172,7 +21236,7 @@ const GC = {
     if (S.net && !(S.host && Net.sb)) return gBad('off');
     if (!gMapOk(c.x, c.z)) return gBad('map');
     const l = supLot(t, c.x, c.z); if (l) c = Object.assign({}, c, { x: l.x, z: l.z, a: l.a });
-    const a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, S.base[1 - t].x, S.base[1 - t].z), w = siteWhy(t, c.x, c.z, a); if (w) return gBad(w);
+    const e = lsFoeBase(t, c.x, c.z), a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z), w = siteWhy(t, c.x, c.z, a); if (w) return gBad(w);
     const p = railOf(c.x, c.z), qs = gSqs(t, c.ids).filter(q => gOrdOk(q, p.ri)); if (!qs.length) return gBad(gSqs(t, c.ids).length ? 'reach' : 'sq');
     const q = qs[0]; if (q.op) { gDrop(q); q.op = null; q.back = null; }
     supOpen(C, { k: 'build', ri: p.ri, s: p.s, x: c.x, z: c.z, a, R: 9 }, q);
@@ -21188,7 +21252,7 @@ const GC = {
   }, r(t, c) { return { b: S.sup.concat(ecoFoe(t)).find(b => b.id === c.id && b.team !== t), q: gSq(t, (c.ids || [])[0]) }; } },
   work: { d: '', f(t, c) {
     const k = c.k === 'trench' ? 1 : c.k === 'sandbag' ? 2 : 0; if (!k) return gBad('kind');
-    const e = S.base[1 - t], a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z);
+    const e = lsFoeBase(t, c.x, c.z), a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z);
     return gUsrGo(t, c, 'work', p => ({ k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, dig: { k, a } }));
   } },
   recon: { d: '', f(t, c) { return gUsrGo(t, c, 'recon', p => ({ k: 'observe', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 5 })); } },
@@ -21275,10 +21339,10 @@ GC.disp = { d: 'atk', f(t, c) {
   dispatch(t, M, () => {
     if (air) for (let i = 0; i < n && ecoUse(t, k); i++, got++) {
       if (k === 'heli') { heliAir(t, side.heli); continue; }
-      const x = b.x + (t ? -300 : 300), z = b.z + (i - (n - 1) / 2) * 400;   // abreast along the base: a command draws no random number
+      const x = b.x + (lsFoeBase(t, b.x, b.z).x < b.x ? -300 : 300), z = b.z + (i - (n - 1) / 2) * 400;   // abreast along the base, on the enemy's side of it: a command draws no random number
       addPlane(side[k], t, x, hgt(x, z) + 900, z, headTo(x, z, A.x, A.z), true, k);
     } else {
-      const p = railOf(A.x, A.z), N = { tank: 0, aa: 0, art: 0, truck: 0, squad: 0 }; N[k] = n;
+      const p = lsRail(t, A.x, A.z), N = { tank: 0, aa: 0, art: 0, truck: 0, squad: 0 }; N[k] = n;   // a column enters by one of t's own roads
       const col = ecoCol(t, N.tank, N.aa, N.truck, N.art, N.squad, p.ri, entryS(t, p.ri));
       if (col) { got = col.nt + col.na + col.nar + (k === 'squad' ? col.nsq : k === 'truck' ? col.ntr : 0); spawnColumn(t, col.nt, col.na, col.ntr, p.ri, col.s0, col.nar, col.nsq); }
     }
@@ -21390,9 +21454,9 @@ function lgGive(o, n) { if (!o || o.lc === undefined) return 0; const k = Math.m
 ecoInit = (f => () => {
   f(); S.lg = null; Net.lgCar.clear(); Net.lgRq.clear();
   if (!LG.on || !S.eco || (S.net && !Net.lg)) return;
-  S.lg = { cv: [], pri: [{}, {}], dry: [{}, {}], cmd: [0, 0], wk: ['', ''], T: 0 };
+  S.lg = { cv: [], pri: lsN().map(() => ({})), dry: lsN().map(() => ({})), cmd: lsN().map(() => 0), wk: lsN().map(() => ''), T: 0 };
   if (S.cq) for (const p of S.cq.p) p.lc = p.base < 0 && p.hold >= 0 ? LG.start.p : 0;
-  if (S.modern && S.eco.sim) for (const t of [0, 1]) S.eco.d[t].keep.lift = Math.max(S.eco.d[t].keep.lift || 0, 1);   // the airlift's helicopter: one kept in the reserve
+  if (S.modern && S.eco.sim) for (const t of lsN()) if (S.E.sides[S.fac[t]] && S.E.sides[S.fac[t]].lift) S.eco.d[t].keep.lift = Math.max(S.eco.d[t].keep.lift || 0, 1);   // the airlift's helicopter: one kept in the reserve
 })(ecoInit);
 /* a point that changes hands loses what was in it */
 cqFlip = (f => (p, was) => { if (S.lg && p.hold !== was) p.lc = 0; return f(p, was); })(cqFlip);
@@ -21404,14 +21468,14 @@ entryS = (f => (t, ri, to) => {
 })(entryS);
 /* the foremost base of side t on road ri that has `need` crates and is safe, else the main base */
 function lgEntry(t, ri, need) {
-  const ds = t ? 1 : -1; let s = endS(t, ri, FIELD.main), o = null;
+  const ds = lsDs(t, ri); let s = lsEndS(t, ri, FIELD.main), o = null;
   for (const b of S.sup) if (b.team === t && b.ri === ri && b.prog >= 1 && !spawnWhy(b, t) && lgFix(b).lc >= need && (b.s - s) * ds > 0) { s = b.s; o = b; }
   return { s, o };
 }
 const lgBase = (t, ri, s) => S.sup.find(b => b.team === t && b.ri === ri && !b.dead && b.prog >= 1 && Math.abs(b.s - s) < 1) || null;
 spawnColumn = (f => (team, nt, na, ntr, ri, s0, nar, nsq) => {
   const L = S.lg;
-  if (!lgSim() || !(team === 0 || team === 1)) return f(team, nt, na, ntr, ri, s0, nar, nsq);
+  if (!lgSim() || !lsSide(team)) return f(team, nt, na, ntr, ri, s0, nar, nsq);
   const C = LG.cost, side = S.E.sides[S.fac[team]], lav = trnOk() && side.lav ? TCOL.lav[Math.min(nt, TCOL.lav.length - 1)] * (C.lav + C.squad) : 0;
   const need = nt * C.tank + na * C.aa + ntr * C.truck + nar * (lgMrl(DEFS.art[side.art]) ? C.mrl : C.art) + (nsq || 0) * C.squad + lav;
   let b = lgBase(team, ri, s0);
@@ -21507,13 +21571,19 @@ refill = (f => (m, dep) => { f(m, dep); const b = S.lg && dep === 2 && m === S.m
 /* the danger side t knows on road ri between its main base and s: as colAxis reads the commander's map */
 function lgThr(t, ri, s) {
   const C = S.cmd && S.cmd[t], r = S.T.routes[ri], K = MANT.thr, G = CMD.cell; if (!C || !C.inf || !C.nx || !r) return 0;
-  const a = endS(t, ri, FIELD.main), lo = clamp(Math.min(a, s), 0, r.len), hi = clamp(Math.max(a, s), 0, r.len), Z = C.kz && C.kz.length === C.nx * C.nz ? C.kz : null;
+  const a = lsEndS(t, ri, FIELD.main), lo = clamp(Math.min(a, s), 0, r.len), hi = clamp(Math.max(a, s), 0, r.len), Z = C.kz && C.kz.length === C.nx * C.nz ? C.kz : null;
   let th = 0, n = 0;
   for (let x = lo; x <= hi + 1e-6; x += 200) { const p = routeAt(r, Math.min(x, hi)), k = clamp((p.z + S.HW) / G | 0, 0, C.nz - 1) * C.nx + clamp(p.x / G | 0, 0, C.nx - 1); th += Math.max(0, -C.inf[k]) * K.k + (Z ? Z[k] * K.kz : 0); n++; }
   return n ? th / n : 0;
 }
-/* where a node is on its road: a base's s, a point's projection on its nearest axis */
-const lgS = o => (o.sup ? { ri: o.ri, s: o.s } : { ri: o.ri, s: o.rs && o.rs[o.ri] !== null && o.rs[o.ri] !== undefined ? o.rs[o.ri] : o.s });
+/* where a node is on its road: a base's s, a point's projection on its nearest axis. t: on one of side t's own roads (with three sides a point's
+   nearest axis may run between the two others: then its projection on t's that has one, else on t's nearest) */
+const lgS = (o, t) => {
+  const has = ri => o.rs && o.rs[ri] !== null && o.rs[ri] !== undefined, p = o.sup ? { ri: o.ri, s: o.s } : { ri: o.ri, s: has(o.ri) ? o.rs[o.ri] : o.s };
+  if (!lsSide(t) || lsRoutes(t).includes(p.ri)) return p;
+  const ri = lsRoutes(t).find(has); if (ri !== undefined) return { ri, s: o.rs[ri] };
+  const q = lsRail(t, o.x, o.z); return { ri: q.ri, s: q.s };
+};
 const lgInb = (t, key) => S.lg.cv.reduce((a, c) => a + (c.t === t && c.n === key ? c.c : 0), 0);
 /* a convoy from the main base to node o: a truck with LG.truck crates for LG.mt metal, with an escort on a dangerous road. '' or why not */
 function lgConvoy(t, o, why) {
@@ -21521,14 +21591,14 @@ function lgConvoy(t, o, why) {
   if (L.cv.filter(c => c.t === t && c.c > 0).length >= LG.cmax) return 'conv';
   if (lgCap(o) - o.lc - lgInb(t, key) <= 0) return 'full';
   if (d.mt < LG.mt) return 'mt';
-  const { ri, s } = m5Lg(t, o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);   // M5: the axis drawn among those that cost about the same
+  const { ri, s } = m5Lg(t, o), s0 = lsEndS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);   // M5: the axis drawn among those that cost about the same
   d.mt -= LG.mt;
   const paid = v => Object.assign(v, { lgp: 1 });   // paid for by the main base: not by a node it is born near
   const M = { kind: 'lift', why: 'comboio de suprimento: ' + nm + (why ? ' (' + why + ')' : ''), target: { ri, s } }, u = dispatch(t, M, () => paid(errand(t, 'truck', ri, s0, [{ s, k: 'sup' }, { s: s0, k: 'bye' }])));
   u.run.k = 'conv'; u.lgc = LG.truck; Object.assign(u.mis, { kind: M.kind, why: M.why });   // errand opens an order of its own: the convoy's words
   let e = null;
   if (thr > LG.threat) for (const k of ['lav', 'car']) if (ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era) && (d.res[k] || []).length && ecoUse(t, k)) {
-    e = dispatch(t, { kind: 'escort', why: 'escolta do comboio para ' + nm, target: { ri, s } }, () => paid(errand(t, k, ri, s0 - (t ? 1 : -1) * 30, [{ s, k: 'turn' }, { s: s0, k: 'bye' }])));
+    e = dispatch(t, { kind: 'escort', why: 'escolta do comboio para ' + nm, target: { ri, s } }, () => paid(errand(t, k, ri, s0 - lsDs(t, ri) * 30, [{ s, k: 'turn' }, { s: s0, k: 'bye' }])));
     e.run.k = 'esc'; Object.assign(e.mis, { kind: 'escort', why: 'escolta do comboio para ' + nm }); break;
   }
   L.cv.push({ t, u, n: key, c: LG.truck, T: S.t, e, s0 });
@@ -21573,14 +21643,14 @@ function lgDrop(u, c) {
   const k = lgGive(o, c.c); c.c -= k; u.lgc = c.c;
   if (k) gLog(c.t, 'eco', (c.air ? 'Ponte aérea entregou ' : 'Comboio entregou ') + k + ' caixas em ' + lgName(o) + ' (' + Math.floor(o.lc) + '/' + lgCap(o) + ')', o);
 }
-/* the crates of a truck that is taken: to the taker's nearest node with room, else lost */
+/* the crates of a truck that is taken: to the taker's (by's side) nearest node with room, else lost */
 function lgGrab(u, t, by) {
-  const n = u.lgc; u.lgc = 0;
+  const n = u.lgc, g = lsBy(t, by); u.lgc = 0;
   const c = S.lg.cv.find(c => c.u === u); if (c) { c.c = 0; u.run = { legs: [{ s: c.s0, k: 'bye' }], i: 0, T: 0 }; }
-  const to = lgNodes(1 - t).filter(o => hdist(o, u) < LG.grab.far && lgCap(o) > o.lc).sort((a, b) => hdist(a, u) - hdist(b, u))[0], k = to ? lgGive(to, n) : 0;
+  const to = g >= 0 ? lgNodes(g).filter(o => hdist(o, u) < LG.grab.far && lgCap(o) > o.lc).sort((a, b) => hdist(a, u) - hdist(b, u))[0] : null, k = to ? lgGive(to, n) : 0;
   gLog(t, 'eco', 'Carga de ' + n + ' caixas tomada pelo inimigo ' + ecoNear(u.x, u.z), u);
-  gLog(1 - t, 'eco', 'Tomamos ' + n + ' caixas de um caminhão inimigo ' + ecoNear(u.x, u.z) + (k ? ': ' + k + ' para ' + lgName(to) : ''), u);
-  if (!S.demo && (t === S.me || 1 - t === S.me)) S.floats.push({ x: u.x, y: u.y + 6, z: u.z, text: (t === S.me ? 'Carga tomada pelo inimigo' : 'Carga capturada: ' + n + ' caixas'), life: 3 });
+  if (g >= 0) gLog(g, 'eco', 'Tomamos ' + n + ' caixas de um caminhão inimigo ' + ecoNear(u.x, u.z) + (k ? ': ' + k + ' para ' + lgName(to) : ''), u);
+  if (!S.demo && (t === S.me || (g >= 0 && g === S.me))) S.floats.push({ x: u.x, y: u.y + 6, z: u.z, text: (t === S.me ? 'Carga tomada pelo inimigo' : 'Carga capturada: ' + n + ' caixas'), life: 3 });
   if (by) by.lgg = 0;
 }
 /* a load lost with what carried it (n: a guest's, as the host counts it): the load and LG.lost tickets */
@@ -21589,7 +21659,8 @@ function lgLost(o, c, n0) {
   if (!n) return;
   if (cqSim() && !S.cq.ph) S.cq.tk[t] -= LG.lost;
   gLog(t, 'eco', (o.heli ? 'Helicóptero de suprimento perdido ' : 'Comboio perdido ') + ecoNear(o.x, o.z) + ': ' + n + ' caixas', o, 'lglost');
-  gLog(1 - t, 'eco', (o.heli ? 'Helicóptero de suprimento inimigo derrubado ' : 'Comboio inimigo destruído ') + ecoNear(o.x, o.z), o, 'lgkill');
+  const by = lsBy(t, S.t - (o.hitT || -1e9) < DMG.credit ? o.lastBy : null);   // the side that hit it last; with two sides, the enemy as before
+  if (by >= 0) gLog(by, 'eco', (o.heli ? 'Helicóptero de suprimento inimigo derrubado ' : 'Comboio inimigo destruído ') + ecoNear(o.x, o.z), o, 'lgkill');
 }
 /* the logistics general of side t: the node that needs it most gets a convoy, or the airlift when its road is cut or too dangerous */
 function lgPlan(t) {
@@ -21599,7 +21670,7 @@ function lgPlan(t) {
   for (const o of lgNodes(t)) {
     const key = lgKey(o), room = lgCap(o) - o.lc - lgInb(t, key), tied = lgTied(t, o); if (room < LG.truck / 2 || (!tied && !air)) continue;
     const pr = P[key] !== undefined ? P[key] : o.sup ? 2 : 1; if (!pr) continue;
-    const { ri, s } = lgS(o), sc = LG.pri[pr] * room / lgCap(o) * (2 - Math.min(1, Math.max(0, ecoDepth(t, o.x, o.z)) / 3000)) * (tied ? 1 : 1.5);   // the front first, a node cut off more
+    const { ri, s } = lgS(o, t), sc = LG.pri[pr] * room / lgCap(o) * (2 - Math.min(1, Math.max(0, ecoDepth(t, o.x, o.z)) / 3000)) * (tied ? 1 : 1.5);   // the front first, a node cut off more
     if (sc > bs) { bs = sc; best = { o, ri, s }; }
   }
   if (!best) return;
@@ -21645,7 +21716,7 @@ function lgStep(dt) {
       if (!c.e) c.done = 1; continue;
     }
     if (c.air || !c.c) continue;
-    const o = lgOf(c.t, c.n), { ri, s } = o ? lgS(o) : { ri: -1, s: 0 };
+    const o = lgOf(c.t, c.n), { ri, s } = o ? lgS(o, c.t) : { ri: -1, s: 0 };
     if (!o) { if (u.run && u.run.legs[0].k === 'sup') { u.run.legs = [{ s: c.s0, k: 'bye' }]; u.run.i = 0; } continue; }   // its node is gone: home
     if ((u.ri === ri && Math.abs(u.s - s) < 30) || hdist(u, o) < (o.sup ? LG.near : o.r)) lgDrop(u, c);
   }
@@ -21659,8 +21730,8 @@ function lgStep(dt) {
   }
   if ((L.T -= dt) > 0) return;
   L.T = 1;
-  for (const t of [0, 1]) {
-    const D = L.dry[t];
+  for (const t of lsN()) {
+    const D = L.dry[t] || (L.dry[t] = {});
     for (const o of lgNodes(t)) {
       const key = lgKey(o);
       if (o.lc >= LG.cost.inf) { delete D[key]; continue; }
@@ -21721,8 +21792,8 @@ GC.sprio = { d: 'sup', f(t, c) {
 } };
 Object.assign(GEN.cn, { conv: 'comboio de suprimento', alift: 'ponte aérea', sprio: 'prioridade de suprimento' });
 Object.assign(GEN.no, { node: 'Nó de suprimento não encontrado', full: 'O nó está cheio', mt: 'Falta metal na base principal', conv: 'Comboios demais a caminho', lift: 'Sem helicóptero de transporte na reserva', cut: 'O nó está cortado da base: use a ponte aérea', era: 'Não existe nesta época' });
-genQuery = (f => (t, q) => (q && q.q === 'logi' && (t === 0 || t === 1) ? lgView(t) : f(t, q)))(genQuery);
-genAnswer = (f => (s, q) => (q && q.q === 'logi' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: lgView(s) } : f(s, q)))(genAnswer);
+genQuery = (f => (t, q) => (q && q.q === 'logi' && lsSide(t) ? lgView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'logi' && lsSide(s) ? { ok: true, why: '', id: 0, r: lgView(s) } : f(s, q)))(genAnswer);
 /* ---- net: welcome lg: 1; the stocks on the base rows and on cq (sk); lsp and lgx ---- */
 Net.rx.welcome = (old => m => { Net.lg = m.lg === 1; old(m); })(Net.rx.welcome);
 Net.rx.cq = (f => m => {
@@ -21843,8 +21914,8 @@ ecoInit = (f => () => {
   for (const k in REC.unit) delete ECO.unit[k];
   if (!REC.on || !S.eco || (S.net && !Net.rec)) return;
   Object.assign(ECO.unit, REC.unit);
-  S.rec = { n: 0, v: [], men: [0, 0], vet: [{}, {}], cmd: [0, 0], T: 0, live: 0 };
-  if (S.eco.sim) for (const t of [0, 1]) { const d = S.eco.d[t]; for (const k in REC.keep) { d.keep[k] = Math.max(d.keep[k] || 0, REC.keep[k]); if (!(d.res[k] || []).length) d.res[k] = ['hq']; } }
+  S.rec = { n: 0, v: [], men: lsN().map(() => 0), vet: lsN().map(() => ({})), cmd: lsN().map(() => 0), T: 0, live: 0 };
+  if (S.eco.sim) for (const t of lsN()) { const d = S.eco.d[t]; for (const k in REC.keep) { d.keep[k] = Math.max(d.keep[k] || 0, REC.keep[k]); if (!(d.res[k] || []).length) d.res[k] = ['hq']; } }
 })(ecoInit);
 const recHulk = h => !!h && !!h.imm && !h.dead && !h.gone;
 const recBusy = h => !!h.rcq && !h.rcq.dead && !!h.rcq.rcv && h.rcq.rcv.h === h;
@@ -21923,7 +21994,7 @@ function recGo(u, g, k) {
 function recRoad(u, s, k) {
   const c = u.ctl; c.brake = false;
   if (!u.rail) {
-    const p = u.rp || (u.rp = railOf(u.x, u.z)), r = S.T.routes[p.ri], ds = Math.sign(s - p.s) || u.ds, lane = ds * RUNS.lane, q = routeAt(r, clamp(p.s, 0, r.len));
+    const p = u.rp || (u.rp = lsRail(u.team, u.x, u.z)), r = S.T.routes[p.ri], ds = Math.sign(s - p.s) || u.ds, lane = ds * RUNS.lane, q = routeAt(r, clamp(p.s, 0, r.len));
     const x = q.x - q.dz * lane, z = q.z + q.dx * lane;
     if (driveTo(u, x, z) > 5) { c.drive *= k; return Math.abs(s - p.s) + hdist(u, { x, z }); }
     Object.assign(u, { rail: true, ri: p.ri, s: clamp(p.s, 0, r.len), ds, lane, rp: null }); place(u);
@@ -21941,16 +22012,16 @@ function recTrail(u, h) {
 }
 /* side t's nearest node on road ri to s: a finished supply base that has the crates for a hulk of kind k (any, with no logistics), else the main base */
 function recDest(t, ri, s, k) {
-  let best = { o: null, ri, s: endS(t, ri, FIELD.main) }, bd = Math.abs(best.s - s);
+  let best = { o: null, ri, s: lsEndS(t, ri, FIELD.main) }, bd = Math.abs(best.s - s);
   for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1 && b.ri === ri && (!S.lg || lgFix(b).lc >= (REC.fix[k] || 6))) { const dd = Math.abs(b.s - s); if (dd < bd) { bd = dd; best = { o: b, ri, s: b.s }; } }
   return best;
 }
 const recWhere = to => (to.o ? lgName(to.o) : LG.tx.main);
 /* ---- the recovery vehicle ---- */
 function recFleet(t, k, ri, why, area) {
-  const d = S.eco.d[t], s0 = endS(t, ri, FIELD.main), id = (REC.side[S.era][S.fac[t]] || {})[k];   // a side with no model of the kind (a faction's own still to come) fields none
+  const d = S.eco.d[t], s0 = lsEndS(t, ri, FIELD.main), id = (REC.side[S.era][S.fac[t]] || {})[k];   // a side with no model of the kind (a faction's own still to come) fields none
   if (!id || !(d.res[k] || []).length || !ecoUse(t, k)) return null;
-  const u = dispatch(t, { kind: 'support', why, area }, () => Object.assign(addUnit('car', t, 0, 0, id, false, ri, s0, (t ? 1 : -1) * RUNS.lane, 0), { fld: 1, lgp: 1, home: s0 }));
+  const u = dispatch(t, { kind: 'support', why, area }, () => Object.assign(addUnit('car', t, 0, 0, id, false, ri, s0, lsDs(t, ri) * RUNS.lane, 0), { fld: 1, lgp: 1, home: s0 }));
   if (u.mis) Object.assign(u.mis, { kind: 'support', why });
   S.rec.v.push({ t, k, u, T: S.t }); return u;
 }
@@ -21959,7 +22030,7 @@ function recSend(t, h, why) {
   if (!recHulk(h) || h.tow) return 'id';
   if (recBusy(h)) return 'tow';
   if (h.team !== t && ecoDepth(t, h.x, h.z) < -REC.ahead) return 'far';
-  const p = railOf(h.x, h.z), u = recFleet(t, 'arv', p.ri, (h.team === t ? 'recuperar ' : 'capturar ') + h.name + ' ' + ecoNear(h.x, h.z), { x: h.x, z: h.z, r: 300 });
+  const p = lsRail(t, h.x, h.z), u = recFleet(t, 'arv', p.ri, (h.team === t ? 'recuperar ' : 'capturar ') + h.name + ' ' + ecoNear(h.x, h.z), { x: h.x, z: h.z, r: 300 });
   if (!u) return 'nores';
   u.rcv = { st: 'go', h, T: 0, g: { x: h.x, z: h.z } }; h.rcq = u;
   gLog(t, 'eco', REC.tx.arv + ' a caminho de ' + (h.team === t ? '' : 'um inimigo imobilizado: ') + h.name + ' ' + ecoNear(h.x, h.z) + (why ? ': ' + why : ''), h, 'rcsend' + h.imm.id);
@@ -21969,11 +22040,11 @@ function recHook(u, h) {
   const R = u.rcv, t = u.team, cx = Math.cos(u.h), cz = -Math.sin(u.h), D = u.def.env[3] + h.def.env[3] + 1;
   if (h.team !== t) {   // an enemy's: ours from here
     gLog(h.team, 'eco', 'O inimigo rebocou o nosso ' + h.name + ' imobilizado ' + ecoNear(h.x, h.z), h);
-    h.team = t; h.ds = t ? 1 : -1; h.cap = 1; h.col = u.col;
+    h.team = t; h.ds = lsDs(t, lsRail(t, h.x, h.z).ri); h.cap = 1; h.col = u.col;
     gLog(t, 'eco', 'Capturamos um ' + h.name + ' imobilizado ' + ecoNear(h.x, h.z), h);
   }
   h.x = u.x - cx * D; h.z = u.z - cz * D; h.y = hgt(h.x, h.z); h.h = u.h; h.tow = u;   // the crew rigs it behind
-  const p = railOf(h.x, h.z); R.to = recDest(t, p.ri, p.s, tk(h)); R.st = 'tow'; R.T = 0; u.rp = null;
+  const p = lsRail(t, h.x, h.z); R.to = recDest(t, p.ri, p.s, tk(h)); R.st = 'tow'; R.T = 0; u.rp = null;
   gLog(t, 'eco', h.name + ' engatado: a caminho de ' + recWhere(R.to), h);
 }
 /* at the node: the full repair, paid, and the vehicle back in the reserve with its experience */
@@ -22038,7 +22109,7 @@ function recWounded(t, x, z, r) {
 /* an evacuation for group g: the helicopter today when the wounded lie far from a road, the road is dangerous or no ambulance is in the
    reserve; else an ambulance. '' or why not */
 function recEvac(t, g, why) {
-  const d = S.eco.d[t], p = railOf(g.x, g.z), nm = ecoNear(g.x, g.z), n = g.men.length;
+  const d = S.eco.d[t], p = lsRail(t, g.x, g.z), nm = ecoNear(g.x, g.z), n = g.men.length;
   const air = S.modern && (d.res.lift || []).length > 0, amb = (d.res.amb || []).length > 0, far = Math.abs(p.off) > REC.amb.road || (S.lg ? lgThr(t, p.ri, p.s) > LG.threat : false);
   if (air && (far || !amb) && ecoUse(t, 'lift')) {
     const w = 'evacuação médica: ' + recN(n) + ' ' + nm + (why ? ' (' + why + ')' : ''), q = dispatch(t, { kind: 'lift', why: w, area: { x: g.x, z: g.z, r: 300 } }, () => heliGround(S.E.sides[S.fac[t]].lift, t, 5, true));
@@ -22093,7 +22164,7 @@ function aiAmb(u, dt) {
       if (Math.abs(u.sp) < ENT.slow && (R.T += dt) >= REC.amb.load) { recLoad(u, R, REC.amb.pick, REC.amb.n); R.m = null; R.T = 0; if (R.n >= REC.amb.n) { R.st = 'back'; u.rp = null; } }
     } else R.T = 0;
   } else if (R.st === 'back') {
-    if (!R.to) { const p = u.rail ? { ri: u.ri, s: u.s } : railOf(u.x, u.z); R.to = recDest(t, p.ri, p.s, ''); }
+    if (!R.to) { const p = u.rail && lsRoutes(t).includes(u.ri) ? { ri: u.ri, s: u.s } : lsRail(t, u.x, u.z); R.to = recDest(t, p.ri, p.s, ''); }
     if (recRoad(u, R.to.s, 1) < REC.reach) { recHand(t, R.n, R.to.o); R.n = 0; R.st = 'home'; }
   } else if (recRoad(u, u.home, 1) < REC.reach) u.dead = u.gone = true;
 }
@@ -22130,7 +22201,7 @@ function recStep(dt) {
   if (R.v.some(v => v.done)) R.v = R.v.filter(v => !v.done);
   if ((R.T -= dt) > 0) return;
   R.T = 1;
-  for (const t of [0, 1]) if (genBy(t, 'sup') === 'ai' && S.t >= R.cmd[t]) { R.cmd[t] = S.t + REC.every; recPlan(t); }
+  for (const t of lsN()) if (genBy(t, 'sup') === 'ai' && S.t >= (R.cmd[t] || 0)) { R.cmd[t] = S.t + REC.every; recPlan(t); }
 }
 ecoStep = (f => dt => { f(dt); recStep(dt); })(ecoStep);
 /* the hulk side t's recovery general would go for: its own before the enemy's, by worth and distance, none past ahead m beyond its line nor with a
@@ -22185,8 +22256,8 @@ GC.medv = { d: 'sup', f(t, c) {
 } };
 Object.assign(GEN.cn, { recv: 'recuperar veículo', medv: 'evacuação médica' });
 Object.assign(GEN.no, { tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais, à frente da linha', hurt: 'Nenhum ferido para evacuar ali' });
-genQuery = (f => (t, q) => (q && q.q === 'rec' && (t === 0 || t === 1) ? recView(t) : f(t, q)))(genQuery);
-genAnswer = (f => (s, q) => (q && q.q === 'rec' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: recView(s) } : f(s, q)))(genAnswer);
+genQuery = (f => (t, q) => (q && q.q === 'rec' && lsSide(t) ? recView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'rec' && lsSide(s) ? { ok: true, why: '', id: 0, r: recView(s) } : f(s, q)))(genAnswer);
 /* ---------- repair trucks and ambulances at work (SV: the captain's "caminhão de reparo e ambulância", on REC) ----------
    The ambulances and the repair trucks of REC are a player's too (REC.play: in the hangar, the list of where to enter and a requisition) and
    they work standing still (under still m/s), whoever drives them, on what is simulated where this runs: the host's (or solo) AI, and on
@@ -22341,7 +22412,7 @@ aiAmb = (f => (u, dt) => {
 /* a repair truck out of the reserve to x z: '' or why not */
 function svSend(t, x, z, why, r, wait) {
   if (!recSim()) return 'off';
-  const p = railOf(x, z), u = recFleet(t, 'rpr', p.ri, 'reparo de veículos ' + ecoNear(x, z) + (why ? ': ' + why : ''), { x, z, r: r || SV.rpr.area });
+  const p = lsRail(t, x, z), u = recFleet(t, 'rpr', p.ri, 'reparo de veículos ' + ecoNear(x, z) + (why ? ': ' + why : ''), { x, z, r: r || SV.rpr.area });
   if (!u) return 'nores';
   u.rpv = { st: 'go', at: { x, z }, r: r || SV.rpr.area, wait: wait || SV.rpr.wait, o: null, g: null, idle: 0 };
   gLog(t, 'eco', REC.tx.rpr + ' a caminho ' + ecoNear(x, z) + (why ? ': ' + why : ''), { x, z }, 'svsend');
@@ -22383,7 +22454,7 @@ GC.disp = (D => ({ d: D.d, f(t, c, ...a) {
     let u = null;
     if (c.k === 'rpr') { if (!svSend(t, A.x, A.z, why, Math.max(A.r, SV.rpr.area), SV.rpr.dwait)) u = svSend.u; }
     else {
-      const p = railOf(A.x, A.z); u = recFleet(t, 'amb', p.ri, why, A);
+      const p = lsRail(t, A.x, A.z); u = recFleet(t, 'amb', p.ri, why, A);
       if (u) { u.mev = { st: 'go', n: 0, T: 0, at: { x: A.x, z: A.z }, m: null, g: null, wait: S.t + SV.amb.dwait }; gLog(t, 'eco', 'Ambulância a caminho ' + ecoNear(A.x, A.z) + ': ' + why, A, 'svamb'); }
     }
     if (!u) break;
@@ -22474,7 +22545,7 @@ function gDone(t, c, by, G, r) {
 /* a command for side t's general from by ('ai', 'me', 'mcp', 'sys'); R the objects the AI resolved. Always { ok, why, id } */
 function genCmd(t, c, by, R) {
   by = by || 'ai';
-  if ((t !== 0 && t !== 1) || !c || typeof c !== 'object') return gDone(t, c || {}, by, null, gBad('shape'));
+  if (!lsSide(t) || !c || typeof c !== 'object') return gDone(t, c || {}, by, null, gBad('shape'));
   const G = typeof c.c === 'string' && Object.hasOwn(GC, c.c) ? GC[c.c] : null;
   if (!G) return gDone(t, c, by, null, gBad('kind'));
   if (by !== 'ai') {
@@ -22493,7 +22564,7 @@ function genCmd(t, c, by, R) {
 }
 /* questions that change nothing: state, pool { x, z }, amb { x, z }, fire { k, x, z }, spots and why (the economy's) */
 function genQuery(t, q) {
-  if (!q || typeof q !== 'object' || (t !== 0 && t !== 1)) return gBad('shape');
+  if (!q || typeof q !== 'object' || !lsSide(t)) return gBad('shape');
   if (q.q === 'state') return genState(t);
   if (q.q === 'spots' || q.q === 'why') return ecoAsk(t, q);
   if (q.q === 'plan') return gpView(t) || { off: 1 };
@@ -22566,10 +22637,10 @@ const cnAt = o => (o.men ? o.men.find(m => !m.dead) || null : o);
 const cnOn = () => !!(CN.on && S && S.cn && (!S.net || S.host));
 /* how long a word of o takes, by its link st; n: the count that makes it this one */
 const cnLag = (o, st, n) => { const R = st === 2 ? CN.in : st === 1 ? CN.out : null; return R ? R[0] + cnHash(cnId(o), n) * (R[1] - R[0]) : Infinity; };
-/* how much of an enemy jammer side t is under at x z: 1 in the middle, 0 at its edge or beyond */
+/* how much of an enemy jammer (any enemy side's) side t is under at x z: 1 in the middle, 0 at its edge or beyond */
 function cnJam(t, x, z) {
   let j = 0;
-  for (const u of S.cn.jam[1 - t]) { const d = Math.hypot(u.x - x, u.z - z); if (d < CN.jam.r) j = Math.max(j, 1 - d / CN.jam.r); }
+  for (const e of lsFoes(t)) for (const u of S.cn.jam[e] || []) { const d = Math.hypot(u.x - x, u.z - z); if (d < CN.jam.r) j = Math.max(j, 1 - d / CN.jam.r); }
   return j;
 }
 /* the link of o (o.cnL), and the node it goes through (o.cnN) */
@@ -22586,13 +22657,13 @@ const cnSt = t => S.cn.st[t];
 /* the look: the HQs, the nodes, the jammers, every unit's link */
 function cnLook() {
   const N = S.cn, W = S.W;
-  for (let t = 0; t < 2; t++) {
+  for (const t of lsN()) {
     const H = N.hq[t];
     if (H.st === 'up' && H.id >= 0 && S.os[H.id] >= 2) { H.st = 'down'; H.T = S.t; gLog(t, 'radio', CN.st.down + ': o comando planeja a cada ' + CN.hq.plan + ' s até montar o QG reserva', H, 'hq'); }
     if (H.st === 'down' && S.t - H.T >= CN.hq.alt) { H.st = 'alt'; gLog(t, 'radio', CN.st.alt + ' montado na base: o comando volta ao seu ritmo', H, 'hqa'); }
     N.jam[t] = S.units.filter(u => !u.dead && u.team === t && u.id !== 'k' && DJAM[u.id] > 0);
   }
-  for (let t = 0; t < 2; t++) {
+  for (const t of lsN()) {
     const L = [], H = N.hq[t];
     if (H.st !== 'down') L.push({ k: 3, x: H.x, z: H.z, r: W * (H.st === 'alt' ? CN.hq.altR : CN.hq.r), o: null });
     for (const u of S.units) if (u.team === t && !u.dead && !u.man && u.def && u.def.rad) L.push({ k: 2, x: u.x, z: u.z, r: W * CN.car.r * (u.dep === 1 ? 1 : CN.car.mob), o: u });
@@ -22601,14 +22672,14 @@ function cnLook() {
     for (const f of S.forts || []) if (f.team === t && f.F.cn && f.prog >= 1 && !f.gone && !(S.os[f.id] > 1)) L.push({ k: 4, x: f.x, z: f.z, r: W * CN.rel.r, o: f });   // a radio relay that stands (CNR)
     N.nodes[t] = L.filter(n => cnJam(t, n.x, n.z) < CN.jam.cut);
   }
-  const c = [[0, 0, 0], [0, 0, 0]]; N.lk = (N.lk || 0) + 1;
+  const c = lsN().map(() => [0, 0, 0]); N.lk = (N.lk || 0) + 1;
   for (const q of S.squads) {
-    if (q.net || !(q.live > 0) || (q.team !== 0 && q.team !== 1)) continue;
+    if (q.net || !(q.live > 0) || !lsSide(q.team)) continue;
     const st = cnLink(q); c[q.team][st]++;
     const L = cnAt(q); if (L && (st === 2 || q.cnT === undefined || (st === 1 && S.t - q.cnT >= CN.out[0]))) { q.cnx = L.x; q.cnz = L.z; q.cnT = S.t; }
   }
-  for (const u of S.units) if (u.ai && !u.net && !u.dead && (u.team === 0 || u.team === 1)) cnLink(u);
-  for (let t = 0; t < 2; t++) { const s = cnSt(t); s.inN = c[t][2]; s.outN = c[t][1]; s.cutN = c[t][0]; }
+  for (const u of S.units) if (u.ai && !u.net && !u.dead && lsSide(u.team)) cnLink(u);
+  for (const t of lsN()) { const s = cnSt(t); s.inN = c[t][2]; s.outN = c[t][1]; s.cutN = c[t][0]; }
 }
 /* how busy a sender is now: its count, halved every df.half s since its last word */
 const cnCount = x => (x.cnX ? x.cnX * Math.pow(.5, (S.t - x.cnXT) / CN.df.half) : 0);
@@ -22625,12 +22696,14 @@ function cnDF() {
     const v = cnCount(o);
     if (o.dead || o.gone || !(o.live === undefined || o.live > 0) || v < .5) { N.tx.delete(o); continue; }
     if (v < CN.df.n || S.t < (o.cnDF || 0)) continue;
-    const a = cnAt(o), t = o.team; if (!a || (t !== 0 && t !== 1)) continue;
-    if (!N.nodes[1 - t].some(n => Math.hypot(n.x - a.x, n.z - a.z) < R)) continue;
-    o.cnDF = S.t + CN.df.cool; cnSt(1 - t).df++;
+    const a = cnAt(o), t = o.team; if (!a || !lsSide(t)) continue;
+    const hear = lsFoes(t).filter(f => (N.nodes[f] || []).some(n => Math.hypot(n.x - a.x, n.z - a.z) < R)); if (!hear.length) continue;   // each enemy side whose own net hears it
+    o.cnDF = S.t + CN.df.cool;
     const k = ++N.n, e = CN.df.err, x = a.x + (cnHash(cnId(o), k) * 2 - 1) * e, z = a.z + (cnHash(k, cnId(o)) * 2 - 1) * e;
-    seeBy(a, 1 - t, x, z); if (o.F && o.F.cn) o.kn = (o.kn || 0) | (1 << (1 - t));   // a relay fixed: the enemy knows the work (CNR)
-    gLog(1 - t, 'radio', 'Radiogoniometria: transmissor inimigo localizado ' + gNear(x, z), { x, z }, 'df' + (o.men ? 'q' + o.id : cnId(o)));
+    for (const f of hear) {
+      seeBy(a, f, x, z); cnSt(f).df++; if (o.F && o.F.cn) o.kn = (o.kn || 0) | (1 << f);   // a relay fixed: that enemy knows the work (CNR)
+      gLog(f, 'radio', 'Radiogoniometria: transmissor inimigo localizado ' + gNear(x, z), { x, z }, 'df' + (o.men ? 'q' + o.id : cnId(o)));
+    }
   }
 }
 /* where the battle is simulated, after the director's own step */
@@ -22638,9 +22711,9 @@ function cnStep(dt) {
   if (!CN.on || (S.net && !S.host)) return;
   if (!S.cn) {
     const tw = t => { const o = S.T.objs.find(o => o.k === 'ctl' && o.base === t); return o ? o.id : -1; };
-    S.cn = { n: 0, ctx: -1, acc: 0, pn: [0, 0], tx: new Set(), sw: new Map(), rw: new Map(), nodes: [[], []], jam: [[], []],
-      hq: [0, 1].map(t => ({ st: 'up', T: 0, id: tw(t), x: S.base[t].x, z: S.base[t].z })),
-      st: [0, 1].map(() => ({ sent: 0, del: 0, late: 0, lost: 0, lat: 0, rep: 0, df: 0, inN: 0, outN: 0, cutN: 0 })) };
+    S.cn = { n: 0, ctx: -1, acc: 0, pn: lsN().map(() => 0), tx: new Set(), sw: new Map(), rw: new Map(), nodes: lsN().map(() => []), jam: lsN().map(() => []),
+      hq: lsN().map(t => ({ st: 'up', T: 0, id: tw(t), x: S.base[t].x, z: S.base[t].z })),
+      st: lsN().map(() => ({ sent: 0, del: 0, late: 0, lost: 0, lat: 0, rep: 0, df: 0, inN: 0, outN: 0, cutN: 0 })) };
   }
   const N = S.cn;
   if ((N.acc -= dt) > 0) return;
@@ -22713,7 +22786,7 @@ plan = (g => (t, J, n) => {
   try { return g(t, J, n); } finally { N.ctx = was; }
 })(plan);
 genCmd = (g => (t, c, by, R) => {
-  const N = S.cn; if (!N || !CN.on || (t !== 0 && t !== 1)) return g(t, c, by, R);
+  const N = S.cn; if (!N || !CN.on || !lsSide(t)) return g(t, c, by, R);
   const was = N.ctx; N.ctx = t;
   try { return g(t, c, by, R); } finally { N.ctx = was; }
 })(genCmd);
@@ -22721,7 +22794,7 @@ genCmd = (g => (t, c, by, R) => {
 rep = (g => (o, k, data) => {
   const L0 = o && S.rep ? S.rep[o.team] : null, last = L0 && L0.length ? L0[L0.length - 1] : null;
   g(o, k, data);
-  if (!cnOn() || !o || (o.team !== 0 && o.team !== 1)) return;
+  if (!cnOn() || !o || !lsSide(o.team)) return;
   const L = S.rep && S.rep[o.team], r = L && L.length ? L[L.length - 1] : null; if (!r || r === last) return;
   const st = o.cnL === undefined ? 2 : o.cnL, N = S.cn;
   r.cnA = st ? S.t + cnLag(o, st, ++N.n) : Infinity; cnSt(o.team).rep++;
@@ -22742,13 +22815,13 @@ function cnVM(t) {
     const P = q.cnP, O = P && P.O, R = S.T.routes, d = O ? (O.x !== undefined ? O : O.ri !== undefined && O.s !== undefined && R[O.ri] ? routeAt(R[O.ri], clamp(O.s, 0, R[O.ri].len)) : null) : null;
     sq.push([q.id, q.cnL, P ? (P.at === Infinity ? -1 : r(Math.max(0, P.at - S.t))) : -2, d ? r(d.x) : 0, d ? r(d.z) : 0]);
   }
-  const jam = N.jam[t].map(u => [r(u.x), r(u.z), CN.jam.r, 1]).concat(N.jam[1 - t].filter(u => S.t - sT(u, t) < CMD.mem && sX(u, t) !== undefined).map(u => [r(sX(u, t)), r(sZ(u, t)), CN.jam.r, 0]));
+  const jam = N.jam[t].map(u => [r(u.x), r(u.z), CN.jam.r, 1]).concat(...lsFoes(t).map(e => (N.jam[e] || []).filter(u => S.t - sT(u, t) < CMD.mem && sX(u, t) !== undefined).map(u => [r(sX(u, t)), r(sZ(u, t)), CN.jam.r, 0])));   // every enemy's jammers side t has seen
   return { hq: H.st, left: H.st === 'down' ? r(Math.max(0, CN.hq.alt - (S.t - H.T))) : 0, every: H.st === 'down' ? CN.hq.plan : FIELD.every,
     nodes: N.nodes[t].map(n => [r(n.x), r(n.z), r(n.r), n.k]), jam, sq, n: [s.inN, s.outN, s.cutN], sent: s.sent, lost: s.lost, df: s.df };
 }
 genVM = (g => (t, all) => {
   const V = g(t, all);
-  if (cnOn() && (t === 0 || t === 1)) {
+  if (cnOn() && lsSide(t)) {
     V.cn = cnVM(t);
     const by = new Map(); for (const q of S.squads) if (q.team === t && !q.net && q.cnT !== undefined) by.set(q.id, q);
     for (const e of V.u) { const q = e.t === t && e.sqd ? by.get(e.id) : null; if (q && S.t - q.cnT > CN.every * 2) { e.x = q.cnx; e.z = q.cnz; e.age = S.t - q.cnT; } }
@@ -22758,7 +22831,7 @@ genVM = (g => (t, all) => {
 GENK.push('cn');
 /* the side's whole picture: its net, and each squad's link and the order on its way */
 genState = (g => t => {
-  const o = g(t), V = cnOn() && (t === 0 || t === 1) ? cnVM(t) : null; if (!V || !o) return o;
+  const o = g(t), V = cnOn() && lsSide(t) ? cnVM(t) : null; if (!V || !o) return o;
   const L = new Map(V.sq.map(e => [e[0], e]));
   for (const q of o.sq) { const e = L.get(q.id); q.link = e ? e[1] : 2; if (e && e[2] !== -2) q.eta = e[2]; }
   o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df,
@@ -22916,7 +22989,7 @@ GC.ord = { d: 'atk', f(t, c, by) {
     });
     if (r) { const k = new Set(r.qs.map((q, i) => i % ax)).size; s = 'Ataque ' + nm('a') + ': ' + gSqTxt(r.qs.length) + ' por ' + k + (k > 1 ? ' eixos' : ' eixo') + gRtTxt(pts); }
   } else if (v === 'def') {
-    const b = S.base[1 - t], ang = Math.atan2(b.z - T.z, b.x - T.x);
+    const b = lsFoeBase(t, T.x, T.z), ang = Math.atan2(b.z - T.z, b.x - T.x);
     r = gSend(t, 'hold', T.x, T.z, qs, n, pts, (q, i) => {
       const a = ang + (i - (Math.min(n, qs.length) - 1) / 2) * .8, P = { x: T.x + Math.cos(a) * W21.def, z: T.z + Math.sin(a) * W21.def }, at = gMapOk(P.x, P.z) ? P : T, p = railOf(at.x, at.z);
       return { x: at.x, z: at.z, O: { k: 'hold', ri: p.ri, s: p.s, x: at.x, z: at.z, R: 12, mk: 'defend', fast: 1 } };
@@ -23020,7 +23093,7 @@ GC.fort = { d: 'def', f(t, c, by) {
     if (!sapOn()) return gBad('off');
     if (mines().filter(o => !o.gone && o.team === t).length >= SAP.cap) return gBad('mcap');
   }
-  const e = S.base[1 - t], a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z), p = railOf(c.x, c.z);
+  const e = lsFoeBase(t, c.x, c.z), a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z), p = railOf(c.x, c.z);
   const qs = gPick(t, c, c.x, c.z, 1, { eng: 1 }); if (!qs.length) return gBad('sq');
   const r = gSend(t, 'work', c.x, c.z, qs, named ? GENC.ids : 1, rt || [], () => ({ x: c.x, z: c.z, O: Object.assign({ k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, mk: 'build', fast: 1 }, F ? { dig: { k: K, a } } : null) }));
   if (!r) return gBad('way');
@@ -23681,8 +23754,8 @@ const aidSites = t => (S.eco ? S.eco.l.filter(e => e.team === t && !e.dead && e.
 function aidSapPost(t) {
   const w = aidSeat(t), b = S.base[t]; let x, z;
   if (w) { const d = Math.hypot(b.x - w.x, b.z - w.z) || 1; x = w.x + (b.x - w.x) / d * w.ru * .6; z = w.z + (b.z - w.z) / d * w.ru * .6; }
-  else { const fr = frontR(), r = S.T.routes[fr], p = routeAt(r, clamp(endS(t, fr, FIELD.base + AID.sap.back), 0, r.len)); x = p.x - p.dz * 40; z = p.z + p.dx * 40; }
-  const c = clearOf(x, z, 2, {}), p = railOf(c.x, c.z); return { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 8 };
+  else { const fr = lsFront(t), r = S.T.routes[fr], p = routeAt(r, clamp(lsEndS(t, fr, FIELD.base + AID.sap.back), 0, r.len)); x = p.x - p.dz * 40; z = p.z + p.dx * 40; }
+  const c = clearOf(x, z, 2, {}), p = lsRail(t, c.x, c.z); return { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 8 };
 }
 function aidQrfAt(t) {
   const w = aidSeat(t); if (w) return { x: w.x, z: w.z, nm: 'a cidade-sede' };
@@ -23690,7 +23763,7 @@ function aidQrfAt(t) {
 }
 function aidQrfPost(t) {
   const P = aidQrfAt(t); if (!P) return null;
-  const b = S.base[t], d = Math.hypot(b.x - P.x, b.z - P.z) || 1, c = clearOf(P.x + (b.x - P.x) / d * 60, P.z + (b.z - P.z) / d * 60, 2, {}), p = railOf(c.x, c.z);
+  const b = S.base[t], d = Math.hypot(b.x - P.x, b.z - P.z) || 1, c = clearOf(P.x + (b.x - P.x) / d * 60, P.z + (b.z - P.z) / d * 60, 2, {}), p = lsRail(t, c.x, c.z);
   return { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12 };
 }
 const aidSapKits = t => { const E = INF[S.era][S.fac[t]], i = E.findIndex(id => KITS[id].sap); return i < 0 ? undefined : [i, i].concat(SQUAD[S.era].slice(2)); };   // as many men as the patrol it stands in for
@@ -23722,15 +23795,16 @@ function aidField(x, z, dx, dz, key, why, kind, at) {
 /* the defensive fields of side t: the roads into its seat town and to its forward mine (or, with neither, the front road ahead of its line) */
 function aidFields(t, A) {
   if (A.fl && S.t - A.flT < 60) return A.fl;
-  const out = [], R = S.T.routes, ds = t ? 1 : -1, w = aidSeat(t), F = AID.field;
+  const out = [], R = S.T.routes, ds = ri => lsDs(t, ri), w = aidSeat(t), F = AID.field;   // forward on each of t's own roads
   const at = (ri, s, key, why) => { const r = R[ri], p = routeAt(r, clamp(s, 0, r.len)); out.push(aidField(p.x, p.z, p.dx, p.dz, key, why, 'build')); };
   if (w) R.forEach((r, ri) => {
+    if (!lsRoutes(t).includes(ri)) return;
     let bs = 0, bd = 1e9; for (let s = 0; s <= r.len; s += 25) { const p = routeAt(r, s), d = Math.hypot(p.x - w.x, p.z - w.z); if (d < bd) { bd = d; bs = s; } }
-    if (bd < w.ru + 150) at(ri, bs + ds * (w.ru + F.out), 'seat' + ri, 'minar a aproximação da cidade-sede pela rota ' + (ri + 1));
+    if (bd < w.ru + 150) at(ri, bs + ds(ri) * (w.ru + F.out), 'seat' + ri, 'minar a aproximação da cidade-sede pela rota ' + (ri + 1));
   });
   const fm = aidSites(t).filter(e => e.k === 'mine').sort((a, b) => ecoDepth(t, a.x, a.z) - ecoDepth(t, b.x, b.z))[0];
-  if (fm && ecoDepth(t, fm.x, fm.z) < AID.eco.fwd) { const p = railOf(fm.x, fm.z); if (p.d < F.road) at(p.ri, p.s + ds * F.out, 'mine' + fm.id, 'minar a aproximação da mina avançada'); }
-  if (!out.length) { const fr = frontR(); at(fr, lineS(t, fr) + ds * F.line, 'line' + fr, 'minar a aproximação da linha na rota ' + (fr + 1)); }
+  if (fm && ecoDepth(t, fm.x, fm.z) < AID.eco.fwd) { const p = lsRail(t, fm.x, fm.z); if (p.d < F.road) at(p.ri, p.s + ds(p.ri) * F.out, 'mine' + fm.id, 'minar a aproximação da mina avançada'); }
+  if (!out.length) { const fr = lsFront(t); at(fr, lineS(t, fr) + ds(fr) * F.line, 'line' + fr, 'minar a aproximação da linha na rota ' + (fr + 1)); }
   A.flT = S.t; return (A.fl = out);
 }
 /* a sweep of a suspect field: its middle and a ring round it */
@@ -23898,7 +23972,7 @@ function aidPostKind(C, q) {
 }
 /* not a garrison that holds a village, nor a squad in a building: its houses and windows serve it better than a post */
 function aidPosts(C, A, sq) {
-  const t = C.t, e = S.base[1 - t];
+  const t = C.t;
   if (S.net && !(Net.ft && Net.sap)) return;
   if (S.forts.filter(f => f.team === t && f.k >= 3 && f.k <= 5 && !f.gone).length >= bmrPostMax(t)) return;
   for (const q of sq) {
@@ -23908,7 +23982,7 @@ function aidPosts(C, A, sq) {
     q.aidPT = S.t + AID.post.again;
     if (S.forts.some(f => f.team === t && f.k === k && !f.gone && hdist(f, O) < AID.post.apart)) continue;
     if (!bmrPay(t, F.cost, 'post')) continue;
-    const a = headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), men = q.men.filter(m => !m.dead && !m.in), need = Math.min(2, men.length);
+    const e = lsFoeBase(t, O.x, O.z), a = headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), men = q.men.filter(m => !m.dead && !m.in), need = Math.min(2, men.length);
     for (const m of men) for (const R of [4, 6]) for (const s of [0, 1, -1]) {   // a little ahead of where its men stand, so that they build it
       if (q.aidP) break;
       const x = m.x + Math.cos(a) * R + ux * s * 4, z = m.z - Math.sin(a) * R + uz * s * 4;
@@ -23941,32 +24015,35 @@ function aidDome(C, A, sq) {
     if (n < K.n && !ln) continue;
     const q = sq.filter(q => K.by[q.job] && !q.op && !q.dome && !q.sapT && !q.qrf && !q.state && q.live >= 2 && aidLead(q) && !aidRide(q)).sort((a, b) => hdist(aidLead(a), P) - hdist(aidLead(b), P))[0];
     if (!q || hdist(aidLead(q), P) > 1500) continue;
-    const L = aidLead(q), e = S.base[1 - t], a = headTo(P.x, P.z, e.x, e.z);
+    const L = aidLead(q), e = lsFoeBase(t, P.x, P.z), a = headTo(P.x, P.z, e.x, e.z);
     let f = null;
     for (let i = 0; i < 64 && !f; i++) {   // open ground the nearest to its builders, away from the houses
       const an = a + Math.PI + (i % 8) * TAU / 8, R = 15 + (i >> 3) * 30, x = L.x + Math.cos(an) * R, z = L.z - Math.sin(an) * R;
       if (!near(x, z, 25).some(o => o.K.sight)) f = fortStart(6, t, x, z, a);
     }
     if (!f) continue;
-    q.dome = f; f.T0 = S.t; const p = railOf(f.x, f.z), back = cnOrd(q);
+    q.dome = f; f.T0 = S.t; const p = lsRail(t, f.x, f.z), back = cnOrd(q);
     setOrd(q, { k: 'hold', ri: p.ri, s: p.s, x: f.x, z: f.z, R: 9, dome: f, back, aid: { kind: 'build', why: 'construir a cúpula antifoguete', area: { x: f.x, z: f.z, r: 60 } } });
     gLog(t, 'eng', 'Cúpula antifoguete iniciada junto ' + aidAt(P.nm) + (n >= K.n ? ': ' + n + ' granadas e foguetes inimigos caíram ali' : ': lançador de foguetes inimigo ao alcance'), f, 'domeS' + f.id);
     A.dT = S.t + K.again; return;
   }
 }
 /* an enemy dome becomes known by sight, or when it engages one of the side's rounds */
-domeHit = (g => (f, b, stop) => { g(f, b, stop); f.kn = (f.kn || 0) | (1 << (1 - f.team)); })(domeHit);
+domeHit = (g => (f, b, stop) => { g(f, b, stop); const s = b && lsSide(b.team) && b.team !== f.team ? b.team : lsBy(f.team, null); if (s >= 0) f.kn = (f.kn || 0) | (1 << s); })(domeHit);   // the side whose round it took
 function aidSee() {
   for (const f of S.forts) {
     if (f.k !== 6 || f.gone) continue;
-    const e = 1 - f.team; if (f.kn & (1 << e)) continue;
-    const by = o => !o.dead && o.team === e && Math.abs(o.x - f.x) < AID.dome.see && Math.abs(o.z - f.z) < AID.dome.see && hdist(o, f) < AID.dome.see;
-    if (S.units.some(by) || S.men.some(by)) f.kn = (f.kn || 0) | (1 << e);
+    for (const e of lsFoes(f.team)) {   // each enemy side by its own eyes
+      if (f.kn & (1 << e)) continue;
+      const by = o => !o.dead && o.team === e && Math.abs(o.x - f.x) < AID.dome.see && Math.abs(o.z - f.z) < AID.dome.see && hdist(o, f) < AID.dome.see;
+      if (S.units.some(by) || S.men.some(by)) f.kn = (f.kn || 0) | (1 << e);
+    }
   }
   for (const b of S.bombs) {   // where enemy rounds come down, for the side they come down on
     if (b.aidN || b.k !== 'he' || b.px === undefined || b.gone) continue;
-    b.aidN = 1; const C = S.cmd && S.cmd[1 - b.team]; if (!C) continue;
-    const l = aidOf(C).rk; l.push({ x: b.px, z: b.pz, t: S.t }); if (l.length > 200) l.shift();
+    b.aidN = 1; if (!S.cmd) continue;
+    const on = lsFoes(b.team), hit = on.length === 1 ? on : on.filter(s => aidAreas(s).some(P => Math.hypot(P.x - b.px, P.z - b.pz) < AID.dome.r));   // with three sides: each enemy whose seat or base it fell by
+    for (const s of hit) { const C = S.cmd[s]; if (!C) continue; const l = aidOf(C).rk; l.push({ x: b.px, z: b.pz, t: S.t }); if (l.length > 200) l.shift(); }
   }
 }
 /* ===== the rocket launchers ===== */
@@ -23977,7 +24054,7 @@ spawnColumn = (g => (team, nt, na, ntr, ri, s0, nar, nsq) => {
   g(team, nt, na, ntr, ri, s0, nar - (want ? 1 : 0), nsq);
   if (!want) return;
   const i = S.units.length - n0;
-  dispatchIf(team, { by: MIS.col, why: 'coluna' }, () => addUnit('art', team, 0, 0, side.mlrs, false, ri, s0 + (team ? -1 : 1) * 24 * i, i % 2 ? 5 : -5, i));
+  dispatchIf(team, { by: MIS.col, why: 'coluna' }, () => addUnit('art', team, 0, 0, side.mlrs, false, ri, s0 - lsDs(team, ri) * 24 * i, i % 2 ? 5 : -5, i));
 })(spawnColumn);
 /* a launcher fires at a mass only, and its whole salvo */
 pickFire = (g => (u, w) => {
@@ -24034,7 +24111,7 @@ function aidQrf(C, A, sq) {
       if (sc >= K.thr && sc > bs) { bs = sc; best = Object.assign({ ex: KN.n ? KN.x : p.x, ez: KN.n ? KN.z : p.z }, p); }
     }
     if (!best) { if (big) gLog(t, 'def', 'Força de reação rápida não sai: o inimigo junto ' + aidAt(big.nm) + ' é forte demais para ela', big, 'qrfbig' + aidKey(big.x, big.z)); continue; }
-    const r = q.qrf = { x: best.x, z: best.z, nm: best.nm, T0: S.t, qT: S.t, why: q.mis && q.mis.why }, p = railOf(best.ex, best.ez);
+    const r = q.qrf = { x: best.x, z: best.z, nm: best.nm, T0: S.t, qT: S.t, why: q.mis && q.mis.why }, p = lsRail(t, best.ex, best.ez);
     setOrd(q, { k: 'assault', ri: p.ri, s: p.s, x: best.ex, z: best.ez, R: 10, qrf: r, aid: { kind: 'defend', why: 'força de reação rápida: ' + best.nm, area: { x: best.x, z: best.z, r: K.r } } });
     if (cnOrd(q).qrf !== r) { q.qrf = null; continue; }
     gLog(t, 'def', 'Força de reação rápida enviada para ' + best.nm + ' (inimigo de força ' + gN(bs) + ')', best, 'qrf' + aidKey(best.x, best.z));
@@ -24117,7 +24194,7 @@ function cnGaps(t) {
 }
 /* where a relay (or, with car, a radio vehicle) can cover gap g for side t: the furthest back toward its base, unwatched and clear of the known enemy */
 function cnSite(t, g, car) {
-  const C = cmdOf(t), b = S.base[t], R = cnRelR(), dx = b.x - g.x, dz = b.z - g.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, e = S.base[1 - t];
+  const C = cmdOf(t), b = S.base[t], R = cnRelR(), dx = b.x - g.x, dz = b.z - g.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, e = lsFoeBase(t, g.x, g.z);
   let best = null, bs = Infinity;
   for (let d = 0; d <= Math.min(R * CNR.keep, L); d += CNR.step) for (const l of CNR.lat) {
     const x = g.x + ux * d - uz * l, z = g.z + uz * d + ux * l;
@@ -30056,6 +30133,12 @@ function drawHud() {
   if (seat) { seat.draw(P, u, ink, acc, disp, blink); fpFx(P); }
   if (!P.dead && S.t - P.dazeT < 1.6) { hx.globalAlpha = .8 * (1 - (S.t - P.dazeT) / 1.6); hx.fillStyle = '#050607'; hx.fillRect(0, 0, cw, ch); hx.globalAlpha = 1; }   // the pilot is hit: the view goes dark for a moment
   (P.man ? hudMan : P.kind ? hudDrive : hudFly)(P, u, ink, acc, disp, blink, seat);
+  const fg = S.farGnd;   // a guided bomb's target in sight but beyond what it can reach from here
+  if (fg && !P.dead && !fg.dead && !fg.gone && !S.lockGnd) {
+    const s = proj(fg.x, bodyY(fg) + (fg.kind ? .5 : 0), fg.z), amb = '#ffd24a';
+    if (s.front) { hx.setLineDash([4, 4]); bracket(s.x, s.y, 15, amb); hx.setLineDash([]); }
+    txt('FORA DE ALCANCE', cw / 2, ch * .5 + 60 * u, 12 * u, amb, 'center');
+  }
   const nl = S.noLos;   // a guided weapon's seeker has a target in its cone that only the ground, a wall, trees or smoke keep from it: no lock
   if (nl && !P.dead && !nl.dead && !nl.gone) {
     const s = proj(nl.x, bodyY(nl) + (nl.kind ? .5 : 0), nl.z), amb = '#ffd24a';
@@ -34537,10 +34620,10 @@ AI.tank = (old => (u, dt) => {
 })(AI.tank);
 /* a convoy's axis: one of those a node lies on that cost about the least, not the last one taken to it when there is another */
 function m5Lg(t, o) {
-  const b = lgS(o);
+  const b = lgS(o, t), my = lsRoutes(t);
   if (!M5.on || o.sup || !Array.isArray(o.rs)) return b;
   const c = [];
-  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri]) return; c.push({ ri, s, c: Math.abs(s - endS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) * mmLgK(t, lgKey(o), ri) }); });   // M6: mmLgK, the convoys lost on it
+  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri] || !my.includes(ri)) return; c.push({ ri, s, c: Math.abs(s - lsEndS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) * mmLgK(t, lgKey(o), ri) }); });   // M6: mmLgK, the convoys lost on it
   if (c.length < 2) return b;
   const lo = Math.min(...c.map(q => q.c)), M = S.m5lg || (S.m5lg = {}), key = t + ':' + lgKey(o);
   let ok = c.filter(q => q.c <= lo * (1 + M5.lg.k));

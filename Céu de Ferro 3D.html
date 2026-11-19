@@ -4350,8 +4350,8 @@ function newState(eraId, model, o) {
   fortInit();
   ecoInit();
   if (!S.net) {
-    for (const t of [0, 1]) dispatch(t, { why: 'antiaérea da base', area: { x: S.base[t].x, z: S.base[t].z, r: 900 } }, () => addUnit('aa', t, S.base[t].x + (t ? -420 : 420), S.base[t].z + (t ? -170 : 170), null, true));
-    for (const t of [0, 1]) dispatch(t, { why: 'abertura' }, () => deploy(t));
+    for (let t = 0; t < (S.N || 2); t++) dispatch(t, { why: 'antiaérea da base', area: { x: S.base[t].x, z: S.base[t].z, r: 900 } }, () => { const a = baseAA(t); return addUnit('aa', t, a.x, a.z, null, true); });
+    for (let t = 0; t < (S.N || 2); t++) dispatch(t, { why: 'abertura' }, () => deploy(t));
   }
   if (!S.demo) spawnPlayer();
   return S;
@@ -4384,9 +4384,9 @@ function spawnPlayer() {
     const x = b.x + Math.cos(h) * 900, z = b.z - Math.sin(h) * 900;
     p = addPlane(S.model, S.me, x, hgt(x, z) + 500, z, h, false);
   } else {
-    const sb = spawnBase(), old = S.net && !Net.sb, r = S.T.routes[frontR()];
-    const ds = S.me ? 1 : -1, art = S.cls === 'art', q = routeAt(r, old ? r.len / 2 - ds * (art ? DIR.back : rand(950, 1050)) : endS(S.me, S.T.routes.indexOf(r), SPAWN[S.cls])), off = old ? rand(-30, 30) : (Math.random() < .5 ? -1 : 1) * rand(SPAWN.off[0], SPAWN.off[1]), a = rand(0, TAU);
-    const x = sb ? sb.x + Math.cos(a) * (sb.sr || BLD.spawn) : q.x - q.dz * off, z = sb ? sb.z + Math.sin(a) * (sb.sr || BLD.spawn) : q.z + q.dx * off, e = S.base[1 - S.me];
+    const sb = spawnBase(), old = S.net && !Net.sb, ri0 = frontR(S.me), r = S.T.routes[ri0];   // N sides: the front road of the player's side, its way along it
+    const ds = dsOf(S.me, ri0), art = S.cls === 'art', q = routeAt(r, old ? r.len / 2 - ds * (art ? DIR.back : rand(950, 1050)) : endS(S.me, ri0, SPAWN[S.cls])), off = old ? rand(-30, 30) : (Math.random() < .5 ? -1 : 1) * rand(SPAWN.off[0], SPAWN.off[1]), a = rand(0, TAU);
+    const x = sb ? sb.x + Math.cos(a) * (sb.sr || BLD.spawn) : q.x - q.dz * off, z = sb ? sb.z + Math.sin(a) * (sb.sr || BLD.spawn) : q.z + q.dx * off, e = S.base[foeOf(S.me, x, z)] || { x: S.W / 2, z: 0 };
     h = sb ? headTo(x, z, e.x, e.z) : Math.atan2(-q.dz * ds, q.dx * ds);
     if (S.cls === 'inf') { const c = clearOf(x, z, 1.5, {}); p = addMan(S.model, S.me, c.x, c.z, h); }
     else {
@@ -4422,7 +4422,7 @@ const brain = ci => ({ jam: null, jamT: 0, free: 0, fs: 1, wo: -1, ws: 1, wpT: 0
 /* AI unit: fixed ones sit at x, z; the others ride route ri at distance s from the enemy airfield (rail) until the AI takes them off it */
 function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
   const u = addVehicle(kind, id || S.E.sides[S.fac[team]].aa, team, x, z, team ? Math.PI : 0);
-  Object.assign(u, { fixed: !!fixed, rail: !fixed, ri: ri || 0, s: s || 0, lane: lane || 0, ds: team ? 1 : -1,
+  Object.assign(u, { fixed: !!fixed, rail: !fixed, ri: ri || 0, s: s || 0, lane: lane || 0, ds: dsOf(team, ri || 0),
     ai: brain(ci) });
   for (const a of u.arms) a.cool = rand(1, 3);
   if (!fixed) place(u);
@@ -4508,7 +4508,7 @@ function tripOf(x0, z0, x1, z1, o) {
 }
 /* nsq: how many of the trucks carry a squad, while there is room under the cap */
 function spawnColumn(team, nt, na, ntr, ri, s0, nar, nsq) {
-  const side = S.E.sides[S.fac[team]], back = team ? -1 : 1, Q = SQUAD[S.era];
+  const side = S.E.sides[S.fac[team]], back = -dsOf(team, ri), Q = SQUAD[S.era];
   let i = 0, men = S.men.length + S.units.reduce((a, u) => a + (u.cargo ? u.cargo.length : 0), 0);
   const put = (k, t) => { const u = addUnit(k, team, 0, 0, t, false, ri, s0 + back * 24 * i, i % 2 ? 5 : -5, i); i++; return u; };
   for (let k = 0; k < nt; k++) put('tank', pick(side.tanks));
@@ -4522,7 +4522,7 @@ const squadsOf = t => S.squads.reduce((a, q) => a + (q.team === t && q.col && q.
 function demoKeepAlive() {
   const r = S.T.routes[0], mid = routeAt(r, r.len * .5);
   for (let t = 0; t < 2; t++) {
-    const side = S.E.sides[S.fac[t]], sg = t ? 1 : -1, x = mid.x - mid.dx * sg * 2500, z = mid.z - mid.dz * sg * 2500, h = headTo(x, z, mid.x, mid.z);
+    const side = S.E.sides[S.fac[t]], sg = dsOf(t, 0), x = mid.x - mid.dx * sg * 2500, z = mid.z - mid.dz * sg * 2500, h = headTo(x, z, mid.x, mid.z);
     const live = S.planes.filter(p => p.team === t && !p.dead);
     if (!live.some(p => p.role === 'fighter')) addPlane(side.fighter, t, x, hgt(x, z) + rand(500, 900), z + rand(-500, 500), h, true, 'fighter');
     if (!live.some(p => p.role === 'cas')) addPlane(side.cas, t, x, hgt(x, z) + rand(450, 700), z + rand(-400, 400), h, true, 'cas');
@@ -4540,8 +4540,10 @@ const DIR = { fighter: [2, 2, 1, 1], cas: [2, 1, 1, 1], tank: [3, 3, 2, 2], aa: 
    danger on it between the side's entry and its line (the commander's enemy influence times MANT.thr.k and its losses times MANT.thr.kz, every 200 m), so a column
    keeps off a road that is held or that has cost troops. Economy columns take the axis the same way (they are made here) */
 function colAxis(t) {
-  const R = S.T.routes, C = S.cmd && S.cmd[t], K = MANT.thr, G = CMD.cell, w = [];
+  const R = S.T.routes, C = S.cmd && S.cmd[t], K = MANT.thr, G = CMD.cell, w = [], M = myRoutes(t);
+  if (!M.length) return 0;
   R.forEach((r, ri) => {
+    if (!M.includes(ri)) { w.push(0); return; }   // N sides: only the roads side t is an end of
     let th = 0, n = 0;
     if (C && C.inf && C.nx) {
       const a = entryS(t, ri), b = lineS(t, ri), lo = clamp(Math.min(a, b), 0, r.len), hi = clamp(Math.max(a, b), 0, r.len), Z = C.kz && C.kz.length === C.nx * C.nz ? C.kz : null;
@@ -4551,8 +4553,11 @@ function colAxis(t) {
   });
   let x = Math.random() * w.reduce((a, b) => a + b, 0);
   for (let i = 0; i < w.length; i++) if ((x -= w[i]) < 0) return i;
-  return w.length - 1;
+  return M[M.length - 1];
 }
+/* N sides: the road side t's first column takes (road 0, or its first when it is no end of it), and the one after ri in turn among its roads (today's (ri + 1) % roads) */
+const firstAxis = t => { const M = myRoutes(t); return !M.length || M.includes(0) ? 0 : M[0]; };
+const nextAxis = (t, ri) => { const M = myRoutes(t); return !M.length ? 0 : M.find(i => i > ri) ?? M[0]; };
 /* ---------- the mission contract and Dispatch (phase F1 of the General's design) ----------
    Every soldier, squad, vehicle and aircraft has a mission, o.mis, from the moment it is born: what it is for, where, since when and with what freedom.
    kind: attack defend ambush recon escort garrison patrol interdict support cap cas lift build reserve; op: the commander's operation it serves (its id, 0: a
@@ -4677,18 +4682,18 @@ function director(dt) {
   const first = !S.dir, D = S.dir || (S.dir = [0, 1].map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
   if (!first && gpOn()) { gpMeter(); for (let t = 0; t < 2; t++) gpStep(t, D[t], dt); return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
   for (let t = 0; t < 2; t++) {
-    const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3), ds = t ? 1 : -1;
+    const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3);
     const cnt = (l, f) => l.reduce((a, o) => a + (o.team === t && !o.dead && !!o.ai && f(o) ? 1 : 0), 0), need = k => (cqFree(t, k) ? Math.max(0, DIR[k][n] - cnt(S.units, u => u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq))) : 0);
     T.air -= dt; T.col -= dt;
-    if (cnt(S.units, u => u.fixed && !u.es)) T.fix = DIR.fix; else if ((T.fix -= dt) <= 0 && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => addUnit('aa', t, b.x + (t ? -420 : 420), b.z + (t ? -170 : 170), null, true));
+    if (cnt(S.units, u => u.fixed && !u.es)) T.fix = DIR.fix; else if ((T.fix -= dt) <= 0 && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => { const a = baseAA(t); return addUnit('aa', t, a.x, a.z, null, true); });
     for (let i = first ? 4 : 1; i-- > 0;) for (const role of ['fighter', 'cas']) {
-      if (T.air > 0 || !cqFree(t, role) || cnt(S.planes, p => p.role === role) >= DIR[role][n] || !ecoUse(t, role)) continue;
+      if (!side[role] || T.air > 0 || !cqFree(t, role) || cnt(S.planes, p => p.role === role) >= DIR[role][n] || !ecoUse(t, role)) continue;
       const x = b.x + rand(-600, 600), z = b.z + rand(-1500, 1500);
       dispatch(t, { why: role === 'cas' ? 'apoio aéreo à frente' : 'superioridade aérea', area: { x: S.W / 2, z: 0, r: 3000 } }, () => addPlane(side[role], t, x, hgt(x, z) + rand(700, 1300), z, headTo(x, z, S.W / 2, 0), true, role)); T.air = first ? 0 : DIR.air;
     }
     const nq = inf ? Math.max(0, DIR.squad[n] - squadsOf(t)) : 0;
     if (T.col <= 0 && need('tank') + need('aa') + nq > 0) {   // with points the columns take the roads in turn, the first from the side's line on road 0
-      const ri = S.cq && !first ? (T.ri = S.T.mv >= 4 ? colAxis(t) : (T.ri + 1) % R.length) : 0, r = R[ri];
+      const ri = S.cq && !first ? (T.ri = S.T.mv >= 4 ? colAxis(t) : nextAxis(t, T.ri)) : firstAxis(t), r = R[ri], ds = dsOf(t, ri);
       const c = ecoCol(t, need('tank'), need('aa'), need('truck'), need('art'), nq, ri, first ? (S.cq ? lineS(t, ri) : r.len / 2 - ds * DIR.start) : sb ? entryS(t, ri) : r.len / 2 - ds * DIR.back);
       if (c) dispatch(t, { by: MIS.col, why: 'coluna pela rota ' + (ri + 1), target: { ri, s: c.s0 } }, () => spawnColumn(t, c.nt, c.na, c.ntr, ri, c.s0, c.nar, c.nsq)); T.col = c ? DIR.col : ECO.col.retry;
     }
@@ -4716,7 +4721,12 @@ function director(dt) {
      its HQ, free, to hold the base, and the general's log says why.
    With no economy (the demo, an older server, ECO.on 0) the classic director runs: DIR's caps and clocks, CQ.ai's waits, HDIR's and POOL's and RUNS's
    waits; these are no longer how a side with an economy fields anything. cap: IAI.cap while a side has an economy (two budgets), cap0: without */
-const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap: 240, cap0: IAI.cap, gnd: .75,
+const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap2: 240, cap0: IAI.cap, gnd: .75,
+  /* three sides (D10, the captain: twice today's infantry and ground vehicles, shared by the three; aircraft as the plan's 120 %): by faction (S.fac),
+     the plan's split (EUA and Russia 96/20/7, the Insurgents 130/16/0) scaled to 480 soldiers and 96 vehicles. cap: what IAI.cap is with an economy, all
+     sides' soldiers together (a getter: 240 with two sides, 480 with three); capMax: the most it may be, for what is sized once at load (MAXM) */
+  pop3: [{ men: 143, veh: 34, air: 7 }, { men: 143, veh: 34, air: 7 }, { men: 194, veh: 28, air: 0 }], cap3: 480, capMax: 480,
+  get cap() { return typeof S !== 'undefined' && S && S.N > 2 ? this.cap3 : this.cap2; },
   meter: { every: 10, min: .5, dn: .1, up: .05, low: .8 },
   mix: { tank: [5, 4, 3], lav: [2, 2, 1], aa: [2, 2, 3], art: [1, 1, 2], truck: [3, 2, 2], squad: [3, 2, 2], fighter: [2, 2, 2], cas: [3, 2, 1], heli: [2, 1, 1], lift: [1, 1, 0] },
   foe: { aa: 2, fighter: 1, arm: .5, armMax: 3, art: 1 }, max: 20,
@@ -4727,10 +4737,11 @@ const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }
   why: { air: 'aviação inimiga ativa', arm: ' blindados inimigos conhecidos', art: 'artilharia inimiga conhecida', set: 'ordem do general', st: ['postura ofensiva', 'postura equilibrada', 'postura defensiva'] } };
 const gpOn = () => ecoGate();
 /* the soldiers a side may have out: its budget with an economy, else half the cap as before */
-const sideMen = t => (gpOn() ? popOf(t).men : IAI.cap * FIELD.side);
+const sideMen = t => (gpOn() ? popOf(t).men : IAI.cap * (S.N > 2 ? 1 / S.N : FIELD.side));
+/* with three sides each faction its own budget (GP.pop3); a kind it has none of (the Insurgents' aircraft) stays at none */
 function popOf(t) {
-  const n = Math.min(S.humans ? S.humans[t] || 0 : 0, 3), k = S.popK || 1, o = {};
-  for (const c in GP.pop) o[c] = Math.max(c === 'men' ? GP.floor.men : 1, Math.round((GP.pop[c] - GP.hum[c] * n) * k));
+  const n = Math.min(S.humans ? S.humans[t] || 0 : 0, 3), k = S.popK || 1, o = {}, B = S.N > 2 ? GP.pop3[S.fac ? S.fac[t] : t] || GP.pop : GP.pop;
+  for (const c in GP.pop) o[c] = B[c] ? Math.max(c === 'men' ? GP.floor.men : 1, Math.round((B[c] - GP.hum[c] * n) * k)) : 0;
   return o;
 }
 function popUse(t) {
@@ -4814,7 +4825,7 @@ function gpMis(id, c) {
 function gpStep(t, T, dt) {
   if ((T.gpA = (T.gpA || 0) - dt) > 0) return;
   T.gpA = GP.dt;
-  const d = S.eco.d[t], pp = d.pp || gpPlan(t), F = pp.f, P = popOf(t), U = popUse(t), b = S.base[t], side = S.E.sides[S.fac[t]], R = S.T.routes, ds = t ? 1 : -1, res = k => (d.res[k] || []).length;
+  const d = S.eco.d[t], pp = d.pp || gpPlan(t), F = pp.f, P = popOf(t), U = popUse(t), b = S.base[t], side = S.E.sides[S.fac[t]], R = S.T.routes, res = k => (d.res[k] || []).length;
   pp.h = {}; for (const k in F) pp.h[k] = gpHave(t, k);
   if (T.flT === undefined) T.flT = S.t;
   if (res('squad') || d.q.some(q => q.cat !== 'site' && q.p > 0 && !q.why) || U.men >= GP.floor.men) T.flT = S.t;
@@ -4824,9 +4835,9 @@ function gpStep(t, T, dt) {
     dispatch(t, { kind: 'defend', why: 'piso de segurança: defender a base', area: { x: b.x, z: b.z, r: 900 } }, () => fieldSquad(t, 'base', 0, O, p.x - p.dz * 14, p.z + p.dx * 14));
     gLog(t, 'rf', 'Sem reserva nem produção há ' + Math.round(GP.floor.t / 60) + ' min: o quartel-general manda uma esquadra defender a base', b, 'floor');
   }
-  if (!S.units.some(u => u.team === t && !u.dead && u.fixed && !u.es) && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => addUnit('aa', t, b.x + (t ? -420 : 420), b.z + (t ? -170 : 170), null, true));
+  if (!S.units.some(u => u.team === t && !u.dead && u.fixed && !u.es) && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => { const a = baseAA(t); return addUnit('aa', t, a.x, a.z, null, true); });
   if (S.t >= (T.gpAir || 0)) for (const role of ['fighter', 'cas']) {
-    if (pp.h[role] >= (F[role] || 0) || U.air >= P.air || !ecoUse(t, role)) continue;
+    if (!side[role] || pp.h[role] >= (F[role] || 0) || U.air >= P.air || !ecoUse(t, role)) continue;
     const x = b.x + rand(-600, 600), z = b.z + rand(-1500, 1500);
     dispatch(t, { why: (role === 'cas' ? 'apoio aéreo à frente' : 'superioridade aérea') + ': ' + (pp.why[role] || ''), area: { x: S.W / 2, z: 0, r: 3000 } }, () => addPlane(side[role], t, x, hgt(x, z) + rand(700, 1300), z, headTo(x, z, S.W / 2, 0), true, role));
     T.gpAir = S.t + GP.air; break;
@@ -4842,15 +4853,15 @@ function gpStep(t, T, dt) {
   nt = take(nt); na = take(na); nar = take(nar); nq = Math.min(nq, Math.floor(Math.max(0, P.men - U.men) / SQUAD[S.era].length)); ntr = take(Math.max(ntr, nq)); nq = Math.min(nq, ntr);
   T.gpF = 0; T.gpCol = S.t + GP.gap;
   if (!(nt + na + nar + nq)) return;
-  const ri = S.cq ? (T.ri = S.T.mv >= 4 ? colAxis(t) : (T.ri + 1) % R.length) : 0, r = R[ri];
+  const ri = S.cq ? (T.ri = S.T.mv >= 4 ? colAxis(t) : nextAxis(t, T.ri)) : firstAxis(t), r = R[ri], ds = dsOf(t, ri);
   const c = ecoCol(t, nt, na, ntr, nar, nq, ri, sb ? entryS(t, ri) : r.len / 2 - ds * DIR.back);
   if (c) dispatch(t, { by: MIS.col, why: 'coluna pela rota ' + (ri + 1) + ': ' + (nt ? pp.why.tank : na ? pp.why.aa : pp.why.squad || ''), target: { ri, s: c.s0 } }, () => spawnColumn(t, c.nt, c.na, c.ntr, ri, c.s0, c.nar, c.nsq));
 }
 /* the helicopters by the plan: an attack one at once when the plan wants more out and the reserve has one, a transport run with a squad likewise */
 function gpHeli(t, D) {
   const d = S.eco.d[t], pp = d.pp || gpPlan(t), F = pp.f, P = popOf(t), U = popUse(t);
-  if (S.t >= (D.gpT || 0) && heliCount(t, p => p.def.atk) < (F.heli || 0) && U.air < P.air && ecoUse(t, 'heli')) { heliAir(t, S.E.sides[S.fac[t]].heli); D.gpT = S.t + GP.air; }
-  if (S.t >= (D.gpL || 0) && heliCount(t, p => p.def.lift) < (F.lift || 0) && U.air < P.air && (!S.net || Net.inf)) { D.gpL = S.t + GP.lift; heliLiftRun(t); }
+  if (S.E.sides[S.fac[t]].heli && S.t >= (D.gpT || 0) && heliCount(t, p => p.def.atk) < (F.heli || 0) && U.air < P.air && ecoUse(t, 'heli')) { heliAir(t, S.E.sides[S.fac[t]].heli); D.gpT = S.t + GP.air; }
+  if (S.E.sides[S.fac[t]].lift && S.t >= (D.gpL || 0) && heliCount(t, p => p.def.lift) < (F.lift || 0) && U.air < P.air && (!S.net || Net.inf)) { D.gpL = S.t + GP.lift; heliLiftRun(t); }
 }
 
 /* ---------- effects ---------- */
@@ -7117,16 +7128,31 @@ function squadThink(q) {
 /* ---------- infantry: the field squads and the side planner (FIELD) ---------- */
 const endS = (t, ri, d) => (t ? d : S.T.routes[ri].len - d);
 /* where a side's line lies on a road: solo where its columns hold or come in, online and in the demo FIELD.line m on its own side of the middle */
-const lineS = (t, ri) => { const p = S.cq && cqLine(t, ri); return p ? p.rs[ri] : S.cq ? endS(t, ri, FIELD.main) : S.T.mid[ri] - (t ? 1 : -1) * FIELD.line; };
-const frontR = () => (S.cq ? S.cq.fr : 0);
-/* every axis, the front one first, then the others in order (today's [fr, 1 - fr] with two roads) */
-const axesFrom = fr => [fr, ...S.T.routes.map((r, i) => i).filter(i => i !== fr)];
+const lineS = (t, ri) => { const p = S.cq && cqLine(t, ri); return p ? p.rs[ri] : S.cq ? endS(t, ri, FIELD.main) : S.T.mid[ri] - dsOf(t, ri) * FIELD.line; };
+/* N sides (P6a of the three sides' plan). A side fights only along the main roads it is an end of (myRoutes, from R.ends of map version 7), toward that
+   road's other end (foeOn), its way along it dsOf; with two sides every road is both sides' and all of this is today's rule.
+   frontR(t): the conquest's front road when it is one of t's, else t's first (frontR() as before: the conquest's).
+   foeS(t, ri): the line of t's enemy on road ri (the other end's lineS; on a road t is no end of, its middle).
+   foeOf(t, x, z): the enemy that owns a place for t: the other end of the road there when t is an end of it, else the enemy whose base is nearest */
+const frontR = t => { const f = S.cq ? S.cq.fr : 0; if (t === undefined) return f; const m = myRoutes(t); return !m.length || m.includes(f) ? f : m[0]; };
+const foeS = (t, ri) => { const f = foeOn(t, ri); return f >= 0 ? lineS(f, ri) : S.T.mid ? S.T.mid[ri] : S.T.routes[ri].len / 2; };
+function foeOf(t, x, z) {
+  if (!(S.N > 2)) return 1 - t;
+  const p = railOf(x, z), f = p.d < FIELD.town * 2 ? foeOn(t, p.ri) : -1; if (f >= 0) return f;
+  let b = -1, bd = Infinity;
+  for (const o of foes(t)) { const B = S.base[o]; if (!B) continue; const d = Math.hypot(B.x - x, B.z - z); if (d < bd) { bd = d; b = o; } }
+  return b;
+}
+/* every axis, the front one first, then the others in order (today's [fr, 1 - fr] with two roads); with t, only side t's roads (myRoutes) */
+const axesFrom = (fr, t) => [fr, ...(t === undefined ? S.T.routes.map((r, i) => i) : myRoutes(t)).filter(i => i !== fr)];
+/* the base AA's place: 420 m out and 170 m across from sides 0 and 1's bases as always; a third side's toward the middle of the map */
+const baseAA = t => { const b = S.base[t]; if (t < 2) return { x: b.x + (t ? -420 : 420), z: b.z + (t ? -170 : 170) }; const dx = S.W / 2 - b.x, dz = -b.z, d = Math.hypot(dx, dz) || 1; return { x: b.x + dx / d * 450, z: b.z + dz / d * 450 }; };
 /* how many squads a side keeps of a job: FIELD.posts' count, but on map version 4 one per axis times RN.postN for the jobs it lists */
 const postN = (job, n) => (S.T.mv >= 4 && RN.postN[job] ? S.T.routes.length * RN.postN[job] : n);
 /* where a side's reinforcements enter road ri: at its supply base on that road nearest the line that is finished and safe, else FIELD.main m
    from its main base. to: only a base short of that place */
 function entryS(t, ri, to) {
-  const ds = t ? 1 : -1; let s = endS(t, ri, FIELD.main);
+  const ds = dsOf(t, ri); let s = endS(t, ri, FIELD.main);
   for (const b of S.sup) if (b.team === t && b.ri === ri && !spawnWhy(b, t) && (b.s - s) * ds > 0 && (to === undefined || (to - b.s) * ds > 0)) s = b.s;
   return s;
 }
@@ -7143,33 +7169,33 @@ function woodNear(x, z, lo, hi, ok) {
 }
 /* the nearest town the other side holds, or with none its line */
 function pushOrd(t) {
-  const w = S.cq ? cqTargets(t)[0] : towns().filter(w => w.hold !== t).sort((a, b) => hdist(a, S.base[t]) - hdist(b, S.base[t]))[0], fr = frontR();
-  return w ? { k: 'assault', ri: w.ri, s: w.s, x: w.x, z: w.z, tw: w } : { k: 'assault', ri: fr, s: lineS(1 - t, fr) };
+  const w = S.cq ? cqAim(cmdOf(t))[0] : towns().filter(w => w.hold !== t).sort((a, b) => hdist(a, S.base[t]) - hdist(b, S.base[t]))[0], fr = frontR(t);
+  return w ? { k: 'assault', ri: w.ri, s: w.s, x: w.x, z: w.z, tw: w } : { k: 'assault', ri: fr, s: foeS(t, fr) };
 }
 /* the order of the k-th squad of a job (FIELD.posts) */
 function post(t, job, k) {
-  const R = S.T.routes, ds = t ? 1 : -1, fr = frontR(), ri = (fr + k) % R.length, sd = (k % 2 ? 1 : -1) * ds;
+  const R = S.T.routes, fr = frontR(t), M = myRoutes(t), ri = M.length ? M[(Math.max(0, M.indexOf(fr)) + k) % M.length] : fr, ds = dsOf(t, ri), dsf = dsOf(t, fr), sd = (k % 2 ? 1 : -1) * ds;   // N sides: the k-th of side t's own roads from its front one (today's (fr + k) % roads)
   const rp = (ri, s, off) => { const p = routeAt(R[ri], clamp(s, 0, R[ri].len)); return { x: p.x - p.dz * off, z: p.z + p.dx * off }; };
   const at = (x, z, o) => { const p = railOf(x, z); return Object.assign({ k: 'hold', ri: p.ri, s: p.s, x, z }, o); };
-  if (job === 'eng') { const s = lineS(t, fr) - ds * BLD.ai.back, p = rp(fr, s, 34); return (genBy(t, 'sup') === 'ai' ? aiSite(t) : null) || { k: 'hold', ri: fr, s, x: p.x, z: p.z }; }
+  if (job === 'eng') { const s = lineS(t, fr) - dsf * BLD.ai.back, p = rp(fr, s, 34); return (genBy(t, 'sup') === 'ai' ? aiSite(t) : null) || { k: 'hold', ri: fr, s, x: p.x, z: p.z }; }
   if (job === 'line') { const s = lineS(t, ri), p = rp(ri, s, 30 * sd), w = S.cq ? cqLine(t, ri) : null; return w ? { k: 'hold', ri, s, x: p.x, z: p.z, tw: w } : { k: 'hold', ri, s, x: p.x, z: p.z }; }
   if (job === 'garr') {   // by the standing house nearest a place 130 m from the middle of its town
     const w = towns().find(w => (S.cq ? w.hold : w.own) === t), a = k * 2.3 + t; if (!w) return null;
     const c = { x: w.x + Math.cos(a) * 130, z: w.z + Math.sin(a) * 130 }, h = S.T.houses.filter(o => S.os[o.id] < 2 && hdist(o, w) < FIELD.town).sort((p, q) => hdist(p, c) - hdist(q, c))[0] || c;
     return at(h.x, h.z, { tw: w });
   }
-  if (job === 'wood') { const ls = lineS(t, fr), p = rp(fr, ls, 0), w = woodNear(p.x, p.z, FIELD.wood[0], FIELD.wood[1], (x, z) => { const q = railOf(x, z); return q.ri !== fr || (q.s - ls) * ds <= 0; }); return w ? at(w.x, w.z, { R: 5, k: 'observe' }) : null; }
+  if (job === 'wood') { const ls = lineS(t, fr), p = rp(fr, ls, 0), w = woodNear(p.x, p.z, FIELD.wood[0], FIELD.wood[1], (x, z) => { const q = railOf(x, z); return q.ri !== fr || (q.s - ls) * dsf <= 0; }); return w ? at(w.x, w.z, { R: 5, k: 'observe' }) : null; }
   if (job === 'road') { const s = lineS(t, ri); return { k: 'patrol', ri, s: s - ds * FIELD.road[0], a: s - ds * FIELD.road[0], e: s - ds * FIELD.road[1] }; }
   if (job === 'base' && S.cmd && S.cmd[t].resAt) return Object.assign({}, S.cmd[t].resAt.o);   // map version 4: the mobile reserve's post (mres)
-  if (job === 'base') { const s = endS(t, 0, FIELD.base), p = rp(0, s, 34 * ds); return { k: 'hold', ri: 0, s, x: p.x, z: p.z }; }
-  if (job === 'mort') { const s = lineS(t, fr) - ds * CMD.mort.back, p = rp(fr, s, 45 * sd); return cmdNet() && jobKits(t, job) ? { k: 'mortar', ri: fr, s, x: p.x, z: p.z, R: 7 } : null; }
+  if (job === 'base') { const r0 = M.includes(0) || !M.length ? 0 : M[0], s = endS(t, r0, FIELD.base), p = rp(r0, s, 34 * dsOf(t, r0)); return { k: 'hold', ri: r0, s, x: p.x, z: p.z }; }   // road 0, or a side that is no end of it its first
+  if (job === 'mort') { const s = lineS(t, fr) - dsf * CMD.mort.back, p = rp(fr, s, 45 * (k % 2 ? 1 : -1) * dsf); return cmdNet() && jobKits(t, job) ? { k: 'mortar', ri: fr, s, x: p.x, z: p.z, R: 7 } : null; }
   if (job === 'amb') { const op = cmdAmb(cmdOf(t), k); return op ? ambOrd(op, op.sq.length) : null; }
   if (job === 'rec' || job === 'lp') return postDisp(t, job, k);
   if (job === 'egd') { const e = S.eco && S.eco.l.find(e => e.j === k >> 1 && e.team === t && !e.dead); return e ? { k: 'hold', ri: e.ri, s: e.s, x: e.x, z: e.z, a: e.a, R: ECO.gd.ring + (k & 1 ? 10 : 0), es: e } : null; }
   if (job === 'guard') { const b = S.sup.find(b => b.id === k >> 1 && b.team === t && !b.dead); return b ? { k: b.prog < 1 ? 'build' : 'hold', ri: b.ri, s: b.s, x: b.x, z: b.z, a: b.a, R: b.prog < 1 ? 9 : BLD.ai.guard + (k & 1 ? 10 : 0), b } : null; }
   if (job !== 'push') return null;
   { const C0 = S.cmd && S.cmd[t], G = C0 && C0.rally; if (G) return { k: 'hold', ri: G.ri, s: G.s, x: G.x, z: G.z, R: 12 }; }
-  const O = cmdObj(cmdOf(t)) || pushOrd(t), fs = clamp(O.s - ds * CMD.fup, 0, R[O.ri].len), p = rp(O.ri, fs, 30);   // an assault squad waits where the assault will form up, until the commander launches it
+  const O = cmdObj(cmdOf(t)) || pushOrd(t), fs = clamp(O.s - dsOf(t, O.ri) * CMD.fup, 0, R[O.ri].len), p = rp(O.ri, fs, 30);   // an assault squad waits where the assault will form up, until the commander launches it
   return { k: 'hold', ri: O.ri, s: fs, x: p.x, z: p.z, R: 12 };
 }
 /* who is in a squad of that job, when not the usual: the mortar team is its leader, the mortar and a rifleman */
@@ -7182,14 +7208,14 @@ function fieldSquad(t, job, k, O, x, z) {
 function deploy(t) {
   for (const [job, n0] of FIELD.posts) for (let k = 0, n = postN(job, n0); k < n; k++) {
     const O = post(t, job, k); if (!O) continue;
-    const r = S.T.routes[O.ri], p = O.k === 'assault' || O.x === undefined ? routeAt(r, clamp(O.s - (O.k === 'assault' ? (t ? 1 : -1) * FIELD.push : 0), 0, r.len)) : O;
+    const r = S.T.routes[O.ri], p = O.k === 'assault' || O.x === undefined ? routeAt(r, clamp(O.s - (O.k === 'assault' ? dsOf(t, O.ri) * FIELD.push : 0), 0, r.len)) : O;
     fieldSquad(t, job, k, O, p.x, p.z);
   }
 }
 /* a squad for a post that has none: from the side's entry on that road, on foot or by truck */
 function reinforce(t, job, k) {
   const O = post(t, job, k); if (!O || !ecoUse(t, 'squad')) return false;
-  const ds = t ? 1 : -1, r = S.T.routes[O.ri], s1 = clamp(O.k === 'assault' ? O.s - ds * FIELD.push : O.s, 0, r.len), s0 = entryS(t, O.ri, s1);
+  const ds = dsOf(t, O.ri), r = S.T.routes[O.ri], s1 = clamp(O.k === 'assault' ? O.s - ds * FIELD.push : O.s, 0, r.len), s0 = entryS(t, O.ri, s1);
   if ((s1 - s0) * ds > FIELD.ride && ecoUse(t, 'truck')) Object.assign(addUnit('truck', t, 0, 0, null, false, O.ri, s0, 10, 0), { cargo: jobKits(t, job) || SQUAD[S.era].slice(), fld: 1, job, jk: k, ord: O, drop: s1 - ds * FIELD.drop, home: s0 });
   else { const p = routeAt(r, s0); fieldSquad(t, job, k, O, p.x - p.dz * 14, p.z + p.dx * 14); }
   return true;
@@ -14311,12 +14337,13 @@ function footPath(C, x0, z0, x1, z1) {
 }
 /* the situation, by road: own and known enemy strength, the foremost of each, their ratio and the posture that follows; the influence grid */
 function cmdSense(C, sq) {
-  const t = C.t, R = S.T.routes, V = CMD.val, ds = t ? 1 : -1, G = CMD.cell, nx = Math.ceil(S.W / G), nz = Math.ceil(2 * S.HW / G), K = (C.known = []);
+  const t = C.t, R = S.T.routes, V = CMD.val, G = CMD.cell, nx = Math.ceil(S.W / G), nz = Math.ceil(2 * S.HW / G), K = (C.known = []);
+  const dsr = R.map((r, ri) => (foeOn(t, ri) >= 0 ? dsOf(t, ri) : 0));   // N sides: side t's way along each road it is an end of, 0 on the others (no line of its there)
   const I = C.inf && C.inf.length === nx * nz ? C.inf.fill(0) : (C.inf = new Float32Array(nx * nz));
   const stamp = (x, z, v) => { const i = clamp(x / G | 0, 0, nx - 1), j = clamp((z + S.HW) / G | 0, 0, nz - 1); for (let b = Math.max(0, j - 1); b <= Math.min(nz - 1, j + 1); b++) for (let a = Math.max(0, i - 1); a <= Math.min(nx - 1, i + 1); a++) I[b * nx + a] += a === i && b === j ? v : v * .5; };
   C.nx = nx; C.nz = nz;
   if (C.kz) { if (C.kz.length === nx * nz) for (let i = 0; i < C.kz.length; i++) C.kz[i] *= MANT.thr.decay; else C.kz = null; }   // map version 4: where this side's troops died, fading
-  R.forEach((r, ri) => { C.own[ri] = C.enemy[ri] = 0; C.front[ri] = lineS(t, ri); C.foe[ri] = lineS(1 - t, ri); });
+  R.forEach((r, ri) => { C.own[ri] = C.enemy[ri] = 0; C.front[ri] = dsr[ri] ? lineS(t, ri) : foeS(t, ri); C.foe[ri] = foeS(t, ri); });
   for (const u of S.units) {
     if (u.dead) continue;
     if (u.team !== t) { if (!u.fixed && S.t - u.seenT < CMD.mem) K.push(u); continue; }
@@ -14324,11 +14351,11 @@ function cmdSense(C, sq) {
     C.own[u.ri] += V[u.kind]; stamp(u.x, u.z, V[u.kind]);
   }
   for (const m of S.men) if (!m.dead && m.team !== t && !m.in && S.t - m.seenT < CMD.mem) K.push(m);
-  for (const q of sq) { const L = q.men.find(m => !m.dead); C.own[q.ri] += q.live * V.inf; if (L) stamp(L.x, L.z, q.live * V.inf); if ((q.s - C.front[q.ri]) * ds > 0 && q.fd > IAI.hold) C.front[q.ri] = q.s; }
+  for (const q of sq) { const L = q.men.find(m => !m.dead); C.own[q.ri] += q.live * V.inf; if (L) stamp(L.x, L.z, q.live * V.inf); if ((q.s - C.front[q.ri]) * dsr[q.ri] > 0 && q.fd > IAI.hold) C.front[q.ri] = q.s; }
   for (const o of K) {
     const p = railOf(o.sx, o.sz), v = o.man ? V.inf : V[tk(o)] || 1;
     C.enemy[p.ri] += v; stamp(o.sx, o.sz, -v);
-    if ((p.s - C.foe[p.ri]) * ds < 0) C.foe[p.ri] = p.s;
+    if ((p.s - C.foe[p.ri]) * dsr[p.ri] < 0) C.foe[p.ri] = p.s;
   }
   R.forEach((r, ri) => { const k = (C.ratio[ri] = (C.own[ri] + 1) / (C.enemy[ri] + 1)); C.post[ri] = C.upos && C.upos[ri] && S.t < C.upos[ri].T ? C.upos[ri].k : k >= C.doc.atk ? 'atk' : k < C.doc.def ? 'def' : 'hold'; });
   if (S.T.mv >= 4 && S.T.net) cmdEdges(C, sq);
@@ -14376,14 +14403,15 @@ function cmdSites() {
 }
 /* the k-th ambush of a side: an op on the best free site near its line, on its own side of the ground between the two lines */
 function cmdAmb(C, k) {
-  const t = C.t, ds = t ? 1 : -1, A = CMD.amb, fr = frontR(); let best = null, bs = -1e9;
+  const t = C.t, A = CMD.amb, fr = frontR(t), M = myRoutes(t), kr = M.length ? M[(Math.max(0, M.indexOf(fr)) + k) % M.length] : fr; let best = null, bs = -1e9;
   if (C.amb[k] && !C.amb[k].over) return C.amb[k];
   if (S.t < (C.ambT[k] || 0)) return null;
   if (genBy(t, 'def') !== 'ai') return null;
   for (const s of cmdSites()) {
-    const l0 = lineS(t, s.ri), rel = (s.s - l0) * ds, gap = Math.abs(lineS(1 - t, s.ri) - l0);
+    if (foeOn(t, s.ri) < 0) continue;   // N sides: only on a road of its own
+    const l0 = lineS(t, s.ri), rel = (s.s - l0) * dsOf(t, s.ri), gap = Math.abs(foeS(t, s.ri) - l0);
     if (rel < -A.far[0] || rel > Math.min(A.far[1], gap * .45) || C.amb.some(o => o && !o.over && o.site === s) || s === C.last || cmdInf(C, s.x, s.z) < -3) continue;
-    const sc = s.sc - Math.abs(rel - 150) / 500 + (s.ri === (fr + k) % S.T.routes.length ? 1.5 : 0) + habAmb(C, s);   // W17: where and when the enemy is known to pass
+    const sc = s.sc - Math.abs(rel - 150) / 500 + (s.ri === kr ? 1.5 : 0) + habAmb(C, s);   // W17: where and when the enemy is known to pass
     if (sc > bs) { bs = sc; best = s; }
   }
   if (!best) return null;
@@ -14470,7 +14498,7 @@ const OPS = {
      the smoke to stand; go: the squads run for the objective behind it while one covers, or take turns without smoke; fight: in the
      objective, as any assault; back: called off, they fall back to where they formed up */
   atk(C, op) {
-    const t = C.t, D = C.doc, ds = t ? 1 : -1, Sc = CMD.screen, O = op.O, l = opLive(op), live = l.reduce((a, q) => a + q.live, 0), age = S.t - op.T;
+    const t = C.t, D = C.doc, Sc = CMD.screen, O = op.O, l = opLive(op), live = l.reduce((a, q) => a + q.live, 0), age = S.t - op.T;
     const lead = q => q.men.find(m => !m.dead), near = l.reduce((a, q) => { const L = lead(q); return L ? Math.min(a, Math.hypot(L.x - O.x, L.z - O.z)) : a; }, 1e9);
     if (l.length < 1 || (op.st !== 'back' && op.st !== 'cons' && ((!op.walk && live <= op.n0 * CMD.fail) || (l.length < 2 && op.st === 'form' && !op.walk)))) {
       if (!l.length || op.st === 'form') { C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Assalto a ' + gName(O) + ' desfeito: ' + (l.length ? 'esquadras insuficientes na reunião' : 'sem esquadras'), O); return opEnd(C, op); }
@@ -14563,7 +14591,7 @@ const OPS = {
   /* an ambush. set: its squads lie at the site and hold their fire; fire: sprung, for a while, a mortar on the way out; back: they fall
      back to a second place, and the next ambush is laid somewhere else */
   amb(C, op) {
-    const t = C.t, ds = t ? 1 : -1, A = CMD.amb, s = op.site, l = opLive(op), r = S.T.routes[s.ri];
+    const t = C.t, ds = dsOf(t, op.site.ri), A = CMD.amb, s = op.site, l = opLive(op), r = S.T.routes[s.ri];
     if (op.st === 'set') {
       if (op.sprung) { op.st = 'fire'; cmdMission(C, 'he', s.x + s.dx * ds * 150, s.z + s.dz * ds * 150, 4, 40, op); return; }
       if (!op.tank && C.post[s.ri] !== 'atk' && S.t - op.T0 < A.hold) {
@@ -14599,9 +14627,25 @@ const OPS = {
 };
 /* what a side goes for next: the nearest town the other holds, or first the enemy's line on that road when it lies in between and has
    not been taken; with no town left, the line of the front road */
+/* N sides (P6a): which enemy a side goes for. With two sides cqTargets' order (a neutral point first, then the nearest to its base). With three, each
+   point it may take scores its distance to the side's base (km), LEAD.held more when an enemy holds it, LEAD.kn a unit of the enemy strength the side knows
+   by it (the local odds), less the personality's lead weight (PERS[..].lead, else LEAD.w) when its holder is the enemy that leads in tickets: so no side runs
+   away with the match while the other two fight each other (the plan's 4.4). The lowest first */
+const LEAD = { w: 1.5, held: 3, kn: .15 };
+function tkLeader(t) {
+  const Q = S.cq; if (!Q || !Array.isArray(Q.tk)) return -1;
+  let b = -1; for (const o of foes(t)) if (Q.tk[o] > 0 && (b < 0 || Q.tk[o] > Q.tk[b])) b = o;
+  return b >= 0 && Q.tk[b] >= (Q.tk[t] || 0) ? b : -1;
+}
+function cqAim(C) {
+  const t = C.t, L = cqTargets(t); if (!(S.N > 2) || L.length < 2) return L;
+  const b = S.base[t], ld = tkLeader(t), P = perOf(t), w = P && Number.isFinite(P.lead) ? P.lead : LEAD.w;
+  const sc = p => hdist(p, b) / 1000 + (p.hold < 0 ? 0 : LEAD.held) + cmdKnown(C, p.x, p.z, 500) * LEAD.kn - (ld >= 0 && p.hold === ld ? w : 0);
+  return L.map(p => [sc(p), p]).sort((a, c) => a[0] - c[0]).map(e => e[1]);
+}
 function cmdObj(C) {
-  if (S.cq) { const p = cqTargets(C.t)[0]; return p ? cqObj(p) : null; }
-  const t = C.t, ds = t ? 1 : -1, w = towns().filter(w => w.hold !== t).sort((a, b) => hdist(a, S.base[t]) - hdist(b, S.base[t]))[0], ri = w ? w.ri : frontR(), ls = lineS(1 - t, ri), ol = lineS(t, ri);
+  if (S.cq) { const p = cqAim(C)[0]; return p ? cqObj(p) : null; }
+  const t = C.t, w = towns().filter(w => w.hold !== t).sort((a, b) => hdist(a, S.base[t]) - hdist(b, S.base[t]))[0], ri = w ? w.ri : frontR(t), ds = dsOf(t, ri), ls = foeS(t, ri), ol = lineS(t, ri);
   if ((!w || ((ls - ol) * ds > 0 && (w.s - ls) * ds > 0)) && !(S.t < (C.took[ri] || 0))) return { ri, s: ls };
   return w ? { ri: w.ri, s: w.s, x: w.x, z: w.z, tw: w } : null;
 }
@@ -14609,22 +14653,22 @@ function cmdObj(C) {
    of its own base, a town also from the other side, then the enemy's line on the other roads; the first for which two squads at least
    are within reach on that side and, with the tanks there, strong enough for what is known of it. Else C.want asks for squads */
 function cmdAttack(C, sq) {
-  const t = C.t, D = C.doc, ds = t ? 1 : -1, fr = frontR(), P0 = cmdObj(C), R = S.T.routes, Sc = CMD.screen, me = S.my, cand = [], ap = apOn();
+  const t = C.t, D = C.doc, fr = frontR(t), P0 = cmdObj(C), R = S.T.routes, Sc = CMD.screen, me = S.my, cand = [], ap = apOn(), dso = ri => dsOf(t, ri);   // N sides: the way along each road is side t's on it
   C.want = null; if (ap) apQuiet(C, sq);   // M2: which posts are quiet enough to lend a squad
   if (P0 && !P0.tw && sq.some(q => q.ri === P0.ri && Math.abs(q.s - P0.s) < 150 && q.fd > 250)) { C.took[P0.ri] = S.t + CMD.took; C.gate = 'took'; gLog(t, 'atk', 'Linha inimiga ocupada na rota ' + (P0.ri + 1), routeAt(R[P0.ri], P0.s), 'took' + P0.ri); return; }   // a squad stands on the enemy's line and nobody is there: it is taken
   const on = C.ops.filter(o => o.k === 'atk').length, room = S.cq ? campRoom(C, sq) : D.ops, go = [];   // with points: up to the side's fronts (F4, D12 A)
   if (!P0 || S.t < C.atkT || on >= room) { C.gate = !P0 ? 'none' : S.t < C.atkT ? 'cool' : 'max'; return; }
   if (genBy(t, 'atk') !== 'ai') { C.gate = 'man'; return; }
   C.gate = ''; const ev = (C.ev = []); C.evT = S.t; const camp = !!S.cq && room - on >= 2 && (C.camp || []).filter(K => !K.over).length < CAMP.max;
-  if (S.cq) for (const p of cqTargets(t)) cand.push([cqObj(p), ds], [cqObj(p), -ds]);   // with points: every point it may take, from either side along its road
-  else { cand.push([P0, ds]); if (P0.tw) cand.push([P0, -ds]); }
-  if (!S.cq) for (const ri of axesFrom(fr)) if (ri !== P0.ri && R[ri] && !(S.t < (C.took[ri] || 0)) && (lineS(1 - t, ri) - lineS(t, ri)) * ds > 0) cand.push([{ ri, s: lineS(1 - t, ri) }, ds]);
+  if (S.cq) for (const p of cqAim(C)) cand.push([cqObj(p), dso(p.ri)], [cqObj(p), -dso(p.ri)]);   // with points: every point it may take, from either side along its road (N sides: the enemy it goes for by cqAim)
+  else { cand.push([P0, dso(P0.ri)]); if (P0.tw) cand.push([P0, -dso(P0.ri)]); }
+  if (!S.cq) for (const ri of axesFrom(fr, t)) if (ri !== P0.ri && R[ri] && !(S.t < (C.took[ri] || 0)) && (foeS(t, ri) - lineS(t, ri)) * dso(ri) > 0) cand.push([{ ri, s: foeS(t, ri) }, dso(ri)]);
   if (C.pref && S.t < C.pref.T) cand.sort((a, b) => (b[0].tw === C.pref.p) - (a[0].tw === C.pref.p));   // map version 4: the point a manoeuvre (cut) chose is looked at first
   for (const [P, sd] of cand) {
     const ri = P.ri, r = R[ri], o = P.x === undefined ? routeAt(r, clamp(P.s, 0, r.len)) : P;
     if (C.post[ri] === 'def' || C.ops.some(o => o.k === 'atk' && o.ri === ri) || go.some(g => g.P.ri === ri)) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: C.post[ri] === 'def' ? 'def' : 'busy' }); continue; }
     let pool = ap ? apPool(C, sq, P, sd, o, D.push + 1) : sq.filter(q => atkFit(q, P, sd)).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || Math.abs(a.s - P.s) - Math.abs(b.s - P.s)).slice(0, D.push + 1);   // M2: from any road, and quiet posts lend
-    const kn = cmdKnown(C, o.x, o.z, 500), walk = !!S.cq && !kn && !P.tw.w[1 - t];
+    const kn = cmdKnown(C, o.x, o.z, 500), walk = !!S.cq && !kn && !P.tw.w.some((v, o) => o !== t && v > 0);   // N sides: no enemy weight in it.
     if (C.gue && !walk) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: 'gue' }); continue; }   // map version 4: harassing, it only walks into empty points (gue)
     if (walk) pool = pool.filter(q => (ap ? (L => !!L && hdist(L, o) < CQ.walk)(q.men.find(m => !m.dead)) : Math.abs(P.s - q.s) < CQ.walk)).slice(0, 2);
     const foe = walk ? 3 : Math.max(CMD.guess, kn), n0 = pool.reduce((a, q) => a + q.live, 0);   // a point nobody stands in is walked into by whoever is at hand
@@ -14679,7 +14723,7 @@ function atkOpen(C, P, sd, pool, walk, own, foe, U) {
 /* the defence: a squad shelled at its post moves; a line post that is losing falls back in order behind its smoke; the reserve (the
    squad by the main base) comes up behind a town the enemy is at, and counter-attacks when what is known of the attack has halved */
 function cmdDefend(C, sq) {
-  const t = C.t, D = C.doc, ds = t ? 1 : -1, R = S.T.routes, G = CMD.relo;
+  const t = C.t, D = C.doc, R = S.T.routes, G = CMD.relo;
   for (const q of sq) {
     const O = q.ord, L = q.men.find(m => !m.dead), r = R[q.ri];
     if (O.T && O.back && !q.op && (S.t > O.T || (q.at && q.fd > 200))) { setOrd(q, O.back); continue; }
@@ -14696,7 +14740,7 @@ function cmdDefend(C, sq) {
     }
     if (C.fb[q.ri] && depWithdraw(C, q, L)) continue;   // map version 4: the fallback line of a defence in depth (dep)
     if (!q.op && O.k === 'hold' && !O.wd && !O.b && (q.job === 'line' || q.job === 'held') && q.live <= q.n0 * D.wd && q.fd < 350 && L) {
-      const s2 = clamp(q.s - ds * CMD.wdb, 0, r.len), b = routeAt(r, s2);
+      const s2 = clamp(q.s - dsOf(t, q.ri) * CMD.wdb, 0, r.len), b = routeAt(r, s2);
       if (L.smk > 0) L.ctl.nade = 2;
       setOrd(q, { k: 'withdraw', ri: q.ri, s: s2, x: b.x - b.dz * 30, z: b.z + b.dx * 30, R: 9 }); gLog(t, 'def', 'Posto da linha recua ' + CMD.wdb + ' m na rota ' + (q.ri + 1), b, 'wd' + q.ri);
     }
@@ -14708,7 +14752,7 @@ function cmdDefend(C, sq) {
   if (!w || !res || res.ri !== w.ri) return;
   if (res.op) return;
   if (genBy(t, 'def') !== 'ai') return;
-  if (E > 2 && !res.ord.res) { const s = clamp(w.s - ds * 300, 0, R[w.ri].len), b = routeAt(R[w.ri], s); genCmd(t, { c: 'res', ri: w.ri, s, x: b.x - b.dz * 30, z: b.z + b.dx * 30 }, 'ai', { res, w, E, b }); }
+  if (E > 2 && !res.ord.res) { const s = clamp(w.s - dsOf(t, w.ri) * 300, 0, R[w.ri].len), b = routeAt(R[w.ri], s); genCmd(t, { c: 'res', ri: w.ri, s, x: b.x - b.dz * 30, z: b.z + b.dx * 30 }, 'ai', { res, w, E, b }); }
   else if (res.ord.res && C.peak >= 6 && E > 0 && E <= C.peak * .5 && Math.abs(res.s - w.s) < 900) {
     genCmd(t, { c: 'ctr', x: kx, z: kz, pi: gPts().indexOf(w) }, 'ai', { res, w });
   } else if (res.ord.res && C.peak < 1) genCmd(t, { c: 'res', home: 1 }, 'ai', { res });
@@ -14742,7 +14786,7 @@ function kzSite(C, ri, u, ds) {
   (C.kzT || (C.kzT = []))[ri] = S.t + K.again; return { ri, s: bs, kz: 1 };
 }
 function cmdColumns(C, sq) {
-  const t = C.t, ds = t ? 1 : -1, R = S.T.routes, G = CMD.react, hold = S.t + FIELD.every + .4, lead = [];
+  const t = C.t, R = S.T.routes, G = CMD.react, hold = S.t + FIELD.every + .4, lead = [];
   for (const u of S.units) {
     const A = u.ai, by = u.lastBy; if (!A || u.net || u.dead || u.team !== t || u.fixed || u.fld || u.run || A.park || u.ri === undefined) continue;
     if (S.t - u.hitT < FIELD.every && by && !by.dead && by.team !== t && by.x !== undefined && (by.man || by.kind) && hdist(by, u) < G.r && S.t > (A.reT || 0)) {
@@ -14754,13 +14798,14 @@ function cmdColumns(C, sq) {
     dVeh(u);
     if (!u.rail) continue;
     for (const op of C.ops) if (op.k === 'atk' && op.ri === u.ri && (u.kind === 'tank' || u.kind === 'aa' || (S.cq && u.kind === 'lav')) && (op.st === 'form' || op.st === 'prep' || op.st === 'screen') && (S.cq || S.t - op.T0 < CMD.hold) && (u.s - op.fs) * op.sd > -40 && (op.O.s - u.s) * op.sd > 0) A.rest = hold;
-    if (!lead[u.ri] || (u.s - lead[u.ri].s) * ds > 0) lead[u.ri] = u;
+    if (!lead[u.ri] || (u.s - lead[u.ri].s) * dsOf(t, u.ri) > 0) lead[u.ri] = u;
   }
   const H = C.hit;
   if (H && S.t > H.T) C.hit = null;
   else if (H) for (const q of sq) if (q.col && !q.op && q.ri === H.ri && q.ord.k === 'escort' && Math.abs(q.s - H.s) < 400) { const p = railOf(H.x, H.z); setOrd(q, { k: 'assault', ri: q.ri, s: p.ri === q.ri ? p.s : q.s, x: H.x, z: H.z, R: 10, rush: 1, ax: H.x, az: H.z, back: q.ord, T: H.T }); }
   R.forEach((r, ri) => {
-    const Sc = CMD.scout, sc = C.sc[ri], u = lead[ri];
+    const Sc = CMD.scout, sc = C.sc[ri], u = lead[ri], ds = dsOf(t, ri);
+    if (foeOn(t, ri) < 0 && !sc) return;   // N sides: no line of side t on a road it is no end of
     if (sc) {   // a squad is out in front: the column waits for it
       const q = sc.q;
       if (q.live <= 0 || cnOrd(q) !== sc.O || q.at || q.fd < 150 || S.t > sc.T) { if (q.live > 0 && cnOrd(q) === sc.O) setOrd(q, sc.back); C.sc[ri] = null; return; }
@@ -16315,11 +16360,12 @@ function cqInit(len) {
 const cqSim = () => !!S.cq && (!S.net || S.host);
 const cqHeld = t => S.cq.p.reduce((a, p) => a + (p.hold === t ? 1 : 0), 0);
 /* the foremost point side t holds on road ri, and the next one along it that it does not */
-function cqLine(t, ri) { let b = null; for (const p of S.cq.p) if (p.hold === t && p.rs[ri] !== null && (!b || (p.rs[ri] - b.rs[ri]) * (t ? 1 : -1) > 0)) b = p; return b; }
+function cqLine(t, ri) { const ds = dsOf(t, ri); let b = null; for (const p of S.cq.p) if (p.hold === t && p.rs[ri] !== null && p.rs[ri] !== undefined && (!b || (p.rs[ri] - b.rs[ri]) * ds > 0)) b = p; return b; }
 function cqNext(t, ri) {
-  const ds = t ? 1 : -1; let b = null;
-  for (const p of S.cq.p) if (p.hold !== t && p.rs[ri] !== null && (p.rs[ri] - endS(t, ri, 0)) * ds > 0 && (!b || (p.rs[ri] - b.rs[ri]) * ds < 0)) b = p;
-  return b || { rs: S.T.routes.map(q => (t ? q.len : 0)), x: S.base[1 - t].x, z: S.base[1 - t].z };
+  const ds = dsOf(t, ri); let b = null;
+  for (const p of S.cq.p) if (p.hold !== t && p.rs[ri] !== null && p.rs[ri] !== undefined && (p.rs[ri] - endS(t, ri, 0)) * ds > 0 && (!b || (p.rs[ri] - b.rs[ri]) * ds < 0)) b = p;
+  const f = foeOn(t, ri), B = S.base[f >= 0 ? f : foes(t)[0]] || { x: S.W / 2, z: 0 };   // N sides: past the last point, the base at the road's other end
+  return b || { rs: S.T.routes.map((q, j) => endS(t, j, q.len)), x: B.x, z: B.z };
 }
 /* what side t may go for: the points it does not hold that are linked to one it holds, a neutral one first, then the nearest to its base */
 function cqTargets(t) {
@@ -23113,11 +23159,12 @@ cmdPosts = (g => (C, sq, have) => {
 })(cmdPosts);
 /* whose turn it is to plan, or -1; it sets when to look again (S.planT). Both sides at FIELD.every (Normal): they take turns every half of it, exactly
    as before W17. Otherwise each side is due by its own cadence (S.planD), looked at every DIF.tick s, the other side first on a tie */
-function planDue() {
-  if (difOf(0).plan === FIELD.every && difOf(1).plan === FIELD.every) { S.planT = FIELD.every / 2; S.planD = null; return S.planK ^ 1; }
+function planDue() {   // N sides (P6a): the sides take turns in order (planK + 1, + 2, ...), every FIELD.every / N s; with two, exactly the rule above
+  const N = S.N || 2, nx = (S.planK + 1) % N, ts = [...Array(N).keys()];
+  if (ts.every(t => difOf(t).plan === FIELD.every)) { S.planT = FIELD.every / N; S.planD = null; return nx; }
   S.planT = DIF.tick;
-  const D = S.planD || (S.planD = [S.t + (S.planK ? 0 : FIELD.every / 2), S.t + (S.planK ? FIELD.every / 2 : 0)]);   // from here on, starting with the side whose turn was next
-  for (const t of [S.planK ^ 1, S.planK]) if (S.t >= D[t] - 1e-6) { const e = difOf(t).plan; D[t] = D[t] + e > S.t ? D[t] + e : S.t + e; return t; }
+  const D = S.planD && S.planD.length === N ? S.planD : (S.planD = ts.map(t => S.t + ((t - nx + N) % N) * FIELD.every / N));   // from here on, starting with the side whose turn was next
+  for (let i = 0; i < N; i++) { const t = (nx + i) % N; if (S.t >= D[t] - 1e-6) { const e = difOf(t).plan; D[t] = D[t] + e > S.t ? D[t] + e : S.t + e; return t; } }
   return -1;
 }
 /* ---- the enemy's habits (HAB): where and when it passes, from what the side itself has seen ----
@@ -25565,7 +25612,7 @@ function debrisMesh(o) {
   m.position.set(-b[0], -b[1], -b[2]); if (d.clip) w.scale.setScalar(1 - d.clip + .1); w.add(m); return w;
 }
 /* --- soldiers: one instanced box per limb, posed on a rig that is reused for each of them. MCOL: uniform and helmet by era and side --- */
-const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = Math.max(IAI.cap, GP.cap) + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
+const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = Math.max(IAI.cap, GP.capMax) + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
 let gMen = null, rig = null;
 /* a supply base: the pad and the corner posts of a site, walls that rise as it is built, then the roof, the stores beside it, the sandbags
    and a mast with a flag in the colour of friend or foe; burnt and flat when it is destroyed */

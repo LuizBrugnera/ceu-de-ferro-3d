@@ -4,6 +4,7 @@ Rodam no Node, sem navegador. `harness.js` carrega a parte da página que não u
 
 ```
 node tests/sim-split.js     # a parte da simulação não chama nada declarado só na parte da cena (o harness não a carrega: o M5, o M6 e o AAR do M8 quebravam as suítes), nenhum arquivo com marcadores de conflito de merge, e o M5 e o M6 rodam sem navegador
+node tests/sides3-start.js  # três lados começam e rodam: a demonstração do hangar com N 3 (nenhuma aeronave para os Insurgentes, que não têm aviação) e o genVM de cada lado (um total por lado; com três lados o anfitrião online travava no t = 0) em moderno com 3 e 2 lados e 1944 (SECS=6)
 node tests/smoke-sight.js   # a IA e a fumaça: tiros no alvo escondido, memória, retomada (TRIALS=12)
 node tests/perception.js    # percepção da IA: campo de visão, tempo para notar, partilha, mira; a escada (detectado, reconhecido, identificado), tempo de reação, primeiro tiro e acertos por distância, e a suíte de honestidade: uma batalha só de IA nas duas épocas em que nenhum tiro vai a alvo não percebido e nenhum míssil guiado a alvo não identificado (SECS=90)
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento

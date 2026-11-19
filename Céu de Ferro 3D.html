@@ -4491,7 +4491,17 @@ function misBirth(o, was) {
 function dispatch(t, M, fn) {
   const D = S.dsp || (S.dsp = { n: 0, cur: null, log: [[], []] }), was = D.cur;
   D.cur = Object.assign({ id: 0, t: S.t, team: t, n: 0 }, M);
-  try { return fn(); } finally { D.cur = was; }
+  try { return fn(); } catch (e) { aiFault('despacho' + (M && M.why ? ' (' + M.why + ')' : ''), t, e); throw e; } finally { D.cur = was; }
+}
+/* the AI's guard: an exception in the commander's plan, its production (gpStep), the economy's AI or a Dispatch order is told once (console.error and a line
+   in the side's general log, once per place and message: S.aiErr) and the caller carries on (the plan job starts again, the other side still fields),
+   so a bug shows instead of leaving a general that silently does nothing. An error already told on its way up is not told again */
+function aiFault(where, t, e) {
+  if (e && typeof e === 'object') { if (e.aiTold) return; try { e.aiTold = 1; } catch (x) {} }
+  const msg = String((e && e.message) || e), key = where + ': ' + msg, K = S && (S.aiErr || (S.aiErr = {}));
+  if (K) { if (K[key]) { K[key]++; return; } K[key] = 1; }
+  console.error('General da IA, erro em ' + where + ' (lado ' + t + '):', e);
+  try { for (const s of t === 0 || t === 1 ? [t] : [0, 1]) gLog(s, 'eng', 'Erro interno do general em ' + where + ': ' + msg.slice(0, 120) + '; retomando'); } catch (x) {}
 }
 const dispatchIf = (t, M, fn) => (S.dsp && S.dsp.cur && (S.dsp.cur.team === t || S.dsp.cur.team < 0) ? fn() : dispatch(t, M, fn));
 /* a squad put together by hand (a militia, a squad found again after a change of host): born with the order of the moment, its men with it */
@@ -4582,7 +4592,7 @@ demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeep
 function director(dt) {
   misTick(dt);
   const first = !S.dir, D = S.dir || (S.dir = [0, 1].map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
-  if (!first && gpOn()) { gpMeter(); for (let t = 0; t < 2; t++) gpStep(t, D[t], dt); return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
+  if (!first && gpOn()) { gpMeter(); for (let t = 0; t < 2; t++) try { gpStep(t, D[t], dt); } catch (e) { aiFault('produção', t, e); } return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
   for (let t = 0; t < 2; t++) {
     const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3), ds = t ? 1 : -1;
     const cnt = (l, f) => l.reduce((a, o) => a + (o.team === t && !o.dead && !!o.ai && f(o) ? 1 : 0), 0), need = k => (cqFree(t, k) ? Math.max(0, DIR[k][n] - cnt(S.units, u => u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq))) : 0);
@@ -8371,8 +8381,10 @@ function step(dt) {
   a0 = AIB.now();
   for (const q of S.squads) if (!q.net && (q.think -= dt) <= 0) { q.think = IAI.think; squadThink(q); }
   if ((!S.net || S.host) && !S.over) {   // the commanders, each at its own cadence (planDue: the difficulty's, W17), a piece of the plan a frame (the one that is not done when the next starts is finished first)
-    if ((S.planT -= dt) <= 0) { const k = planDue(); if (k >= 0) { if (S.planJ) plan(S.planK, S.planJ, Infinity); S.planJ = plan((S.planK = k), true) || null; } }
-    if (S.planJ) S.planJ = plan(S.planK, S.planJ, Math.max(1, Math.round(dt * 60 * SLICE.plan))) || null;
+    try {   // a plan that throws is told once (aiFault) and dropped: the side's next turn plans afresh instead of a dead job every turn
+      if ((S.planT -= dt) <= 0) { const k = planDue(); if (k >= 0) { if (S.planJ) plan(S.planK, S.planJ, Infinity); S.planJ = plan((S.planK = k), true) || null; } }
+      if (S.planJ) S.planJ = plan(S.planK, S.planJ, Math.max(1, Math.round(dt * 60 * SLICE.plan))) || null;
+    } catch (e) { aiFault('plano', S.planK, e); S.planJ = null; S.planT = 0; }
   } else S.planJ = null;
   AIB.g += AIB.now() - a0;
   trnStep(dt);
@@ -16168,7 +16180,7 @@ function ecoStep(dt) {
     for (const r of ['en', 'mt']) { d.use[r] += (pay[r] / e * 60 - d.use[r]) * w; d.bill[r] += (d.ba[r] / e * 60 - d.bill[r]) * w; d.ba[r] = 0; }
     for (const [m, mem] of [[d.miss, ECO.ai.mem], [d.lost, ECO.ai.lost]]) for (const k in m) { m[k] = m[k].filter(T => S.t - T < mem); if (!m[k].length) delete m[k]; }
     if (S.t >= (d.ppT || 0)) { d.ppT = S.t + ECO.ai.every; gpPlan(t); }   // the production plan, whoever holds the economy
-    if (E.ctl[t] === 'ai' && S.t >= d.aiT) { d.aiT = S.t + ECO.ai.every; for (const c of ecoAI(t, ecoView(t))) genCmd(t, c, 'ai'); }
+    if (E.ctl[t] === 'ai' && S.t >= d.aiT) { d.aiT = S.t + ECO.ai.every; try { for (const c of ecoAI(t, ecoView(t))) genCmd(t, c, 'ai'); } catch (e) { aiFault('economia', t, e); } }
     for (const s of E.l) {   // a finished site with a fixed AA asked for and none within reach: one from the reserve, a little toward the enemy
       if (s.team !== t || s.dead || s.prog < 1 || !s.gd.aa || S.units.some(u => !u.dead && u.fixed && u.kind === 'aa' && u.team === t && hdist(u, s) < ECO.gd.r) || !ecoUse(t, 'aaf')) continue;
       const b = S.base[1 - t], h = headTo(s.x, s.z, b.x, b.z), sq = s.lot >= 0 && (S.T.lots || []).find(l => l.team === t && l.k === 'aa' && hdist(l, s) < ECO.gd.r * 2 && !(l.hi >= 0 && S.os[S.T.houses[l.hi].id] >= 2) && !S.units.some(u => !u.dead && u.fixed && hdist(u, l) < ECO.lot.at * 4));   // in the seat town: on its square or a roof

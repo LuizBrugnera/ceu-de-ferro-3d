@@ -69,7 +69,7 @@ console.log('-- conquest: the director reinforces, losses cost tickets, the poin
   ok(col() >= 2 && !S.units.some(u => u.team === 1 && u.kind === 'tank' && !u.dead), 'the director sent the next column within ' + ($('DIR').col + 5) + ' s (' + col() + ' vehicles), without the tanks, whose replacement waits ' + K.ai.tank + ' s');
   const P = Q.p, n = P.find(p => p.hold < 0), b = P.find(p => p.base === 1), far = P.find(p => p.hold === 1 && p.base < 0 && !p.links.some(i => P[i].hold === 0));
   ok(P.length === 7 && P.filter(p => p.hold === 0).length === 3 && P.filter(p => p.hold === 1).length === 3 && !!n && $('towns')().length === 2, 'seven points in 1944: three a side and ' + n.L + ' ' + n.name + ' neutral; ' + P.map(p => p.L + ' ' + p.name).join(', '));
-  S.units = []; S.men = []; S.squads = []; C.director = () => {}; C.plan = () => {};
+  S.units = []; S.men = []; S.squads = []; C.director = () => {}; C.plan = () => {}; for (const p of S.planes) if (p !== S.my) p.gone = true;   // the point alone: no jet strafing the soldiers in it
   const man = (t, p, dx) => C.addMan($('INF').ww2[S.fac[t]][0], t, p.x + dx, p.z, 0); let m = man(0, n, 5); n.c = 0; C.run(K.t + 2, () => park(S));
   ok(n.hold === 0, 'one soldier alone in the neutral point takes it in ' + K.t + ' s');
   const e = man(1, n, -5); C.run(20, () => park(S)); ok(n.hold === 0 && n.c === -1 && n.w[0] === 1 && n.w[1] === 1, 'with one of each side in it nothing moves');

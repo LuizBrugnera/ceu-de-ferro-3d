@@ -13,7 +13,7 @@ Causas encontradas lendo o código (não houve medição antes/depois):
 Correções em `Céu de Ferro 3D.html`:
 
 - `fortPlan`: o limite de 6 (`FORT.ai.cap`) vale só para trincheiras e parapeitos (k 1 e 2). Os postos ficam com o limite de cada tipo (`F.cap`: anticarro 3, ninho 4, torre 2). A obra ordenada (`O.dig`) começa sem inimigo a 150 m (`FORT.ai.oq`).
-- `GC.fort`: o limite é contado por grupo, com trincheiras e parapeitos juntos e cada tipo de posto à parte. O posto acima do limite é recusado com o motivo novo `pcap` (`GEN.no.pcap`, e também em `mcp-general.js`).
+- `GC.fort`: o limite é contado por grupo, com trincheiras e parapeitos juntos e cada tipo de posto à parte. O posto acima do limite é recusado com o motivo novo `postcap` (`GEN.no.postcap`, e também em `mcp-general.js`).
 - **Plano de fortificação (`AFP`, bloco novo no fim da simulação, antes da cena 3D)**, ligado em `fortPlan`. A cada 15 s, a partir de 90 s, num lado com a defesa nas mãos da IA, num mapa com rede de estradas, sem ser a demonstração do hangar nem a partida terminada:
   - antiaérea fixa sobre a cidade-sede (ou a fábrica) e sobre a base. Sem antiaérea fixa na reserva, registra a falta em `d.miss.aaf` para a produção fazer uma, e espera;
   - nas entradas mais expostas (estrada que entra no lugar, 90 m fora dele): ninho de metralhadora, e posto anticarro quando o lado conhece blindados. Quantas entradas: 1, 2 ou 3, conforme o nível da economia (`AFP.tier`, contado pelas instalações prontas);
@@ -49,7 +49,7 @@ Só a checagem de fumaça (cerca de 1 min):
   - `tests/orders.js` e `tests/w13.js`: o lado 1 da IA pode pegar esquadras criadas pelo teste depois de 90 s.
   - `tests/tmap.js`, "a partida igual com e sem o mapa": deve continuar igual, porque o tráfego e os gargalos só entram no nível 1 ou 2 e com hábitos vistos, mas pode divergir.
   - As comparações de paridade (`PARITY=`, `BEFORE=`) mudam de propósito: a IA agora constrói.
-- **Mudança de regra:** `fcap` agora vale só para trincheiras e parapeitos. Um teste que esperava `fcap` para um posto vai receber `pcap`, ou `ok`.
+- **Mudança de regra:** `fcap` agora vale só para trincheiras e parapeitos. Um teste que esperava `fcap` para um posto vai receber `postcap`, ou `ok`.
 - **Equilíbrio:**
   - tirar esquadras de linha ou de guarda por até 8 min pode enfraquecer a defesa dos pontos;
   - a poupança da economia pode atrasar a reserva;
@@ -81,5 +81,5 @@ Só a checagem de fumaça (cerca de 1 min):
    - inimigo blindado conhecido na entrada: posto anticarro e `mineat` nesse eixo;
    - obra destruída: refeita depois de `AFP.redo` com o lugar calmo;
    - economia sem reserva: `C.afp.save` aparece e o `ecoAI` segura o `make`;
-   - `GC.fort` com um posto acima do limite responde `pcap`, e 6 trincheiras não impedem um ninho.
+   - `GC.fort` com um posto acima do limite responde `postcap`, e 6 trincheiras não impedem um ninho.
 4. No jogo: "Assistir" no hangar, Tab, diário do general. Procure "Plano de fortificação" e veja no mapa as obras perto da cidade-sede.

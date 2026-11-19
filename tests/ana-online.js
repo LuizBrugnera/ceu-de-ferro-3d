@@ -31,11 +31,13 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   g.send({ t: 'ana', n: 0, e: [sn(5)] }); h.send({ t: 'ana', n: 3, e: [sn(5)] }); h.send({ t: 'ana', n: 0, e: [{ k: 'nope', t: 1 }] }); h.send({ t: 'ana', n: 0, e: [{ k: 'sn' }] }); h.send({ t: 'ana', n: 0, e: 'x' });
   await N.sleep(200);
   ok(lines(F).length === 2, 'refused: a guest\'s batch, another match, an unknown kind, an event without its time, a batch that is not a list');
-  h.send({ t: 'ana', n: 0, e: [sn(10)] }); h.send({ t: 'ana', n: 0, e: [sn(20)] }); await N.sleep(200);
-  const L = lines(F); ok(L.length === 4 && L[2].t === 10 && L[3].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
+  const mano = [{ k: 'mv', t: 21, s: 0, id: 2, m: 'flk', by: 'ai', h: 1 }, { k: 'ap', t: 22, s: 0, id: 1, L: 'E', walk: 0, a: [1, 0, 0, 2, 0, 0], off: 2, mv: ['flk'] }, { k: 'ab', t: 23, s: 1, id: 3, f: 'amb', e: 'arm' }, { k: 'tr', t: 24, d: 60, e: null, o: [1, 2], v: [[1, 0, 0, 0], [0, 0, 0, 0]] }];
+  h.send({ t: 'ana', n: 0, e: [sn(10)] }); h.send({ t: 'ana', n: 0, e: [sn(20)].concat(mano) }); await N.sleep(200);
+  const L = lines(F); ok(L.length === 8 && L[2].t === 10 && L[3].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
+  ok(L.slice(4).map(e => e.k).join() === 'mv,ap,ab,tr', 'the general\'s manoeuvre events (mv, ap, ab, tr) are known kinds');
   for (let i = 0; i < 12; i++) h.send({ t: 'ana', n: 0, e: [sn(100 + i)] });
   await N.sleep(300); const n2 = lines(F).length;
-  ok(n2 - 4 === 7, 'too fast: of 12 batches at once, ' + (n2 - 4) + ' kept (10 a window of 15 s, 3 already used)');
+  ok(n2 - 8 === 7, 'too fast: of 12 batches at once, ' + (n2 - 8) + ' kept (10 a window of 15 s, 3 already used)');
   ok(!fs.existsSync(F.replace('.ndjson.gz', '.json')), 'no summary before the end');
   const lp = JSON.parse((await get('/ana/list')).b), inProg = f[0].slice(0, -10);
   ok(lp.m.length === 0 && (await get('/ana/m/ww2/' + inProg)).code === 404 && (await get('/ana/r/ww2/' + inProg)).code === 404, 'a match still in progress is neither listed nor served');
@@ -80,7 +82,7 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   await N.sleep(400);
   const fw = list('ww2').filter(n => n.endsWith('.ndjson.gz')), ev = fw.length ? lines(path.join(DIR, 'ww2', fw[0])) : [];
   const kinds = {}; for (const e of ev) kinds[e.k] = (kinds[e.k] || 0) + 1;
-  ok(Net.ana && S().net && S().host && fw.length === 1 && kinds.hdr === 1 && kinds.sn >= 3 && kinds.end === 1 && kinds.rep === 1, 'a real host page: its match on disk, ' + JSON.stringify(kinds));
+  ok(Net.ana && S().net && S().host && fw.length === 1 && kinds.hdr === 1 && kinds.sn >= 3 && kinds.end === 1 && kinds.rep === 1 && kinds.tr >= 1, 'a real host page: its match on disk, the traffic too, ' + JSON.stringify(kinds));
   ok(list('ww2').some(n => n.endsWith('.json')) && S().anaRep && S().anaRep.over, 'and the summary at its end');
   Net.close && Net.close(); N.stop();
   /* ANALYTICS=0 */

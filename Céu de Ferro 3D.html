@@ -11241,7 +11241,7 @@ Net.rx.hacc = m => { const g = Net.ghosts.get(m.from), R = S && S.help && S.help
 const DRILL = { on: 1, stick: .3, min: 3, max: 90, cool: 20, hist: 8 };
 const DRILLS = [];
 const drCls = o => (o.men ? 'inf' : o.heli ? 'heli' : o.def && o.def.vmax ? 'plane' : o.kind || '');
-const drOf = id => DRILLS.find(D => D.id === id);
+const drOf = (id, c) => DRILLS.find(D => D.id === id && (c === undefined || D.cls === c));   // an id may have an entry for each class (drFor)
 const drCount = () => S.drN || (S.drN = { all: [{}, {}], sn: [{}, {}] });
 /* what a squad is and has, once a think, for its drills: null when it cannot drill (broken, aboard, gone) */
 function drInfo(q) {
@@ -11289,13 +11289,13 @@ function drRun(o, p) {
 function drEnd(o) {
   const d = o.dr; if (!d) return;
   o.dr = null;
-  const D = drOf(d.id); if (D && D.end) D.end(o, d);
+  const D = drOf(d.id, drCls(o)); if (D && D.end) D.end(o, d);
   (o.drC || (o.drC = {}))[d.id] = S.t + ((D && D.cool) || DRILL.cool);
   const H = o.drH || (o.drH = []); H.push([d.id, Math.round(d.T0 * 10) / 10, Math.round(S.t * 10) / 10]); if (H.length > DRILL.hist) H.shift();
   if (o.men) { const live = o.men.filter(m => !m.dead && m.ai); for (const m of live) { const A = m.ai; A.dx = null; if (A.drb && A.brk <= A.drb) A.brk = 0; A.drb = 0; } if (!o.state) sqSync(o, live); }
 }
 /* a vehicle's or an aircraft's drill, each step after its controller (AI, aiPlane) and before the gate: its ctl */
-function drStep(o, dt) { const d = o.dr; if (!d || !DRILL.on) return; const D = drOf(d.id); if (D && D.ctl) D.ctl(o, d, dt); }
+function drStep(o, dt) { const d = o.dr; if (!d || !DRILL.on) return; const D = drOf(d.id, drCls(o)); if (D && D.ctl) D.ctl(o, d, dt); }
 /* p, or as far toward it from `from` as o's mission leash lets a drill take it: inside the leash round the mission's area, or (on its way
    there, or out of it) within half the leash of where it is */
 function drLeash(o, p, from) {
@@ -11344,7 +11344,7 @@ sqMan = (g => (m, A, q, best) => {
   if (!q) return;
   if (S.t > (A.trT || 0)) { A.trT = S.t + 2; const l = A.trl || (A.trl = []), p = l[l.length - 1]; if (!p || Math.abs(p.x - m.x) + Math.abs(p.z - m.z) > 1) { l.push({ x: m.x, z: m.z }); if (l.length > 12) l.shift(); } }
   const d = q.dr; if (!d || !DRILL.on || (A.brk > S.t && !(A.drb >= A.brk))) return;
-  const D = drOf(d.id); if (D && D.man) D.man(q, d, m, A, best);
+  const D = drOf(d.id, drCls(q)); if (D && D.man) D.man(q, d, m, A, best);
 })(sqMan);
 /* a squad that drills thinks at the usual pace, wherever it is (LOD) */
 lodTier = (g => q => (q.dr ? 0 : g(q)))(lodTier);
@@ -11845,7 +11845,7 @@ function dvHull(u, b, r) {
   return best;
 }
 /* a drill of a moment (taken and over at once): its history and the review's counts all the same */
-function drOnce(o, id, f) { const D = drOf(id); if (!D || !DRILL.on) return; const was = o.dr; if (was && was.id === id) return; o.dr = null; drRun(o, { D, u: 1, f: f || null }); drEnd(o); o.dr = was; }
+function drOnce(o, id, f) { const D = drOf(id, drCls(o)); if (!D || !DRILL.on) return; const was = o.dr; if (was && was.id === id) return; o.dr = null; drRun(o, { D, u: 1, f: f || null }); drEnd(o); o.dr = was; }
 /* the missile p knows is coming for it: its warner (a radar seeker, a missile approach warner) as the player's, or one it sees within MSL.eye m */
 function daWarn(p) {
   let best = null, bd = 1e9;
@@ -11906,7 +11906,7 @@ drStep = (g => (o, dt) => {
 /* a truck in the amb drill keeps its squad aboard through the killing ground; any truck lets it out on the side away from the enemy it believes */
 unload = (g => u => {
   if (u.cargo && u.ai && !u.net && DRILL.on && u.kind !== 'lav') {   // an ambush is drilled at once, before the squad is let out into it
-    const D = drOf('emboscada-v'), f = !D || (u.dr && u.dr.id === D.id) ? null : !u.dr && S.t >= ((u.drC && u.drC[D.id]) || 0) && D.when(u, belief(u), null);
+    const D = drOf('emboscada-v', drCls(u)), f = !D || (u.dr && u.dr.id === D.id) ? null : !u.dr && S.t >= ((u.drC && u.drC[D.id]) || 0) && D.when(u, belief(u), null);
     if (f) drRun(u, { D, u: f.u, f });
     if (D && u.dr && u.dr.id === D.id) return;
   }

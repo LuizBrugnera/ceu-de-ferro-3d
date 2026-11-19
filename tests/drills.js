@@ -26,8 +26,8 @@ const pinAll = S => () => { for (const u of S.units) if (u.pin) u.pin(); };
 console.log('-- the table: scored in the mind, recorded on the unit, bound by the mission --');
 {
   const { C, $, S, mid, squad, tank, know, took, D } = box(3);
-  const ids = $('DRILLS').map(d => d.id), inf = $('DRILLS').filter(d => d.cls === 'inf');
-  ok(inf.length >= 18 && new Set(ids).size === ids.length && inf.every(d => typeof d.when === 'function' && d.s), inf.length + ' infantry drills in the one table, each named and with its trigger');
+  const ids = $('DRILLS').map(d => d.id + '/' + d.cls), inf = $('DRILLS').filter(d => d.cls === 'inf');
+  ok(inf.length >= 18 && new Set(ids).size === ids.length && inf.every(d => typeof d.when === 'function' && d.s), inf.length + ' infantry drills in the one table, each named (one entry an id and a class) and with its trigger');
   const q = squad(0, mid, 0, NOAT.ww2), u = tank(1, mid + 350); still(u);
   $('mindThink')(q);
   ok(!q.dr && q.mind.k !== 'drill', 'a tank on the map the squad has not perceived sets nothing off (mind: ' + q.mind.k + ')');
@@ -255,11 +255,11 @@ if (SECS) for (const era of ['ww2', 'modern']) {
   C.$('drRun = (f => (o, p) => { __chk(o, p); return f(o, p); })(drRun)'); C.__chk = (o, p) => {
     if (o.dr && o.dr.id === p.D.id) return;
     n++; seen[p.D.id] = (seen[p.D.id] || 0) + 1; const f = typeof p.f === 'object' ? p.f : {};
-    if (f.of && !(o.bel && o.bel.has(f.of))) bad.push(p.D.id + ': ' + (f.of.kind || (f.of.man ? 'man' : 'plane')) + ' not believed');
+    if (f.of && f.of.team !== o.team && !(o.bel && o.bel.has(f.of))) bad.push(p.D.id + ': ' + (f.of.kind || (f.of.man ? 'man' : 'plane')) + ' not believed');
     if (p.D.id === 'artilharia' && !(o.drB || []).length) bad.push('artilharia without a burst');
   };
   C.run(SECS);
-  ok(n > 0 && !bad.length && !H.nan(S), era + ': AI battle of ' + SECS + ' s: ' + n + ' drills taken ' + JSON.stringify(seen) + ', every one from what the squad believed' + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
+  ok(n > 0 && !bad.length && !H.nan(S), era + ': AI battle of ' + SECS + ' s: ' + n + ' drills taken ' + JSON.stringify(seen) + ', every one from what the squad believed (a friend it keeps with, com-carro, is no contact)' + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
 }
 
 console.log('-- the review and the cost --');

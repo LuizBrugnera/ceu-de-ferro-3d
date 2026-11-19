@@ -22,7 +22,10 @@ console.log('-- tank: a guided missile coming in --');
 { box('modern'); const u = unit('tank', 0, mid() - 300, tankOf(0)), s0 = u.s, sm0 = u.smk;
   ok(pick(u) === null, 'nothing in the air yet: no drill');
   const a = C.addMan('redAT', 1, u.x + 900, u.z + 40, Math.PI), w = $('INF').modern; still(a);
-  const blue = C.addMan('blueAT', 1, u.x + 1000, u.z, Math.PI); still(blue);
+  /* a launch spot with the seeker's line clear to the tank (seekLine): behind a rock or a wood the missile would not guide at all (missile-los.js) */
+  let P = null; for (let i = 0; i < 400 && !P; i++) { const r = 600 + 400 * Math.random(), q = Math.random() * 2 * Math.PI, x = u.x + r * Math.cos(q), z = u.z + r * Math.sin(q), y = C.hgt(x, z) + 1.6;
+    if ($('seekLine')({ x, y, z }, y, u, u.y + 2, true)) P = { x, z }; }
+  const blue = C.addMan('blueAT', 1, P.x, P.z, Math.PI); still(blue);
   const e = $('manEye')(blue), m = $('MSHOT').atgm(blue, blue.arms[1].d, e, C.vnorm({ x: u.x - e.x, y: u.y - e.y, z: u.z - e.z }), u);
   let tk = -1; C.run(12, () => { if (tk < 0 && took(u, 'missil-at')) tk = S.t; });
   const back = (s0 - u.s) * u.ds;
@@ -138,8 +141,9 @@ console.log('-- AA: a ground enemy close --');
 
 console.log('-- AA: its radar silent until it has the shot --');
 { const run = on => {
-    box('modern'); DRILL.on = on; const u = unit('aa', 0, mid() - 2000 * -1, 'pantsir'), pl = C.addPlane('su57', 1, u.x - 8300, C.hgt(u.x, u.z) + 1500, u.z, Math.PI, false); pl.inv = 0;
-    let lock = 0, n = 0; C.run(6, () => { pl.x = u.x - 8300; pl.v = { x: -200, y: 0, z: 0 }; pl.hp = pl.def.hp; know(u, pl, 3); n++; if (u.ctl.lock === pl) lock++; });
+    box('modern'); DRILL.on = on; const u = unit('aa', 0, mid() - 2000 * -1, 'pantsir'), pl = C.addPlane('su57', 1, u.x - 8300, C.hgt(u.x, u.z) + 1500, u.z, Math.PI, false); pl.inv = 0; const t0 = S.t + 1.5;
+    /* counted from 1.5 s on: the drill wants the target its controller took, and the mind (every MIND.every s, at a slot staggered by mission) has had its turn by then */
+    let lock = 0, n = 0; C.run(6, () => { pl.x = u.x - 8300; pl.v = { x: -200, y: 0, z: 0 }; pl.hp = pl.def.hp; know(u, pl, 3); if (S.t < t0) return; n++; if (u.ctl.lock === pl) lock++; });
     DRILL.on = 1; return lock / (n || 1);
   };
   const a = run(1), b = run(0);

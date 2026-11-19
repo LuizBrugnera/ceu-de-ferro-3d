@@ -100,7 +100,8 @@ console.log('-- experience: kills, missions, calls met, staying alive in contact
   ok(!z.vx, '  out of contact: nothing');
   const op = { k: 'atk', st: 'cons', sq: [q, f], over: false, O: { x: 0, z: 0 } }; S.cmd[0].ops.push(op); const q0 = q.vx || 0, f0 = f.vx || 0;
   q.mind = f.mind = null; $('vetStep')(); $('vetStep')();
-  ok((q.vx || 0) - q0 === X.take && (f.vx || 0) - f0 === X.take, 'an assault that took its point: ' + X.take + ' to each of its squads, once');
+  ok(near((q.vx || 0) - q0, X.take, 1e-9) && near((f.vx || 0) - f0, X.take, 1e-9),   // near: a squad in contact may have a fraction from its minutes alive (X.live)
+     'an assault that took its point: ' + X.take + ' to each of its squads, once');
 }
 
 console.log('-- named squads: by side and number, through a ride --');

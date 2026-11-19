@@ -1,7 +1,8 @@
 'use strict';
 /* the models the page carries (models/*.glb, embedded by gen-models.js) against the files and against the plane's own numbers (mdl): read
    with the page's readGlb, the same nodes the procedural model files under the damage parts, nose forward along +x, the nozzle marks where
-   mdl.noz puts the hit boxes and the flames, each part inside its boxes, the length the game reads, and a size kept small for the page */
+   mdl.noz puts the hit boxes and the flames (a jet with pods, mdl.eng, has neither: the pods hold the meshes), each part inside its boxes,
+   the length the game reads, and a size kept small for the page */
 const fs = require('fs'), path = require('path'), H = require('./harness'), { ok, done } = H;
 const ctx = H.load(), $ = ctx.$, PLANES = $('PLANES'), readGlb = $('readGlb'), MS = $('MS');
 const html = fs.readFileSync(H.PAGE, 'utf8'), DIR = path.join(H.ROOT, 'models');
@@ -41,12 +42,19 @@ for (const id in PLANES) {
   /* frame: the nose ahead, the fin up, the right wing to +z */
   const ctr = n => { let s = [0, 0, 0], c = 0; each(n, (x, y, z) => { s[0] += x; s[1] += y; s[2] += z; c++; }); return s.map(v => v / c); };
   ok(ctr(N.pilot)[0] > ctr(N.hull)[0] + 2 && ctr(N.pilot)[1] > .5, 'the canopy ahead of the fuselage\'s middle and above it: nose along +x');
-  ok(ctr(N.wingR)[2] > 2 && ctr(N.wingL)[2] < -2 && Math.min(ctr(N.finL)[1], ctr(N.finR)[1]) > 1.5, 'right wing at +z, the fins above');
+  ok(ctr(N.wingR)[2] > 2 && ctr(N.wingL)[2] < -2 && Math.min(ctr(N.finL)[1], ctr(N.finR)[1]) > Math.max(ctr(N.stabL)[1], ctr(N.stabR)[1]) + .3, 'right wing at +z, the fins above the tailplanes');
   ok(Math.abs(hi[0] - lo[0] - d.len) / d.len < .02, 'length ' + (hi[0] - lo[0]).toFixed(2) + ' against the ' + d.len.toFixed(2) + ' of mdl.fus (the hit radius, the missile fuse and the shadow read it)');
-  ok(Math.abs(hi[2] + lo[2]) < .1 && hi[1] > 4 && lo[1] > -2, 'symmetric, upright: z ' + lo[2].toFixed(2) + '..' + hi[2].toFixed(2) + ', y ' + lo[1].toFixed(2) + '..' + hi[1].toFixed(2));
+  const top = +(Math.max(...d.mdl.fin.pts.map(p => p[1])) * Math.cos(d.mdl.fin.cant || 0)).toFixed(2);   // a canted fin stands lower
+  ok(Math.abs(hi[2] + lo[2]) < .1 && Math.abs(hi[1] - top) < .3 && lo[1] > -2, 'symmetric, upright: z ' + lo[2].toFixed(2) + '..' + hi[2].toFixed(2) + ', y ' + lo[1].toFixed(2) + '..' + hi[1].toFixed(2) + ', the fins\' top at the ' + top + ' of mdl.fin');
 
-  /* the exhaust: a mark per nozzle, where mdl.noz has it */
-  for (const s of ['L', 'R']) {
+  /* the exhaust: a mark per nozzle, where mdl.noz has it; pods (mdl.eng) carry no marks, and with no afterburner (Tab) no flames either */
+  if (d.mdl.eng) {
+    ok(!d.mdl.noz && !d.Tab && !G.nodes.some(n => /^noz/.test(n.name)), 'pods, no nozzle marks and no afterburner: no flames');
+    for (const s of ['L', 'R']) {
+      const c = ctr(N['eng' + s]), e = d.mdl.eng, z = s === 'R' ? e[2] : -e[2];
+      ok(Math.hypot(c[0] - e[0], c[1] - e[1], c[2] - z) < .3, 'pod ' + s + ' at ' + c.map(v => v.toFixed(2)).join(', ') + ', mdl.eng ' + [e[0], e[1], z].join(', '));
+    }
+  } else for (const s of ['L', 'R']) {
     const mk = G.nodes.find(n => n.name === 'noz' + s), nz = d.mdl.noz.find(n => (s === 'R' ? n[2] > 0 : n[2] < 0));
     ok(mk && nz && Math.hypot(mk.t[0] - nz[0], mk.t[1] - nz[1], mk.t[2] - nz[2]) < .05, 'nozzle ' + s + ' at ' + (mk && mk.t.map(v => v.toFixed(2)).join(', ')) + ', mdl.noz ' + (nz && nz.join(', ')));
     /* the rim around it: the eng mesh's rearmost vertices ring the mark */

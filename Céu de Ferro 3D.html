@@ -9652,6 +9652,15 @@ const CIV = {
       modern: { name: 'Milícia', role: 'Civil armado', era: 'modern', side: 0, hp: 11, parts: [], arms: [{ name: 'Fuzil antigo', rate: 1.9, dmg: 9, spd: 700, mag: 5, mags: 1, sp: .018, rl: 3.2 }] } } }
 };
 const CIVDEF = { name: 'Civil', era: 'ww2', side: 0, parts: [] }, CIVARMS = [{ d: {} }];
+/* the militia kit of the era for side t (P8, NOT TESTED): CIV.mil.kit's, marked with t's faction (def.side is a faction, as on every kit), one copy per era and faction */
+const CIVKIT = new Map();
+function civKit(t) {
+  const K = CIV.mil.kit[S.era], f = S.fac && S.fac[t] !== undefined ? S.fac[t] : 0;
+  if (K.side === f) return K;
+  const k = S.era + ':' + f;
+  if (!CIVKIT.has(k)) CIVKIT.set(k, Object.assign({}, K, { side: f }));
+  return CIVKIT.get(k);
+}
 const civBegin = () => { S.civs = []; S.civN = 0; S.civX = []; S.civI = new Map(); S.civM = new Map(); S.civD = null; };
 /* where the towns stand: houses by town, the streets that run through each, then the people in them */
 function civGroups() {
@@ -9823,7 +9832,7 @@ const civMine = id => S.men.reduce((n, m) => n + (m.mil && !m.dead && m.own === 
    soldier keeps the first kit of its side as its id, so that a snapshot row and a death name something every server knows */
 function civRecruit(c, team, own) {
   if (c.dead || c.gone || c.net || S.men.length >= IAI.cap) return null;
-  const E = INF[S.era][S.fac[team]], K = CIV.mil.kit[S.era], m = addMan(E[0], team, c.x, c.z, c.h);
+  const E = INF[S.era][S.fac[team]] || INF[S.era][0], K = civKit(team), m = addMan(E[0], team, c.x, c.z, c.h);
   m.def = K; m.name = K.name; m.max = m.hp = K.hp; m.nades = m.smk = m.kit = m.chg = 0; m.mil = 1; m.cc = c.cc; m.pi = c.pi; m.inv = 1;
   m.arms = K.arms.map(a => ({ d: a, mag: a.mag, res: a.mags, cool: 0, rl: 0, t: -9, lock: null, lockT: 0 }));
   m.ai = manBrain(0); m.ai.gx = m.x; m.ai.gz = m.z; if (own !== undefined) m.own = own;
@@ -9864,11 +9873,12 @@ function civFollow(dt) {
 function civPlan() {
   const K = S.civT || (S.civT = []), M = CIV.mil;
   towns().forEach((w, i) => {
-    const k = K[i] || (K[i] = { t: [0, 0], cl: [0, 0] }), n = [0, 0], foe = [false, false];
-    for (const m of S.men) if (!m.dead && !m.in) { const d = hdist(m, w); if (d < FIELD.town && !m.mil) n[m.team]++; if (d < M.calm) foe[m.team] = true; }
-    for (const u of S.units) if (!u.dead && hdist(u, w) < M.calm) foe[u.team] = true;
-    for (const t of [0, 1]) {
-      k.t[t] = n[t] >= FIELD.held && !foe[1 - t] ? k.t[t] + CIV.plan : 0;
+    const k = K[i] || (K[i] = { t: [], cl: [] }), n = SIDES().map(() => 0), by = SIDES().map(() => false);   // by: a side stands within calm m
+    for (const m of S.men) if (!m.dead && !m.in && m.team >= 0 && m.team < S.N) { const d = hdist(m, w); if (d < FIELD.town && !m.mil) n[m.team]++; if (d < M.calm) by[m.team] = true; }
+    for (const u of S.units) if (!u.dead && u.team >= 0 && u.team < S.N && hdist(u, w) < M.calm) by[u.team] = true;
+    for (const t of SIDES()) {
+      k.cl[t] = k.cl[t] || 0;
+      k.t[t] = n[t] >= FIELD.held && !foes(t).some(s => by[s]) ? (k.t[t] || 0) + CIV.plan : 0;
       if (k.t[t] >= M.wait && S.t >= k.cl[t]) { k.cl[t] = S.t + M.every; civRaise(w, t); }
     }
   });
@@ -9985,13 +9995,15 @@ function civStep(dt) {
    towns that turned (index in S.T.burgs: bits of the sides), hits the deaths by side in each town, say what the feed has yet to tell by side, mil the
    militia squads raised by side, rv when a town that turned arms its next squad, cl when a person's general may arm a town again (town:side), roe the holds by side (rT: when each place was last noted),
    evac and back the towns that emptied and came home */
-const civD = () => S.civD || (S.civD = { n: [0, 0], tk: [0, 0], dead: 0, foe: {}, hits: {}, say: [{ n: 0, tk: 0, T: 0 }, { n: 0, tk: 0, T: 0 }], mil: [0, 0], rv: {}, cl: {}, roe: [0, 0], rT: {}, evac: 0, back: 0 });
+const civD = () => S.civD || (S.civD = { n: SIDES().map(() => 0), tk: SIDES().map(() => 0), dead: 0, foe: {}, hits: {}, say: SIDES().map(() => ({ n: 0, tk: 0, T: 0 })), mil: SIDES().map(() => 0), rv: {}, cl: {}, roe: SIDES().map(() => 0), rT: {}, evac: 0, back: 0 });
+/* t is one of the match's sides (0 .. S.N - 1) */
+const civT = t => Number.isInteger(t) && t >= 0 && t < S.N;
 /* the town a civilian belongs to (its index in S.T.burgs, -1 none): its group's, else (a copy of the host's) where it stands */
 function civBi(c) {
   const B = S.T.burgs, b = (c.g && c.g.b) || B.find(b => hdist(b, c) < b.ru + 30);
   return b ? B.indexOf(b) : -1;
 }
-const civHates = (bi, t) => bi >= 0 && !!S.civD && (t === 0 || t === 1) && !!((S.civD.foe[bi] | 0) & (1 << t));
+const civHates = (bi, t) => bi >= 0 && !!S.civD && civT(t) && !!((S.civD.foe[bi] | 0) & (1 << t));
 /* a town's name: its own, a point of the match on it, else a word */
 function civName(b) {
   if (b.nm) return b.nm;
@@ -10001,7 +10013,7 @@ function civName(b) {
 const civSide = t => S.E.sides[S.fac[t]].name;
 /* a civilian killed by by's fire, where the battle is simulated (civKill) */
 function civToll(c, by) {
-  const D = civD(), t = by && (by.team === 0 || by.team === 1) ? by.team : -1, bi = civBi(c);
+  const D = civD(), t = by && civT(by.team) ? by.team : -1, bi = civBi(c);
   const paid = t >= 0 && cqSim() && !S.cq.ph ? CIV.toll : 0;
   D.dead++;
   anaCv('kill', t, { x: Math.round(c.x), z: Math.round(c.z), b: bi, tk: paid });
@@ -10010,27 +10022,45 @@ function civToll(c, by) {
   if (paid) { S.cq.tk[t] -= paid; D.tk[t] += paid; }
   const s = D.say[t]; s.n++; s.tk += paid; if (!s.T) s.T = S.t + CIV.say;
   if (bi < 0) return;
-  const h = D.hits[bi] || (D.hits[bi] = [0, 0]); h[t]++;
+  const h = D.hits[bi] || (D.hits[bi] = SIDES().map(() => 0)); h[t] = (h[t] | 0) + 1;
   if (h[t] >= CIV.rage.n && !civHates(bi, t)) civTurn(bi, t);
 }
-/* the town bi turns against side t: told to all, and it arms its militia for the other side at once (unless it hates both) */
+/* the town bi turns against side t: told to all (each of t's enemies hears it turned against t), and it arms its militia at once for a side it does not hate (civRevolt) */
 function civTurn(bi, t) {
   const D = civD(), b = S.T.burgs[bi], nm = civName(b);
   D.foe[bi] = (D.foe[bi] | 0) | (1 << t);
   civHeard(t, 0, bi, D.foe[bi], 0);
   if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, 0, bi, D.foe[bi], 0] });
   gLog(t, 'rep', 'A população de ' + nm + ' se voltou contra nós: ' + CIV.rage.n + ' civis mortos por fogo nosso', b, 'cvt' + bi);
-  gLog(1 - t, 'rep', 'A população de ' + nm + ' se voltou contra o inimigo', b, 'cvt' + bi);
+  for (const s of foes(t)) gLog(s, 'rep', 'A população de ' + nm + ' se voltou contra ' + (S.N > 2 ? civSide(t) : 'o inimigo'), b, 'cvt' + bi);
   anaCv('turn', t, { b: bi, nm });
   civRevolt(bi);
 }
-/* a town that turned arms a squad for the side it does not hate, every CIV.mil.every s */
+/* a town that turned arms a squad, every CIV.mil.every s, for a side it does not hate (civArms) */
 function civRevolt(bi) {
-  const D = civD(), f = D.foe[bi] | 0, t = f === 1 ? 1 : f === 2 ? 0 : -1, b = S.T.burgs[bi];
+  const D = civD(), t = civArms(bi), b = S.T.burgs[bi];
   if (t < 0 || !b || S.t < (D.rv[bi] || 0)) return;
   D.rv[bi] = S.t + CIV.mil.every;
   const w = towns().find(w => hdist(w, b) < 150) || { x: b.x, z: b.z };
   civTake(w, t, 'turn');
+}
+/* the side a town that turned arms its militia for (P8, D8; NOT TESTED), -1 none: of the sides it does not hate, and that are enemies of one it hates,
+   the Insurgents' when they are one of them (the town takes up arms with the irregulars), else the one whose fire killed the fewest of its people
+   (the one it hates least; the first on a tie). With two sides it is the other side, and none when it hates both, as before */
+function civArms(bi) {
+  const D = civD(), f = D.foe[bi] | 0, h = D.hits[bi] || [];
+  if (!f) return -1;
+  const L = SIDES().filter(s => !(f & (1 << s)) && foes(s).some(o => f & (1 << o)));
+  if (!L.length) return -1;
+  const ins = civIns();
+  if (ins >= 0 && L.includes(ins)) return ins;
+  return L.reduce((a, s) => ((h[s] | 0) < (h[a] | 0) ? s : a), L[0]);
+}
+/* the Insurgents' side in this match (the side whose faction is FACTIONS.modern.insurgentes' slot), -1 none */
+function civIns() {
+  if (S.N < 3 || S.era !== 'modern' || typeof FACTIONS === 'undefined' || !FACTIONS.modern || !FACTIONS.modern.insurgentes) return -1;
+  const f = FACTIONS.modern.insurgentes.slot;
+  return SIDES().find(t => S.fac[t] === f) ?? -1;
 }
 /* the general of side t raises the town w's militia: its AI's choice where the AI holds the defence, else the town arms itself for the side */
 function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def') === 'ai' ? 'ai' : 'sys'); }
@@ -10038,12 +10068,12 @@ function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def'
    tk the tickets those deaths cost it */
 function civHeard(t, n, bi, f, tk) {
   const D = civD(), b = bi >= 0 && S.T.burgs[bi], was = b ? D.foe[bi] | 0 : 0;
-  if (b && f >= 0 && f < 4) D.foe[bi] = was | f;
-  if ((t === 0 || t === 1) && n > 0) {
+  if (b && f >= 0 && f < (1 << S.N)) D.foe[bi] = was | f;
+  if (civT(t) && n > 0) {
     cqSay(civSide(t) + ': ' + (n > 1 ? n + ' civis mortos' : 'um civil morto') + (tk > 0 ? ' · −' + tk + ' tíquetes' : ''), t);
     if (!S.net || S.host) gLog(t, 'rep', (n > 1 ? n + ' civis mortos' : 'Um civil morto') + ' por fogo nosso' + (tk > 0 ? ': −' + tk + ' tíquetes' : ''));
   }
-  if (b && (t === 0 || t === 1) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
+  if (b && civT(t) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
 }
 /* the feed's word on the deaths, CIV.say s after the first of a run */
 function civSays() {
@@ -10070,10 +10100,13 @@ function civWar() {
   }
   for (const bi in D.foe) civRevolt(+bi);
 }
-/* are both sides within CIV.evac.r m of the town's edge */
+/* do two sides that are enemies stand within CIV.evac.r m of the town's edge */
 function civFight(b) {
-  const R = b.ru + CIV.evac.r, f = [false, false];
-  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && !o.in && (o.team === 0 || o.team === 1) && !f[o.team] && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R) { f[o.team] = true; if (f[0] && f[1]) return true; }
+  const R = b.ru + CIV.evac.r, f = [];
+  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && !o.in && civT(o.team) && !f[o.team] && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R) {
+    f[o.team] = true;
+    if (foes(o.team).some(s => f[s])) return true;
+  }
   return false;
 }
 /* the town g empties: a refuge beyond its edge away from where the fighting was heard (the first of a fan of headings that is on the map, dry,
@@ -10122,12 +10155,13 @@ function civLook(dt) {
   const K = CIV.roe;
   if (!K.on || (S.civL = (S.civL || 0) - dt) > 0) return;
   S.civL = K.every;
-  const obs = [[], []];
-  for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && (o.team === 0 || o.team === 1)) obs[o.team].push(o);
+  const obs = SIDES().map(() => []);
+  for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && civT(o.team)) obs[o.team].push(o);
   for (const c of S.civs) {
     if (c.dead || c.gone || c.in || c.net) continue;
-    const sn = c.sn || (c.sn = [-1e9, -1e9]);
-    for (const t of [0, 1]) {
+    const sn = c.sn || (c.sn = SIDES().map(() => -1e9));
+    for (const t of SIDES()) {
+      if (sn[t] === undefined) sn[t] = -1e9;
       let k = 0;
       for (const o of obs[t]) {
         const R = o.man || o.kind ? K.see : K.see * 2;
@@ -10149,10 +10183,10 @@ function roeIdf(t, o) {
 }
 /* do side t's rules of engagement bar a burst of radius r at x z on target o: a civilian it has seen there lately, and o not identified */
 function roeBar(t, x, z, r, o) {
-  if (!CIV.roe.on || !S.civs || !S.civs.length || (t !== 0 && t !== 1)) return false;
+  if (!CIV.roe.on || !S.civs || !S.civs.length || !civT(t)) return false;
   const K = CIV.roe, R = (r || 0) + K.pad;
   let near = false;
-  for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
+  for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && c.sn[t] !== undefined && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
   return near && !roeIdf(t, o);
 }
 /* must the AI of side t hold that burst (roeBar), written down when it does */
@@ -20467,7 +20501,7 @@ function bombFoe(o, r) {
   return best;
 }
 /* the AI holds a bomb the rules of engagement bar; a human's goes off */
-const bombHeld = (o, B, t) => !!o.ai && (o.team === 0 || o.team === 1) && roeHeld(o.team, o.x, o.z, B.r, t);
+const bombHeld = (o, B, t) => !!o.ai && civT(o.team) && roeHeld(o.team, o.x, o.z, B.r, t);
 function bombGo(o) {
   const B = bombOf(o); if (!B || o.bGone) return; o.bGone = true;
   const x = o.x, z = o.z, y = (o.y || hgt(x, z)) + 1;
@@ -21788,9 +21822,12 @@ function civState(t) {
     let home = 0, away = 0;
     for (const c of S.civs || []) if (!c.dead && !c.gone && c.g && c.g.b === b) { if (c.mode >= 4) away++; else home++; }
     const f = D ? D.foe[i] | 0 : 0;
-    if (home || away || f) towns.push({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), home, away, hate: f & (1 << t) ? (f & (1 << (1 - t)) ? 'both' : 'us') : f ? 'them' : '' });
+    // hate: us (only us), them (others, not us), both (us and another); against: every side it hates, by name (P8: with three sides 'them' may be either enemy)
+    if (home || away || f) towns.push({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), home, away, hate: f & (1 << t) ? (f & ~(1 << t) ? 'both' : 'us') : f ? 'them' : '',
+      against: SIDES().filter(s => f & (1 << s)).map(s => (s === t ? 'us' : civSide(s))) });
   });
-  return { killed: D ? D.n[t] : 0, enemyKilled: D ? D.n[1 - t] : 0, tk: D ? D.tk[t] : 0, toll: CIV.toll, roe: D ? D.roe[t] : 0, towns };
+  const n = D ? D.n : [];
+  return { killed: D ? n[t] | 0 : 0, enemyKilled: foes(t).reduce((a, s) => a + (n[s] | 0), 0), bySide: SIDES().map(s => ({ side: civSide(s), killed: n[s] | 0 })), tk: D ? D.tk[t] | 0 : 0, toll: CIV.toll, roe: D ? D.roe[t] | 0 : 0, towns };
 }
 genState = (f => t => Object.assign(f(t), { civ: civState(t) }))(genState);
 /* an analytics event of the laws of war */
@@ -21801,8 +21838,9 @@ anaSnap = (f => () => {
   if (e && e.k === 'sn' && S.civs) { let a = 0, away = 0, ins = 0; for (const c of S.civs) if (!c.dead && !c.gone) { a++; if (c.mode >= 4) away++; if (c.in) ins++; } e.cv = [a, away, ins]; }
 })(anaSnap);
 anaReport = (f => (ev, me) => {
-  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end'), cv = ev.filter(e => e.k === 'cv'), of = (c, s) => cv.filter(e => e.c === c && e.s === s);
-  const side = [0, 1].map(s => (hide && s !== me ? null : { killed: of('kill', s).length, tk: anaR(of('kill', s).reduce((a, e) => a + (e.tk || 0), 0)), mil: of('mil', s).length, roe: of('roe', s).length }));
+  const R = f(ev, me), hide = Number.isInteger(me) && me >= 0 && !ev.some(e => e.k === 'end'), cv = ev.filter(e => e.k === 'cv'), of = (c, s) => cv.filter(e => e.c === c && e.s === s);
+  const ns = cv.reduce((n, e) => (Number.isInteger(e.s) ? Math.max(n, e.s + 1) : n), Math.max(2, R.tickets ? R.tickets.length : 0));   // the sides of the match (P8: two or three)
+  const side = [...Array(ns).keys()].map(s => (hide && s !== me ? null : { killed: of('kill', s).length, tk: anaR(of('kill', s).reduce((a, e) => a + (e.tk || 0), 0)), mil: of('mil', s).length, roe: of('roe', s).length }));
   R.civ = { side, turned: cv.filter(e => e.c === 'turn').map(e => ({ t: e.t, s: e.s, nm: e.nm || '' })), evac: cv.filter(e => e.c === 'evac').length, back: cv.filter(e => e.c === 'back').length, dead: cv.filter(e => e.c === 'kill').length };
   R.tickets.forEach((x, s) => { if (x && side[s]) { x.civ = side[s].tk; x.other = anaR(x.other - side[s].tk); } });
   return R;

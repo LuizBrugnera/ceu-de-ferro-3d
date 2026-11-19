@@ -166,7 +166,7 @@ console.log('-- online: the host takes a guest\'s call and answer; a guest reads
   ok(m0 && m0.e.some(r => r[0] === R.id && r[1] === 0 && r[4] === 1 && r[5] === 7) && sent.some(m => m.t === 'hlp' && m.s === 1 && !m.e.length), 'the host sends each side its open calls (hlp), the asker\'s player id with his');
   const u2 = tank(0, mid + 600); u2.hp = u2.max * .3; const R2 = $('helpAsk')(u2, 'repair', u2, null), h = squad(0, mid + 650, 12).men[0];
   N.ghosts.set(8, h); h.pid = 8; N.rx.hacc({ from: 8, id: R2.id });
-  ok(R2.pl === h && R2.pid === 8, 'a guest answers a call (hacc): the host marks him as its helper');
+  ok(R2.pl === h && R2.plid === 8 && R2.pid !== 8, 'a guest answers a call (hacc): the host marks him as its helper');
   S.host = false; N.id = 7; N.rx.hlp({ s: 0, e: [[R.id, 0, 1, 2, 1, 7], [R2.id, 2, 3, 4, 2, 8]] });
   const rows = $('helpRows')(0, g);
   ok(rows.length === 2 && rows[0][5] === 1 && rows[1][5] === 0, 'a guest reads its side\'s calls from the host, his own marked');

@@ -119,7 +119,7 @@ A entrada é recusada com inimigo a menos de 150 m, com o rádio atingido nos ú
 
 ## Obras: bases, trincheiras, sacos de areia e postos
 
-De soldado, N mostra o contorno da obra à frente, verde onde pode e vermelho com o motivo onde não pode. Cada toque em N passa para a próxima obra (base de suprimento, trincheira, sacos de areia, posto anticarro, ninho de metralhadora, torre de sniper, cúpula antifoguete; o sapador segue para o pontão, a mina anticarro e a antipessoal) e depois fecha; o clique começa e o botão direito cancela. Para construir, fique parado junto da obra; outros soldados ao lado aceleram e um tiro recebido interrompe.
+De soldado, N mostra o contorno da obra à frente, verde onde pode e vermelho com o motivo onde não pode. Cada toque em N passa para a próxima obra (base de suprimento, trincheira, sacos de areia, posto anticarro, ninho de metralhadora, torre de sniper, cúpula antifoguete; o sapador segue para o pontão, a ponte, a mina anticarro e a antipessoal) e depois fecha; o clique começa e o botão direito cancela. Para construir, fique parado junto da obra; outros soldados ao lado aceleram e um tiro recebido interrompe.
 
 - **Base de suprimento.** Gasta o kit de construção (um por soldado, reposto numa base). Três por lado. Leva 70 s sozinho. Pronta, remunicia e repara por inteiro soldados e veículos de solo do lado a até 70 m, é ponto de entrada e depósito de requisição. Tem 230 pontos: canhão, foguete, bomba e obuseiro a destroem, e encostado nela N arma a carga de demolição (duas bastam).
 - **Trincheira** (40 s). Em pé, só a cabeça aparece; agachado ou deitado o soldado some. Explosão fora quase não fere, granada dentro mata. Tanque cruza devagar, veículo de rodas só pelas pranchas.

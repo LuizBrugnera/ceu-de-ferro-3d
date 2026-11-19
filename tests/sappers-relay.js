@@ -48,9 +48,9 @@ const N = require('./net'), { ok, done } = require('./harness');
   const row = k => [55100 + k, k, 0, 1234.5, -678.9, 1.57, 42, 150, 0];
   h.send({ t: 'fort', i: 0, n: 1, e: [3, 4, 5, 6].map(row) }); const f1 = await a.wait('fort');
   ok(f1 && f1.e.map(r => r[1]).join() === '3,4,5,6', 'fort carries the posts (kinds 3 to 6)');
-  h.send({ t: 'fort', i: 0, n: 1, e: [row(7)] }); ok(await none(a, 'fort'), 'and no kind past them');
+  h.send({ t: 'fort', i: 0, n: 1, e: [row(8)] }); ok(await none(a, 'fort'), 'and no kind past them and the pontoon (7)');
   await N.sleep(720); a.send({ t: 'fbuild', k: 6, p: [1, 2], a: 0 }); const fb = await h.wait('fbuild'); ok(fb && fb.k === 6, 'fbuild asks for one');
-  await N.sleep(720); a.send({ t: 'fbuild', k: 7, p: [1, 2], a: 0 }); ok(await none(h, 'fbuild'), 'not for a kind that is none');
+  await N.sleep(720); a.send({ t: 'fbuild', k: 8, p: [1, 2], a: 0 }); ok(await none(h, 'fbuild'), 'not for a kind that is none (7 is the pontoon)');
 
   h.send({ t: 'dint', f: 55106, k: 4000000000, s: 1 }); const da = await a.wait('dint'), db = await b.wait('dint'), ds = await sp.wait('dint');
   ok(da && db && ds && da.f === 55106 && da.k === 4000000000 && da.s === 1 && await none(h, 'dint'), 'dint (the host\'s dome engaged a round) reaches the room and the spectator');

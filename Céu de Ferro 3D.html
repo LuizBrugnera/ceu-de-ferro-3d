@@ -1546,7 +1546,7 @@ function hgtT(T, x, z) {
   const a = h[k] + (h[k + 1] - h[k]) * u, b = h[k + N + 1] + (h[k + N + 2] - h[k + N + 1]) * u;
   return Math.max(T.WL, a + (b - a) * (gz - j));
 }
-function hgt(x, z) { return hgtT(S.T, x, z); }
+function hgt(x, z) { const h = hgtT(S.T, x, z); return S.gap ? brH(x, z, h) : h; }   // S.gap: the crossings a bridge's fall has opened in the river (bridges, W20)
 /* ---------- world objects: the list, the grid and the queries (the table is OBJ) ----------
    An object is a box, half sizes hw hd turned by a, or with rd a round post; y the ground under it, h its height, r the circle around it */
 function addObj(T, id, k, x, z, w, d, h, a, rd) {
@@ -1879,9 +1879,9 @@ function netNear(x, z, T) {
 }
 function netPath(a, b, cost, mode, T) {
   T = T || S.T; mode = mode || 'veh';
-  const key = !cost && a + ',' + b + ',' + mode, N = T.net; let c;
+  const bm = S && S.bre && T === S.T ? S.bre : null, key = !cost && a + ',' + b + ',' + mode + (bm ? S.brk : ''), N = T.net; let c;   // bm: what the bridges make of each edge (W20): a fallen one is no way, a pontoon a slow one
   if (key) { T.pc = T.pc || new Map(); if ((c = T.pc.get(key)) !== undefined) return c; }
-  const f = cost || (e => e.len * RN.cls[mode][e.c]), n = N.n.length, dist = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
+  const f0 = cost || (e => e.len * RN.cls[mode][e.c]), f = bm ? e => f0(e) * bm[e.i] : f0, n = N.n.length, dist = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
   const push = (k, v) => { hk.push(k); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
   const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
@@ -1899,16 +1899,18 @@ function netPath(a, b, cost, mode, T) {
    such a way is kept for 10 s (T.pt) when both ends are nodes. edgeCostOf(C, mode): the cost of an edge for the commander C (no C, or none with edge threats yet: the plain one) */
 const edgeCostOf = (C, mode) => { const cls = RN.cls[mode], et = C && C.et; return et ? e => e.len * cls[e.c] * (1 + (et[e.i] || 0)) : e => e.len * cls[e.c]; };
 function tripOf(x0, z0, x1, z1, o) {
-  o = o || {}; const T = S.T, N = T.net, mode = o.mode || 'veh', Cm = o.team !== undefined && !o.cost && T.mv >= 4 && S.cmd ? S.cmd[o.team] : null, cost = o.cost || (Cm && Cm.et ? edgeCostOf(Cm, mode) : null), f = cost || (e => e.len * RN.cls[mode][e.c]);
-  const na0 = N.n.findIndex(q => Math.hypot(q.x - x0, q.z - z0) < 1), na1 = N.n.findIndex(q => Math.hypot(q.x - x1, q.z - z1) < 1), bk = S.t / 10 | 0, key = (!o.cost && na0 >= 0 && na1 >= 0) ? 't' + na0 + ',' + na1 + ',' + mode + (cost ? ',' + Cm.t : '') : null;
+  o = o || {}; const T = S.T, N = T.net, mode = o.mode || 'veh', Cm = o.team !== undefined && !o.cost && T.mv >= 4 && S.cmd ? S.cmd[o.team] : null, cost = o.cost || (Cm && Cm.et ? edgeCostOf(Cm, mode) : null), bm = S.bre || null, f0 = cost || (e => e.len * RN.cls[mode][e.c]);
+  const na0 = N.n.findIndex(q => Math.hypot(q.x - x0, q.z - z0) < 1), na1 = N.n.findIndex(q => Math.hypot(q.x - x1, q.z - z1) < 1), bk = S.t / 10 | 0, key = (!o.cost && na0 >= 0 && na1 >= 0) ? 't' + na0 + ',' + na1 + ',' + mode + (cost ? ',' + Cm.t : '') + (bm ? S.brk : '') : null;
   let pm = null;
   if (key && cost) { if (T.ptB !== bk || !T.pt) { T.pt = new Map(); T.ptB = bk; } pm = T.pt; const c = pm.get(key); if (c) return c; }
   else if (key) { T.pc = T.pc || new Map(); const c = T.pc.get(key); if (c) return c; }
   const n0 = netNear(x0, z0), n1 = netNear(x1, z1), E0 = N.e[n0.e], E1 = N.e[n1.e];
-  let best = n0.e === n1.e ? { c: Math.abs(n1.s - n0.s) * f(E0) / E0.len } : null;
+  const cut = (E, s, q) => bm && bm[E.i] === Infinity && brAcross(E, s, q === E.a ? 0 : E.len);   // the end of a cut edge (W20) that the bridge's fall has put across the river from the point
+  let best = n0.e === n1.e && !(bm && bm[E0.i] === Infinity && brAcross(E0, n0.s, n1.s)) ? { c: Math.abs(n1.s - n0.s) * f0(E0) / E0.len } : null;
   for (const [A, da] of [[E0.a, n0.s], [E0.b, E0.len - n0.s]]) for (const [B, db] of [[E1.a, n1.s], [E1.b, E1.len - n1.s]]) {
+    if (cut(E0, n0.s, A) || cut(E1, n1.s, B)) continue;
     const p = netPath(A, B, cost, mode); if (!p) continue;
-    const c = da * f(E0) / E0.len + p.c + db * f(E1) / E1.len; if (!best || c < best.c) best = { c, A, B, p };
+    const c = da * f0(E0) / E0.len + p.c + db * f0(E1) / E1.len; if (!best || c < best.c) best = { c, A, B, p };
   }
   if (!best) return null;
   const inner = (E, s0, s1) => { const lo = Math.min(s0, s1), hi = Math.max(s0, s1), m = E.p.filter(q => q.s > lo + 1e-6 && q.s < hi - 1e-6); return s1 >= s0 ? m : m.reverse(); };
@@ -3598,7 +3600,7 @@ function moveUnit(u, dt) {
   if (u.fixed) return;
   if (u.def.swim && swim(u, dt)) return;
   if (u.rail && u.trip) { u.sp = c.drive * d.spd * Q.drive; tripMove(u, dt); }   // map version 4: on a trip it rides the trip's polyline, not its axis
-  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive; u.s = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); place(u); }
+  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive; const s1 = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); if (S.brc && brStop(u, S.T.routes[u.ri], u.s, s1)) u.sp = 0; else u.s = s1; place(u); }   // a fallen bridge stops it at the bank (W20)
   else {
     const dir = Math.sign(u.sp || c.drive) || 1, cx = Math.cos(u.h), cz = -Math.sin(u.h);
     const slope = (hgt(u.x + cx * 6 * dir, u.z + cz * 6 * dir) - u.y) / 6, want = c.brake ? 0 : c.drive * d.spd * Q.drive * (c.drive < 0 ? .5 : 1) * clamp(1 - slope * 2.2, .2, 1.15), acc = (c.brake ? 16 : 5) * dt;
@@ -3673,7 +3675,9 @@ function placeOn(u, p, s) {
 }
 /* T.ev (a manoeuvre squad's ride, MAN.ride): places along the way where the trip does something (k pick: the squad boards; drop: it gets out), in order; the vehicle stops there for a step */
 function tripMove(u, dt) {
-  const T = u.trip, E = T.ev && T.ev[0]; T.s = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt); placeOn(u, T.p, T.s);
+  const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt);
+  if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
+  placeOn(u, T.p, T.s);
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
   if (T.s >= T.p.len - 1e-6) tripEnd(u);
 }
@@ -8982,7 +8986,7 @@ function fortsAt(x, z) {
   const C = FCELL.m, key = (i, j) => (i + 512) * 8192 + j + 4096;
   if (!S.fg || S.fg.n !== S.fn) {
     const G = (S.fg = new Map()); G.n = S.fn;
-    for (const f of S.forts) { const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
+    for (const f of S.forts) { if (f.F.span) continue; const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
   }
   return S.fg.get(key(Math.floor(x / C), Math.floor(z / C))) || NONE;
 }
@@ -9057,8 +9061,8 @@ function fortStep(dt) {
   for (const f of S.forts) {
     if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && ecoSim() && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
     if (!sim || f.prog >= 1) continue;
-    let n = 0; for (const m of S.men) if (builds(m, f)) n++;
-    f.n = n = Math.min(n, BLD.max);
+    let n = 0; for (const m of S.men) if (builds(m, f)) n += f.F.eng && !m.def.sap ? f.F.eng : 1;   // a pontoon: a sapper a whole builder, any other soldier eng of one (W20)
+    f.n = n = Math.min(n, f.F.max || BLD.max);
     if (n) { f.workT = S.t; fortAt(f, Math.min(1, f.prog + (1 + BLD.help * (n - 1)) / f.F.time * dt)); }
     else if (S.t - f.workT > BLD.decay[0]) { fortAt(f, f.prog - BLD.decay[1] * dt); if (f.prog <= 0) fortDrop(f); }
   }
@@ -10172,7 +10176,7 @@ function footPath(C, x0, z0, x1, z1) {
   if (C.fpN >= MAN.fp) return null;
   C.fpN++;
   const T = S.T, F = fpCells(T), G = F.G, nx = F.nx, nz = F.nz, K = MANT.thr, ci = (x, z) => clamp((z + S.HW) / G | 0, 0, nz - 1) * nx + clamp(x / G | 0, 0, nx - 1);
-  const thr = k => (C.inf && C.inf.length === nx * nz ? Math.max(0, -C.inf[k]) : 0), cost = k => G * (1 + K.k * thr(k) + K.kz * (C.kz && C.kz.length === nx * nz ? C.kz[k] : 0) + (F.road[k] > 0 ? .5 : 0) - .3 * F.wood[k]) + (F.water[k] > K.wet && !F.road[k] ? 20 * G : 0);
+  const thr = k => (C.inf && C.inf.length === nx * nz ? Math.max(0, -C.inf[k]) : 0), cost = k => G * (1 + K.k * thr(k) + K.kz * (C.kz && C.kz.length === nx * nz ? C.kz[k] : 0) + (F.road[k] > 0 ? .5 : 0) - .3 * F.wood[k]) + (F.water[k] > K.wet && (!F.road[k] || (S.brw && S.brw[k])) ? 20 * G : 0);   // S.brw: a cell whose bridge has fallen is water again (W20)
   const a = ci(x0, z0), b = ci(x1, z1), n = nx * nz, g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
   const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
@@ -15989,7 +15993,7 @@ function sabStep() {
 /* ---------- the sapper's hands: the mines in the build mode, lifting, and sabotage ---------- */
 build = (g => (P, I, key, trig) => {
   const kd = P.kd || (P.kd = {}), vk = !!I.ordB && !kd.sapV; kd.sapV = !!I.ordB;
-  if (key && S.fm) { let n = S.fm.k + 1; while (FORT.K[n] && FORT.K[n].era && FORT.K[n].era !== S.era) n++; S.fm.k = n - 1; }   // N skips a work of the other era (the dome in 1944)
+  if (key && S.fm) { let n = S.fm.k + 1; while (FORT.K[n] && ((FORT.K[n].era && FORT.K[n].era !== S.era) || (FORT.K[n].eng && !P.def.sap))) n++; S.fm.k = n - 1; }   // N skips a work of the other era (the dome in 1944), and the pontoon but for a sapper (W20)
   if (!P.def.sap) { S.mm = null; return g(P, I, key, trig); }
   const a = S.aim, say = text => S.floats.push({ x: P.x + a.d.x * 3, y: P.y + 3, z: P.z + a.d.z * 3, text, life: 2.2 });
   if (S.mw && S.t > S.mw.T) { if (!mines().some(o => o.k === S.mw.k && hdist(o, S.mw) < 1)) { P.mn[S.mw.k]++; say('O anfitrião recusou a mina'); } S.mw = null; }
@@ -16698,6 +16702,374 @@ Net.rx.ill = m => {
 Net.tick = (tick => dt => { tick(dt); if (S.net && S.host && Net.sky && S.sky && (Net.skyacc += dt) >= SKYNET.every) Net.skySend(); })(Net.tick);
 Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host && Net.sky) Net.skySend(); })(Net.rx.host);
 
+/* ---------- bridges and pontoons (BR: W20, §13c T11 of the General's design) ----------
+   Every place a road of the network (map version 2 on) crosses the river is a bridge: a world object (kind bridge) under id BR.id + its
+   index, hp by the road's class, kept in T.byId like the terrain's own objects but on no grid (nothing bumps into it, nothing sees through
+   it), so that hitObj, setObj and the room's obj and ohit lines carry its stage as any object's. The generated terrain does not change (no
+   new map version): the road keeps its embankment over the river, which is the bridge while it stands. Bursts take it down (blastObjs: artillery, rockets, bombs; take [bullet, hit, burst]),
+   and demolition charges set at either end of it (a soldier's N within reach m of an end; dmg each, as against a base). Small arms do nothing.
+   Down, its edge of the network is cut: the stretch of river it raised (z0..z1 along the river's middle, its own half where two crossings
+   share one, BR.edge m wider) sinks: the nodes of the height grid there within b.gw of the middle (gw, or more than half a cell so that
+   every row has one) are put sink m under the water for the match (S.brn, which hgt reads: brH), and the scene sinks the same nodes, so
+   that what is drawn is what is walked; nothing on wheels, tracks or feet crosses but the amphibious; what stood on it falls (brFall); the edge costs Infinity to netPath and tripOf (S.bre, S.brk the key of the caches); a vehicle
+   on its axis or on a trip stops at the bank (brStop) and brStep looks for a way round by the network (tripTo), or holds; a squad walking
+   into it gets a way round on foot, and footPath counts its cells as water (S.brw). colAxis keeps the columns off an axis that is cut.
+   A pontoon (a work of kind 7, FORT.pont) is laid at the bank end of a fallen bridge by engineers: a sapper is a whole builder, any other
+   soldier eng of one, up to max, time s for one (2 to 4 min); done, it carries everything over again along its line, pw m either side of
+   the road's middle (a slow way to the network: pslow), until it is destroyed in its turn. Its rows go in the room's fort lines (kind 7).
+   ends: where a demolition charge is set and a pontoon starts, end m past the channel along the road. rs: [route, s] of each axis the
+   bridge lies on. Online: welcome br: 1, the server knows the pontoon (fort kind 7) and the question brg (Net.br); with an older one the
+   bridges stand.
+   ai: the two manoeuvres of the general. Demolition on the way back (dem): with known enemy worth at least min (CMD.val) on the far bank
+   within near m of the far end, its own across within foe m under own times that, its own on this bank within foe m under held times it
+   (it cannot hold the bridge), no assault of its own across, and a retreat over it (brBack: the enemy holds the far bank's point, it the
+   near bank's, and the enemy the point at the bridge too, within at m, if one stands there), a free squad within reach m sets the charges and the bridge goes; the
+   score grows with the enemy's worth (k). Crossing (tra): a side with every crossing it needs cut (no open
+   one at all, or vehicles held at a fallen bridge for wait s) sends a free squad within reach m, sappers first, to lay a pontoon at the
+   fallen bridge whose bank end has no known enemy within safe m. hold: s a vehicle held at a bank waits before it looks again for a way */
+const BR = { id: 100, hp: [600, 450, 300], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 20, kill: 5000,
+  ai: { foe: 1500, near: 700, at: 300, min: 8, own: .5, held: 1.5, k: 12, reach: 3500, safe: 400, wait: 30, T: 600, cd: 90 } };
+OBJ.bridge = { hp: [0, 0], take: [0, .5, 1] };
+OBJ.pont = { hp: [280, 0], take: [.15, .6, 1], dug: 99, veh: () => 1 };
+FORT.pont = { k: 7, name: 'Pontão', obj: 'pont', size: [80, 2 * BR.pw, 1], time: 240, cap: 2, put: [5, 9], pad: 0, road: 0, min: 1, near: 0, back: 0, conceal: 0, pitch: 99, span: 1, eng: .5, max: 3, garr: [] };
+FORT.K[7] = FORT.pont;
+/* the bridges of a terrain, found once: T.br, and T.brE[edge] its bridges */
+function brOf(T) {
+  if (T.br) return T.br;
+  const L = (T.br = []); T.brE = [];
+  if (!T.net) return L;
+  const dry = z => hgtT(T, T.rx(z), z) > T.WL + .3, off = (x, z) => Math.abs(x - T.rx(z));
+  for (const E of T.net.e) for (const s of E.ford) {
+    const q = routeAt(E.p, s), i = L.length, b = { i, id: BR.id + i, e: E.i, c: E.c, s, x: q.x, z: q.z, dx: q.dx, dz: q.dz, y: hgtT(T, q.x, q.z), gw: Math.max(BR.gw, T.cx * .55), ends: [], rs: [] };
+    let z0 = q.z, z1 = q.z;
+    while (z0 > q.z - 3000 && dry(z0 - 5)) z0 -= 5;
+    while (z1 < q.z + 3000 && dry(z1 + 5)) z1 += 5;
+    b.z0 = z0 - BR.edge; b.z1 = z1 + BR.edge;
+    for (const d of [-1, 1]) {   // along the road both ways until clear of the channel
+      let t = s; while (t > 0 && t < E.len && off(routeAt(E.p, t).x, routeAt(E.p, t).z) < b.gw + BR.end) t += d * 2;
+      const p = routeAt(E.p, clamp(t, 0, E.len)); b.ends.push({ x: p.x, z: p.z, s: clamp(t, 0, E.len), k: b.ends.length });
+    }
+    b.len = Math.max(20, hdist(b.ends[0], b.ends[1]));
+    T.routes.forEach((r, ri) => { const p = railT({ routes: [r] }, q.x, q.z); if (p.d < 6) b.rs.push([ri, p.s]); });
+    const a = Math.atan2(-q.dz, q.dx);
+    b.o = { id: b.id, k: 'bridge', K: OBJ.bridge, br: b, x: q.x, y: b.y, z: q.z, hw: b.len / 2, hd: RN.w[E.c] / 2 + 1, h: 1.2, a, c: Math.cos(a), s: Math.sin(a), rd: 0, r: b.len / 2, hp: BR.hp[E.c] };
+    T.byId[b.id] = b.o; (T.brE[E.i] || (T.brE[E.i] = [])).push(b); L.push(b);
+  }
+  for (const a of L) for (const b of L) if (a !== b && a.z < b.z && a.z1 > b.z0) { const m = (a.z + b.z) / 2; a.z1 = Math.min(a.z1, m); b.z0 = Math.max(b.z0, m); }   // one dry stretch, two crossings: each its own half
+  return L;
+}
+const brs = () => (S && S.T && S.T.net ? brOf(S.T) : []);
+const brOn = () => !S.net || Net.br;
+const brDown = b => S.os[b.id] > 1;
+/* the live pontoon of a bridge, and whether its crossing carries anything now: standing, or a pontoon finished and not destroyed */
+const brPont = b => S.forts ? S.forts.find(f => f.k === 7 && !f.dead && f.b === b.i) || null : null;
+const brOpen = b => { if (!brDown(b)) return true; const f = brPont(b); return !!f && f.prog >= 1 && S.os[f.id] < 2; };
+const brIn = (b, x, z) => z >= b.z0 && z <= b.z1 && Math.abs(x - S.T.rx(z)) < b.gw;
+const brLat = (b, x, z) => Math.abs((x - b.x) * b.dz - (z - b.z) * b.dx);
+/* the ground near a fallen bridge: the height grid with its sunk nodes (S.brn), but along a finished pontoon, whose deck is the road's height */
+function brH(x, z, h) {
+  const T = S.T; let near = false;
+  for (const g of S.gap) { const b = g.b; if (z > b.z0 - T.cz && z < b.z1 + T.cz && Math.abs(x - T.rx(z)) < b.gw + T.cx) { if (g.open && brLat(b, x, z) < BR.pw && Math.abs((x - b.x) * b.dx + (z - b.z) * b.dz) < b.gw + T.cx + BR.end) return h; near = true; } }
+  if (!near) return h;
+  const N = T.N, M = S.brn, gx = clamp((x - T.x0) / T.cx, 0, N - .001), gz = clamp((z - T.z0) / T.cz, 0, N - .001), i = gx | 0, j = gz | 0, u = gx - i, k = j * (N + 1) + i, H = n => (M.has(n) ? M.get(n) : T.h[n]);
+  const a = H(k) + (H(k + 1) - H(k)) * u, c = H(k + N + 1) + (H(k + N + 2) - H(k + N + 1)) * u;
+  return Math.max(T.WL, a + (c - a) * (gz - j));
+}
+/* the nodes of the grid a fallen bridge sinks: each row of its stretch, those within b.gw of the river's middle */
+function brNodes(T, b, f) {
+  const N = T.N;
+  for (let j = Math.max(0, Math.ceil((b.z0 - T.z0) / T.cz)); j <= N && T.z0 + j * T.cz <= b.z1; j++) {
+    const z = T.z0 + j * T.cz, xs = [T.rx(z - T.cz), T.rx(z), T.rx(z + T.cz)], lo = Math.min(...xs) - b.gw, hi = Math.max(...xs) + b.gw;   // the river's middle in this row and the next ones: no dry corner between two rows
+    for (let i = Math.max(0, Math.ceil((lo - T.x0) / T.cx)); i <= N && T.x0 + i * T.cx < hi; i++) f(j * (N + 1) + i);
+  }
+}
+/* the fallen bridge, its crossing shut, near which a point is in the water (null: none) */
+const brNearIn = (b, x, z) => z > b.z0 - S.T.cz && z < b.z1 + S.T.cz && Math.abs(x - S.T.rx(z)) < b.gw + S.T.cx;
+function brCut(x, z) {
+  if (!S.gap) return null;
+  for (const g of S.gap) if (!g.open && brNearIn(g.b, x, z) && hgt(x, z) <= S.T.WL + .3) return g.b;
+  return null;
+}
+/* a rider from s0 to s1 on polyline r that would drive into a shut crossing: held, and noted (u.brT, u.brB) */
+function brStop(u, r, s0, s1) {
+  const a = routeAt(r, s0), b = routeAt(r, s1), c = brCut(b.x, b.z);
+  if (!c || brCut(a.x, a.z)) return false;
+  u.brT = S.t; u.brB = c.i; return true;
+}
+/* which side of a cut edge's bridge two places along it lie on: true, across */
+function brAcross(E, s0, s1) {
+  for (const b of S.T.brE[E.i] || []) if (!brOpen(b) && (s0 - b.s) * (s1 - b.s) < 0) return true;
+  return false;
+}
+/* the state of the crossings, each step: S.gap (fallen bridges, open: a pontoon carries), S.bre (an edge's cost times: Infinity cut, pslow a
+   pontoon) and its key S.brk, S.brw (footPath's cells of a shut stretch). A crossing that shuts drops what stands on it */
+function brSync() {
+  const L = brs(), fell = []; let gap = null, key = '';
+  for (const b of L) {
+    const dn = brDown(b), op = brOpen(b);
+    if (dn) { (gap || (gap = [])).push({ b, open: op }); key += b.i + (op ? 'p' : 'x'); }
+    if (b.op !== undefined && b.op && !op && (b.st === S)) fell.push(b);
+    b.op = op; b.st = S;
+  }
+  S.gap = gap;
+  if (key !== (S.brk || '')) brKey(gap, key);
+  for (const b of fell) brFall(b);   // once the river is open there
+}
+function brKey(gap, key) {
+  S.brn = new Map(); if (gap) for (const g of gap) brNodes(S.T, g.b, k => S.brn.set(k, Math.min(S.T.h[k], S.T.WL - BR.sink)));
+  S.brk = key; S.brc = gap && gap.some(g => !g.open) ? 1 : 0;
+  const N = S.T.net; S.bre = null; S.brw = null;
+  if (!gap) return;
+  S.bre = new Float64Array(N.e.length).fill(1);
+  for (const g of gap) S.bre[g.b.e] = g.open ? BR.pslow : Infinity;
+  const G = CMD.cell, nx = Math.ceil(S.W / G), nz = Math.ceil(2 * S.HW / G); S.brw = new Uint8Array(nx * nz);
+  for (const g of gap) if (!g.open) for (let z = g.b.z0; z <= g.b.z1; z += G / 4) { const x = S.T.rx(z); S.brw[clamp((z + S.HW) / G | 0, 0, nz - 1) * nx + clamp(x / G | 0, 0, nx - 1)] = 1; }
+  for (const q of S.squads) q.pts = null;
+}
+/* a crossing shuts: what stands on its stretch goes into the river, each client for what it simulates (the amphibious swim) */
+function brFall(b, by) {
+  const k = BR.kill, on = o => !o.dead && !o.net && brNearIn(b, o.x, o.z) && hgt(o.x, o.z) <= S.T.WL + .3;
+  for (const u of S.units) if (on(u) && !u.def.swim && !u.fixed) hurt(u)(u, k, by || null, false, null);
+  for (const m of S.men) if (on(m) && !m.in) damageMan(m, k, by || null, true, { k: HK.blast, pt: 0 });
+  for (let i = 0; i < 14; i++) { const t = (i / 13 - .5) * b.len; puff(b.x + b.dx * t, b.y - rand(0, 4), b.z + b.dz * t, i % 2 ? 'dust' : 'smoke', rand(4, 8), rand(-4, 4), rand(2, 7), rand(-4, 4)); }
+  for (let i = 0; i < 6 && S.debris.length < 24; i++) S.debris.push({ k: 'chunk', sz: rand(1.2, 3), x: b.x + rand(-b.len, b.len) * .3, y: b.y, z: b.z + rand(-6, 6), vx: rand(-6, 6), vy: rand(2, 8), vz: rand(-6, 6), q: yawQ(rand(0, TAU)), w: { x: rand(-3, 3), y: rand(-2, 2), z: rand(-3, 3) }, drag: .2, h: .5, life: 6 });
+  const d = S.ear ? dist(b, S.ear) : 1e9; if (d < 5000) { S.shake = Math.max(S.shake, .6 * (1 - d / 5000)); fx.boom(60, d); }
+}
+/* the per-match state: each bridge whole; the cache of the ways is the terrain's and keyed by S.brk */
+newState = (g => (eraId, model, o) => {
+  const r = g(eraId, model, o);
+  for (const b of brs()) { S.oh[b.id] = b.o.hp; S.os[b.id] = 0; S.ot[b.id] = -99; b.op = true; b.st = S; }
+  S.gap = S.bre = S.brw = null; S.brn = new Map(); S.brk = ''; S.brc = 0; S.brT = 0;
+  return r;
+})(newState);
+/* the bridges take a burst like any object, by the distance from it to their deck (the road between the ends, BR.gw + end either side of the river) */
+blastObjs = (g => (x, y, z, r, dmg, by, ob) => {
+  g(x, y, z, r, dmg, by, ob);
+  if (!(ob > 0) || !S.T.net) return;
+  for (const b of brs()) {
+    if (S.os[b.id] > 1 || Math.abs(z - b.z) > b.len + r || Math.abs(x - b.x) > b.len + r) continue;
+    const e0 = b.ends[0], e1 = b.ends[1], d = Math.hypot(Math.max(0, segDist(e0.x, e0.z, e1.x, e1.z, x, z) - b.o.hd), Math.max(0, y - b.y - 3, b.y - 12 - y));
+    if (d < r) hitObj(b.o, dmg * ob * (1 - d / r) * OBJ.bridge.take[2], by);
+  }
+})(blastObjs);
+/* online the bridges stand with a server that does not carry the pontoons (no br in welcome) */
+hitObj = (g => (o, dmg, by, rx) => { if (o.br && S.net && !Net.br) return; g(o, dmg, by, rx); })(hitObj);
+setObj = (g => (o, st, by, quiet) => {
+  const was = S.os[o.id]; g(o, st, by, quiet);
+  if (!o.br || was === st || st < 2) return;
+  brSync();
+  if (!quiet) gLogBoth(brName(o.br) + ' destruída', o.br);
+})(setObj);
+const gLogBoth = (s, at) => { if (S.cmd) for (const t of [0, 1]) gLog(t, 'eng', s, at, 'brx' + s); };
+/* a demolition charge at either end of a bridge, as against a base (S.chg; the charge is the soldier's) */
+const brEnd = (b, p, R) => b.ends.find(e => hdist(e, p) < (R || BR.reach)) || null;
+function brPlant(m, b) {
+  if (!(m.chg > 0) || brDown(b) || !brEnd(b, m) || !brOn()) return false;
+  m.chg--; S.chg.push({ b: { dead: false, o: b.o, br: b }, by: m, x: m.x, y: m.y, z: m.z, T: S.t + BLD.charge.fuse }); return true;
+}
+/* a soldier's own charge on a bridge goes off where it lies: a burst, and the bridge takes the charge's whole damage. (S.chg's base entries with
+   a bridge, b.br: supStep hits b.o with the charge's damage as it does a base) */
+const brNear = (p, R) => brs().find(b => !brDown(b) && brEnd(b, p, R)) || null;
+build = (g => (P, I, key, trig) => {
+  const b = key && !S.bm && !S.fm && !S.mm && P.man && P.chg > 0 ? brNear(P) : null;
+  if (b && brOn()) { const ok = brPlant(P, b); S.floats.push({ x: P.x, y: P.y + 3, z: P.z, text: ok ? 'Carga armada na ' + brName(b).toLowerCase() + ': afaste-se' : 'Sem carga de demolição', life: 2.5 }); return; }
+  g(P, I, key, trig);
+})(build);
+/* a pontoon: only at the bank end of a fallen bridge with none, by a sapper (the player) or for the general's crossing (the AI) */
+function brPontAt(x, z, R) {
+  let best = null, bd = R || BR.put;
+  for (const b of brs()) for (const e of b.ends) { const d = Math.hypot(e.x - x, e.z - z); if (d < bd) { bd = d; best = { b, e }; } }
+  return best;
+}
+fortWhy = (g => (k, t, x, z, a, pre) => {
+  if (k !== 7) return g(k, t, x, z, a, pre);
+  if (S.net && !Net.br) return 'server';
+  const h = brPontAt(x, z); if (!h) return 'nobr';
+  if (!brDown(h.b)) return 'whole';
+  if (brPont(h.b)) return 'pont';
+  if (!pre) { for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, h.e) < FORT.foe) return 'foe'; for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, h.e) < FORT.foe) return 'foe'; }
+  return '';
+})(fortWhy);
+/* a pontoon's record stands at its bank end (where its builders are); its object spans the river along the road, at the road's height */
+fortAdd = (g => (id, k, team, x, z, a, prog, pre) => {
+  if (k !== 7) return g(id, k, team, x, z, a, prog, pre);
+  const h = brPontAt(x, z, 400), b = h && h.b, e = h && h.e, f = g(id, k, team, e ? e.x : x, e ? e.z : z, b ? Math.atan2(-b.dz, b.dx) - Math.PI / 2 : a, prog, pre);
+  if (!b) return f;
+  const T = S.T, o = f.o, dyn = (o, add) => cellsOf(T, o, c => { const l = (S.dyn.get(c) || []).filter(q => q !== o); if (add) l.push(o); if (l.length) S.dyn.set(c, l); else S.dyn.delete(c); });
+  dyn(o, false);
+  const oa = Math.atan2(-b.dz, b.dx);
+  Object.assign(o, { x: b.x, z: b.z, y: b.y - 1.2, a: oa, c: Math.cos(oa), s: Math.sin(oa), hw: b.len / 2, hd: BR.pw, r: b.len / 2 });
+  f.b = b.i; f.y = b.y; f.e = e.k;
+  dyn(o, true);
+  S.fg = null; brSync(); return f;
+})(fortAdd);
+fortAt = (g => (f, prog) => { const was = f.prog; g(f, prog); if (f.k === 7 && f.b !== undefined && (was < 1) !== (prog < 1)) { brSync(); if (prog >= 1 && !f.pre) gLogBoth('Pontão pronto: ' + brName(brs()[f.b]).toLowerCase() + ' volta a ser passagem', f); } })(fortAt);
+fortDrop = (g => f => { g(f); if (f.k === 7) brSync(); })(fortDrop);
+fortSlots = (g => f => (f.k === 7 ? (f.pts = []) : g(f)))(fortSlots);
+/* a bridge's name in the log and the view: by the road and the place nearest it */
+const BRC = ['da estrada principal', 'da estrada secundária', 'do caminho'];
+const brName = b => 'Ponte ' + (b.i + 1) + ' ' + BRC[b.c] + ' (' + gNear(b.x, b.z) + ')';
+/* the columns keep off an axis cut by a fallen bridge while another is open */
+const brAxisCut = ri => brs().some(b => !brOpen(b) && b.rs.some(r => r[0] === ri));
+colAxis = (g => t => { const ri = g(t); if (!S.brc || !brAxisCut(ri)) return ri; const ok = S.T.routes.map((r, i) => i).filter(i => !brAxisCut(i)); return ok.length ? ok.reduce((a, i) => (Math.abs(i - ri) < Math.abs(a - ri) ? i : a)) : ri; })(colAxis);
+/* each step: the crossings' state; where the match is simulated, every BR.step s, what is held at a bank looks for a way round */
+function brStep() {
+  if (!S.T.net) return;
+  brSync();
+  if (!S.brc || (S.net && !S.host) || S.t < S.brT) return;
+  S.brT = S.t + BR.step;
+  for (const u of S.units) {
+    if (u.dead || u.net || !u.ai || u.fixed || !(u.brT > S.t - 1.5) || S.t < (u.brW || 0)) continue;
+    u.brW = S.t + BR.hold;
+    const T = u.trip, r = S.T.routes[u.ri], b = brs()[u.brB];
+    let to = null, o = {};
+    if (T) { const e = T.p[T.p.length - 1]; to = { x: e.x, z: e.z }; o = { drop: T.drop, back: T.back, gone: T.gone, why: T.why }; if (T.ev) continue; }
+    else if (r && b) { const rs = b.rs.find(q => q[0] === u.ri); if (!rs) continue; to = routeAt(r, clamp(rs[1] + u.ds * (BR.gw + 400), 0, r.len)); }
+    if (!to) continue;
+    const was = u.trip; u.trip = null;
+    if (!tripTo(u, to.x, to.z, o)) u.trip = was;
+    else if (S.cmd && u.team !== undefined) gLog(u.team, 'eng', (u.kind === 'truck' ? 'Caminhão' : 'Viatura') + ' contorna a ' + (b ? brName(b).toLowerCase() : 'ponte destruída') + ' por outra passagem', u, 'brv' + u.team + (b ? b.i : ''));
+  }
+  for (const q of S.squads) {
+    if (q.net || !q.live || q.state || q.tp || q.rd || q.lift) continue;
+    const O = q.ord, L = q.men.find(m => !m.dead); if (!O || !L || O.x === undefined) continue;
+    const c = brCut(L.x + (O.x - L.x) * Math.min(1, 60 / (hdist(L, O) || 1)), L.z + (O.z - L.z) * Math.min(1, 60 / (hdist(L, O) || 1)));
+    if (!c || (L.x < S.T.rx(L.z)) === (O.x < S.T.rx(O.z)) || S.t < (q.brW || 0)) continue;
+    q.brW = S.t + BR.hold;
+    const tp = tripOf(L.x, L.z, O.x, O.z, { mode: 'foot', team: q.team });
+    if (tp && tp.len <= RN.tripMax * 2) { q.tp = O.trp = tp; q.ts = 0; q.at = false; }
+  }
+}
+step = (g => dt => { g(dt); brStep(); })(step);
+/* ---- the general's two manoeuvres: dem (demolition on the way back) and tra (crossing by pontoon) ---- */
+Object.assign(MANC, { demolish: ['dem', 'def'], cross: ['tra', 'atk'] });
+MANORD.push('dem', 'tra');
+Object.assign(MANT, { dem: { w: 1, T: BR.ai.T, cd: BR.ai.cd }, tra: { w: 1, T: BR.ai.T, cd: BR.ai.cd } });
+Object.assign(GEN.man, { dem: 'Demolição no recuo', tra: 'Travessia' });
+GEN.mfem.dem = 1; GEN.mfem.tra = 1;
+Object.assign(GEN.mtag, { dem: 'DEM', tra: 'TRV' });
+Object.assign(GEN.mlg, { dem: 'ponte com X: as cargas vão nela', tra: 'ponte tracejada: o pontão sendo lançado' });
+Object.assign(GEN.mst, { set: 'ARMADA', lay: 'LANÇANDO' });
+/* side t's home bank: where its main base stands */
+const brHome = (t, p) => (p.x < S.T.rx(p.z)) === (S.base[t].x < S.T.rx(S.base[t].z));
+/* the worth of what side t knows of the enemy within r m of p on the bank `home` (its own: true), and of its own side there */
+function brFoe(C, p, r, home) { let v = 0; for (const o of C.known) if (!o.dead && Math.hypot(o.sx - p.x, o.sz - p.z) < r && brHome(C.t, { x: o.sx, z: o.sz }) === home) v += o.man ? CMD.val.inf : CMD.val[tk(o)] || 1; return v; }
+function brOwn(t, p, r, home) {
+  let v = 0;
+  for (const m of S.men) if (!m.dead && m.team === t && hdist(m, p) < r && brHome(t, m) === home) v += CMD.val.inf;
+  for (const u of S.units) if (!u.dead && u.team === t && !u.fixed && hdist(u, p) < r && brHome(t, u) === home) v += CMD.val[tk(u)] || 1;
+  return v;
+}
+/* side t falls back over bridge b: the point nearest its far end on that bank is the enemy's, the one nearest its near end on this bank is
+   its own, and a point at the bridge itself (within at m), if there is one, was lost to the enemy (at the start of a match, the race for the
+   crossing is no retreat) */
+function brBack(t, b) {
+  const P = S.cq ? S.cq.p : null; if (!P || !P.length) return false;
+  const T = S.T, side = (p, home) => Math.abs(p.x - T.rx(p.z)) > b.gw + 50 && brHome(t, p) === home, near = (e, home) => P.filter(p => side(p, home)).reduce((a, p) => (!a || hdist(p, e) < hdist(a, e) ? p : a), null);
+  const far = near(b.ends.find(e => !brHome(t, e)) || b, false), mine = near(b.ends.find(e => brHome(t, e)) || b, true), at = P.find(p => hdist(p, b) < BR.ai.at);
+  return !!far && !!mine && far.hold === 1 - t && mine.hold === t && !(at && at.hold !== 1 - t);
+}
+/* the free squad nearest p on side t's bank `home` within reach m; sappers first */
+function brSquad(X, p, home, sap, far) {
+  let best = null, bd = 1e9;
+  for (const q of X.free) {
+    const L = q.men.find(m => !m.dead); if (!L || q.job === 'fpost' || brHome(X.t, L) !== home) continue;
+    const d = hdist(L, p) - (sap && q.men.some(m => !m.dead && m.def.sap) ? 2000 : 0); if (d < bd && hdist(L, p) < (far || BR.ai.reach)) { bd = d; best = q; }
+  }
+  return best;
+}
+/* the bridge a command names: { x, z } nearest within 800 m */
+const brAt = spec => { const a = Number.isFinite(spec.x) && Number.isFinite(spec.z) ? spec : manAt(spec); if (!a) return null; let best = null, bd = 800; for (const b of brs()) { const d = Math.hypot(b.x - a.x, b.z - a.z); if (d < bd) { bd = d; best = b; } } return best; };   // x z as given: a fallen bridge's place is water, which manAt refuses
+MANG.dem = (C, X) => {
+  const t = X.t, out = [];
+  if (!brOn()) return out;
+  for (const b of brs()) {
+    if (brDown(b) || C.ops.some(o => !o.over && o.b === b.i)) continue;
+    const e = b.ends.find(e => brHome(t, e)), far = b.ends.find(e => !brHome(t, e)); if (!e || !far) continue;
+    const foe = brFoe(C, far, BR.ai.near, false), own = brOwn(t, b, BR.ai.foe, false), mine = brOwn(t, e, BR.ai.foe, true);
+    if (foe < BR.ai.min || own > foe * BR.ai.own || mine > foe * BR.ai.held) continue;   // the enemy at the far end, nobody of its own left across, and not enough on this bank to hold it
+    if (C.ops.some(o => o.k === 'atk' && !o.over && o.O && o.O.x !== undefined && !brHome(t, o.O))) continue;   // its own assault is across: the bridge is its way
+    if (!brBack(t, b)) continue;
+    const q = brSquad(X, e, true, false); if (!q) continue;
+    out.push({ k: 'dem', sc: clamp(foe / BR.ai.k, .6, 2), spec: { c: 'demolish', x: b.x, z: b.z }, at: { x: b.x, z: b.z }, res: { b, q },
+      why: 'inimigo forte do outro lado da ' + brName(b).toLowerCase() + ' (força ' + gN(foe) + ' contra ' + gN(own) + ' nossa lá): derrubar a ponte no recuo' });
+  }
+  return out;
+};
+MANG.tra = (C, X) => {
+  const t = X.t, out = [], L = brs();
+  if (!brOn() || !L.length || C.ops.some(o => o.k === 'tra' && !o.over)) return out;
+  const none = !L.some(brOpen);
+  for (const b of L) {
+    if (brOpen(b) || brPont(b)) continue;
+    const held = S.units.filter(u => !u.dead && u.team === t && u.brB === b.i && u.brT > S.t - BR.ai.wait).length;
+    if (!none && held < 1) continue;
+    const e = b.ends.find(e => brHome(t, e)); if (!e) continue;
+    if (brFoe(C, e, BR.ai.safe, true) + brFoe(C, e, BR.ai.safe, false) > 0) continue;
+    const q = brSquad(X, e, true, true); if (!q) continue;
+    out.push({ k: 'tra', sc: none ? 1.6 : clamp(.6 + held * .2, .6, 1.4), spec: { c: 'cross', x: b.x, z: b.z }, at: { x: b.x, z: b.z }, res: { b, q },
+      why: (none ? 'todas as pontes caíram' : held + ' viatura(s) parada(s) na margem') + ': lançar um pontão na ' + brName(b).toLowerCase() });
+  }
+  return out;
+};
+/* the doors: the bridge, then the squad (the AI's, or the nearest free one of the side on that bank) */
+function brOpenOp(t, C, spec, by, R, k) {
+  if (!brOn()) return gBad('server');
+  const b = (R && R.res && R.res.b) || brAt(spec); if (!b) return gBad('at');
+  if (k === 'dem' ? brDown(b) : !brDown(b) || brPont(b)) return gBad(k === 'dem' ? 'down' : brPont(b) ? 'pont' : 'whole');
+  if (C.ops.some(o => !o.over && o.b === b.i)) return gBad('busy');
+  const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), X = { t, free: by === 'ai' ? manFree(all) : all.filter(q => q.live >= 2 && !q.lift && !q.rd && !(q.op && !q.op.over && (q.op.k === 'dem' || q.op.k === 'tra'))) };   // a person may take any squad of the side but one already at a bridge
+  const home = b.ends.some(e => brHome(t, e)) ? true : false, q = (R && R.res && R.res.q) || brSquad(X, b, home, k === 'tra', by === 'ai' ? 0 : 1e9); if (!q) return gBad('sq');   // a person's order: the nearest free squad however far
+  const L = q.men.find(m => !m.dead), e = b.ends.reduce((a, e) => (hdist(e, L) < hdist(a, L) ? e : a));
+  const op = manOpen(C, k, spec, by, { b: b.i, e: e.k, st: 'go', kz: { x: b.x, z: b.z }, nm: brName(b) });
+  const wp = footPath(C, L.x, L.z, e.x, e.z) || tripOf(L.x, L.z, e.x, e.z, { mode: 'foot', team: t }), p = railOf(e.x, e.z);   // across country as the manoeuvres walk, else by the network
+  gTake(op, q, { k: 'move', ri: p.ri, s: p.s, x: e.x, z: e.z, R: 4, fast: 1, wp: wp && wp.len < RN.tripMax * 2 ? wp : undefined });
+  gLog(t, k === 'dem' ? 'def' : 'atk', (k === 'dem' ? 'Demolição: esquadra a caminho da ' : 'Travessia: esquadra leva o pontão à ') + brName(b).toLowerCase() + (spec.why ? ' — ' + spec.why : ''), b);
+  return gYes(op.id);
+}
+MANO.dem = (t, C, spec, by, R) => brOpenOp(t, C, spec, by, R, 'dem');
+MANO.tra = (t, C, spec, by, R) => brOpenOp(t, C, spec, by, R, 'tra');
+/* each plan tick: at the end the squad's men set their charges (enough for what the bridge has left) or start the pontoon and build it */
+OPS.dem = (C, op) => {
+  const b = brs()[op.b], q = opLive(op)[0], e = b && b.ends[op.e];
+  if (!b || brDown(b)) { if (b) gLog(C.t, 'def', 'Demolição concluída: ' + brName(b).toLowerCase() + ' caiu', b, 'brd' + b.i); return opEnd(C, op); }
+  if (!q) { gLog(C.t, 'def', 'Demolição abandonada: a esquadra caiu', b); return opEnd(C, op); }
+  const set = S.chg.filter(c => c.b.br === b && !c.gone).length * BR.dmg;
+  if (op.st === 'set' && !set) { op.st = 'go'; }
+  if (set >= S.oh[b.id]) return;
+  let n = 0;
+  for (const m of q.men) if (!m.dead && brEnd(b, m, BR.reach) && brPlant(m, b)) { n++; if (set + n * BR.dmg >= S.oh[b.id]) break; }
+  if (n) { op.st = 'set'; gLog(C.t, 'def', 'Demolição: ' + n + ' carga(s) armada(s) na ' + brName(b).toLowerCase(), b, 'brs' + b.i); }
+  else if (q.men.every(m => m.dead || !(m.chg > 0)) && !set) { gLog(C.t, 'def', 'Demolição abandonada: a esquadra está sem cargas', b); opEnd(C, op); }
+};
+OPS.tra = (C, op) => {
+  const b = brs()[op.b], q = opLive(op)[0], e = b && b.ends[op.e];
+  if (!b) return opEnd(C, op);
+  if (brOpen(b)) { gLog(C.t, 'atk', 'Travessia: ' + brName(b).toLowerCase() + ' aberta', b, 'brt' + b.i); return opEnd(C, op); }
+  if (!q) { gLog(C.t, 'atk', 'Travessia abandonada: a esquadra caiu', b); return opEnd(C, op); }
+  const f = brPont(b), L = q.men.find(m => !m.dead);
+  if (!f && L && hdist(L, e) < 40) {
+    const w = fortWhy(7, C.t, e.x, e.z, 0);
+    if (w === 'pont') return opEnd(C, op);
+    const g = w ? null : fortStart(7, C.t, e.x, e.z, 0);
+    if (g) { op.st = 'lay'; gLog(C.t, 'atk', 'Travessia: pontão começado na ' + brName(b).toLowerCase(), b, 'brp' + b.i); const p = railOf(e.x, e.z); opTake(op, q, { k: 'hold', ri: p.ri, s: p.s, x: e.x, z: e.z, R: 3 }); }
+  }
+};
+genManOp = (g => (C, op) => { const e = g(C, op); if (op.k === 'dem' || op.k === 'tra') { const b = brs()[op.b]; e.nm = b ? brName(b) : ''; e.to = b ? gXZ(b) : null; e.st = op.st || 'go'; } return e; })(genManOp);
+Object.assign(GEN.mst, { go: GEN.mst.go || 'A CAMINHO' });
+/* ---- the question brg: every bridge, its state, and its pontoon ---- */
+function brView(t) {
+  return { ok: true, why: '', on: brOn() ? 1 : 0, br: brs().map(b => { const f = brPont(b); return { id: b.i, nm: brName(b), c: b.c, x: Math.round(b.x), z: Math.round(b.z), st: brDown(b) ? 'down' : S.os[b.id] ? 'hurt' : 'ok', hp: Math.round(Math.max(0, S.oh[b.id]) / b.o.hp * 100), open: brOpen(b) ? 1 : 0,
+    pont: f ? { team: f.team === t ? 'own' : 'foe', pg: Math.round(f.prog * 100) } : null, ri: b.rs.map(r => r[0]), ends: b.ends.map(e => ({ x: Math.round(e.x), z: Math.round(e.z), home: brHome(t, e) ? 1 : 0 })) }; }) };
+}
+genQuery = (f => (t, q) => (q && q.q === 'brg' && (t === 0 || t === 1) ? brView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'brg' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: brView(s) } : f(s, q)))(genAnswer);
+Object.assign(GEN.no, { down: 'A ponte já caiu', whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', server: 'O servidor desta sala é antigo: sem pontes destrutíveis' });
+Object.assign(GEN.cn, { demolish: 'demolir ponte', cross: 'lançar pontão' });
+/* ---- online: welcome br: 1; the bridges' stages travel in the obj lines (and to whoever comes later, with every other object's) ---- */
+Net.br = false;
+Net.rx.welcome = (old => m => { Net.br = m.br === 1; old(m); })(Net.rx.welcome);
+Net.allObjs = (g => () => { g(); const l = []; for (const b of brs()) if (S.os[b.id]) l.push(b.id, S.os[b.id]); if (l.length && Net.wo) Net.flat('obj', 'e', l, { full: 1 }); })(Net.allObjs);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -21786,7 +22158,7 @@ const PWHY = { era: 'A cúpula antifoguete só existe na frente atual', cost: 'S
 hudFort = (g => (P, u, ink, acc, disp) => {
   const B = S.fm, M = S.mm, dim = 'rgba(158,170,162,.95)';
   if (!(B && B.k >= 3) && !M) { g(P, u, ink, acc, disp); return sapHud(P, u, ink, acc, dim); }
-  const names = ['BASE', 'TRINCHEIRA', 'SACOS'].concat(POSTK.filter(F => !F.era || F.era === S.era).map(F => F.name.toUpperCase()), P.def.sap && sapOn() ? ['MINA AT', 'MINA AP'] : []);
+  const names = ['BASE', 'TRINCHEIRA', 'SACOS'].concat(POSTK.filter(F => !F.era || F.era === S.era).map(F => F.name.toUpperCase()), P.def.sap && FORT.K[7] ? [FORT.K[7].name.toUpperCase()] : [], P.def.sap && sapOn() ? ['MINA AT', 'MINA AP'] : []);
   const cur = M ? names.length - 2 + M.k : names.indexOf(FORT.K[B.k].name.toUpperCase()), w = Math.min(120 * u, cw * .9 / names.length);
   let x = cw / 2 - w * (names.length - 1) / 2;
   names.forEach((s, i) => { txt((i === cur ? '[ ' : '') + s + (i === cur ? ' ]' : ''), x, ch * .6 - 24 * u, 10 * u, i === cur ? acc : dim, 'center'); x += w; });
@@ -22256,6 +22628,106 @@ for (const b of document.querySelectorAll('.tab[data-sky]')) b.addEventListener(
 for (const b of document.querySelectorAll('.tab[data-wx]')) b.addEventListener('click', () => { wxPre = b.dataset.wx; try { localStorage.setItem('ceu-de-ferro-3d-tempo', wxPre); } catch (e) {} buildHangar(); });
 buildHangar = (g => () => { g(); for (const b of document.querySelectorAll('.tab[data-sky]')) b.setAttribute('aria-selected', String(b.dataset.sky === skyPre)); for (const b of document.querySelectorAll('.tab[data-wx]')) b.setAttribute('aria-selected', String(b.dataset.wx === wxPre)); })(buildHangar);
 
+/* ---------- bridges and pontoons: what is seen of them (W20) ----------
+   A bridge standing: its parapets along both edges of the road over the channel, posts between their pieces and an abutment at each end, in
+   stone (1944) or concrete; darker when hurt. Fallen: a stub at each end and pieces of its deck in the water; the scene's ground and roads
+   sink at the nodes the match sank (S.brn), so the river is seen where it is (a road under its water). A pontoon: its deck at the road's height from the bank it was
+   started on, as far as it is built, on floats down to the water. The 2D maps cross out a fallen bridge and dash a pontoon */
+const BLOOK = { stone: [0x8c8577, 0x9a9a94], dark: .62, pont: [0x5d6b47, 0x56605a], float: 0x2f3530, seg: 12, rail: [1.1, .5], post: [.8, 1.6], deck: .45 };
+const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), box: null, mats: {} };
+function br3Init() {
+  const K = BR3, T = S.T, n = (T.N + 1) * (T.N + 1);
+  K.at = scene; K.key = null; K.sunk = new Set(); K.roads = []; K.ter = null;
+  scene.traverse(o => {
+    if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
+    if (!K.ter && o.geometry.attributes.position.count === n && o.material && o.material.vertexColors) K.ter = o;
+    else if (o.material && o.material.isMeshBasicMaterial && o.material.polygonOffset && o.material.side === THREE.DoubleSide && o.geometry.index) K.roads.push(o);
+  });
+  if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
+  K.g = new THREE.Group(); scene.add(K.g);
+}
+const br3Mat = hex => BR3.mats[hex] || (BR3.mats[hex] = mat(hex));
+function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) {
+  const m = new THREE.Mesh(BR3.box, br3Mat(hex)); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(tilt || 0, a, 0, 'YXZ'); BR3.g.add(m); return m;
+}
+/* the ground and the roads where the match sank the grid */
+function br3Sink() {
+  const K = BR3, T = S.T, L = brs().filter(b => brDown(b));
+  if (K.ter && S.brn) { const tp = K.ter.geometry.attributes.position; let n = 0; for (const [k, h] of S.brn) if (!K.sunk.has(k)) { K.sunk.add(k); tp.setY(k, h); n++; } if (n) { tp.needsUpdate = true; K.ter.geometry.computeVertexNormals(); } }
+  for (const r of K.roads) {
+    const p = r.geometry.attributes.position; let n = 0;
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); if (L.some(b => z > b.z0 - T.cz && z < b.z1 + T.cz && Math.abs(x - T.rx(z)) < b.gw + T.cx)) { const h = hgt(x, z), y = h <= T.WL + .3 ? T.WL - 3 : h + ROADH; if (Math.abs(p.getY(i) - y) > .01) { p.setY(i, y); n++; } } }
+    if (n) p.needsUpdate = true;
+  }
+}
+function br3Build() {
+  const K = BR3, T = S.T, era = S.modern ? 1 : 0;
+  for (const c of K.g.children.slice()) K.g.remove(c);
+  for (const b of brs()) {
+    const a = Math.atan2(-b.dz, b.dx), e0 = b.ends[0], e1 = b.ends[1], n = Math.max(3, Math.round(b.len / BLOOK.seg)), hd = b.o.hd, st = S.os[b.id], c0 = BLOOK.stone[era];
+    const hex = st ? new THREE.Color(c0).multiplyScalar(BLOOK.dark).getHex() : c0, at = t => ({ x: e0.x + (e1.x - e0.x) * t, z: e0.z + (e1.z - e0.z) * t }), yAt = p => hgtT(T, p.x, p.z) + ROADH;
+    const R = BLOOK.rail, P = BLOOK.post, seg = b.len / n, side = (p, s) => ({ x: p.x - b.dz * s, z: p.z + b.dx * s });
+    for (let i = 0; i < n; i++) {
+      if (st > 1 && i > 0 && i < n - 1) continue;   // fallen: a stub at each end
+      const p = at((i + .5) / n), y = yAt(p);
+      for (const s of [-hd, hd]) { const q = side(p, s); br3Box(q.x, y + R[0] / 2, q.z, seg, R[0], R[1], a, hex); }
+      if (i) for (const s of [-hd, hd]) { const q = side(at(i / n), s); br3Box(q.x, yAt(q) + P[1] / 2, q.z, P[0], P[1], P[0], a, hex); }
+    }
+    for (const e of [e0, e1]) br3Box(e.x, yAt(e) - 1.6, e.z, 3, 3.2, hd * 2 + 2, a, hex);
+    if (st > 1) for (const t of [.38, .62]) { const p = at(t); br3Box(p.x, T.WL - .4, p.z, seg * 2, BLOOK.deck * 2, hd * 2, a + (t - .5), hex, t < .5 ? .25 : -.2); }
+    const f = brPont(b);
+    if (f) {
+      const fe = b.ends[f.e === undefined ? 0 : f.e], oe = b.ends[1 - (f.e | 0)], built = Math.ceil(n * clamp(f.prog, 0, 1)), dk = S.os[f.id] ? BLOOK.dark : 1, ph = new THREE.Color(BLOOK.pont[era]).multiplyScalar(dk).getHex();
+      for (let i = 0; i < built; i++) {
+        const t = (i + .5) / n, p = { x: fe.x + (oe.x - fe.x) * t, z: fe.z + (oe.z - fe.z) * t }, y = hgtT(T, p.x, p.z) + .3;
+        br3Box(p.x, y, p.z, seg - .3, BLOOK.deck, BR.pw * 2, a, ph);
+        if (y > T.WL + 1) br3Box(p.x, (y + T.WL - 1) / 2, p.z, 1.6, y - T.WL + 1, BR.pw * 1.6, a, BLOOK.float);
+      }
+    }
+  }
+}
+function br3Scene() {
+  if (!S || !S.T || !S.T.net) return;
+  if (BR3.at !== scene) br3Init();
+  let key = S.brk || '';
+  for (const b of brs()) { const f = brPont(b); key += '|' + S.os[b.id] + (f ? ',' + Math.ceil(f.prog * 20) + ',' + S.os[f.id] : ''); }
+  if (key === BR3.key) return;
+  BR3.key = key; br3Sink(); br3Build();
+}
+syncScene = (g => dt => { g(dt); br3Scene(); })(syncScene);
+/* the 2D maps: a fallen bridge crossed out, a pontoon dashed, a standing one as two short bars across the road */
+drawRoads = (g => (c, T, tx, tz, lw) => {
+  g(c, T, tx, tz, lw);
+  if (!S || T !== S.T || !T.net) return;
+  const a0 = c.globalAlpha, s0 = c.strokeStyle;
+  for (const b of brs()) {
+    const x = tx(b.x), y = tz(b.z), ex = tx(b.x + b.dx * 30) - x, ey = tz(b.z + b.dz * 30) - y, L = Math.hypot(ex, ey) || 1, ux = ex / L, uy = ey / L, r = Math.max(3, lw * 2.4);
+    c.globalAlpha = Math.max(.8, a0); c.lineWidth = Math.max(1, lw * .8);
+    if (!brDown(b)) { c.strokeStyle = s0; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x - ux * r - uy * r * s * .7, y - uy * r + ux * r * s * .7); c.lineTo(x + ux * r - uy * r * s * .7, y + uy * r + ux * r * s * .7); c.stroke(); } }
+    else if (brOpen(b)) { c.strokeStyle = '#d8c27a'; c.setLineDash([2, 2]); c.beginPath(); c.moveTo(x - ux * r * 1.4, y - uy * r * 1.4); c.lineTo(x + ux * r * 1.4, y + uy * r * 1.4); c.stroke(); c.setLineDash([]); }
+    else { c.strokeStyle = '#e2604f'; c.lineWidth = Math.max(1.4, lw); c.beginPath(); c.moveTo(x - r, y - r); c.lineTo(x + r, y + r); c.moveTo(x + r, y - r); c.lineTo(x - r, y + r); c.stroke(); }
+  }
+  c.globalAlpha = a0; c.strokeStyle = s0; c.lineWidth = lw;
+})(drawRoads);
+/* the general's view: a manoeuvre at a bridge is marked at the bridge, with its tag and state */
+gManOp = (g => (c, V, P, o, now) => {
+  g(c, V, P, o, now);
+  if (o.k !== 'dem' && o.k !== 'tra') return;
+  const to = gPt(P, o.to); if (!to) return;
+  const k = P.k, own = gCol(V, V.t), r = 11 * k;
+  c.setLineDash(o.k === 'tra' ? [4, 3] : []); gRing(c, to[0], to[1], r, own, 2); c.setLineDash([]);
+  gTxt(c, (GEN.mtag[o.k] || '') + ' · ' + (GEN.mst[o.st] || o.st || '') + (o.nm ? ' · ' + o.nm : ''), to[0], to[1] - r - 8 * k, 10.5 * k, own, 'center');
+})(gManOp);
+/* the HUD: a soldier at either end of a standing bridge is told N sets a charge there; the pontoon's build mode and its progress */
+Object.assign(PWHY, { nobr: 'Pontão só na cabeceira de uma ponte destruída', whole: 'A ponte está de pé', pont: 'Já há um pontão nessa ponte', server: PWHY.server });
+drawHud = (g => () => {
+  g();
+  const P = S && S.my; if (playMode !== 'play' || !P || !P.man || P.dead || !S.T.net) return;
+  const u = clamp(cw / 1000, .62, 1), b = !S.bm && !S.fm && !S.mm ? brNear(P) : null;
+  if (b && brOn()) txt(brName(b).toUpperCase() + (P.chg > 0 ? '  ·  N: armar carga de demolição (' + P.chg + ')' : '  ·  sem carga de demolição'), cw / 2, ch * .72, 12 * u, S.modern ? '#c4f1f7' : '#f3ead2', 'center');
+  const f = S.forts.find(f => f.k === 7 && f.prog < 1 && !f.dead && builds(P, f));
+  if (f) { txt('LANÇANDO O PONTÃO ' + Math.round(f.prog * 100) + '%' + (f.n > 1 ? '  ·  ' + gN(f.n) + ' construtores' : ''), cw / 2, ch * .76, 12 * u, S.modern ? '#63d2e6' : '#e6b53a', 'center'); }
+})(drawHud);
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(.05, (now - lastT) / 1000 || .016); lastT = now;

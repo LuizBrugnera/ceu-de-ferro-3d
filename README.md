@@ -13,7 +13,7 @@ npm start
 
 Abra `http://localhost:8080`. Para outra porta, `PORT=9000 npm start`. O jogo precisa do servidor: toda partida é numa sala, e quem entra sozinho joga contra a IA. Abrir `Céu de Ferro 3D.html` direto, sem servidor, mostra só o hangar e o aviso de como iniciar o servidor.
 
-Depois de atualizar o jogo, reinicie o servidor: a página nova funciona com um servidor antigo, mas sem o que ele não conhece (conquista, requisição, rádios, drones, tripulação, obras, sapadores, minas, postos, lançadores de foguetes, economia, general, espectador, logística, recuperação e evacuação).
+Depois de atualizar o jogo, reinicie o servidor: a página nova funciona com um servidor antigo, mas sem o que ele não conhece (conquista, requisição, rádios, drones, tripulação, obras, sapadores, minas, postos, lançadores de foguetes, economia, general, espectador, logística, recuperação e evacuação, pontes destrutíveis e pontões).
 
 ## Três jeitos de entrar
 
@@ -35,7 +35,7 @@ Cada lado tem um general. Sem ninguém na cadeira, a IA comanda. Tab abre a vis�
 
 **Logística.** Com a economia ligada, o que entra num nó à frente da base principal é pago em caixas que alguém levou até lá. A base principal não tem estoque: sempre deixa entrar, mas fica longe da frente. Uma base de suprimento pronta guarda até 120 caixas (começa com as 20 que os construtores trouxeram) e um ponto seu até 60 (os pontos de cada lado começam com 30; um ponto tomado começa vazio e perde o que tinha quando cai). Só se entra num ponto ligado à base principal pelos pontos do lado; o rádio e o veículo-rádio continuam com as entradas de antes. Cada entrada custa: soldado 2, esquadra da IA 8, carro ou caminhão 5, blindado leve, antiaérea ou veículo-rádio 12, artilharia 15, lançador de foguetes e tanque 20; remuniciar e reparar um veículo numa base de suprimento custa 3 e um soldado 1, e uma base sem caixas não atende. As colunas da IA entram na base mais avançada da estrada que paga a coluna inteira, senão na base principal, e o general anota a linha fraca ("reforços saem da base principal, longe da frente"). O suprimento sai da base principal: um caminhão leva 40 caixas pela estrada (30 de metal) e, hoje, o helicóptero de transporte da reserva leva 20 por cima das estradas cortadas (15 de metal) e volta à reserva. O general logístico (a área Apoio) manda sozinho os comboios ao nó que mais precisa, com escolta numa estrada perigosa e com a ponte aérea para um nó cortado; o general humano ou o modelo manda um comboio (`conv`), a ponte aérea (`alift`), muda a prioridade de um nó (`sprio`) e pergunta o estado (`logi`). Um comboio destruído perde a carga e custa 3 tíquetes; um caminhão carregado parado e sozinho com um soldado inimigo ao lado por 5 s perde a carga para o nó mais próximo do inimigo. De caminhão ou de helicóptero de transporte, o jogador carrega parado 3 s perto da base principal e descarrega parado num nó do lado. A Logística da visão de general mostra o estoque de cada nó, os comboios e a linha fraca; a lista "onde entrar" mostra as caixas de cada nó e recusa o que não paga.
 
-**Manobras.** Além dos assaltos pelos eixos, o general usa a rede de estradas: flanco por estrada secundária, infiltração a pé, incursão na retaguarda, bloqueio de estrada de suprimento, cerco, finta antes do assalto, reserva móvel num cruzamento, defesa em profundidade e fustigamento. As rotas evitam trechos onde houve baixas.
+**Manobras.** Além dos assaltos pelos eixos, o general usa a rede de estradas: flanco por estrada secundária, infiltração a pé, incursão na retaguarda, bloqueio de estrada de suprimento, cerco, finta antes do assalto, reserva móvel num cruzamento, defesa em profundidade, fustigamento, demolição de ponte no recuo e travessia por pontão (veja Pontes e pontões). As rotas evitam trechos onde houve baixas.
 
 **Modelo como general (MCP).** `mcp-general.js` liga um modelo de linguagem à cadeira de general. Veja `MCP.md`.
 
@@ -106,7 +106,7 @@ A entrada é recusada com inimigo a menos de 150 m, com o rádio atingido nos ú
 
 ## Obras: bases, trincheiras, sacos de areia e postos
 
-De soldado, N mostra o contorno da obra à frente, verde onde pode e vermelho com o motivo onde não pode. Cada toque em N passa para a próxima obra (base de suprimento, trincheira, sacos de areia, posto anticarro, ninho de metralhadora, torre de sniper, cúpula antifoguete; o sapador segue para a mina anticarro e a antipessoal) e depois fecha; o clique começa e o botão direito cancela. Para construir, fique parado junto da obra; outros soldados ao lado aceleram e um tiro recebido interrompe.
+De soldado, N mostra o contorno da obra à frente, verde onde pode e vermelho com o motivo onde não pode. Cada toque em N passa para a próxima obra (base de suprimento, trincheira, sacos de areia, posto anticarro, ninho de metralhadora, torre de sniper, cúpula antifoguete; o sapador segue para o pontão, a mina anticarro e a antipessoal) e depois fecha; o clique começa e o botão direito cancela. Para construir, fique parado junto da obra; outros soldados ao lado aceleram e um tiro recebido interrompe.
 
 - **Base de suprimento.** Gasta o kit de construção (um por soldado, reposto numa base). Três por lado. Leva 70 s sozinho. Pronta, remunicia e repara por inteiro soldados e veículos de solo do lado a até 70 m, é ponto de entrada e depósito de requisição. Tem 230 pontos: canhão, foguete, bomba e obuseiro a destroem, e encostado nela N arma a carga de demolição (duas bastam).
 - **Trincheira** (40 s). Em pé, só a cabeça aparece; agachado ou deitado o soldado some. Explosão fora quase não fere, granada dentro mata. Tanque cruza devagar, veículo de rodas só pelas pranchas.
@@ -130,6 +130,16 @@ O sapador (Pionier e Combat Engineer em 1944, Sapador Azul e Sapyor Vermelho hoj
 - Online, quando o anfitrião sai, o servidor passa só ao novo anfitrião a lista inteira de minas: nenhuma se perde, nem as escondidas do outro lado.
 
 O uso dos sapadores, dos postos e do Grad pelo general da IA ainda não existe.
+
+## Pontes e pontões
+
+Cada lugar em que uma estrada cruza o rio é uma ponte: seis em cada época, duas nas estradas principais, as outras nas secundárias e nos caminhos; o eixo central e as duas estradas principais passam o rio em uma delas. As pontes aparecem nos mapas (dois traços na estrada; X vermelho quando caem; tracejado quando há pontão).
+
+- **O que derruba uma ponte.** Cargas de demolição na cabeceira (N a pé, junto de uma das pontas, arma uma carga; 4 derrubam a de estrada principal, 3 a de secundária e 2 a de caminho; todo soldado leva uma e o sapador três), artilharia, foguetes e bombas (duas bombas de 500 kg derrubam a de estrada principal). Tiro de fuzil e de metralhadora não fazem nada.
+- **Ponte caída.** O trecho de rio que ela atravessava fica aberto: nada de rodas, lagartas ou a pé passa ali, só o blindado anfíbio; o que estava em cima cai no rio. As rotas a contornam por outra ponte, os veículos da IA param na margem e vão pela ponte mais próxima que ainda está de pé, as esquadras a pé também, e as colunas evitam o eixo cortado. Com todas as pontes caídas, ninguém atravessa o rio por terra.
+- **Pontão.** Na cabeceira de uma ponte caída, o sapador lança um pontão (N até PONTÃO e clique): 4 min com um sapador, menos com ajuda (cada outro sapador conta inteiro e qualquer outro soldado meio), nunca menos de 2 min. Pronto, a passagem volta a levar tudo, mais devagar para as rotas, até o pontão ser destruído também. Um pontão por ponte.
+- **O general.** A IA derruba uma ponte ao recuar, quando o inimigo forte chega à cabeceira do outro lado, o ponto da outra margem já é dele (e o da própria ponte, se houver um) e o seu lado não tem mais ninguém lá; e lança um pontão quando todas as pontes caíram ou quando as suas viaturas ficam paradas na margem. O general humano ou o modelo manda as duas manobras (`man` com `demolish` ou `cross` e o lugar da ponte) e pergunta o estado das pontes (`brg`). O diário anota a ponte caída, as cargas e o pontão pronto.
+- **Online.** O estado de cada ponte viaja nas linhas de objetos do anfitrião (`obj`), e o pontão como obra (tipo 7). Com um servidor antigo as pontes ficam de pé.
 
 ## Dano, reparo e fumaça
 

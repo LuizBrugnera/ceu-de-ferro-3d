@@ -43,6 +43,7 @@ node tests/crew.js  crew-relay.js  crew-online.js        # tripulação: descer,
 node tests/transport.js  transport-relay.js  transport-online.js   # transporte e atirador de elite
 node tests/forts.js  forts-relay.js  forts-online.js     # trincheiras e sacos de areia
 node tests/sappers.js  posts.js  sappers-relay.js  sappers-online.js   # sapadores e minas, sabotagem, postos guarnecidos, torre, cúpula antifoguete e lançadores de foguetes
+node tests/bridges.js  bridges-relay.js  bridges-online.js   # pontes e pontões (W20): o que derruba uma ponte, o rio fechado e as rotas em volta, a viatura parada na margem, o pontão (2 a 4 min), as manobras demolição e travessia e a pergunta brg; pelo servidor: br no welcome, obj, fort tipo 7, e anfitrião e convidados de verdade
 node tests/city.js  city-online.js  woods.js             # prédios das vilas e matas
 node tests/civ.js  civ-war.js  civ-online.js   # civis: quem anda onde, o que os fere, recrutar e a milícia; as regras da guerra (W14): o custo de cada civil morto, a vila que se volta contra um lado e arma a milícia do outro, a evacuação e a volta, as regras de engajamento da IA (civis à vista, alvo identificado), a ordem mil do general, os eventos cv e a revisão, e uma partida IA × IA por época no mapa v5 (SECS=240; SECS=0 pula); online, o custo e o aviso aos convidados (civ k 2)
 node tests/seat.js          # mapa v5: a cidade-sede junto de cada base, os lotes, as instalações neles e o disfarce até serem identificadas

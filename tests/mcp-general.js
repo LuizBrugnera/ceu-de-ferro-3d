@@ -77,6 +77,8 @@ function bridge(env) {
   const cv = await b.call('send_convoy', { node: 'p4', why: 'frente' }); ok(!cv.isError && last() === JSON.stringify(Object.entries({ c: 'conv', nd: 'p4', why: 'frente' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'send_convoy maps to conv {nd, why}, through the relay\'s key nd');
   const al = await b.call('airlift_supply', { node: 'b30300' }); ok(!al.isError && last() === JSON.stringify(Object.entries({ c: 'alift', nd: 'b30300' }).sort()), 'airlift_supply maps to alift {nd}');
   const spr = await b.call('set_supply_priority', { node: 'p2', priority: 3 }); ok(!spr.isError && last() === JSON.stringify(Object.entries({ c: 'sprio', nd: 'p2', p: 3 }).sort()), 'set_supply_priority maps to sprio {nd, p}');
+  await new Promise(r => setTimeout(r, 300)); const dm = await b.call('demolish_bridge', { x: 12000, z: -2600, why: 'recuo' }); ok(!dm.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'demolish', x: 12000, z: -2600, why: 'recuo' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'demolish_bridge maps to man {k: demolish, x, z}');
+  await new Promise(r => setTimeout(r, 300)); const lp = await b.call('lay_pontoon', { x: 12000, z: -2600 }); ok(!lp.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'cross', x: 12000, z: -2600 }).sort()), 'lay_pontoon maps to man {k: cross, x, z}');
   const nl = seenCmd.length, bad3 = [await b.call('send_convoy', { node: 'X1' }), await b.call('send_convoy', {}), await b.call('set_supply_priority', { node: 'p2', priority: 9 })];
   ok(bad3.every(r => r.isError) && seenCmd.length === nl, 'a node that is not b<id> or p<index>, none, or a priority out of -1..3: refused locally');
   const rv = await b.call('recover_vehicle', { id: 7, why: 'tanque na estrada' }); ok(!rv.isError && last() === JSON.stringify(Object.entries({ c: 'recv', id: 7, why: 'tanque na estrada' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'recover_vehicle maps to recv {id, why}');
@@ -118,6 +120,7 @@ function bridge(env) {
   const gp = await b.call('get_production_plan'); ok(!gp.isError && seenAsk[seenAsk.length - 1].q.q === 'plan', 'get_production_plan: the relay passes gask plan to the host');
   await new Promise(r => setTimeout(r, 1100)); const gl2 = await b.call('get_logistics'); ok(!gl2.isError && seenAsk[seenAsk.length - 1].q.q === 'logi', 'get_logistics: the relay passes gask logi to the host');
   await new Promise(r => setTimeout(r, 1100)); const gr = await b.call('get_recovery'); ok(!gr.isError && seenAsk[seenAsk.length - 1].q.q === 'rec', 'get_recovery: the relay passes gask rec to the host');
+  await new Promise(r => setTimeout(r, 1100)); const gb = await b.call('get_bridges'); ok(!gb.isError && seenAsk[seenAsk.length - 1].q.q === 'brg', 'get_bridges: the relay passes gask brg to the host');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

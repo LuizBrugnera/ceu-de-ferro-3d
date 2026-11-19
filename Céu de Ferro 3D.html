@@ -213,7 +213,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .aar p{margin:0;max-width:70ch} .aar-res{font-size:18px} .aar-note{color:var(--mute);font-size:13px}
 .aar-c{width:100%;max-width:640px;height:auto;aspect-ratio:640/200;background:var(--panel);border:1px solid var(--line);border-radius:3px}
 #aarBody,#aarList{display:flex;flex-direction:column;gap:10px} .aar-w{overflow-x:auto;max-width:100%} .aar-t{font-size:13px;gap:3px 12px;min-width:max-content} .aar-t span{overflow-wrap:normal}
-.aar-dec{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px} .aar-dec b{font-family:var(--f-data);font-weight:600} .aar .f{color:#6fc3b2} .aar .e{color:#e2604f}
+.aar-dec{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:6px;font-size:14px} .aar-dec b{font-family:var(--f-data);font-weight:600} .aar .f{color:#6fc3b2} .aar .e{color:#e2604f} .aar .i{color:#d8a84a}
 .aar-i{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 12px;text-align:left;padding:9px 12px} .aar-i span{color:var(--mute);font-size:13px}
 .ghost{background:transparent;border:1px solid var(--line);border-radius:3px;padding:12px 16px;font-family:var(--f-data);font-size:15px}
 .ghost:hover{border-color:var(--accent);color:var(--accent)}
@@ -7053,10 +7053,10 @@ function director(dt) {
      its HQ, free, to hold the base, and the general's log says why.
    With no economy (the demo, an older server, ECO.on 0) the classic director runs: DIR's caps and clocks, CQ.ai's waits, HDIR's and POOL's and RUNS's
    waits; these are no longer how a side with an economy fields anything. cap: IAI.cap while a side has an economy (two budgets), cap0: without */
-const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap: 240, cap0: IAI.cap, gnd: .75,
+const GP = { pop: { men: 240, veh: 48, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap: 480, cap0: IAI.cap, gnd: .75, scale: 2,   /* scale: the ground part of the plan's mix (vehicles and squads) grows with the doubled budget; aircraft keep theirs */
   meter: { every: 10, min: .5, dn: .1, up: .05, low: .8 },
   mix: { tank: [5, 4, 3], lav: [2, 2, 1], aa: [2, 2, 3], art: [1, 1, 2], truck: [3, 2, 2], squad: [3, 2, 2], fighter: [2, 2, 2], cas: [3, 2, 1], heli: [2, 1, 1], lift: [1, 1, 0] },
-  foe: { aa: 2, fighter: 1, arm: .5, armMax: 3, art: 1 }, max: 20,
+  foe: { aa: 2, fighter: 1, arm: .5, armMax: 3, art: 1 }, max: 40,
   veh: ['tank', 'lav', 'aa', 'art', 'truck'], fly: ['fighter', 'cas', 'heli', 'lift'],
   dt: .5, form: 12, gap: 20, air: 3, lift: 30, run: 8,
   floor: { t: 180, men: 8 },
@@ -7096,11 +7096,11 @@ const gpKinds = () => Object.keys(GP.mix).filter(k => ECO.unit[k] && (!ECO.unit[
 /* side t's production plan, kept in S.eco.d[t].pp: { st, f: the field it wants by kind, why: the reason of each, set: the kinds a command fixed } */
 function gpPlan(t) {
   const d = S.eco.d[t], C = S.cmd && S.cmd[t], st = gpStance(t), P = popOf(t), M = GP.mix, W = GP.why, f = {}, why = {}, set = {}, o = d.ppo || {};
-  for (const k of gpKinds()) { f[k] = M[k][st]; why[k] = W.st[st]; }
+  for (const k of gpKinds()) { f[k] = M[k][st] * (GP.veh.includes(k) || k === 'squad' ? GP.scale : 1); why[k] = W.st[st]; }
   perMix(t, f, why);   // the personality's taste in the mix (W17): the same budget, spent otherwise
   const kn = C ? C.known.filter(e => !e.dead) : [], arm = kn.filter(e => !e.man && (tk(e) === 'tank' || tk(e) === 'lav')).length, art = kn.filter(e => !e.man && tk(e) === 'art').length;
   if (C && C.airT !== undefined && S.t - C.airT < ECO.ai.airMem) for (const k of ['aa', 'fighter']) if (k in f) { f[k] += GP.foe[k]; why[k] = W.air; }
-  if (arm && 'tank' in f) { f.tank += Math.min(GP.foe.armMax, Math.ceil(arm * GP.foe.arm)); why.tank = arm + W.arm; }
+  if (arm && 'tank' in f) { f.tank += Math.min(GP.foe.armMax, Math.ceil(arm * GP.foe.arm)) * GP.scale; why.tank = arm + W.arm; }
   if (art && 'cas' in f) { f.cas += GP.foe.art; why.cas = W.art; }
   for (const k in o) if (k in f) { f[k] = o[k]; why[k] = W.set; set[k] = 1; }
   const fit = (ks, cap) => {   // over the budget: one fewer of the kind that has the most, never one a command fixed, until it fits
@@ -14003,11 +14003,11 @@ function drLeash(o, p, from) {
 anaSnap = (g => () => {
   g();
   const e = ANA.ev[ANA.ev.length - 1], C = S.drN;
-  if (e && e.k === 'sn' && C && (Object.keys(C.sn[0]).length || Object.keys(C.sn[1]).length)) { e.dr = C.sn; C.sn = [{}, {}]; }
+  if (e && e.k === 'sn' && C && C.sn.some(x => x && Object.keys(x).length)) { e.dr = C.sn; C.sn = C.sn.map(() => ({})); }
 })(anaSnap);
 anaReport = (f => (ev, me) => {
-  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end'), dr = [{}, {}];
-  for (const e of ev) if (e.k === 'sn' && Array.isArray(e.dr)) for (const s of [0, 1]) for (const k in e.dr[s] || {}) dr[s][k] = (dr[s][k] || 0) + e.dr[s][k];
+  const R = f(ev, me), hide = anaHide(me, R.ns, R.over), dr = anaSides(R.ns).map(() => ({}));
+  for (const e of ev) if (e.k === 'sn' && Array.isArray(e.dr)) for (const s of anaSides(R.ns)) for (const k in e.dr[s] || {}) dr[s][k] = (dr[s][k] || 0) + e.dr[s][k];
   R.drills = dr.map((x, s) => (hide && s !== me ? null : x));
   return R;
 })(anaReport);
@@ -24254,12 +24254,28 @@ cnVM = (g => t => {
    points), sp a vehicle or aircraft that entered (u its kind), ls a loss (u kind, by [side, kind] of who did it or null, c tickets it cost,
    age s it lived, x z), pt a point that changed hands (L, from, to, d the tickets it moved per side), lg a line of the general's log (c its
    kind, x its text), sn a snapshot (tk tickets, pt points held, pop [men, vehicles, aircraft] a side, inf soldiers that entered since the last,
-   eco [energy, metal, made] a side or null, ms [mean, worst] ms of a frame or null), end the result (win -1 a draw, why CQ.why's index).
+   eco [energy, metal, made] a side or null, ms [mean, worst] ms of a frame or null), el a side eliminated (N > 2: why 'tk' out of tickets,
+   'base' its main base fell; the match goes on between the others), end the result (win -1 a draw, why CQ.why's index, pl the placing: the sides
+   first to last).
+   N sides (v 2): the header carries n, the number of sides (2 or 3, S.N); every per-side array (fac, doc, tk, pt, pop, inf, bl, eco, cn, dr...)
+   has n entries, side i at index i. A v 1 match (no n) is read as 2 sides.
    Sending: q holds what is not out yet; flush hands it in pieces of at most ANA.chunk bytes to sink(events, last), which the page sets: the
    message ana online (the host), a POST to the server that served the page otherwise. ANALYTICS=0 on the server stops both. */
-const ANA = { on: 1, v: 1, snap: 10, batch: 15, chunk: 7000, max: 30000, win: 120, ptw: 10, top: 5, scan: 1,
+const ANA = { on: 1, v: 2, snap: 10, batch: 15, chunk: 7000, max: 30000, win: 120, ptw: 10, top: 5, scan: 1,
   ev: [], q: [], S: null, acc: 0, sT: 0, bT: 0, ms: [0, 0, 0], inf: [0, 0], sink: null, done: null,
-  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'] };
+  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'], out: [] };
+/* the sides of the match simulated (S.N, 2 when the page has no N yet), and of a match's events (the header's n, 2 for a v 1 match) */
+const anaN = () => (S && S.N > 2 ? S.N : 2), anaSides = n => Array.from({ length: n }, (_, i) => i), anaZ = () => anaSides(anaN()).map(() => 0);
+const anaNev = H => (H && H.n > 2 ? H.n : H && Array.isArray(H.fac) && H.fac.length > 2 ? H.fac.length : 2);
+/* a side's view of the review (me a side, the match not over) hides the others' breakdown */
+const anaHide = (me, n, over) => Number.isInteger(me) && me >= 0 && me < n && !over;
+/* the placing of the sides from a review's pieces: the winner first, then the sides still in (not eliminated), then by points, then by tickets;
+   the eliminated last, the latest eliminated before the earlier */
+function anaPlace(n, win, tk, pt, el) {
+  const out = new Map((el || []).map((e, i) => [e.s, i]));
+  return anaSides(n).sort((a, b) => (b === win) - (a === win) || out.has(a) - out.has(b) || (out.has(a) ? out.get(b) - out.get(a) : 0)
+    || ((pt && pt[b]) || 0) - ((pt && pt[a]) || 0) || ((tk && tk[b]) || 0) - ((tk && tk[a]) || 0) || a - b);
+}
 const anaLive = () => ANA.on && S && S.cq && cqSim();
 const anaKind = o => (!o || o.team === undefined ? '' : o.mil ? 'mil' : o.man ? 'inf' : o.kind ? tk(o) : o.heli ? 'heli' : o.role === 'cas' ? 'cas' : o.def ? 'fighter' : '');
 const anaR = v => Math.round(v * 10) / 10;
@@ -24269,10 +24285,10 @@ function anaPush(e) {
 }
 /* the first event of a match: called when the simulated match has no events yet (a new match, or a host that adopted one) */
 function anaBegin() {
-  const Q = S.cq, N = t => S.E.sides[S.fac[t]].name;
-  ANA.S = S; ANA.ev = []; ANA.q = []; ANA.acc = ANA.sT = ANA.bT = 0; ANA.ms = [0, 0, 0]; ANA.inf = [0, 0]; ANA.bl = [0, 0]; S.anaRep = null;
-  anaPush({ k: 'hdr', v: ANA.v, t: anaR(S.t), era: S.era, mv: S.mv, len: Q.len, T0: Q.T0, tk0: Q.tk0, tk: Q.tk.map(anaR), fac: [N(0), N(1)],
-    doc: [0, 1].map(t => (S.cmd && S.cmd[t] ? docK(S.cmd[t]) : CMD.use[t])), eco: S.eco ? 1 : 0, net: S.net ? 1 : 0, watch: S.watch ? 1 : 0,
+  const Q = S.cq, sd = anaSides(anaN()), N = t => { const f = S.E.sides[S.fac[t]]; return f ? f.name : 'Lado ' + (t + 1); };
+  ANA.S = S; ANA.ev = []; ANA.q = []; ANA.acc = ANA.sT = ANA.bT = 0; ANA.ms = [0, 0, 0]; ANA.inf = anaZ(); ANA.bl = anaZ(); ANA.out = []; S.anaRep = null;
+  anaPush({ k: 'hdr', v: ANA.v, n: sd.length, t: anaR(S.t), era: S.era, mv: S.mv, len: Q.len, T0: Q.T0, tk0: Q.tk0, tk: Q.tk.map(anaR), fac: sd.map(N),
+    doc: sd.map(t => (S.cmd && S.cmd[t] ? docK(S.cmd[t]) : CMD.use[t] || '')), eco: S.eco ? 1 : 0, net: S.net ? 1 : 0, watch: S.watch ? 1 : 0,
     me: S.demo ? -1 : S.me, adopt: S.t > 1 ? 1 : 0, pts: Q.p.map(p => [p.L, p.name, p.base, p.hold]) });
   anaScan(true);
 }
@@ -24286,11 +24302,11 @@ function anaScan(quiet) {
   }
 }
 function anaSnap() {
-  const Q = S.cq, pop = [0, 1].map(t => [S.men.filter(m => m.team === t && !m.dead).length, S.units.filter(u => u.team === t && !u.dead).length, S.planes.filter(p => p.team === t && !p.dead).length]);
+  const Q = S.cq, pop = anaSides(anaN()).map(t => [S.men.filter(m => m.team === t && !m.dead).length, S.units.filter(u => u.team === t && !u.dead).length, S.planes.filter(p => p.team === t && !p.dead).length]);
   const E = S.eco, ms = ANA.ms[2] ? [Math.round(ANA.ms[0] / ANA.ms[2] * 100) / 100, Math.round(ANA.ms[1] * 100) / 100] : null;
-  anaPush({ k: 'sn', t: anaR(S.t), tk: Q.tk.map(anaR), bl: ANA.bl.map(anaR), pt: [cqHeld(0), cqHeld(1)], pop, inf: ANA.inf.slice(),
+  anaPush({ k: 'sn', t: anaR(S.t), tk: Q.tk.map(anaR), bl: ANA.bl.map(anaR), pt: anaSides(anaN()).map(t => cqHeld(t)), pop, inf: ANA.inf.slice(),
     eco: E ? E.d.map(d => [Math.round(d.en), Math.round(d.mt), d.made || 0]) : null, ms });
-  ANA.inf = [0, 0]; ANA.ms = [0, 0, 0];
+  ANA.inf = anaZ(); ANA.ms = [0, 0, 0];
 }
 function anaStep(dt) {
   if (!anaLive()) return;
@@ -24331,23 +24347,33 @@ gLog = (f => (t, k, s, at, key, tg) => {
   const M = S && S.glog && S.glog.l[t], e = M && M[M.length - 1];
   if (e && e !== b && anaLive() && ANA.S === S) anaPush(Object.assign({ k: 'lg', t: anaR(e.t), s: t, c: e.k, x: e.s }, e.x !== undefined && { px: Math.round(e.x), pz: Math.round(e.z) }));
 })(gLog);
-cqEnd = (f => (win, why) => {
+cqEnd = (f => (win, why, ...x) => {
   const live = anaLive() && ANA.S === S && !S.cq.ph;
   if (live) anaScan(false);
-  f(win, why);
+  f(win, why, ...x);
   if (!live) return;
-  const Q = S.cq; anaSnap();
-  anaPush({ k: 'end', t: anaR(S.t), win, why, tk: Q.tk.map(anaR), bl: ANA.bl.map(anaR), lost: Q.lost.map(l => l.slice()), T: anaR(Q.T0 - Math.max(0, Q.T)) });
+  const Q = S.cq, n = anaN(); anaSnap();
+  const pl = Array.isArray(x[0]) && x[0].length === n ? x[0].slice() : Array.isArray(Q.pl) && Q.pl.length === n ? Q.pl.slice() : anaPlace(n, win, Q.tk, anaSides(n).map(t => cqHeld(t)), ANA.out);
+  anaPush({ k: 'end', t: anaR(S.t), win, why, pl, tk: Q.tk.map(anaR), bl: ANA.bl.map(anaR), lost: Q.lost.map(l => l.slice()), T: anaR(Q.T0 - Math.max(0, Q.T)) });
   S.anaRep = anaReport(ANA.ev);
   ANA.q.push(Object.assign({ k: 'rep', t: anaR(S.t) }, anaBrief(S.anaRep)));
   anaFlush(true);
   if (ANA.done) ANA.done(S.anaRep, ANA.ev);
 })(cqEnd);
-/* the bleed, as cqStep charges it (CQ.bleed by the margin of points, each time its quarter second is up) */
+/* the bleed, as cqStep charges it (CQ.bleed by how many points a side is behind the best of the others, each time its quarter second is up;
+   with 2 sides the margin of points of today), and the sides eliminated (N > 2: out of tickets, or the point of its main base in other hands) */
 cqStep = (f => dt => {
   const Q = S.cq, live = Q && !Q.ph && anaLive() && ANA.S === S, a = live ? Q.acc + dt : 0;
   f(dt);
-  if (live && !Q.ph && a >= .25 && Q.acc === 0) { const m = cqHeld(0) - cqHeld(1); if (m) ANA.bl[m > 0 ? 1 : 0] += CQ.bleed[Math.min(Math.abs(m), CQ.bleed.length - 1)] / 60 * a; }
+  if (live && !Q.ph && a >= .25 && Q.acc === 0) {
+    const sd = anaSides(anaN()), h = sd.map(t => cqHeld(t));
+    for (const s of sd) { if (ANA.out.some(e => e.s === s)) continue; let m = -1e9; for (const o of sd) if (o !== s && !ANA.out.some(e => e.s === o)) m = Math.max(m, h[o]); m -= h[s]; if (m > 0) ANA.bl[s] += CQ.bleed[Math.min(m, CQ.bleed.length - 1)] / 60 * a; }
+  }
+  if (live && !S.over && anaN() > 2) for (const s of anaSides(anaN())) {
+    if (ANA.out.some(e => e.s === s)) continue;
+    const gone = Array.isArray(Q.out) ? !!Q.out[s] : Array.isArray(Q.el) ? !!Q.el[s] : false, base = Q.p.some(p => p.base === s && p.hold !== undefined && p.hold >= 0 && p.hold !== s);
+    if (gone || Q.tk[s] <= 0 || base) { const e = { s, t: anaR(S.t), why: Q.tk[s] <= 0 ? 'tk' : 'base' }; ANA.out.push(e); anaPush({ k: 'el', t: e.t, s, why: e.why, tk: Q.tk.map(anaR) }); }
+  }
   anaStep(dt);
 })(cqStep);
 /* the cost of a frame where a clock is at hand (the page; not the tests) */
@@ -24355,14 +24381,15 @@ step = (f => dt => {
   if (typeof performance === 'undefined' || !ANA.S) return f(dt);
   const a = performance.now(); f(dt); const d = performance.now() - a; ANA.ms[0] += d; ANA.ms[1] = Math.max(ANA.ms[1], d); ANA.ms[2]++;
 })(step);
-/* the after-action review from the events of one match (any order of arrival; a missing piece leaves its part empty). The side's view (me 0 or 1,
-   an unfinished match) keeps the enemy's breakdown out: only what the end screen shows of it */
+/* the after-action review from the events of one match (any order of arrival; a missing piece leaves its part empty). The side's view (me a side,
+   an unfinished match) keeps the enemies' breakdown out: only what the end screen shows of it. ns the sides (the header's n), place the placing
+   (the sides first to last, from the end event, or worked out), out the sides eliminated in order { s, t, why } */
 function anaReport(ev, me) {
   const H = ev.find(e => e.k === 'hdr') || {}, E = ev.filter(e => e.k === 'end').pop() || null, sn = ev.filter(e => e.k === 'sn').sort((a, b) => a.t - b.t);
-  const ls = ev.filter(e => e.k === 'ls'), pt = ev.filter(e => e.k === 'pt'), lg = ev.filter(e => e.k === 'lg'), sp = ev.filter(e => e.k === 'sp');
-  const last = sn[sn.length - 1], t1 = E ? E.t : last ? last.t : 0, tk0 = H.tk || [H.tk0, H.tk0], tkE = E ? E.tk : last ? last.tk : tk0, blE = E ? E.bl : last ? last.bl : null;
-  const hide = (me === 0 || me === 1) && !E, sides = [0, 1].filter(s => !hide || s === me);
-  const tickets = [0, 1].map(s => {
+  const ls = ev.filter(e => e.k === 'ls'), pt = ev.filter(e => e.k === 'pt'), lg = ev.filter(e => e.k === 'lg'), sp = ev.filter(e => e.k === 'sp'), out = ev.filter(e => e.k === 'el').sort((a, b) => a.t - b.t);
+  const n = anaNev(H), SD = anaSides(n), last = sn[sn.length - 1], t1 = E ? E.t : last ? last.t : 0, tk0 = H.tk || SD.map(() => H.tk0), tkE = E ? E.tk : last ? last.tk : tk0, blE = E ? E.bl : last ? last.bl : null;
+  const hide = anaHide(me, n, !!E), sides = SD.filter(s => !hide || s === me);
+  const tickets = SD.map(s => {
     const loss = ls.filter(e => e.s === s).reduce((a, e) => a + (e.c || 0), 0), lost = pt.reduce((a, e) => a + (e.d && e.d[s] < 0 ? -e.d[s] : 0), 0), took = pt.reduce((a, e) => a + (e.d && e.d[s] > 0 ? e.d[s] : 0), 0);
     const all = (tk0[s] || 0) - (tkE[s] || 0), bleed = blE ? blE[s] : 0;
     return { start: anaR(tk0[s] || 0), end: anaR(tkE[s] || 0), loss: anaR(loss), ptLost: anaR(lost), ptTook: anaR(took), bleed: anaR(bleed), other: anaR(all - loss - lost + took - bleed) };
@@ -24370,22 +24397,28 @@ function anaReport(ev, me) {
   const by = {}, add = (s, u, f, n) => { const k = s + ':' + u, r = by[k] || (by[k] = { s, u, lost: 0, paid: 0, kills: 0, value: 0, made: 0, age: 0 }); r[f] += n; return r; };
   for (const e of ls) { const r = add(e.s, e.u, 'lost', 1); r.paid += e.c || 0; r.age += e.age || 0; if (e.by && e.by[0] !== e.s && e.by[1]) { const k = add(e.by[0], e.by[1], 'kills', 1); k.value += e.c || 0; } }
   for (const e of sp) add(e.s, e.u, 'made', 1);
-  for (const e of sn) if (e.inf) for (const s of [0, 1]) if (e.inf[s]) add(s, 'inf', 'made', e.inf[s]);
+  for (const e of sn) if (e.inf) for (const s of SD) if (e.inf[s]) add(s, 'inf', 'made', e.inf[s]);
   const eff = Object.values(by).filter(r => sides.includes(r.s)).map(r => ({ s: r.s, u: r.u, made: r.made, lost: r.lost, kills: r.kills, paid: anaR(r.paid), value: anaR(r.value), ratio: r.paid ? anaR(r.value / r.paid) : r.value ? null : 0, life: r.lost ? Math.round(r.age / r.lost) : null }))
     .sort((a, b) => a.s - b.s || b.value + b.paid - (a.value + a.paid));
-  const at = (t, f) => { let b = null; for (const e of sn) { if (e.t > t) break; b = e; } return b ? f(b) : null; }, mar = (s, e) => (e.tk[s] - e.tk[1 - s]) + ANA.ptw * (e.pt[s] - e.pt[1 - s]);
+  /* the margin of side s: its tickets and ANA.ptw a point, less the best of the others (with 2 sides: less the enemy's, as before) */
+  const sc = (s, e) => (e.tk[s] || 0) + ANA.ptw * ((e.pt && e.pt[s]) || 0);
+  const at = (t, f) => { let b = null; for (const e of sn) { if (e.t > t) break; b = e; } return b ? f(b) : null; }, mar = (s, e) => { let m = -1e9; for (const o of SD) if (o !== s) m = Math.max(m, sc(o, e)); return sc(s, e) - m; };
   const dec = lg.filter(e => ANA.dec.includes(e.c) && sides.includes(e.s)).map(e => {
     const a = at(e.t, x => mar(e.s, x)), b = at(Math.min(e.t + ANA.win, t1), x => mar(e.s, x));
     return { t: e.t, s: e.s, c: e.c, x: e.x, swing: a === null || b === null ? 0 : anaR(b - a) };
   }).sort((a, b) => Math.abs(b.swing) - Math.abs(a.swing) || a.t - b.t).slice(0, ANA.top);
-  const ms = sn.filter(e => e.ms), pop = sn.reduce((a, e) => Math.max(a, e.pop ? e.pop[0][0] + e.pop[1][0] : 0), 0), veh = sn.reduce((a, e) => Math.max(a, e.pop ? e.pop[0][1] + e.pop[1][1] : 0), 0);
+  const ms = sn.filter(e => e.ms), tot = (e, i) => (e.pop ? e.pop.reduce((a, x) => a + ((x && x[i]) || 0), 0) : 0), pop = sn.reduce((a, e) => Math.max(a, tot(e, 0)), 0), veh = sn.reduce((a, e) => Math.max(a, tot(e, 1)), 0);
   const big = ls.filter(e => (e.c || 0) >= 6).map(e => ({ t: e.t, k: 'ls', s: e.s, x: e.u })), marks = pt.map(e => ({ t: e.t, k: 'pt', s: e.to >= 0 ? e.to : e.from, x: e.L + (e.to >= 0 ? ' tomado' : ' perdido') })).concat(big).sort((a, b) => a.t - b.t);
-  const lost = [0, 1].map(s => { const o = {}; for (const e of ls) if (e.s === s) o[e.u] = (o[e.u] || 0) + 1; return o; });
-  return { v: H.v || 0, era: H.era || '', mv: H.mv || 0, len: H.len, fac: H.fac || ['', ''], doc: H.doc || ['', ''], per: H.per || ['', ''], dif: H.dif || ['normal', 'normal'], eco: H.eco || 0, net: H.net || 0, watch: H.watch || 0, adopt: H.adopt || 0,
+  const lost = SD.map(s => { const o = {}; for (const e of ls) if (e.s === s) o[e.u] = (o[e.u] || 0) + 1; return o; });
+  for (const e of out) marks.push({ t: e.t, k: 'el', s: e.s, x: 'eliminado' }); marks.sort((a, b) => a.t - b.t);
+  const ptE = last ? last.pt : null, place = E && Array.isArray(E.pl) && E.pl.length === n ? E.pl.slice() : anaPlace(n, E ? E.win : -1, tkE, ptE, out);
+  const pad = (a, v) => SD.map(s => (a && a[s] !== undefined ? a[s] : v));
+  return { v: H.v || 0, ns: n, era: H.era || '', mv: H.mv || 0, len: H.len, fac: pad(H.fac, ''), doc: pad(H.doc, ''), per: pad(H.per, ''), dif: pad(H.dif, 'normal'), eco: H.eco || 0, net: H.net || 0, watch: H.watch || 0, adopt: H.adopt || 0,
     dur: anaR(t1 - (H.t || 0)), clock: E ? E.T : null, over: !!E, win: E ? E.win : null, why: E ? E.why : null, whyTxt: E ? CQ.why[E.why] || '' : '',
-    tk0, tk: tkE, tickets: tickets.map((x, s) => (sides.includes(s) ? x : null)), pts: last ? last.pt : null,
-    curve: sn.map(e => [e.t, e.tk[0], e.tk[1], e.pt[0], e.pt[1]]), marks: marks.filter(m => !hide || m.k === 'pt' || m.s === me),
-    lost: lost.map((x, s) => (sides.includes(s) ? x : null)), lostN: E ? E.lost.map(l => l.reduce((a, b) => a + b, 0)) : lost.map(o => Object.values(o).reduce((a, b) => a + b, 0)),
+    place, rank: SD.map(s => place.indexOf(s) + 1), out: out.map(e => ({ s: e.s, t: e.t, why: e.why })),
+    tk0, tk: tkE, tickets: tickets.map((x, s) => (sides.includes(s) ? x : null)), pts: ptE,
+    curve: sn.map(e => [e.t].concat(SD.map(s => e.tk[s]), SD.map(s => (e.pt ? e.pt[s] : 0)))), marks: marks.filter(m => !hide || m.k === 'pt' || m.k === 'el' || m.s === me),
+    lost: lost.map((x, s) => (sides.includes(s) ? x : null)), lostN: E && Array.isArray(E.lost) ? E.lost.map(l => l.reduce((a, b) => a + b, 0)) : lost.map(o => Object.values(o).reduce((a, b) => a + b, 0)),
     eff, dec, perf: { ms: ms.length ? anaR(ms.reduce((a, e) => a + e.ms[0], 0) / ms.length) : null, worst: ms.length ? Math.max(...ms.map(e => e.ms[1])) : null, men: pop, veh },
     honesty: null, n: ev.length };
 }
@@ -24397,7 +24430,7 @@ function anaAsk(t) {
   const R = S.anaRep || anaReport(ANA.ev, t), c = R.curve, k = Math.max(1, Math.ceil(c.length / 40));
   return { ok: true, why: '', id: 0, r: Object.assign(anaBrief(R), { side: t, curve: c.filter((e, i) => i % k === 0 || i === c.length - 1) }) };
 }
-genAnswer = (f => (t, q) => (q && q.q === 'report' && (t === 0 || t === 1) ? anaAsk(t) : f(t, q)))(genAnswer);
+genAnswer = (f => (t, q) => (q && q.q === 'report' && Number.isInteger(t) && t >= 0 && t < anaN() ? anaAsk(t) : f(t, q)))(genAnswer);
 /* online: the host sends the batches (welcome ana: 1 says the server keeps them); elsewhere the page's POST, when it has one */
 Net.ana = false;
 Net.rx.welcome = (old => m => { Net.ana = m.ana === 1; old(m); })(Net.rx.welcome);
@@ -24434,15 +24467,15 @@ function readGlb(buf) {
 anaSnap = (f => () => {
   f();
   const N = S.cn, e = ANA.ev[ANA.ev.length - 1]; if (!N || !e || e.k !== 'sn') return;
-  e.cn = [0, 1].map(t => { const s = N.st[t]; return [s.sent, s.del, s.late, s.lost, Math.round(s.lat), s.rep, s.df, ['up', 'down', 'alt'].indexOf(N.hq[t].st), s.inN, s.outN, s.cutN]; });
+  e.cn = anaSides(anaN()).map(t => { const s = N.st[t], q = N.hq && N.hq[t]; if (!s || !q) return null; return [s.sent, s.del, s.late, s.lost, Math.round(s.lat), s.rep, s.df, ['up', 'down', 'alt'].indexOf(q.st), s.inN, s.outN, s.cutN]; });
 })(anaSnap);
 anaReport = (f => (ev, me) => {
   const R = f(ev, me), sn = ev.filter(e => e.k === 'sn' && Array.isArray(e.cn)).sort((a, b) => a.t - b.t);
   if (!sn.length) { R.comms = null; return R; }
-  const hide = (me === 0 || me === 1) && !R.over, last = sn[sn.length - 1];
-  R.comms = [0, 1].map(s => {
+  const hide = anaHide(me, R.ns, R.over), last = sn[sn.length - 1];
+  R.comms = anaSides(R.ns).map(s => {
     if (hide && s !== me) return null;
-    const c = last.cn[s]; if (!Array.isArray(c)) return null;
+    const c = last.cn[s]; if (!Array.isArray(c)) return null;   // a side the snapshot has no net for
     let down = 0, sh = 0, n = 0;
     sn.forEach((e, i) => { const x = e.cn[s]; if (!Array.isArray(x)) return; if (x[7] === 1 && i) down += e.t - sn[i - 1].t; const all = x[8] + x[9] + x[10]; if (all) { sh += (x[9] + x[10]) / all; n++; } });
     return { sent: c[0], del: c[1], late: c[2], lost: c[3], lag: c[1] ? anaR(c[4] / c[1]) : 0, rep: c[5], df: c[6], hqDown: Math.round(down), out: n ? anaR(sh / n * 100) / 100 : 0 };
@@ -24524,8 +24557,8 @@ anaSnap = (f => () => {
   if (e && e.k === 'sn' && S.civs) { let a = 0, away = 0, ins = 0; for (const c of S.civs) if (!c.dead && !c.gone) { a++; if (c.mode >= 4) away++; if (c.in) ins++; } e.cv = [a, away, ins]; }
 })(anaSnap);
 anaReport = (f => (ev, me) => {
-  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end'), cv = ev.filter(e => e.k === 'cv'), of = (c, s) => cv.filter(e => e.c === c && e.s === s);
-  const side = [0, 1].map(s => (hide && s !== me ? null : { killed: of('kill', s).length, tk: anaR(of('kill', s).reduce((a, e) => a + (e.tk || 0), 0)), mil: of('mil', s).length, roe: of('roe', s).length }));
+  const R = f(ev, me), hide = anaHide(me, R.ns, R.over), cv = ev.filter(e => e.k === 'cv'), of = (c, s) => cv.filter(e => e.c === c && e.s === s);
+  const side = anaSides(R.ns).map(s => (hide && s !== me ? null : { killed: of('kill', s).length, tk: anaR(of('kill', s).reduce((a, e) => a + (e.tk || 0), 0)), mil: of('mil', s).length, roe: of('roe', s).length }));
   R.civ = { side, turned: cv.filter(e => e.c === 'turn').map(e => ({ t: e.t, s: e.s, nm: e.nm || '' })), evac: cv.filter(e => e.c === 'evac').length, back: cv.filter(e => e.c === 'back').length, dead: cv.filter(e => e.c === 'kill').length };
   R.tickets.forEach((x, s) => { if (x && side[s]) { x.civ = side[s].tk; x.other = anaR(x.other - side[s].tk); } });
   return R;
@@ -24663,7 +24696,7 @@ function anaMvLook() {
   }
   for (const [op, R] of MVA.live) if (!seen.has(op)) anaMvEnd(R);
 }
-const anaTrNew = () => { const n = S.T.net ? S.T.net.e.length : 0; return { T0: S.t, e: [new Array(n).fill(0), new Array(n).fill(0)], o: [0, 0], v: [[0, 0, 0, 0], [0, 0, 0, 0]] }; };
+const anaTrNew = () => { const n = S.T.net ? S.T.net.e.length : 0, sd = anaSides(anaN()); return { T0: S.t, e: sd.map(() => new Array(n).fill(0)), o: sd.map(() => 0), v: sd.map(() => [0, 0, 0, 0]) }; };
 function anaTrOut() {
   const X = MVA.X; if (!X) return;
   anaPush({ k: 'tr', t: anaR(S.t), d: Math.round(S.t - X.T0), e: S.T.net ? X.e : null, o: X.o, v: X.v });
@@ -24718,7 +24751,7 @@ function anaMano(ev, s) {
   const prev = {}; let again = 0, rep = 0; for (const d of dom) { const p = prev[d.L]; if (p) { again++; if (p.ri === d.ri && p.b === d.b) rep++; } prev[d.L] = d; }
   const arm = ab.filter(e => e.e === 'arm'), fire = ab.filter(e => e.e === 'fire'), end = ab.filter(e => e.e === 'end');
   const net = H.net || null, E = net ? net.map(() => 0) : null; let o = 0; const v = [0, 0, 0, 0];
-  for (const e of tr) { o += e.o[s]; e.v[s].forEach((x, i) => { v[i] += x; }); if (E && e.e) e.e[s].forEach((x, i) => { E[i] += x; }); }
+  for (const e of tr) { o += e.o[s] || 0; if (e.v[s]) e.v[s].forEach((x, i) => { v[i] += x; }); if (E && e.e && e.e[s]) e.e[s].forEach((x, i) => { E[i] += x; }); }
   const road = E ? sum(E) : 0, axis = E ? sum(E.filter((x, i) => net[i][1])) : 0, mov = v[0] + v[1] + v[2], mins = tr.reduce((a, e) => a + e.d, 0) / 60 || 1;
   const top = E ? E.map((x, i) => ({ e: net[i][3] + '–' + net[i][4], axis: net[i][1], n: anaR(x * MVA.dt / 60 / mins) })).sort((a, b) => b.n - a.n).slice(0, 3) : [];
   return {
@@ -24735,8 +24768,8 @@ function anaMano(ev, s) {
   };
 }
 anaReport = (f => (ev, me) => {
-  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end');
-  R.mano = ev.some(e => e.k === 'tr' || e.k === 'ap' || e.k === 'mv' || e.k === 'ab') ? [0, 1].map(s => (hide && s !== me ? null : anaMano(ev, s))) : null;
+  const R = f(ev, me), hide = anaHide(me, R.ns, R.over);
+  R.mano = ev.some(e => e.k === 'tr' || e.k === 'ap' || e.k === 'mv' || e.k === 'ab') ? anaSides(R.ns).map(s => (hide && s !== me ? null : anaMano(ev, s))) : null;
   return R;
 })(anaReport);
 
@@ -25939,7 +25972,7 @@ ecoUnpack = (g => K => {
   if (P && Array.isArray(P[0]) && Array.isArray(P[1])) { S.per = [0, 1].map(t => (Object.hasOwn(PERS, P[0][t]) ? P[0][t] : null)); S.dif = [0, 1].map(t => (DIFK.includes(P[1][t]) ? P[1][t] : 'normal')); if (S.cmd) for (const C of S.cmd) perInit(C); }
 })(ecoUnpack);
 /* the analytics: the header names each side's personality and difficulty, for the review and the AI × AI tournaments */
-anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) { h.per = [0, 1].map(t => (S.per && S.per[t]) || ''); h.dif = [0, 1].map(t => (S.dif && S.dif[t]) || 'normal'); } })(anaBegin);
+anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) { h.per = anaSides(anaN()).map(t => (S.per && S.per[t]) || ''); h.dif = anaSides(anaN()).map(t => (S.dif && S.dif[t]) || 'normal'); } })(anaBegin);
 /* ---------- the tactical map (M1 of the general's manoeuvre): seven layers on a grid of TM.cell m, by side, from what the side knows ----------
    Each side's commander keeps C.tm, a Float32Array a layer over cells of TM.cell m (index j * nx + i, x = i * cell, z = -S.HW + j * cell):
    f the enemy's strength the side knows of (C.known, where it was reported, CMD.val each spread over TM.reach m by its class, falling off to
@@ -27985,17 +28018,10 @@ function stgView(t) {
 genState = (g => t => { const o = g(t); if (o) o.stg = stgView(t); return o; })(genState);
 anaReport = (g => (ev, me) => {
   const R = g(ev, me); if (!R) return R;
-  const sides = [0, 1].filter(s => R.tickets && R.tickets[s] !== null && R.tickets[s] !== undefined);
+  const sides = anaSides(R.ns || 2).filter(s => R.tickets && R.tickets[s] !== null && R.tickets[s] !== undefined);
   R.stg = ev.filter(e => e.k === 'lg' && e.c === 'stg' && (sides.length ? sides.includes(e.s) : true)).slice(-40).map(e => ({ t: e.t, s: e.s, x: String(e.x).slice(0, 200) }));
   return R;
 })(anaReport);
-aarShow = (g => (R, sub) => {
-  g(R, sub);
-  if (!R || !R.stg || !R.stg.length) return;
-  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
-  for (const d of R.stg) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
-  b.append(aarEl('h3', '', 'Estratégias do general'), ol);
-})(aarShow);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -31198,7 +31224,9 @@ ANA.done = R => {
 };
 const AARK = { inf: 'Infantaria', mil: 'Milícia', car: 'Viatura', truck: 'Caminhão', rad: 'Rádio', lav: 'Blindado leve', aa: 'Antiaérea', art: 'Artilharia', tank: 'Carro de combate', heli: 'Helicóptero', fighter: 'Caça', cas: 'Ataque ao solo', drone: 'Drone' };
 const AARD = { atk: 'ataque', def: 'defesa', amb: 'emboscada', fire: 'fogo', rq: 'requisição', eng: 'engenharia', rf: 'reforço', stg: 'estratégia' };
-const aarCol = s => (s ? FOE : FRIEND);
+/* a side's colour and class in the review, by its index (0 the Blue/USA, 1 the Red/Russia, 2 the Insurgents), whoever looks at it */
+const AARC = ['#6fc3b2', '#e2604f', '#d8a84a'], aarCol = s => AARC[s] || FOE, aarK = s => ['f', 'e', 'i'][s] || 'e', aarSd = R => anaSides((R && R.ns) || 2);
+const aarOrd = i => i + 1 + 'º';
 function aarEl(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function aarTable(rows, head) {
   const w = aarEl('div', 'aar-w'), t = aarEl('div', 'score aar-t'); t.style.gridTemplateColumns = 'minmax(8.5em,1fr) repeat(' + (head.length - 1) + ',auto)'; w.append(t);
@@ -31211,13 +31239,13 @@ function aarChart(R) {
   const cv = aarEl('canvas', 'aar-c'), W = 640, Hh = 200, dpr = Math.min(2, window.devicePixelRatio || 1);
   cv.width = W * dpr; cv.height = Hh * dpr; cv.setAttribute('role', 'img');
   const c = R.curve; if (c.length < 2) { cv.setAttribute('aria-label', 'Sem curva: a partida foi curta demais'); return cv; }
-  const g = cv.getContext('2d'), t1 = c[c.length - 1][0] || 1, hi = Math.max(R.tk0[0], R.tk0[1], ...c.map(e => Math.max(e[1], e[2]))), X = t => 40 + (W - 50) * t / t1, Y = v => 10 + (Hh - 50) * (1 - Math.max(0, v) / (hi || 1));
+  const SD = aarSd(R), g = cv.getContext('2d'), t1 = c[c.length - 1][0] || 1, hi = Math.max(...SD.map(s => R.tk0[s] || 0), ...c.map(e => Math.max(...SD.map(s => e[1 + s] || 0)))), X = t => 40 + (W - 50) * t / t1, Y = v => 10 + (Hh - 50) * (1 - Math.max(0, v) / (hi || 1));
   g.scale(dpr, dpr); g.font = '11px sans-serif'; g.fillStyle = '#9eaaa2'; g.strokeStyle = 'rgba(158,170,162,.25)'; g.lineWidth = 1;
   for (const f of [0, .5, 1]) { const y = Y(hi * f); g.beginPath(); g.moveTo(40, y); g.lineTo(W - 10, y); g.stroke(); g.fillText(String(Math.round(hi * f)), 4, y + 4); }
   for (let m = 0; m <= t1 / 60; m += Math.max(1, Math.ceil(t1 / 60 / 8))) g.fillText(m + ' min', X(m * 60) - 10, Hh - 26);
-  for (const s of [0, 1]) { g.strokeStyle = aarCol(s); g.lineWidth = 2; g.beginPath(); c.forEach((e, i) => (i ? g.lineTo(X(e[0]), Y(e[1 + s])) : g.moveTo(X(e[0]), Y(e[1 + s])))); g.stroke(); }
-  for (const m of R.marks || []) { g.fillStyle = aarCol(m.s); g.fillRect(X(Math.min(m.t, t1)) - 1, m.k === 'pt' ? Hh - 18 : Hh - 10, 3, m.k === 'pt' ? 8 : 6); }
-  cv.setAttribute('aria-label', 'Tíquetes ao longo da partida: ' + R.fac[0] + ' de ' + R.tk0[0] + ' a ' + Math.round(R.tk[0]) + ', ' + R.fac[1] + ' de ' + R.tk0[1] + ' a ' + Math.round(R.tk[1]) + '. Marcas embaixo: pontos que mudaram de dono (traço alto) e perdas caras (traço baixo).');
+  for (const s of SD) { g.strokeStyle = aarCol(s); g.lineWidth = 2; g.beginPath(); c.forEach((e, i) => (i ? g.lineTo(X(e[0]), Y(e[1 + s])) : g.moveTo(X(e[0]), Y(e[1 + s])))); g.stroke(); }
+  for (const m of R.marks || []) { g.fillStyle = aarCol(m.s); if (m.k === 'el') { g.fillRect(X(Math.min(m.t, t1)) - 1, 10, 3, Hh - 50); continue; } g.fillRect(X(Math.min(m.t, t1)) - 1, m.k === 'pt' ? Hh - 18 : Hh - 10, 3, m.k === 'pt' ? 8 : 6); }
+  cv.setAttribute('aria-label', 'Tíquetes ao longo da partida: ' + SD.map(s => R.fac[s] + ' de ' + R.tk0[s] + ' a ' + Math.round(R.tk[s])).join(', ') + '. Marcas embaixo: pontos que mudaram de dono (traço alto) e perdas caras (traço baixo)' + (SD.length > 2 ? '; traço de alto a baixo: um lado eliminado' : '') + '.');
   return cv;
 }
 function aarShow(R, sub) {
@@ -31225,22 +31253,28 @@ function aarShow(R, sub) {
   if (!R) { b.append(aarEl('p', '', 'Esta partida não deixou dados.')); return; }
   const N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0');
   b.append(aarEl('p', 'aar-sub', (sub || '') + (ERAS[R.era] ? ERAS[R.era].label : R.era) + ' · ' + mm(R.dur) + ' de partida' + (R.watch ? ' · IA × IA' : '') + (R.net ? ' · online' : '') + (R.adopt ? ' · dados desde a troca de anfitrião' : '')));
+  const SD = aarSd(R), many = SD.length > 2;
   b.append(aarEl('p', 'aar-res', !R.over ? 'Partida em andamento.' : R.win < 0 ? 'Empate: ' + R.whyTxt + '.' : N(R.win) + ' venceu: ' + R.whyTxt + '.'));
+  if (many && Array.isArray(R.place)) {   // N sides: the placing, and who was eliminated when
+    const el = new Map((R.out || []).map(e => [e.s, e]));
+    b.append(aarTable(R.place.map((s, i) => { const e = el.get(s); return Object.assign([aarOrd(i) + ' · ' + N(s), Math.round(R.tk[s] || 0), R.pts ? R.pts[s] || 0 : '—', e ? 'eliminado aos ' + mm(e.t) + (e.why === 'base' ? ' (base caiu)' : ' (sem tíquetes)') : R.over ? 'até o fim' : 'em jogo'], { cls: aarK(s) }); }),
+      ['Colocação', 'Tíquetes', 'Pontos', 'Situação']));
+  }
   b.append(aarEl('h3', '', 'Tíquetes'));
   b.append(aarChart(R));
-  const tk = [0, 1].filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.civ || 0), Math.round(x.other), Math.round(x.end)], { cls: s ? 'e' : 'f' }); });
+  const tk = SD.filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.civ || 0), Math.round(x.other), Math.round(x.end)], { cls: aarK(s) }); });
   b.append(aarTable(tk, ['Lado', 'Início', 'Perdas', 'Sangria', 'Pontos', 'Civis', 'Outros', 'Fim']));
-  b.append(aarEl('p', 'aar-note', R.eco ? 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: instalações, bases de suprimento, requisições e o resto.' : 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: requisições, instalações e o resto.'));
+  b.append(aarEl('p', 'aar-note', R.eco ? 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos' + (many ? ' que o lado que mais tem' : '') + '. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: instalações, bases de suprimento, requisições e o resto.' : 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos' + (many ? ' que o lado que mais tem' : '') + '. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: requisições, instalações e o resto.'));
   b.append(aarEl('h3', '', 'Decisões que mais pesaram'));
   if (!R.dec.length) b.append(aarEl('p', 'aar-note', 'Nenhuma decisão do general registrada.'));
-  else { const ol = aarEl('ol', 'aar-dec'); for (const d of R.dec) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s) + ' · ' + (AARD[d.c] || d.c) + ' · ' + (d.swing > 0 ? '+' : '') + Math.round(d.swing))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); } b.append(ol);
-    b.append(aarEl('p', 'aar-note', 'O número é quanto a margem do lado (tíquetes e 10 por ponto) mudou nos 2 minutos seguintes.')); }
+  else { const ol = aarEl('ol', 'aar-dec'); for (const d of R.dec) { const li = aarEl('li'); li.append(aarEl('b', aarK(d.s), mm(d.t) + ' · ' + N(d.s) + ' · ' + (AARD[d.c] || d.c) + ' · ' + (d.swing > 0 ? '+' : '') + Math.round(d.swing))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); } b.append(ol);
+    b.append(aarEl('p', 'aar-note', 'O número é quanto a margem do lado (tíquetes e 10 por ponto' + (many ? ', contra o melhor dos outros lados' : '') + ') mudou nos 2 minutos seguintes.')); }
   b.append(aarEl('h3', '', 'Custo-efetividade por tipo'));
-  const ef = R.eff.filter(r => r.lost || r.kills).map(r => Object.assign([N(r.s) + ' · ' + (AARK[r.u] || r.u), r.made, r.lost, r.kills, Math.round(r.paid), Math.round(r.value), r.ratio === null ? '∞' : String(r.ratio).replace('.', ','), r.life === null ? '—' : mm(r.life)], { cls: r.s ? 'e' : 'f' }));
+  const ef = R.eff.filter(r => r.lost || r.kills).map(r => Object.assign([N(r.s) + ' · ' + (AARK[r.u] || r.u), r.made, r.lost, r.kills, Math.round(r.paid), Math.round(r.value), r.ratio === null ? '∞' : String(r.ratio).replace('.', ','), r.life === null ? '—' : mm(r.life)], { cls: aarK(r.s) }));
   b.append(ef.length ? aarTable(ef, ['Tipo', 'Entrou', 'Perdidos', 'Abates', 'Pago', 'Destruído', 'Razão', 'Vida média']) : aarEl('p', 'aar-note', 'Sem perdas nem abates.'));
   b.append(aarEl('p', 'aar-note', 'Pago e Destruído em tíquetes; a razão é destruído sobre pago.'));
   if (R.civ) {
-    const C = R.civ, cr = [0, 1].filter(s => C.side[s]).map(s => { const x = C.side[s]; return Object.assign([N(s), x.killed, Math.round(x.tk), x.mil, x.roe], { cls: s ? 'e' : 'f' }); });
+    const C = R.civ, cr = SD.filter(s => C.side[s]).map(s => { const x = C.side[s]; return Object.assign([N(s), x.killed, Math.round(x.tk), x.mil, x.roe], { cls: aarK(s) }); });
     b.append(aarEl('h3', '', 'Civis e regras da guerra'));
     if (cr.length) b.append(aarTable(cr, ['Lado', 'Civis mortos', 'Tíquetes', 'Milícias', 'Fogo suspenso']));
     b.append(aarEl('p', 'aar-note', 'Cada civil morto custa ' + CIV.toll + ' tíquetes a quem o matou. Fogo suspenso: vezes em que a IA segurou um disparo de área por ter civis à vista e o alvo não identificado. '
@@ -31286,9 +31320,18 @@ aarShow = (f => (R, sub) => {
   const c = R && Array.isArray(R.comms) ? R.comms : null; if (!c || !c.some(Boolean)) return;
   const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), d = v => String(v).replace('.', ',');
   b.append(aarEl('h3', '', 'Rede de comando'));
-  b.append(aarTable([0, 1].filter(s => c[s]).map(s => { const x = c[s]; return Object.assign([N(s), x.sent, x.late, x.lost, d(x.lag) + ' s', Math.round(x.out * 100) + '%', x.hqDown ? Math.round(x.hqDown) + ' s' : '—', x.df], { cls: s ? 'e' : 'f' }); }),
+  b.append(aarTable(aarSd(R).filter(s => c[s]).map(s => { const x = c[s]; return Object.assign([N(s), x.sent, x.late, x.lost, d(x.lag) + ' s', Math.round(x.out * 100) + '%', x.hqDown ? Math.round(x.hqDown) + ' s' : '—', x.df], { cls: aarK(s) }); }),
     ['Lado', 'Ordens', 'Fora da rede', 'Perdidas', 'Demora média', 'Esquadras fora', 'Sem QG', 'Localizados']));
-  b.append(aarEl('p', 'aar-note', 'Ordens do comando pelo rádio: as que chegaram de fora da rede demoraram de 20 a 60 s, as perdidas não chegaram. Esquadras fora: a média das que estavam fora da rede ou cortadas pelo bloqueador. Localizados: transmissores do outro lado achados por radiogoniometria.'));
+  b.append(aarEl('p', 'aar-note', 'Ordens do comando pelo rádio: as que chegaram de fora da rede demoraram de 20 a 60 s, as perdidas não chegaram. Esquadras fora: a média das que estavam fora da rede ou cortadas pelo bloqueador. Localizados: transmissores dos outros lados achados por radiogoniometria.'));
+})(aarShow);
+
+/* the general's strategies (STG) in the review: here, after aarShow, since the page's DOM part comes after the simulation the tests load */
+aarShow = (g => (R, sub) => {
+  g(R, sub);
+  if (!R || !R.stg || !R.stg.length) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
+  for (const d of R.stg) { const li = aarEl('li'); li.append(aarEl('b', aarK(d.s), mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
+  b.append(aarEl('h3', '', 'Estratégias do general'), ol);
 })(aarShow);
 
 /* ---------- conquest: the strip, the capture bar, the marks, the result and the requisition ---------- */

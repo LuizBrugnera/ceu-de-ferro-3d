@@ -187,6 +187,28 @@ load({ seed: 37 }); fresh('modern'); C.run(2);
   ok(D.n[0] > d0 && D.tk[0] - t0 === (D.n[0] - d0) * CIV.toll, 'the battery fires it among them, and side 0 pays ' + CIV.toll + ' tickets a civilian killed (' + (D.n[0] - d0) + ' killed, ' + (D.tk[0] - t0) + ' paid)');
 }
 
+console.log('-- a fire mission at an identified enemy among civilians, from the coordinates get_state gives (tenths of a metre) --');
+load({ seed: 38 }); fresh('modern'); C.run(2);
+{
+  const { g, b } = bigTown(), c = ofTown(g).find(c => !c.in), Cm = C.cmdOf(0);
+  C.addUnit('art', 0, b.x > S.W / 2 ? b.x - 3000 : b.x + 3000, b.z, S.E.sides[S.fac[0]].art, true);
+  const pin = () => { for (const o of S.civs) { o.mode = 2; o.goal = null; o.v = { x: 0, y: 0, z: 0 }; } c.in = null; c.sn = [S.t, -1e9]; };
+  pin(); C.run(.05, pin);
+  const e = C.addVehicle('aa', S.E.sides[S.fac[1]].aa, 1, c.x + 8.0437, c.z + 3.0371, 0); e.seenT = S.t; e.moveT = -99; e.sx = e.x; e.sz = e.z; Cm.known = [e];
+  const o = man(0, e.x - 300, e.z, false), x = Math.round(e.sx * 10) / 10, z = Math.round(e.sz * 10) / 10, live = () => Cm.fm.filter(M => !M.dead && S.t < M.T && M.k === 'he');
+  C.genCtl(0, 'mcp', { eco: 0, atk: 0, def: 0, sup: 0 });
+  let r = C.genCmd(0, { c: 'fire', k: 'he', x, z, n: 3 }, 'mcp');
+  ok(!r.ok && r.why === 'roe', 'a model\'s burst at it while it is only detected, civilians in sight: refused (' + r.why + ')');
+  o.pm = new Map([[e, { kn: true, ic: 1, rc: 1 }]]); e.kn = [{ t0: S.t, last: S.t, by: o }, null];
+  r = C.genCmd(0, { c: 'fire', k: 'he', x, z, n: 3 }, 'mcp');
+  ok(r.ok && live().length === 1 && live()[0].tg === e, 'once identified, an order at its place rounded to tenths (' + x + ', ' + z + ') is accepted, the mission aimed at it');
+  for (const M of live()) M.dead = true;
+  C.genCtl(0, 'me', { eco: 0, atk: 0, def: 0, sup: 0 });
+  const n0 = S.glog.l[0].length;
+  r = C.genCmd(0, { c: 'fire', k: 'he', x: e.sx + 4, z: e.sz - 3, n: 3 }, 'me');
+  ok(r.ok && live()[0].tg === e && !S.glog.l[0].slice(n0).some(l => /alvo não identificado/.test(l.s)), 'a person\'s click 5 m off it: accepted with no "alvo não identificado" warning');
+}
+
 console.log('-- the general\'s order: mil --');
 load({ seed: 35 }); fresh('modern'); C.run(2);
 {

@@ -9128,6 +9128,11 @@ function shelled(x, z, team) {
    with 2 sides, or for t's own unit, they read seenT/sx/sz as before, so a battle of 2 sides goes as it did. seeBy(u, t, x, z, T) notes that side t
    saw u at T (now if left out) at x, z (where it was last noted if left out); sdsOf(): the sides of the battle */
 const NSD = () => S.N || 2, sdsOf = () => [...Array(NSD()).keys()];
+/* P1: P6a, P6c and P2 call foes(t) and foeBase(t, x, z) (the plan's section 4.1, from P0), which have not landed; until it does, the same rule as a global the page's
+   own binding replaces (a later 'const foes' shadows this property, no clash): every other side, unless S.rel says it is an ally */
+if (typeof globalThis.foes !== 'function') globalThis.foes = t => sdsOf().filter(s => s !== t && !(S.rel && S.rel[t] && S.rel[t][s] === 'ally'));
+if (typeof globalThis.foeBase !== 'function') globalThis.foeBase = (t, x, z) => { let b = null, bd = Infinity; for (const o of foes(t)) { const B = S.base[o]; if (!B) continue; const d = Math.hypot(B.x - x, B.z - z); if (d < bd) { bd = d; b = B; } } return b || S.base[1 - t] || S.base[0]; };   // the enemy base nearest (x, z)
+const eBase = (t, x, z) => (NSD() > 2 ? foeBase(t, x, z) : S.base[1 - t]);   // P1: the enemy base for t (today's S.base[1 - t]; with three sides the nearest)
 const perSd = (u, t) => NSD() > 2 && t >= 0 && t !== u.team;
 const sT = (u, t) => (perSd(u, t) ? (u.sn && u.sn[t] ? u.sn[t][0] : -1e9) : u.seenT);
 const sX = (u, t) => (perSd(u, t) && u.sn && u.sn[t] ? u.sn[t][1] : u.sx);
@@ -9565,7 +9570,7 @@ const slot = (q, i) => {
 function postPts(t, x, z, n, R, k) {
   const bp = bldPts(t, x, z, n, R, k); if (bp) return bp;
   const fp = fortPts(t, x, z, n, R); if (fp) return fp;
-  const e = S.base[1 - t], out = [], hs = R ? [] : near(x, z, 60).filter(o => o.K.sight && !o.K.rock && S.os[o.id] < 2).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 4);
+  const e = eBase(t, x, z), out = [], hs = R ? [] : near(x, z, 60).filter(o => o.K.sight && !o.K.rock && S.os[o.id] < 2).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 4);
   for (let i = 0; i < n; i++) {
     const w = hs[i % (hs.length || 1)], a = i * 2.4, r = R || 6 + 2.5 * (i >> 1); let p = { x: x + Math.cos(a) * r, z: z + Math.sin(a) * r };
     if (w) p = CORN4.map(q => { const lx = q[0] * (w.hw + 1.4), lz = q[1] * (w.hd + 1.4); return { x: w.x + lx * w.c + lz * w.s, z: w.z - lx * w.s + lz * w.c }; }).sort((a, b) => hdist(a, e) - hdist(b, e))[((i / hs.length) | 0) % 2];
@@ -9904,7 +9909,7 @@ function ptThreat(t, p, x, z) {
   if (n) return { x: sx / n, z: sz / n };
   let b = null, bd = 1e9;
   if (S.cq && p && p.links) for (const i of p.links) { const o = S.cq.p[i], d = Math.hypot(o.x - x, o.z - z); if (o.hold !== t && d < bd) { bd = d; b = o; } }
-  return b || S.base[1 - t];
+  return b || eBase(t, x, z);
 }
 /* the best place to be covered from o at (from anywhere with no o): x z, eight round it r m out and, past 10 m, eight more half as far */
 function covBest(x, z, r, o) {
@@ -11187,7 +11192,7 @@ function step(dt) {
   if (S.over) return;
   if (P && P.dead && S.respawn > 0 && !S.hold) {   // what was lost may be on its countdown: the player waits for it, or picks something else
     S.respawn -= dt;
-    if (S.respawn <= 0) { if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
+    if (S.respawn <= 0) { if (cqOut(S.me)) S.respawn = 1; else if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
   }
   if (!S.net || S.host) { a0 = AIB.now(); director(dt); AIB.g += AIB.now() - a0; }
 }
@@ -12234,6 +12239,15 @@ const CIV = {
       modern: { name: 'Milícia', role: 'Civil armado', era: 'modern', side: 0, hp: 11, parts: [], arms: [{ name: 'Fuzil antigo', rate: 1.9, dmg: 9, spd: 700, mag: 5, mags: 1, sp: .018, rl: 3.2 }] } } }
 };
 const CIVDEF = { name: 'Civil', era: 'ww2', side: 0, parts: [] }, CIVARMS = [{ d: {} }];
+/* the militia kit of the era for side t (P8, NOT TESTED): CIV.mil.kit's, marked with t's faction (def.side is a faction, as on every kit), one copy per era and faction */
+const CIVKIT = new Map();
+function civKit(t) {
+  const K = CIV.mil.kit[S.era], f = S.fac && S.fac[t] !== undefined ? S.fac[t] : 0;
+  if (K.side === f) return K;
+  const k = S.era + ':' + f;
+  if (!CIVKIT.has(k)) CIVKIT.set(k, Object.assign({}, K, { side: f }));
+  return CIVKIT.get(k);
+}
 const civBegin = () => { S.civs = []; S.civN = 0; S.civX = []; S.civI = new Map(); S.civM = new Map(); S.civD = null; };
 /* where the towns stand: houses by town, the streets that run through each, then the people in them */
 function civGroups() {
@@ -12405,7 +12419,7 @@ const civMine = id => S.men.reduce((n, m) => n + (m.mil && !m.dead && m.own === 
    soldier keeps the first kit of its side as its id, so that a snapshot row and a death name something every server knows */
 function civRecruit(c, team, own) {
   if (c.dead || c.gone || c.net || S.men.length >= IAI.cap) return null;
-  const E = INF[S.era][S.fac[team]], K = CIV.mil.kit[S.era], m = addMan(E[0], team, c.x, c.z, c.h);
+  const E = INF[S.era][S.fac[team]] || INF[S.era][0], K = civKit(team), m = addMan(E[0], team, c.x, c.z, c.h);
   m.def = K; m.name = K.name; m.max = m.hp = K.hp; m.nades = m.smk = m.kit = m.chg = 0; m.mil = 1; m.cc = c.cc; m.pi = c.pi; m.inv = 1;
   m.arms = K.arms.map(a => ({ d: a, mag: a.mag, res: a.mags, cool: 0, rl: 0, t: -9, lock: null, lockT: 0 }));
   m.ai = manBrain(0); m.ai.gx = m.x; m.ai.gz = m.z; if (own !== undefined) m.own = own;
@@ -12446,11 +12460,12 @@ function civFollow(dt) {
 function civPlan() {
   const K = S.civT || (S.civT = []), M = CIV.mil;
   towns().forEach((w, i) => {
-    const k = K[i] || (K[i] = { t: [0, 0], cl: [0, 0] }), n = [0, 0], foe = [false, false];
-    for (const m of S.men) if (!m.dead && !m.in) { const d = hdist(m, w); if (d < FIELD.town && !m.mil) n[m.team]++; if (d < M.calm) foe[m.team] = true; }
-    for (const u of S.units) if (!u.dead && hdist(u, w) < M.calm) foe[u.team] = true;
-    for (const t of [0, 1]) {
-      k.t[t] = n[t] >= FIELD.held && !foe[1 - t] ? k.t[t] + CIV.plan : 0;
+    const k = K[i] || (K[i] = { t: [], cl: [] }), n = sdsOf().map(() => 0), by = sdsOf().map(() => false);   // by: a side stands within calm m
+    for (const m of S.men) if (!m.dead && !m.in && civT(m.team)) { const d = hdist(m, w); if (d < FIELD.town && !m.mil) n[m.team]++; if (d < M.calm) by[m.team] = true; }
+    for (const u of S.units) if (!u.dead && civT(u.team) && hdist(u, w) < M.calm) by[u.team] = true;
+    for (const t of sdsOf()) {
+      k.cl[t] = k.cl[t] || 0;
+      k.t[t] = n[t] >= FIELD.held && !civFoes(t).some(s => by[s]) ? (k.t[t] || 0) + CIV.plan : 0;
       if (k.t[t] >= M.wait && S.t >= k.cl[t]) { k.cl[t] = S.t + M.every; civRaise(w, t); }
     }
   });
@@ -12567,23 +12582,28 @@ function civStep(dt) {
    towns that turned (index in S.T.burgs: bits of the sides), hits the deaths by side in each town, say what the feed has yet to tell by side, mil the
    militia squads raised by side, rv when a town that turned arms its next squad, cl when a person's general may arm a town again (town:side), roe the holds by side (rT: when each place was last noted),
    evac and back the towns that emptied and came home */
-const civD = () => S.civD || (S.civD = { n: [0, 0], tk: [0, 0], dead: 0, foe: {}, hits: {}, say: [{ n: 0, tk: 0, T: 0 }, { n: 0, tk: 0, T: 0 }], mil: [0, 0], rv: {}, cl: {}, roe: [0, 0], rT: {}, evac: 0, back: 0 });
+const civD = () => S.civD || (S.civD = { n: sdsOf().map(() => 0), tk: sdsOf().map(() => 0), dead: 0, foe: {}, hits: {}, say: sdsOf().map(() => ({ n: 0, tk: 0, T: 0 })), mil: sdsOf().map(() => 0), rv: {}, cl: {}, roe: sdsOf().map(() => 0), rT: {}, evac: 0, back: 0 });
+/* t is one of the match's sides (0 .. NSD() - 1) */
+const civT = t => Number.isInteger(t) && t >= 0 && t < NSD();
+/* the sides at war with t (P8): every other side, unless a table of relations (S.rel[t][s] === 'ally', P0) says it is a friend */
+const civFoes = t => sdsOf().filter(s => s !== t && !(S.rel && S.rel[t] && S.rel[t][s] === 'ally'));
 /* the town a civilian belongs to (its index in S.T.burgs, -1 none): its group's, else (a copy of the host's) where it stands */
 function civBi(c) {
   const B = S.T.burgs, b = (c.g && c.g.b) || B.find(b => hdist(b, c) < b.ru + 30);
   return b ? B.indexOf(b) : -1;
 }
-const civHates = (bi, t) => bi >= 0 && !!S.civD && (t === 0 || t === 1) && !!((S.civD.foe[bi] | 0) & (1 << t));
+const civHates = (bi, t) => bi >= 0 && !!S.civD && civT(t) && !!((S.civD.foe[bi] | 0) & (1 << t));
 /* a town's name: its own, a point of the match on it, else a word */
 function civName(b) {
   if (b.nm) return b.nm;
   const p = S.cq && S.cq.p.find(p => hdist(p, b) < 150); if (p) return p.name;
   return b.k === 'town' ? 'a vila' : b.k === 'village' ? 'a aldeia' : 'o povoado';
 }
-const civSide = t => S.E.sides[S.fac[t]].name;
+/* a side's name: its faction's, the Insurgents' label while their faction is not in the era's sides yet (before P4), else 'lado n' */
+const civSide = t => { const d = S.E.sides[S.fac[t]], I = typeof FACTIONS !== 'undefined' && FACTIONS.modern && FACTIONS.modern.insurgentes; return d ? d.name : I && S.fac[t] === I.slot ? I.label : 'lado ' + (t + 1); };
 /* a civilian killed by by's fire, where the battle is simulated (civKill) */
 function civToll(c, by) {
-  const D = civD(), t = by && (by.team === 0 || by.team === 1) ? by.team : -1, bi = civBi(c);
+  const D = civD(), t = by && civT(by.team) ? by.team : -1, bi = civBi(c);
   const paid = t >= 0 && cqSim() && !S.cq.ph ? CIV.toll : 0;
   D.dead++;
   anaCv('kill', t, { x: Math.round(c.x), z: Math.round(c.z), b: bi, tk: paid });
@@ -12592,27 +12612,45 @@ function civToll(c, by) {
   if (paid) { S.cq.tk[t] -= paid; D.tk[t] += paid; }
   const s = D.say[t]; s.n++; s.tk += paid; if (!s.T) s.T = S.t + CIV.say;
   if (bi < 0) return;
-  const h = D.hits[bi] || (D.hits[bi] = [0, 0]); h[t]++;
+  const h = D.hits[bi] || (D.hits[bi] = sdsOf().map(() => 0)); h[t] = (h[t] | 0) + 1;
   if (h[t] >= CIV.rage.n && !civHates(bi, t)) civTurn(bi, t);
 }
-/* the town bi turns against side t: told to all, and it arms its militia for the other side at once (unless it hates both) */
+/* the town bi turns against side t: told to all (each of t's enemies hears it turned against t), and it arms its militia at once for a side it does not hate (civRevolt) */
 function civTurn(bi, t) {
   const D = civD(), b = S.T.burgs[bi], nm = civName(b);
   D.foe[bi] = (D.foe[bi] | 0) | (1 << t);
   civHeard(t, 0, bi, D.foe[bi], 0);
   if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, 0, bi, D.foe[bi], 0] });
   gLog(t, 'rep', 'A população de ' + nm + ' se voltou contra nós: ' + CIV.rage.n + ' civis mortos por fogo nosso', b, 'cvt' + bi);
-  gLog(1 - t, 'rep', 'A população de ' + nm + ' se voltou contra o inimigo', b, 'cvt' + bi);
+  for (const s of civFoes(t)) gLog(s, 'rep', 'A população de ' + nm + ' se voltou contra ' + (NSD() > 2 ? civSide(t) : 'o inimigo'), b, 'cvt' + bi);
   anaCv('turn', t, { b: bi, nm });
   civRevolt(bi);
 }
-/* a town that turned arms a squad for the side it does not hate, every CIV.mil.every s */
+/* a town that turned arms a squad, every CIV.mil.every s, for a side it does not hate (civArms) */
 function civRevolt(bi) {
-  const D = civD(), f = D.foe[bi] | 0, t = f === 1 ? 1 : f === 2 ? 0 : -1, b = S.T.burgs[bi];
+  const D = civD(), t = civArms(bi), b = S.T.burgs[bi];
   if (t < 0 || !b || S.t < (D.rv[bi] || 0)) return;
   D.rv[bi] = S.t + CIV.mil.every;
   const w = towns().find(w => hdist(w, b) < 150) || { x: b.x, z: b.z };
   civTake(w, t, 'turn');
+}
+/* the side a town that turned arms its militia for (P8, D8; NOT TESTED), -1 none: of the sides it does not hate, and that are enemies of one it hates,
+   the Insurgents' when they are one of them (the town takes up arms with the irregulars), else the one whose fire killed the fewest of its people
+   (the one it hates least; the first on a tie). With two sides it is the other side, and none when it hates both, as before */
+function civArms(bi) {
+  const D = civD(), f = D.foe[bi] | 0, h = D.hits[bi] || [];
+  if (!f) return -1;
+  const L = sdsOf().filter(s => !(f & (1 << s)) && civFoes(s).some(o => f & (1 << o)));
+  if (!L.length) return -1;
+  const ins = civIns();
+  if (ins >= 0 && L.includes(ins)) return ins;
+  return L.reduce((a, s) => ((h[s] | 0) < (h[a] | 0) ? s : a), L[0]);
+}
+/* the Insurgents' side in this match (the side whose faction is FACTIONS.modern.insurgentes' slot), -1 none */
+function civIns() {
+  if (NSD() < 3 || S.era !== 'modern' || typeof FACTIONS === 'undefined' || !FACTIONS.modern || !FACTIONS.modern.insurgentes) return -1;
+  const f = FACTIONS.modern.insurgentes.slot;
+  return sdsOf().find(t => S.fac[t] === f) ?? -1;
 }
 /* the general of side t raises the town w's militia: its AI's choice where the AI holds the defence, else the town arms itself for the side */
 function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def') === 'ai' ? 'ai' : 'sys'); }
@@ -12620,12 +12658,12 @@ function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def'
    tk the tickets those deaths cost it */
 function civHeard(t, n, bi, f, tk) {
   const D = civD(), b = bi >= 0 && S.T.burgs[bi], was = b ? D.foe[bi] | 0 : 0;
-  if (b && f >= 0 && f < 4) D.foe[bi] = was | f;
-  if ((t === 0 || t === 1) && n > 0) {
+  if (b && f >= 0 && f < (1 << NSD())) D.foe[bi] = was | f;
+  if (civT(t) && n > 0) {
     cqSay(civSide(t) + ': ' + (n > 1 ? n + ' civis mortos' : 'um civil morto') + (tk > 0 ? ' · −' + tk + ' tíquetes' : ''), t);
     if (!S.net || S.host) gLog(t, 'rep', (n > 1 ? n + ' civis mortos' : 'Um civil morto') + ' por fogo nosso' + (tk > 0 ? ': −' + tk + ' tíquetes' : ''));
   }
-  if (b && (t === 0 || t === 1) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
+  if (b && civT(t) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
 }
 /* the feed's word on the deaths, CIV.say s after the first of a run */
 function civSays() {
@@ -12652,10 +12690,13 @@ function civWar() {
   }
   for (const bi in D.foe) civRevolt(+bi);
 }
-/* are both sides within CIV.evac.r m of the town's edge */
+/* do two sides that are enemies stand within CIV.evac.r m of the town's edge */
 function civFight(b) {
-  const R = b.ru + CIV.evac.r, f = [false, false];
-  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && !o.in && (o.team === 0 || o.team === 1) && !f[o.team] && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R) { f[o.team] = true; if (f[0] && f[1]) return true; }
+  const R = b.ru + CIV.evac.r, f = [];
+  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && !o.in && civT(o.team) && !f[o.team] && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R) {
+    f[o.team] = true;
+    if (civFoes(o.team).some(s => f[s])) return true;
+  }
   return false;
 }
 /* the town g empties: a refuge beyond its edge away from where the fighting was heard (the first of a fan of headings that is on the map, dry,
@@ -12704,12 +12745,13 @@ function civLook(dt) {
   const K = CIV.roe;
   if (!K.on || (S.civL = (S.civL || 0) - dt) > 0) return;
   S.civL = K.every;
-  const obs = [[], []];
-  for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && (o.team === 0 || o.team === 1)) obs[o.team].push(o);
+  const obs = sdsOf().map(() => []);
+  for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && civT(o.team)) obs[o.team].push(o);
   for (const c of S.civs) {
     if (c.dead || c.gone || c.in || c.net) continue;
-    const sn = c.sn || (c.sn = [-1e9, -1e9]);
-    for (const t of [0, 1]) {
+    const sn = c.sn || (c.sn = sdsOf().map(() => -1e9));
+    for (const t of sdsOf()) {
+      if (sn[t] === undefined) sn[t] = -1e9;
       let k = 0;
       for (const o of obs[t]) {
         const R = o.man || o.kind ? K.see : K.see * 2;
@@ -12731,10 +12773,10 @@ function roeIdf(t, o) {
 }
 /* do side t's rules of engagement bar a burst of radius r at x z on target o: a civilian it has seen there lately, and o not identified */
 function roeBar(t, x, z, r, o) {
-  if (!CIV.roe.on || !S.civs || !S.civs.length || (t !== 0 && t !== 1)) return false;
+  if (!CIV.roe.on || !S.civs || !S.civs.length || !civT(t)) return false;
   const K = CIV.roe, R = (r || 0) + K.pad;
   let near = false;
-  for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
+  for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && c.sn[t] !== undefined && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
   return near && !roeIdf(t, o);
 }
 /* must the AI of side t hold that burst (roeBar), written down when it does */
@@ -12953,7 +12995,7 @@ errand = (f => (team, kind, ri, s0, legs, o) => {
 
 /* the first choice of where to enter: the player, already in at the main base, is put beside the supply base chosen */
 function crewMove(P, b) {
-  const a = rand(0, TAU), e = S.base[1 - S.me], c = clearOf(b.x + Math.cos(a) * BLD.spawn, b.z + Math.sin(a) * BLD.spawn, P.man ? 1.5 : 6, {}), h = headTo(c.x, c.z, e.x, e.z);
+  const a = rand(0, TAU), e = eBase(S.me, b.x, b.z), c = clearOf(b.x + Math.cos(a) * BLD.spawn, b.z + Math.sin(a) * BLD.spawn, P.man ? 1.5 : 6, {}), h = headTo(c.x, c.z, e.x, e.z);
   P.x = c.x; P.z = c.z; P.y = P.man ? manY(c.x, c.z) : hgt(c.x, c.z); P.h = h; P.v = { x: 0, y: 0, z: 0 }; P.inv = 4;
   if (P.kind) { P.sp = 0; if (S.fcp) S.fcp = { x: clamp(P.x + Math.cos(h) * HOW.pt, 0, S.W), z: clamp(P.z - Math.sin(h) * HOW.pt, -S.HW, S.HW) }; }
   if (S.aim) { S.aim.h = h; S.aim.p = 0; }
@@ -16503,7 +16545,7 @@ function bldWins(o, ex, ez) {
 function bldPts(t, x, z, n, R, k) {
   const I = CITY.ai; if ((R && R > I.ring) || k === 'build' || k === 'supply') return null;
   const burg = S.T.burgs.some(b => b.k !== 'hamlet' && Math.hypot(b.x - x, b.z - z) < b.ru + 40), r = R ? R + I.near : burg ? I.post : I.near;
-  const e = S.base[1 - t], hs = near(x, z, r).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - t])).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 2), l = [], out = [];
+  const e = eBase(t, x, z), hs = near(x, z, r).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - t])).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 2), l = [], out = [];
   for (const o of hs) l.push(bldWins(o, e.x - o.x, e.z - o.z).slice(0, I.men));
   for (const f of S.forts) if (f.k === 1 && f.prog >= 1 && !f.in[1 - t] && Math.abs(f.x - x) < FORT.ai.post && Math.abs(f.z - z) < FORT.ai.post) for (const p of fortSlots(f)) out.push(p);   // a trench dug at the post comes first
   for (let k = 0; k < I.men; k++) for (const w of l) if (w[k]) out.push(w[k]);
@@ -16869,7 +16911,7 @@ function aiMortar(m, dt) {
 }
 
 /* ---------- the commander: what it knows ---------- */
-const cmdOf = t => (S.cmd || (S.cmd = [0, 1].map(t => perInit({ t, doc: CMD.doc[CMD.use[t]] || CMD.doc.balanced, ops: [], amb: [], ambT: [], fm: [], own: [], enemy: [], front: [], foe: [], ratio: [], post: [], known: [], inf: null, nx: 0, nz: 0, focus: null, hit: null, peak: 0, thr: 0, atkT: CMD.open, sc: {}, took: [], scd: new Set(), want: null, last: null, cue: null, man: [], mev: [], mcd: {}, taste: null, kz: null, fb: [], resAt: null, gue: null, mid: 0, mnT: 0, fpN: 0, fpT: -1 }))))[t];
+const cmdOf = t => (S.cmd || (S.cmd = sdsOf().map(t => perInit({ t, doc: CMD.doc[CMD.use[t]] || CMD.doc.balanced, ops: [], amb: [], ambT: [], fm: [], own: [], enemy: [], front: [], foe: [], ratio: [], post: [], known: [], inf: null, nx: 0, nz: 0, focus: null, hit: null, peak: 0, thr: 0, atkT: CMD.open, sc: {}, took: [], scd: new Set(), want: null, last: null, cue: null, man: [], mev: [], mcd: {}, taste: null, kz: null, fb: [], resAt: null, gue: null, mid: 0, mnT: 0, fpN: 0, fpT: -1 }))))[t];
 const cmdInf = (C, x, z) => (C.inf ? C.inf[clamp((z + S.HW) / CMD.cell | 0, 0, C.nz - 1) * C.nx + clamp(x / CMD.cell | 0, 0, C.nx - 1)] : 0);
 const cmdBias = (t, o) => { const F = S.cmd && S.cmd[t].focus; return F && Math.abs(o.x - F.x) < F.r && Math.abs(o.z - F.z) < F.r ? CMD.air : 0; };
 /* the known enemy's strength within r m of a point, and where its middle is (KN) */
@@ -18688,7 +18730,7 @@ function thbSense(C) {
   if (Q) Q.p.forEach((p, i) => {
     const was = pc[i] === undefined ? p.c : pc[i]; pc[i] = p.c;
     if (p.hold !== t) return;
-    const E = cmdKnown(C, p.x, p.z, CMD.thr), kx = KN.n ? KN.x : p.x, kz = KN.n ? KN.z : p.z, ex = (p.c - was) * own < -1e-4;   // its bar moving away from this side: being taken
+    const E = cmdKnown(C, p.x, p.z, CMD.thr), kx = KN.n ? KN.x : p.x, kz = KN.n ? KN.z : p.z, ex = p.c - was < -1e-4;   // its bar going down (P2: c is the holder's progress): being taken
     if (E > THB.min || ex) see('p' + i, 'pt', p, gName(p), p.base >= 0 ? THB.val.base : p.tw ? THB.val.town : THB.val.pt, E, ex, kx, kz, 'p' + i);
   });
   const hit = id => S.ot[id] !== undefined && S.t - S.ot[id] < THB.hit;
@@ -18953,9 +18995,35 @@ function ptsOf() {
   return (T.pts = P);
 }
 function cqInit(len) {
-  const L = CQ.len[len] ? len : CQ.def, tk = Math.round(CQ.len[L][2] * CQ.era[S.era] * (S.mv >= 3 ? RN.tk[S.era + (S.T.n === 3 ? '3' : '')] : 1));
-  S.cq = { len: L, T: CQ.len[L][1] * 60, T0: CQ.len[L][1] * 60, tk: [tk, tk], tk0: tk, p: ptsOf().map(d => Object.assign({}, d, { hold: d.own, c: d.own < 0 ? 0 : d.own ? 1 : -1, w: [0, 0] })), ph: 0, res: null, fr: 0, acc: 0, endT: 0,
-    lost: [[0, 0, 0], [0, 0, 0]], rd: [{}, {}], st: { k: 0, d: 0, c: 0 }, stock: {}, rq: {} };
+  const L = CQ.len[len] ? len : CQ.def, tk = Math.round(CQ.len[L][2] * CQ.era[S.era] * (S.mv >= 3 ? RN.tk[S.era + (S.T.n === 3 ? '3' : '')] : 1));   // RN.tk.modern3: the map of three sides has 16 points, not 12
+  S.cq = { len: L, T: CQ.len[L][1] * 60, T0: CQ.len[L][1] * 60, tk: sdsOf().map(() => tk), tk0: tk, p: ptsOf().map(d => Object.assign({}, d, { hold: d.own, cap: -1, c: d.own < 0 ? 0 : 1, w: sdsOf().map(() => 0) })), ph: 0, res: null, place: null, fr: 0, acc: 0, endT: 0,
+    lost: sdsOf().map(() => [0, 0, 0]), rd: sdsOf().map(() => ({})), out: sdsOf().map(() => 0), ord: [], st: { k: 0, d: 0, c: 0 }, stock: {}, rq: {} };
+}
+/* N sides (P2): a point is hold (its side or -1), cap (the side taking a neutral one, or -1) and c, the progress 0..1 of the holder,
+   or of cap on a neutral point. With 2 sides it is the old signed bar: c_old = (hold >= 0 ? hold : cap) ? c : -c. out[t]: 0 alive, or why
+   side t is out (1 its tickets, 3 its main base), ord the order they went out in */
+const cqOut = t => !!(S.cq && S.cq.out && S.cq.out[t]);
+const cqLive = () => sdsOf().filter(t => !cqOut(t));
+const cqSide = p => (p.hold >= 0 ? p.hold : p.cap);
+const cqHot = p => { let n = 0; for (const v of p.w) if (v > 0) n++; return n > 1; };
+const cqFoeW = (p, t) => { let m = 0; p.w.forEach((v, s) => { if (s !== t && v > m) m = v; }); return m; };
+/* the placing: the sides alive first, by points, then (tk) by tickets; then the ones out, the last out first. win: the first, unless tied with the second */
+function cqRank(tk = true) {
+  const Q = S.cq, h = sdsOf().map(cqHeld), key = t => [h[t], tk ? Q.tk[t] : 0], live = cqLive().sort((a, b) => h[b] - h[a] || (tk ? Q.tk[b] - Q.tk[a] : 0));
+  const place = live.concat(Q.ord.slice().reverse()), a = place[0], b = live[1];
+  return { win: a === undefined ? -1 : b !== undefined && key(a)[0] === key(b)[0] && key(a)[1] === key(b)[1] ? -1 : a, place };
+}
+/* side s is out: its points go neutral (while others still play on), its director stops, its players watch; the last side standing wins */
+function cqOust(s, why) {
+  const Q = S.cq, N = S.E.sides; if (!Q || Q.out[s] || Q.ph) return;
+  Q.out[s] = why; Q.ord.push(s);
+  const live = cqLive();
+  if (live.length <= 1) return cqEnd(live.length ? live[0] : -1, why);
+  for (const p of Q.p) { if (p.hold === s) { p.hold = -1; p.cap = -1; p.c = 0; } else if (p.cap === s) { p.cap = -1; p.c = 0; } }
+  if (S.cmd && S.cmd[s]) S.cmd[s].out = 1;
+  cqSay(N[S.fac[s]].name + ' foi eliminado: ' + (why === 3 ? 'a base principal caiu' : 'os tíquetes acabaram'), s);
+  for (const t of live) gLog(t, 'rep', N[S.fac[s]].name + ' foi eliminado');
+  if (s === S.me) S.banner = { text: 'Seu lado foi eliminado', sub: 'A partida segue entre os outros lados: você assiste até o fim.', life: 8 };
 }
 const cqSim = () => !!S.cq && (!S.net || S.host);
 const cqHeld = t => S.cq.p.reduce((a, p) => a + (p.hold === t ? 1 : 0), 0);
@@ -18991,7 +19059,7 @@ function cqDead(o) {
   cmdLoss(o);
 }
 /* is the director free to replace a loss of that kind on side t: always where the general produces (the time to make it is the wait) */
-const cqFree = (t, k) => !S.cq || gpOn() || !(S.t < (S.cq.rd[t][k] || 0));
+const cqFree = (t, k) => !S.cq || (!cqOut(t) && (gpOn() || !(S.t < (S.cq.rd[t][k] || 0))));   // a side that is out gets nothing more
 /* what the player lost comes back after a while: cdKey the model, cdOf how long, cdLeft what is left of it */
 const cdKey = (cls, model) => cls + ':' + model;
 function cdOf(cls, model) {
@@ -19005,7 +19073,7 @@ const cdStart = (cls, model) => { if (PCD && S.cq) (S.cd || (S.cd = {}))[cdKey(c
 /* how long a player of side t waits to come back */
 const cqWait = t => (S.cq ? CQ.wait[0] + CQ.wait[1] * clamp(1 - Math.max(0, S.cq.tk[t]) / (S.cq.tk0 * CQ.low), 0, 1) : 4);
 /* may side t enter at point p: '' or foe (not its own), fight (contested), unsafe (an enemy within CQ.safe m) */
-const cqSpawnWhy = (p, t) => (p.hold !== t ? 'foe' : p.w[1 - t] > 0 || Math.abs(p.c) < 1 ? 'fight' : S.units.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) || S.men.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) ? 'unsafe' : '');
+const cqSpawnWhy = (p, t) => (p.hold !== t ? 'foe' : cqOut(t) ? 'foe' : cqFoeW(p, t) > 0 || p.c < 1 ? 'fight' : S.units.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) || S.men.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) ? 'unsafe' : '');
 function cqSay(text, t) {
   S.feed.push({ text, life: 6, team: t }); if (S.feed.length > 4) S.feed.shift();
 }
@@ -19014,16 +19082,17 @@ function cqFlip(p, was) {
   if (p.hold < 0) { if (cqSim()) Q.tk[was] -= CQ.lost; cqSay(N[S.fac[was]].name + ' perdeu ' + p.L + ' · ' + p.name, was); gLog(was, 'rep', 'Perdemos ' + p.L + ' · ' + p.name, p); }
   else {
     if (cqSim()) Q.tk[p.hold] = Math.min(Q.tk0, Q.tk[p.hold] + CQ.took);
-    cqSay(N[S.fac[p.hold]].name + ' tomou ' + p.L + ' · ' + p.name, p.hold); gLog(p.hold, 'rep', 'Tomamos ' + p.L + ' · ' + p.name, p); gLog(1 - p.hold, 'rep', 'O inimigo tomou ' + p.L + ' · ' + p.name, p);
+    cqSay(N[S.fac[p.hold]].name + ' tomou ' + p.L + ' · ' + p.name, p.hold); gLog(p.hold, 'rep', 'Tomamos ' + p.L + ' · ' + p.name, p); for (const s of sdsOf()) if (s !== p.hold && !cqOut(s)) gLog(s, 'rep', (NSD() > 2 ? N[S.fac[p.hold]].name : 'O inimigo') + ' tomou ' + p.L + ' · ' + p.name, p);
     if (here && p.hold === S.me) { Q.st.c++; S.floats.push({ x: me.x, y: me.y + 6, z: me.z, text: 'Ponto capturado: ' + p.name, life: 3 }); }
   }
   S.tw = null; for (const C of S.cmd || []) C.took = [];
   if (was >= 0 && S.cmd && p.hold !== was) S.cmd[was].atkT = Math.min(S.cmd[was].atkT, S.t + INC.op.ctr);
 }
-function cqEnd(win, why) {
+function cqEnd(win, why, place) {
   const Q = S.cq; if (Q.ph) return;
-  Q.ph = 1; Q.res = [win, why]; Q.endT = S.t; Q.left = CQ.next;
-  endGame(win < 0 ? 'Empate' : win === S.me ? 'Vitória' : 'Derrota');
+  Q.ph = 1; Q.res = [win, why]; Q.place = place || cqRank().place; Q.endT = S.t; Q.left = CQ.next;
+  const i = Q.place.indexOf(S.me);
+  endGame(win < 0 ? 'Empate' : win === S.me ? 'Vitória' : NSD() > 2 && i > 0 ? 'Derrota · ' + (i + 1) + 'º lugar' : 'Derrota');
 }
 function cqStep(dt) {
   const Q = S.cq;
@@ -19033,27 +19102,43 @@ function cqStep(dt) {
   Q.T -= dt;
   if ((Q.acc += dt) < .25) return;
   const e = Q.acc, P = Q.p; Q.acc = 0;
-  for (const p of P) p.w[0] = p.w[1] = 0;
-  const put = (o, w) => { for (const p of P) if (Math.abs(o.x - p.x) < p.r && Math.abs(o.z - p.z) < p.r && hdist(o, p) < p.r) p.w[o.team] += w; };
+  for (const p of P) p.w.fill(0);
+  const put = (o, w) => { for (const p of P) if (Math.abs(o.x - p.x) < p.r && Math.abs(o.z - p.z) < p.r && hdist(o, p) < p.r && o.team < p.w.length) p.w[o.team] += w; };
   for (const m of S.men) if (!m.dead && !m.in && !m.down) put(m, CQ.w.inf);
   for (const u of S.units) if (!u.dead && CQ.w[u.kind] && !(u.ai && u.ai.park) && !u.lim) put(u, CQ.w[u.kind]);
-  const tied = [cqTied(0), cqTied(1)];
+  const tied = sdsOf().map(t => (cqOut(t) ? new Set() : cqTied(t)));
   let fr = -1, fs = 0;
   for (const p of P) {
-    const d = p.w[1] - p.w[0], t = d > 0 ? 1 : 0, was = p.hold, may = p.hold === t || p.links.some(i => P[i].hold === t);
-    if (d && may) p.c = clamp(p.c + (t ? 1 : -1) * Math.min(Math.abs(d), CQ.max) / CQ.t * e, -1, 1);
-    else if (!p.w[0] && !p.w[1]) { const g = was < 0 || !tied[was].has(p.i) ? 0 : was ? 1 : -1, k = e / (g || was < 0 ? CQ.idle : CQ.cut); p.c = Math.abs(g - p.c) <= k ? g : p.c + Math.sign(g - p.c) * k; }
-    if (was >= 0 && (was ? p.c <= 0 : p.c >= 0)) { p.hold = -1; cqFlip(p, was); }
-    if (p.hold < 0 && Math.abs(p.c) >= 1) { p.hold = p.c > 0 ? 1 : 0; cqFlip(p, was); }
-    const sc = p.base >= 0 ? 0 : (p.w[0] && p.w[1] ? 3 : 0) + (Math.abs(p.c) < 1 ? 2 : 0) + (p.hold < 0 ? 1 : 0);
+    let L = -1, a = 0, b = 0;   // the side with the most weight in it, and the margin over the next
+    p.w.forEach((v, t) => { if (v > a) { b = a; a = v; L = t; } else if (v > b) b = v; });
+    const d = a - b, was = p.hold, may = L >= 0 && !cqOut(L) && (p.hold === L || p.links.some(i => P[i].hold === L)), k = Math.min(d, CQ.max) / CQ.t * e;
+    if (d > 0 && may) {
+      if (p.hold === L) p.c = Math.min(1, p.c + k);   // its own: back to full
+      else if (p.hold >= 0) { p.c -= k; if (p.c <= 0) { p.hold = -1; p.cap = L; p.c = Math.min(1, -p.c); cqFlip(p, was); } }   // another's: down to neutral, and L starts taking it
+      else if (p.cap === L || p.cap < 0) { p.cap = L; p.c = Math.min(1, p.c + k); }
+      else { p.c -= k; if (p.c <= 0) { p.cap = L; p.c = Math.min(1, -p.c); } }   // neutral, being taken by another: undo that first
+    } else if (!a) {   // empty: settles back to its holder while tied to its base, else goes neutral in cut s; a neutral one back to nobody's
+      if (p.hold >= 0) { p.c = tied[p.hold].has(p.i) ? Math.min(1, p.c + e / CQ.idle) : p.c - e / CQ.cut; if (p.c <= 0) { p.hold = -1; p.cap = -1; p.c = 0; cqFlip(p, was); } }
+      else { p.c = Math.max(0, p.c - e / CQ.idle); if (!p.c) p.cap = -1; }
+    }
+    if (p.hold < 0 && p.cap >= 0 && p.c >= 1) { p.hold = p.cap; p.cap = -1; p.c = 1; cqFlip(p, was); }
+    const sc = p.base >= 0 ? 0 : (cqHot(p) ? 3 : 0) + (p.c < 1 ? 2 : 0) + (p.hold < 0 ? 1 : 0);
     if (sc > fs) { fs = sc; fr = p.ri; }
-    if (p.base >= 0 && p.hold === 1 - p.base) return cqEnd(p.hold, 3);
+    if (p.base >= 0 && p.hold >= 0 && p.hold !== p.base && !cqOut(p.base)) { cqOust(p.base, 3); if (Q.ph) return; }   // a main base taken: its side is out
   }
   if (fr >= 0) Q.fr = fr;
-  const n0 = cqHeld(0), n1 = cqHeld(1), m = n0 - n1;
-  if (m) Q.tk[m > 0 ? 1 : 0] -= CQ.bleed[Math.min(Math.abs(m), CQ.bleed.length - 1)] / 60 * e;
-  if (Q.tk[0] <= 0 || Q.tk[1] <= 0) return cqEnd(Q.tk[0] <= 0 && Q.tk[1] <= 0 ? (m ? +(m < 0) : -1) : +(Q.tk[0] <= 0), 1);
-  if (Q.T <= 0) cqEnd(m ? +(m < 0) : Q.tk[0] === Q.tk[1] ? -1 : +(Q.tk[1] > Q.tk[0]), 2);
+  const live = cqLive(), held = sdsOf().map(cqHeld);
+  for (const s of live) {   // a side behind the leader in points bleeds by how far behind (2 sides: the old rule)
+    let m = 0; for (const o of live) if (o !== s) m = Math.max(m, held[o] - held[s]);
+    if (m > 0) Q.tk[s] -= CQ.bleed[Math.min(m, CQ.bleed.length - 1)] / 60 * e;
+  }
+  const z = live.filter(s => Q.tk[s] <= 0);
+  if (z.length) {
+    if (z.length >= live.length) { const r = cqRank(false); return cqEnd(r.win, 1, r.place); }   // all out of tickets at once: the points decide
+    for (const s of z) cqOust(s, 1);
+    if (Q.ph) return;
+  }
+  if (Q.T <= 0) { const r = cqRank(); cqEnd(r.win, 2, r.place); }
 }
 /* the point the player's body stands in, for the capture bar */
 function cqHere() {
@@ -19069,9 +19154,11 @@ Net.ui.rematch = () => {};
 Net.cqNew = () => { Net.cqn++; Net.cqSend(1); Net.ui.rematch(); };
 Net.cqSend = (fresh) => {
   const Q = S.cq, p = []; if (!Q) return;
-  if (!fresh) for (const o of Q.p) p.push(o.hold, Math.round(o.c * 100), Math.round(o.w[0] * 10), Math.round(o.w[1] * 10));
+  const v2 = Q.tk.length > 2;   // cq v2 (3 sides): a point [hold, c in hundredths, cap, the weights in tenths]; 2 sides keep v1, the signed bar
+  if (!fresh) for (const o of Q.p) { if (v2) p.push(o.hold, Math.round(o.c * 100), o.cap, ...o.w.map(v => Math.round(v * 10))); else { const sd = cqSide(o); p.push(o.hold, Math.round((sd === 1 ? o.c : sd === 0 ? -o.c : 0) * 100), Math.round(o.w[0] * 10), Math.round(o.w[1] * 10)); } }
   Net.cqacc = 0;
-  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: Q.lost[0].concat(Q.lost[1]) }, !fresh && Q.res && { r: Q.res, w: Math.max(0, Math.round(Q.left)) },
+  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: [].concat(...Q.lost) }, v2 && { v: 2 },
+    !fresh && Q.res && { r: v2 ? Q.res.concat([Q.place || cqRank().place]) : Q.res, w: Math.max(0, Math.round(Q.left)) },
     !fresh && Net.lg && S.lg && { sk: Q.p.map(o => (o.base < 0 && o.hold >= 0 ? Math.floor(o.lc || 0) : -1)) }));   // logistics (lg): the crates of each point, -1 none
 };
 /* friendly fire is a rule of the room: the host's choice (message ff), which a server that does not know it never carries, and then nobody hurts a friend */
@@ -19085,15 +19172,23 @@ Net.rx.cq = m => {
   const Q = S && S.cq;
   if (!S || !S.net || S.host || !Net.cq || !Array.isArray(m.p) || !Array.isArray(m.k)) return;
   if (m.n !== Net.cqn) { Net.cqn = m.n; return Net.ui.rematch(); }
-  if (!Q || m.p.length !== Q.p.length * 4) return;
-  Q.T = m.T; Q.tk = m.k.slice(0, 2); Q.tk0 = m.k0 || Q.tk0; Q.len = CQ.len[m.len] ? m.len : Q.len;
-  if (Array.isArray(m.l) && m.l.length === 6) Q.lost = [m.l.slice(0, 3), m.l.slice(3)];
-  Q.p.forEach((p, i) => { const was = p.hold; p.hold = m.p[i * 4]; p.c = m.p[i * 4 + 1] / 100; p.w[0] = m.p[i * 4 + 2] / 10; p.w[1] = m.p[i * 4 + 3] / 10; if (p.hold !== was && (p.hold >= 0 || was >= 0)) cqFlip(p, was); });
-  if (m.ph === 1 && !Q.ph && Array.isArray(m.r)) cqEnd(m.r[0], m.r[1]);
+  const NN = Q ? Q.tk.length : 2, v2 = m.v === 2, st = v2 ? 3 + NN : 4;
+  if (!Q || m.p.length !== Q.p.length * st || m.k.length < NN || (!v2 && NN > 2)) return;
+  Q.T = m.T; Q.tk = m.k.slice(0, NN); Q.tk0 = m.k0 || Q.tk0; Q.len = CQ.len[m.len] ? m.len : Q.len;
+  if (Array.isArray(m.l) && m.l.length === 3 * NN) Q.lost = Q.tk.map((_, t) => m.l.slice(3 * t, 3 * t + 3));
+  Q.p.forEach((p, i) => {
+    const was = p.hold, j = i * st; p.hold = m.p[j];
+    if (v2) { p.c = m.p[j + 1] / 100; p.cap = m.p[j + 2]; for (let t = 0; t < NN; t++) p.w[t] = m.p[j + 3 + t] / 10; }
+    else { const c = m.p[j + 1] / 100; p.c = Math.abs(c); p.cap = p.hold >= 0 || !c ? -1 : c > 0 ? 1 : 0; p.w[0] = m.p[j + 2] / 10; p.w[1] = m.p[j + 3] / 10; }
+    if (p.hold !== was && (p.hold >= 0 || was >= 0)) cqFlip(p, was);
+  });
+  const out = v2 && !Q.ph ? Q.tk.map((k, t) => (k <= 0 ? 1 : Q.p.some(p => p.base === t && p.hold >= 0 && p.hold !== t) ? 3 : 0)) : [];   // the server carries no out list: a side with no tickets or its base taken is out
+  out.forEach((w, t) => { if (w && !Q.out[t]) { Q.out[t] = w; Q.ord.push(t); if (t === S.me) S.banner = { text: 'Seu lado foi eliminado', sub: 'A partida segue entre os outros lados: você assiste até o fim.', life: 8 }; cqSay(S.E.sides[S.fac[t]].name + ' foi eliminado', t); } });
+  if (m.ph === 1 && !Q.ph && Array.isArray(m.r)) cqEnd(m.r[0], m.r[1], v2 && Array.isArray(m.r[2]) ? m.r[2] : null);
   if (Q.ph) Q.left = m.w || 0;
 };
 Net.tick = (tick => dt => { tick(dt); if (S.net && S.host && Net.cq && S.cq && (Net.cqacc += dt) >= .5) Net.cqSend(); })(Net.tick);
-Net.adopt = (old => () => { old(); const Q = S.cq; if (Q) { Q.rd = [{}, {}]; if (Q.ph) { Q.left = Math.max(Q.left || 0, 5); Q.again = 0; } } })(Net.adopt);
+Net.adopt = (old => () => { old(); const Q = S.cq; if (Q) { Q.rd = Q.tk.map(() => ({})); if (Q.ph) { Q.left = Math.max(Q.left || 0, 5); Q.again = 0; } } })(Net.adopt);
 Net.kill = (old => (g, det) => { if (g && !g.dead && S.host && g.pid) cqDead(g); old(g, det); })(Net.kill);
 /* ---------- requisition (RQ): a soldier on foot draws a vehicle at a depot ----------
    A depot (rqDepot): the main base (k 1), a finished supply base of the side (k 2), or a point it holds, uncontested, with such a base
@@ -19316,7 +19411,7 @@ function radGuard(t, sq) {
   }
 }
 fortPlan = (f => (t, sq) => { f(t, sq); radGuard(t, sq); })(fortPlan);
-cqDead = (f => o => { const Q = S.cq, was = o.cqd; f(o); if (Q && o.cqd && !was && o.def && o.def.rad) Q.tk[1 - o.team] = Math.min(Q.tk0, Q.tk[1 - o.team] + RAD.bonus[o.man ? 0 : 2]); })(cqDead);
+cqDead = (f => o => { const Q = S.cq, was = o.cqd; f(o); if (!Q || !o.cqd || was || !o.def || !o.def.rad) return; const by = o.lastBy, k = by && by.team !== undefined && by.team !== o.team ? by.team : Q.tk.length > 2 ? -1 : 1 - o.team; if (k >= 0 && !cqOut(k)) Q.tk[k] = Math.min(Q.tk0, Q.tk[k] + RAD.bonus[o.man ? 0 : 2]); })(cqDead);   // the radio bonus: to the side that killed it
 /* the squad that waits for the assault brings an operator in place of its last rifleman */
 jobKits = (f => (t, job) => { const i = job === 'push' ? INF[S.era][S.fac[t]].findIndex(id => KITS[id].rad) : -1, Q = SQUAD[S.era]; return i < 0 || (S.net && !Net.cq) ? f(t, job) : Q.slice(0, 2).concat(Q.slice(3), [i]); })(jobKits);
 Net.rx.rad = m => { if (!S.net || S.host || !Array.isArray(m.e)) return; S.rl = m.e.filter(e => Array.isArray(e) && e.length === 7).map(e => ({ id: e[0], k: e[1], team: e[2], x: e[3], z: e[4], n: e[5], w: e[6], o: null })); for (const u of S.units) if (u.def.rad && u !== S.my) u.dep = S.rl.some(r => r.k === 2 && Math.abs(r.x - u.x) < 8 && Math.abs(r.z - u.z) < 8) ? 1 : 0; };
@@ -19415,7 +19510,7 @@ const dstock = m => m.dst || (m.dst = Object.fromEntries(m.def.drone.map(k => [k
 const qmul = (a, b) => ({ x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w, w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z });
 const dHead = o => Math.atan2(-o.f.z, o.f.x);
 const droneOn = () => S.modern && (!S.net || Net.dr);
-function droneRail(team) { const b = S.base[team], e = S.base[1 - team], h = headTo(b.x, b.z, e.x, e.z), x = b.x + Math.cos(h) * 320 - Math.sin(h) * 150, z = b.z - Math.sin(h) * 320 - Math.cos(h) * 150; return { x, z, h, y: hgt(x, z) }; }
+function droneRail(team) { const b = S.base[team], e = eBase(team, b.x, b.z), h = headTo(b.x, b.z, e.x, e.z), x = b.x + Math.cos(h) * 320 - Math.sin(h) * 150, z = b.z - Math.sin(h) * 320 - Math.cos(h) * 150; return { x, z, h, y: hgt(x, z) }; }
 function addDrone(k, team, x, y, z, h, op, ai) {
   const d = DDEF[k][S.fac[team]], o = { drone: 1, k, def: d, team, name: d.name, x, y, z, q: yawQ(h), v: { x: 0, y: 0, z: 0 }, w: { x: 0, y: 0, z: 0 }, ctl: { roll: 0, pitch: 0, yaw: 0, thr: 1 / d.tw }, ec: { roll: 0, pitch: 0, yaw: 0, thr: 1 / d.tw },
     V: 0, bat: d.bat, sagK: 1, link: 1, lq: 1, lkT: 0, lost: 0, jam: 0, hp: d.hp, op: op || null, ai: ai || null, mode: 0, armed: false, pay: d.pay ? d.pay.n : 0, pcool: 0, cut: false, auto: null, nav: null, hx: x, hz: z, t0: S.t, inv: 0, dead: false, gone: false, end: null, hs: null, zoom: 0, slot: d.air === 'delta' ? 1 : 0 };
@@ -20543,7 +20638,7 @@ function gLog(t, k, s, at, key, tg) {
 /* the tickets now and then, for the panel's trend (called each frame; one comparison when it is not time) */
 function genSample() {
   if (!S || !S.cq || S.t < (S.gtkT || 0)) return;
-  S.gtkT = S.t + GEN.tk; (S.gtk || (S.gtk = [])).push([Math.round(S.t), Math.round(S.cq.tk[0]), Math.round(S.cq.tk[1])]);
+  S.gtkT = S.t + GEN.tk; (S.gtk || (S.gtk = [])).push([Math.round(S.t)].concat(S.cq.tk.map(Math.round)));
   if (S.gtk.length > 400) S.gtk.shift();
 }
 /* what the commander is doing, in a word and a reason: a plain mapping of its state (ops, threat, want, timers), it decides nothing */
@@ -20688,7 +20783,7 @@ function genVM(t, all) {
   return genNet({ t, all, T: S.t, over: !!S.over, res: Q ? Q.res : null, net: !!S.net, host: !S.net || !!S.host, cmd: !!C,
     nm: [0, 1].map(i => S.E.sides[S.fac[i]].name), doc: C ? GEN.doc[docK(C)] || '' : '',
     tk: Q ? Q.tk.slice() : null, tk0: Q ? Q.tk0 : 0, clock: Q ? Q.T : null, held: Q ? [cqHeld(0), cqHeld(1)] : null, lost: Q ? Q.lost : null, trend: S.gtk || [],
-    pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, base: p.base, tw: p.tw, w: [p.w[0], p.w[1]], links: p.links }))
+    pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, cap: p.cap, base: p.base, tw: p.tw, w: p.w.slice(), links: p.links }))
       : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: [0, 0], links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
     sup: S.sup.filter(b => !b.dead && (all || b.team === t || spotted(b, t))).map(b => ({ x: b.x, z: b.z, t: b.team, prog: b.prog, a: b.a })),
@@ -22720,7 +22815,7 @@ function genState(t) {
   }
   const log = (S.glog ? S.glog.l[t] : []).slice(-20).map(e => ({ t: e.t, k: e.k, s: e.s, x: e.x, z: e.z }));
   const o = { t, T: S.t, ctl: V.ctl || { seat: 'ai', eco: 'ai', atk: 'ai', def: 'ai', sup: 'ai' }, doc: V.doc, over: V.over, res: V.res, tk: V.tk, clock: V.clock,
-    pts: V.pts.map((p, i) => ({ i, L: p.L, name: p.name, x: p.x, z: p.z, hold: p.hold, c: p.c, base: p.base })),
+    pts: V.pts.map((p, i) => ({ i, L: p.L, name: p.name, x: p.x, z: p.z, hold: p.hold, c: p.c, cap: p.cap === undefined ? -1 : p.cap, base: p.base })),
     roads: V.road ? V.road.map((r, ri) => ({ ri, own: r.own, foe: r.foe, k: r.k, post: r.post })) : null,
     sq, veh, foe, ops: V.ops, fm: V.fm, post: V.post, want: V.want, gate: V.gate, eco: S.eco ? ecoView(t) : null, log, thb: V.thb || [], camp: V.camp || [] };
   return JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
@@ -23413,7 +23508,7 @@ function bombFoe(o, r) {
   return best;
 }
 /* the AI holds a bomb the rules of engagement bar; a human's goes off */
-const bombHeld = (o, B, t) => !!o.ai && roeHeld(o.team, o.x, o.z, B.r, t);   // every side's AI, the Insurgents' too (P7, D9)
+const bombHeld = (o, B, t) => !!o.ai && roeHeld(o.team, o.x, o.z, B.r, t);   // every side's AI, the Insurgents' too (P7, D9); roeBar checks civT (P8)
 function bombGo(o) {
   const B = bombOf(o); if (!B || o.bGone) return; o.bGone = true;
   const x = o.x, z = o.z, y = (o.y || hgt(x, z)) + 1;
@@ -24779,9 +24874,12 @@ function civState(t) {
     let home = 0, away = 0;
     for (const c of S.civs || []) if (!c.dead && !c.gone && c.g && c.g.b === b) { if (c.mode >= 4) away++; else home++; }
     const f = D ? D.foe[i] | 0 : 0;
-    if (home || away || f) towns.push({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), home, away, hate: f & (1 << t) ? (f & (1 << (1 - t)) ? 'both' : 'us') : f ? 'them' : '' });
+    // hate: us (only us), them (others, not us), both (us and another); against: every side it hates, by name (P8: with three sides 'them' may be either enemy)
+    if (home || away || f) towns.push({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), home, away, hate: f & (1 << t) ? (f & ~(1 << t) ? 'both' : 'us') : f ? 'them' : '',
+      against: sdsOf().filter(s => f & (1 << s)).map(s => (s === t ? 'us' : civSide(s))) });
   });
-  return { killed: D ? D.n[t] : 0, enemyKilled: D ? D.n[1 - t] : 0, tk: D ? D.tk[t] : 0, toll: CIV.toll, roe: D ? D.roe[t] : 0, towns };
+  const n = D ? D.n : [];
+  return { killed: D ? n[t] | 0 : 0, enemyKilled: civFoes(t).reduce((a, s) => a + (n[s] | 0), 0), bySide: sdsOf().map(s => ({ side: civSide(s), killed: n[s] | 0 })), tk: D ? D.tk[t] | 0 : 0, toll: CIV.toll, roe: D ? D.roe[t] | 0 : 0, towns };
 }
 genState = (f => t => Object.assign(f(t), { civ: civState(t) }))(genState);
 /* an analytics event of the laws of war */
@@ -28858,6 +28956,8 @@ ecoUnpack = (g => K => {
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
 const FRIEND = '#6fc3b2', FOE = '#e2604f';
+/* 3 sides (P2): each enemy in its own colour, by side (0 EUA violet-blue, 1 Rússia red, 2 Insurgentes ochre); 2 sides: the one FOE */
+const FOEC = ['#8f86ff', '#e2604f', '#d9a441'], foeCol = s => (S && NSD() > 2 && FOEC[s]) || FOE;
 let renderer, scene, camera, cw = 1, ch = 1, dpr = 1, frameId = 0;
 let gPlanes, gUnits, gWrecks, gDebris, gBombs, gMissiles, gFlares, gSup, gEco, gGhost, tracers, sparks, skyDome, shadows = [];
 const MAXB = 700, MAXP = 1500;
@@ -32193,39 +32293,48 @@ aarShow = (g => (R, sub) => {
 })(aarShow);
 
 /* ---------- conquest: the strip, the capture bar, the marks, the result and the requisition ---------- */
-const cqCol = t => (t < 0 ? '#aeb6b3' : t === S.me ? FRIEND : FOE), mmss = s => { s = Math.max(0, Math.ceil(s)); return (s / 60 | 0) + ':' + String(s % 60).padStart(2, '0'); };
+const cqCol = t => (t < 0 ? '#aeb6b3' : t === S.me ? FRIEND : foeCol(t)), mmss = s => { s = Math.max(0, Math.ceil(s)); return (s / 60 | 0) + ':' + String(s % 60).padStart(2, '0'); };
 const cqDist = d => (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km');
-/* the top strip: my tickets, the points in chain order from my base (filled by c, bordered by the holder, a white blink while both sides
-   stand in one, a tick under it for each side inside), the enemy's tickets, the clock. Returns how far down it reaches */
+/* the order of the strip: 2 sides, the chain from my base; 3 sides (P2), mine by distance to my base, then the others the same way */
+function cqOrder(me) {
+  const Q = S.cq; if (Q.tk.length <= 2) return me ? Q.p.slice().reverse() : Q.p;
+  const b = S.base[me] || Q.p[0], d = p => hdist(p, b);
+  return Q.p.filter(p => p.hold === me).sort((a, c) => d(a) - d(c)).concat(Q.p.filter(p => p.hold !== me).sort((a, c) => d(a) - d(c)));
+}
+/* the top strip: my tickets, the points (filled by c in the colour of who holds or takes it, bordered by the holder, a white blink while
+   two sides stand in one, a tick under it for each side inside), each enemy's tickets in its colour (✕ once out), the clock. Returns how far down it reaches */
 function hudCq(P, u, ink, acc, disp, blink, mapV) {
-  const Q = S.cq, me = S.me, n = Q.p.length, w = 21 * u, g = 3 * u, h = 19 * u, tw = 44 * u, W = n * (w + g) - g + 2 * (tw + 8 * u), x0 = cw < 720 ? 8 : cw / 2 - W / 2, y0 = 8, L = me ? Q.p.slice().reverse() : Q.p;
+  const Q = S.cq, me = S.me, n = Q.p.length, foes = Q.tk.map((_, t) => t).filter(t => t !== me), w = 21 * u, g = 3 * u, h = 19 * u, tw = 44 * u, W = n * (w + g) - g + (1 + foes.length) * (tw + 8 * u), x0 = cw < 720 ? 8 : cw / 2 - W / 2, y0 = 8, L = cqOrder(me), many = Q.tk.length > 2;
+  const tkS = t => (cqOut(t) ? '✕' : String(Math.max(0, Math.ceil(Q.tk[t]))));
   hx.fillStyle = 'rgba(8,12,13,.5)'; hx.fillRect(x0 - 4, y0 - 4, W + 8, h + 24 * u);
-  txt(String(Math.max(0, Math.ceil(Q.tk[me]))), x0 + tw, y0, 17 * u, FRIEND, 'right', disp);
+  txt(tkS(me), x0 + tw, y0, 17 * u, FRIEND, 'right', disp);
   let x = x0 + tw + 8 * u;
   for (const p of L) {
-    const k = Math.abs(p.c), hot = p.w[0] > 0 && p.w[1] > 0;
+    const k = p.c, hot = cqHot(p), sd = cqSide(p);
     hx.fillStyle = 'rgba(8,12,13,.8)'; hx.fillRect(x, y0, w, h);
-    if (k > 0) { hx.globalAlpha = p.hold < 0 ? .5 : .9; hx.fillStyle = cqCol(p.c > 0 ? 1 : 0); hx.fillRect(x, y0 + h * (1 - k), w, h * k); hx.globalAlpha = 1; }
+    if (k > 0 && sd >= 0) { hx.globalAlpha = p.hold < 0 ? .5 : .9; hx.fillStyle = cqCol(sd); hx.fillRect(x, y0 + h * (1 - k), w, h * k); hx.globalAlpha = 1; }
     hx.strokeStyle = hot && blink ? '#ffffff' : cqCol(p.hold); hx.lineWidth = hot ? 2.2 : 1.3; hx.strokeRect(x + .5, y0 + .5, w - 1, h - 1);
     txt(p.L, x + w / 2, y0 + 3 * u, 12 * u, '#ffffff', 'center');
-    for (const t of [0, 1]) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
+    if (many) { if (p.w[me] > 0) { hx.fillStyle = FRIEND; hx.fillRect(x + u, y0 + h + 2 * u, 4 * u, 3 * u); } foes.forEach((t, j) => { if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + w - 5 * u * (j + 1), y0 + h + 2 * u, 4 * u, 3 * u); } }); }
+    else for (const t of [0, 1]) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
     x += w + g;
   }
-  txt(String(Math.max(0, Math.ceil(Q.tk[1 - me]))), x + 5 * u, y0, 17 * u, FOE, 'left', disp);
+  let xt = x + 5 * u;
+  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
   let y = y0 + h + 26 * u;
   const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere() : null;
   if (p) {
-    const k = ((me ? p.c : -p.c) + 1) / 2, a = p.w[me], b = p.w[1 - me], may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
-    const st = a > 0 && b > 0 && a === b ? 'DISPUTADO' : a > b ? (!may ? 'SEM LIGAÇÃO COM UM PONTO SEU' : k >= 1 ? 'SEU' : p.hold === me ? 'DEFENDENDO' : 'CAPTURANDO') : b > a ? 'PERDENDO' : p.hold === me ? 'SEU' : p.hold < 0 ? 'NEUTRO' : 'DO INIMIGO';
+    const sd = cqSide(p), k = sd === me ? .5 + .5 * p.c : sd < 0 ? .5 : .5 - .5 * p.c, a = p.w[me] || 0, b = cqFoeW(p, me), may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
+    const st = a > 0 && b > 0 && a === b ? 'DISPUTADO' : a > b ? (!may ? 'SEM LIGAÇÃO COM UM PONTO SEU' : k >= 1 ? 'SEU' : p.hold === me ? 'DEFENDENDO' : 'CAPTURANDO') : b > a ? 'PERDENDO' : p.hold === me ? 'SEU' : p.hold < 0 ? 'NEUTRO' : many ? 'DE ' + S.E.sides[S.fac[p.hold]].name.toUpperCase() : 'DO INIMIGO';
     txt(p.L + ' · ' + p.name.toUpperCase(), cw / 2, y, 12 * u, ink, 'center');
-    hx.fillStyle = FOE; hx.globalAlpha = .75; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw, 6 * u); hx.globalAlpha = 1; hx.fillStyle = FRIEND; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw * k, 6 * u);
+    hx.fillStyle = sd >= 0 && sd !== me ? cqCol(sd) : FOE; hx.globalAlpha = .75; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw, 6 * u); hx.globalAlpha = 1; hx.fillStyle = FRIEND; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw * k, 6 * u);
     hx.strokeStyle = 'rgba(8,12,13,.85)'; hx.lineWidth = 1; hx.strokeRect(cw / 2 - bw / 2 - .5, y + 16 * u - .5, bw + 1, 6 * u + 1);
     txt(f(a) + ' × ' + f(b) + ' · ' + st, cw / 2, y + 25 * u, 11 * u, a > 0 && b > 0 && blink ? '#ffffff' : ink, 'center');
     y += 40 * u;
   }
-  if (!mapV && !P.dead) {   // the nearest points that matter: what my side may take, and what it holds with the enemy in it
-    const l = Q.p.filter(o => o !== p && (o.hold === me ? o.w[1 - me] > 0 : o.links.some(i => Q.p[i].hold === me))).sort((a, b) => hdist(a, P) - hdist(b, P)).slice(0, 3);
+  if (!mapV && !P.dead) {   // the nearest points that matter: what my side may take, and what it holds with an enemy in it
+    const l = Q.p.filter(o => o !== p && (o.hold === me ? cqFoeW(o, me) > 0 : o.links.some(i => Q.p[i].hold === me))).sort((a, b) => hdist(a, P) - hdist(b, P)).slice(0, 3);
     for (const o of l) {
       const s = proj(o.x, hgt(o.x, o.z) + 34, o.z); if (!onScr(s) || s.y < y + 10) continue;
       bracket(s.x, s.y, 8, cqCol(o.hold), true); txt(o.L, s.x, s.y - 6 * u, 11 * u, '#ffffff', 'center'); txt(cqDist(hdist(o, P)), s.x, s.y + 12, 10 * u, cqCol(o.hold), 'center');
@@ -32235,13 +32344,13 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
   }
   return y;
 }
-/* the points on a map: a ring in the holder's colour, filled as far as it is taken, and its letter on a large one */
+/* the points on a map: a ring in the holder's colour, filled as far as it is held or taken in that side's colour, and its letter on a large one */
 function cqMarks(X, Y, u, big) {
   const Q = S.cq, r = big ? 9 : 4.5; if (!Q) return;
   for (const p of Q.p) {
-    const x = X(p.x), y = Y(p.z), hot = p.w[0] > 0 && p.w[1] > 0;
+    const x = X(p.x), y = Y(p.z), hot = cqHot(p), sd = cqSide(p);
     hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fillStyle = 'rgba(8,12,13,.7)'; hx.fill();
-    if (p.c) { hx.beginPath(); hx.arc(x, y, r * Math.sqrt(Math.abs(p.c)), 0, TAU); hx.fillStyle = cqCol(p.c > 0 ? 1 : 0); hx.globalAlpha = .8; hx.fill(); hx.globalAlpha = 1; }
+    if (p.c && sd >= 0) { hx.beginPath(); hx.arc(x, y, r * Math.sqrt(p.c), 0, TAU); hx.fillStyle = cqCol(sd); hx.globalAlpha = .8; hx.fill(); hx.globalAlpha = 1; }
     hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.strokeStyle = hot && (S.t * 5 | 0) % 2 ? '#ffffff' : cqCol(p.hold); hx.lineWidth = big ? 2 : 1.3; hx.stroke();
     if (big) txt(p.L, x, y - 6 * u, 11 * u, '#ffffff', 'center');
   }
@@ -32254,12 +32363,20 @@ function overFill() {
   tl.textContent = ''; sc.textContent = '';
   $('#overTitle').textContent = S.why || 'Partida encerrada';
   if (!Q || !Q.res) { $('#overWhy').textContent = ''; return; }
-  const [win, why] = Q.res, lose = 1 - win;
+  const [win, why] = Q.res, many = Q.tk.length > 2, pl = Q.place || cqRank().place, lose = many ? pl[pl.length - 1] : 1 - win;
+  if (many) {   // 3 sides (P2): the placing, 1st, 2nd and 3rd, each with its points, tickets and losses
+    $('#overWhy').textContent = win < 0 ? 'Empate: o tempo acabou com os primeiros iguais em pontos e tíquetes.' : N(win) + ' venceu: ' + (why === 2 ? 'o tempo acabou e ficou em 1º (lados de pé, depois pontos, depois tíquetes).' : 'foi o último lado de pé.');
+    row(tl, 'Sua colocação', (pl.indexOf(me) + 1) + 'º de ' + pl.length); row(tl, 'Tempo de partida', mmss(Q.T0 - Math.max(0, Q.T)));
+    row(tl, 'Seus abates', Q.st.k); row(tl, 'Suas capturas', Q.st.c); row(tl, 'Suas quedas', Q.st.d);
+    for (const h of ['Lado', 'Pontos', 'Tíquetes', 'Perdas: soldados / veículos / aeronaves']) cell(h, 'h');
+    pl.forEach((t, i) => { cell((i + 1) + 'º · ' + N(t) + (t === win ? ' · vitória' : Q.out[t] ? ' · eliminado' : ''), t === me ? 'f' : 'e'); cell(cqHeld(t)); cell(Math.max(0, Math.ceil(Q.tk[t]))); cell(Q.lost[t].join(' / ')); });
+  } else {
   $('#overWhy').textContent = win < 0 ? 'O tempo acabou com os dois lados iguais em pontos e tíquetes.' : N(win) + ' venceu: ' + (why === 1 ? 'os tíquetes de ' + N(lose) + ' acabaram.' : why === 3 ? 'a base principal de ' + N(lose) + ' foi tomada.' : 'o tempo acabou e ' + (cqHeld(win) !== cqHeld(lose) ? 'tinha mais pontos.' : 'tinha mais tíquetes.'));
   row(tl, 'Pontos', cqHeld(me) + ' × ' + cqHeld(1 - me)); row(tl, 'Tíquetes', Math.max(0, Math.ceil(Q.tk[me])) + ' × ' + Math.max(0, Math.ceil(Q.tk[1 - me]))); row(tl, 'Tempo de partida', mmss(Q.T0 - Math.max(0, Q.T)));
   row(tl, 'Seus abates', Q.st.k); row(tl, 'Suas capturas', Q.st.c); row(tl, 'Suas quedas', Q.st.d);
   for (const h of ['Lado', 'Pontos', 'Tíquetes', 'Perdas: soldados / veículos / aeronaves']) cell(h, 'h');
   for (const t of [me, 1 - me]) { cell(N(t) + (t === win ? ' · vitória' : ''), t === me ? 'f' : 'e'); cell(cqHeld(t)); cell(Math.max(0, Math.ceil(Q.tk[t]))); cell(Q.lost[t].join(' / ')); }
+  }
   if (S.net) {
     for (const h of ['Jogador', 'Abates', 'Quedas', 'IA']) cell(h, 'h');
     for (const o of [...Net.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths).slice(0, 12)) { cell((o.id === Net.id ? '▸ ' : '') + o.name, pSide(o) === me ? 'f' : 'e'); cell(o.kills); cell(o.deaths); cell(o.ai || 0); }
@@ -32402,7 +32519,7 @@ const GLAY = [
   { id: 'fx', nm: 'Efeitos', on: 1, draw: gFx }];
 const gLay = id => GLAY.find(L => L.id === id), GVSPD = [1, 2, 4], gMono = k => (k | 0) + 'px "Share Tech Mono",ui-monospace,monospace', gHead = (k, big) => (k | 0) + 'px "' + (S.modern ? 'Chakra Petch' : 'Saira Stencil One') + '",Impact,sans-serif';
 const gAcc = () => (S.modern ? '#63d2e6' : '#e6b53a');
-const gCol = (V, s) => (s === V.t ? FRIEND : s < 0 ? '#aeb6b3' : FOE);
+const gCol = (V, s) => (s === V.t ? FRIEND : s < 0 ? '#aeb6b3' : foeCol(s));
 const gE = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
 
 function genOpen(v, user) {
@@ -32614,8 +32731,8 @@ function gObj(g, V, P, now) {
   for (const p of V.pts) {
     if (!gOn(P, p.x, p.z, 80)) continue;
     const x = P.X(p.x), y = P.Y(p.z), r = Math.max(9 * P.k, (p.r || 60) * P.s), hc = gCol(V, p.hold), a = Math.abs(p.c);
-    g.beginPath(); g.arc(x, y, r, 0, TAU); g.globalAlpha = .12 + .3 * a; g.fillStyle = p.c === 0 ? '#aeb6b3' : gCol(V, p.c < 0 ? 0 : 1); g.fill(); g.globalAlpha = 1; g.strokeStyle = hc; g.lineWidth = 2; g.stroke();
-    if (p.w && p.w[0] && p.w[1]) { g.setLineDash([4, 4]); gRing(g, x, y, r + 4, '#ece6d6', 1.2); g.setLineDash([]); }
+    g.beginPath(); g.arc(x, y, r, 0, TAU); g.globalAlpha = .12 + .3 * a; g.fillStyle = !p.c || cqSide(p) < 0 ? '#aeb6b3' : gCol(V, cqSide(p)); g.fill(); g.globalAlpha = 1; g.strokeStyle = hc; g.lineWidth = 2; g.stroke();
+    if (p.w && cqHot(p)) { g.setLineDash([4, 4]); gRing(g, x, y, r + 4, '#ece6d6', 1.2); g.setLineDash([]); }
     if (p.L) gTxt(g, p.L, x, y + 5 * P.k, 14 * P.k, '#ece6d6', 'center');
   }
 }

@@ -8247,6 +8247,48 @@ const MSL = {
 };
 
 /* ---------- projectiles ---------- */
+/* swept hits for the rounds in S.bombs (a tank's shells above all), so that a fast round cannot step past a body between two frames.
+   hopBox: the hop of a round from a to b against a vehicle's hit box (half m round its centre and below top m over it, the box the old
+   end-point test used): the share of the hop where it first meets the hull (the def's length and width, turned with the vehicle) inside that
+   box, or failing that where it passes nearest the centre; -1 when it never enters the box */
+function hopBox(u, ax, ay, az, bx, by, bz, half, top) {
+  const dx = bx - ax, dy = by - ay, dz = bz - az, px = ax - u.x, pz = az - u.z, H = u.y + top;
+  let t0 = 0, t1 = 1, a, b, q;
+  if (Math.abs(dx) < 1e-9) { if (Math.abs(px) > half) return -1; } else { a = (-half - px) / dx; b = (half - px) / dx; if (a > b) { q = a; a = b; b = q; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
+  if (Math.abs(dz) < 1e-9) { if (Math.abs(pz) > half) return -1; } else { a = (-half - pz) / dz; b = (half - pz) / dz; if (a > b) { q = a; a = b; b = q; } if (a > t0) t0 = a; if (b < t1) t1 = b; }
+  if (Math.abs(dy) < 1e-9) { if (ay >= H) return -1; } else if (dy > 0) t1 = Math.min(t1, (H - ay) / dy); else t0 = Math.max(t0, (H - ay) / dy);
+  if (t0 > t1) return -1;
+  const D = u.def, hl = (D.l || 0) / 2, hw = (D.w || 0) / 2;
+  if (hl && hw) {   // the hull, in the vehicle's own axes (forward cos h, -sin h)
+    const c = Math.cos(u.h), s = Math.sin(u.h), L = [px * c - pz * s, dx * c - dz * s, hl, px * s + pz * c, dx * s + dz * c, hw];
+    let e0 = t0, e1 = t1;
+    for (let i = 0; i < 6 && e0 <= e1; i += 3) {
+      const p = L[i], v = L[i + 1], h = L[i + 2];
+      if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h) e0 = 2; continue; }
+      a = (-h - p) / v; b = (h - p) / v; if (a > b) { q = a; a = b; b = q; } if (a > e0) e0 = a; if (b < e1) e1 = b;
+    }
+    if (e0 <= e1) return e0;
+  }
+  const hh = dx * dx + dz * dz;
+  return hh > 1e-9 ? clamp(-(px * dx + pz * dz) / hh, t0, t1) : t0;
+}
+/* hopMan: the same hop against a soldier or a civilian, an upright cylinder of MAN.r round and as tall as the stance (from .3 m below the
+   feet, as for bullets): the share of the hop where the round first touches it, or -1 */
+function hopMan(m, ax, ay, az, bx, by, bz) {
+  const R = MAN.r * MAN.sc;
+  if (m.x < Math.min(ax, bx) - R || m.x > Math.max(ax, bx) + R || m.z < Math.min(az, bz) - R || m.z > Math.max(az, bz) + R) return -1;
+  const dx = bx - ax, dy = by - ay, dz = bz - az, rx = m.x - ax, rz = m.z - az, hh = dx * dx + dz * dz, lo = m.y - .3, hi = m.y + STANCE[m.st].h * MAN.sc;
+  let t0 = 0, t1 = 1;
+  if (hh < 1e-9) { if (rx * rx + rz * rz > R * R) return -1; }
+  else {
+    const bq = (rx * dx + rz * dz) / hh, cq = (rx * rx + rz * rz - R * R) / hh, dq = bq * bq - cq;
+    if (dq < 0) return -1;
+    const sq = Math.sqrt(dq); t0 = Math.max(t0, bq - sq); t1 = Math.min(t1, bq + sq);
+  }
+  if (Math.abs(dy) < 1e-9) { if (ay < lo || ay > hi) return -1; }
+  else { let a = (lo - ay) / dy, b = (hi - ay) / dy; if (a > b) { const q = a; a = b; b = q; } t0 = Math.max(t0, a); t1 = Math.min(t1, b); }
+  return t0 <= t1 ? t0 : -1;
+}
 function stepShots(dt) {
   for (const b of S.bullets) {
     const x0 = b.x, y0 = b.y, z0 = b.z;
@@ -8296,20 +8338,29 @@ function stepShots(dt) {
       if (b.k === 'rocket' || heat) { b.vy -= GR * .25 * h; if (Math.random() < .7) puff(b.x, b.y, b.z, 'smoke', .35); } else { if (he) b.y += .5 * GR * h * h; b.vy -= GR * h; }   // a howitzer round keeps to its exact arc, whatever the step
       const x0 = b.x, y0 = b.y, z0 = b.z;
       b.x += b.vx * h; b.y += b.vy * h; b.z += b.vz * h;
-      const g = hgt(b.x, b.z), D = OBJD[hv ? 'he' : b.k];
+      let g = hgt(b.x, b.z); const D = OBJD[hv ? 'he' : b.k];
       let wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null;
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // the hop ends at the wall; what stood right before it is still struck first
-      let hit = !wo && (b.y <= g + .5 || b.life <= 0), du = null;
-      if (!hit && b.y < g + 10) for (const u of S.units) if (!u.dead && !safe(u, b) && Math.abs(b.x - u.x) < 5 && Math.abs(b.z - u.z) < 5 && b.y < u.y + top) { hit = true; du = u; break; }
+      let du = null, dc = null, bt = 2;
+      if (Math.min(y0, b.y) < g + 10) {   // swept: the first vehicle, soldier or civilian anywhere on the hop, before the wall or the ground that ends it
+        for (const u of S.units) if (!u.dead && !safe(u, b)) { const t = hopBox(u, x0, y0, z0, b.x, b.y, b.z, 5, top); if (t >= 0 && t < bt) { bt = t; du = u; } }
+        if (!b.smk && b.k !== 'smk') {   // a round goes through men no more than through a truck: it strikes the first one in its way
+          for (const m of S.men) if (!m.dead && !m.in && !safe(m, b)) { const t = hopMan(m, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = m; } }
+          if (S.civs) for (const c of S.civs) if (!c.dead && !c.gone && !c.in) { const t = hopMan(c, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = null; dc = c; } }   // last, so a civilian taken here is the nearest of all
+        }
+        if (bt <= 1) { b.x = x0 + (b.x - x0) * bt; b.y = y0 + (b.y - y0) * bt; b.z = z0 + (b.z - z0) * bt; g = hgt(b.x, b.z); wo = null; }
+      }
+      let hit = !!(du || dc) || (!wo && (b.y <= g + .5 || b.life <= 0));
       if (!hit && b.k !== 'bomb') for (const p of S.planes) if (!p.dead && !safe(p, b) && dist(p, b) < 9) { impact(p, HK.missile, b.o.dmg, b.by, b.x, b.y, b.z, b.vx - p.v.x, b.vy - p.v.y, b.vz - p.v.z); hit = true; break; }
       if (hit) wo = null; else if (!wo) continue;
       b.gone = true;
       if (wo) { const P = shotObj(wo, b, b.smk ? 0 : (he || hv ? b.o.hit : b.o.dmg) * D.hit, b.x, b.y, b.z, b.vx, b.vy, b.vz); b.x = P.x; b.y = P.y; b.z = P.z; }
+      if (dc && (sh || heat)) { const h = manHit(dc, HK.shell, he || hv ? b.o.hit : b.o.dmg, b.x, b.y, b.z, b.vx, b.vz); if (h) civHurt(dc, h.dmg, b.by); }   // a civilian in the way, struck as a soldier would be
       if (b.k === 'smk') addSmoke(b.x, wo ? hgt(b.x, b.z) : g, b.z, b.o.r, b.o.h);
       else if (b.smk) { addSmoke(b.x, hgt(b.x, b.z), b.z, b.smk.r, b.smk.h, b.smk.life); if (b.by === S.my) S.falls.push({ x: b.x, z: b.z, life: HOW.mark }); }
-      else if ((b.k === 'shell' && !hv) || heat) { if (!du || impact(du, heat ? HK.heat : HK.shell, b.o.dmg, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, heat ? b.o.pen : undefined)) explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg * .3, b.by, b.team, false, D.blast); }   // the direct hit is what kills; the splash is small, and a round that bounces off does not burst
+      else if ((b.k === 'shell' && !hv) || heat) { if (!du || impact(du, heat ? HK.heat : HK.shell, b.o.dmg, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, heat ? b.o.pen : undefined) || du.man) explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg * .3, b.by, b.team, false, D.blast); }   // the direct hit is what kills; the splash is small, and a round that bounces off armour does not burst (one that hits a man, or the cover he is behind, does)
       else if (he || hv) {   // (hv: a tank's high-explosive round, which bursts like this one) on the ground the last hop is taken back to the surface; on a vehicle the direct hit, and the burst either way
-        if (!du && !wo && b.vy < 0) { const k = (g + .5 - b.y) / b.vy; b.x += b.vx * k; b.z += b.vz * k; b.y = g + .5; }
+        if (!du && !dc && !wo && b.vy < 0) { const k = (g + .5 - b.y) / b.vy; b.x += b.vx * k; b.z += b.vz * k; b.y = g + .5; }
         if (du) impact(du, HK.shell, b.o.hit, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, hv ? 2 : true);
         explode(b.x, Math.max(b.y, hgt(b.x, b.z) + .5), b.z, b.o.r, b.o.dmg, b.by, b.team, hv ? 2 : true, D.blast);
         if (he && b.by === S.my) S.falls.push({ x: b.x, z: b.z, life: HOW.mark });

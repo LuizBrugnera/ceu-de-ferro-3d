@@ -16,7 +16,8 @@
 ## NÃO testado
 - Nenhuma suíte, partida A/B ou baseline (regra do capitão). Só: sintaxe do script, mapa 7 idêntico ao do main, `genTerrain(era, 8)` nas duas eras (ids ≤ 65447, abaixo de 65536), 25 s de IA × IA por era no mapa 8 pelo sim sem DOM (sem erro), viagens de exemplo com trechos de terra (`dr`) e `dirtK` (caminhão 0,7/0,5 na chuva, tanque 1/0,9), e o servidor sobe e entrega a página (HTTP 200).
 - **A página não foi aberta no navegador**: o Chrome headless deste ambiente não carrega a página (nem a do main; a aba fica em branco). A cena 3D das estradas de chão, o tracejado nos mapas 2D e o FPS não foram vistos.
-- `tests/harness.js` está quebrado no main (`aarShow` e `m5Lg` só existem depois do marcador da cena 3D; vem do #60). Usei um carregador próprio com stubs e `LG.on = 0`. As suítes em `tests/` provavelmente não rodam até isso ser corrigido.
+- `tests/harness.js` está quebrado no main: funções chamadas pelo sim (`aarShow`, `m5Lg`, e depois do merge `mmMan`, `mmW`) só existem depois do marcador da cena 3D. Usei um carregador próprio com stubs vazios e `LG.on = 0`; depois do merge com o main rodei de novo 10 s de IA × IA por era (sem erro). As suítes em `tests/` provavelmente não rodam até isso ser corrigido.
+- No merge com o main, o caminho de `tripOf` passou a ter as curvas arredondadas (`orgPoly`); os trechos de terra (`dr`) são escalados pela razão entre o comprimento arredondado e o original, então o início/fim de cada trecho pode errar alguns metros.
 - Se os generais de fato passam a usar as estradas: a fatia de tempo fora dos eixos (medida antes: ~86% nos eixos, 0,7–4% fora) não foi medida de novo.
 - Riscos:
   - Estradas de chão aparecem no `fog` de `cmdEdges` (aresta sem tropa própria por 300 s custa mais), então podem ficar pouco usadas até alguém passar por elas.

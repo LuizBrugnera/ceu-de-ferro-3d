@@ -30,8 +30,8 @@ const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Fer
 /* valid models per room and class (a model's side is MSIDE's, below); the page's PLANES, TANKS, AAS, ARTS and INF tables are the other copy.
    inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size */
 const MODELS = {
-  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
-  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
+  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47', 'he177', 'b17'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
+  modern: { plane: ['f22', 'a10', 'su57', 'su25', 'b2', 'tu160'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
 };
 /* helicopters: aircraft to every check of an AI row or a loss, a class of their own to join, swap and hstate. None in 1944 */
 MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8'];
@@ -141,7 +141,7 @@ const RX = {
       if (room.size > 0 && m.ns !== undefined && m.ns !== room.ns) return send(c.ws, { t: 'error', code: 'sides' });   // and the sides', when the page says its own
       const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Espectador';
       c.player = { id: nextId++, name, cls: 'spec', model: '', side: -1, kills: 0, deaths: 0, ai: 0 }; c.spec = 1; c.room = room; room.specs.add(c);
-      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, players: [...room.values()].map(o => o.player) }));
+      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, man2: 1, players: [...room.values()].map(o => o.player) }));
       send(c.ws, { t: 'fcap', v: 1 }); send(c.ws, { t: 'dcap', v: 1 });
       if (room.host) send(room.host.ws, { t: 'sjoin', id: c.player.id });
       return;
@@ -162,7 +162,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1, man2: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -549,7 +549,7 @@ RX.gcmd = (c, m) => {
 };
 /* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
    lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
-const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap'];
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro)
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
   if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
@@ -601,12 +601,12 @@ RX.gres = (c, m) => {
    here, at the end of their lists, so that no older index moves; they field only in a room of 3 sides (join refuses one in a room of 2) */
 const MSIDE = {
   ww2: [
-    ['stuka', 'bf109', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
-    ['spit', 'p47', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
+    ['stuka', 'bf109', 'he177', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
+    ['spit', 'p47', 'b17', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
   modern: [
-    ['f22', 'a10', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
+    ['f22', 'a10', 'b2', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
       'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60'],
-    ['su57', 'su25', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
+    ['su57', 'su25', 'tu160', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
       'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
     ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
       'tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };

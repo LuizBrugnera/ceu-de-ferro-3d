@@ -20,10 +20,10 @@ Pedido do capitão: "vamos colocar algumas situações alguns padrões nos npcs,
 
 Antes da regra nova do capitão (entregar sem testes), passaram nesta branch, depois do merge de main com linha de visada, cobertura e veterania: `veh-drills`, `drills` (com e sem as batalhas de 120 s), `cover`, `missile-los`, `perception`, `online`, `world-online`, `cover-online`, `seat`, `loadout`, `loadout-more`, `loadout-stores`, `transport`, `sky`, `sky-online`, `comms`, `logistics`, `logistics-online`, `civ`, `civ-online`, `civ-war`, `rec`, `rec-online`, `orders-online`, `bridges-online`, `world`, `frame-budget`, `campaign`, `personality` e os `*-relay`. `help` e `vet` passaram em partes isoladas depois das correções.
 
-**Não verificado** (o último merge de main, com #38, #42 e #43, não foi testado; só o smoke):
+**Não verificado** (os últimos merges de main, com #38, #41, #42, #43 e #46, não foram testados; só o smoke):
 - `tests/orders.js`: falhou 2× nesta branch (rodando com a máquina carregada): "fort trench: the general picks the nearest free squad [...] who go to dig (fcap)" e "they reach the place and a trench is started there". Não comparado com main; pode ser um procedimento (ex.: `perimetro`, `area-batida`) atrasando a esquadra que vai cavar, ou carga da máquina.
 - `tests/bases.js`: estourou o tempo (1500 s) com a máquina carregada; não se sabe se passa.
-- `tests/bridges.js`: o teste "demolish again: refused (down)" foi ajustado (limpa o cool-down do primeiro comando), mas a suíte não foi rodada de novo.
+- `tests/bridges.js`: o teste "demolish again: refused (down)" falhava aqui pelo cool-down do primeiro comando; main (#41) trouxe o mesmo ajuste, mantido no merge. A suíte não foi rodada de novo.
 - `tests/field.js`: o teste do ponto de conquista foi ajustado (tira os jatos inimigos, como `calm`); só aquele bloco foi rodado, não a suíte inteira.
 - `tests/help.js` e `tests/vet.js` não foram rodados inteiros depois das correções.
 - Custo: o código dos procedimentos mede ~0,05 ms do quadro de IA de ~5,9 ms (< 1%); as médias de batalhas com e sem procedimentos variam de −6% a +9% entre sementes (as partidas divergem). Sem medição longa online.

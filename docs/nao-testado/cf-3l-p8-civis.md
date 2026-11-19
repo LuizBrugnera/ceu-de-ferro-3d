@@ -35,6 +35,11 @@ A fundação P0 ainda não estava no main; os nomes `SIDES` e `foe` do plano já
 - `civRevolt` a favor dos Insurgentes pode dar muita milícia a eles numa partida com muito fogo sobre vilas (uma esquadra a cada 150 s por vila revoltada). Ajustar no torneio (P10).
 - `civState.hate === 'them'` não diz qual inimigo; quem lê o MCP deve usar `against`.
 
+## Merge com o main (P0, P5, P6a, P6c, P7, P9, GBU)
+
+- Um só conflito, em `bombHeld`: o main (P7, D9) tirou a trava `team 0 ou 1` para a IA insurgente também segurar a bomba; o P8 trocou a trava por `civT(o.team)`. Ficou a linha do main, sem `civT`, porque `roeBar` já sai cedo quando `!civT(t)`. O efeito é o mesmo das duas versões.
+- Smoke (servidor sobe e responde 200; página carrega) achou `ReferenceError: dsOf is not defined` no boot (`lineS` ← `fortInit` ← `newState`). Isso vem do main: a P6a (#76) já chama `dsOf`, que é da P1 (mapa versão 7) e ainda não está no main. O main sem este PR quebra igual. Enquanto a P1 não entrar, a página não passa do boot e nada do P8 roda no navegador; o resto do smoke ficou mascarado por esse erro.
+
 ## Como testar depois
 
 1. Regressão com 2 lados (deve dar igual a antes): `node tests/civ.js`, `node tests/civ-war.js`, `node tests/civ-online.js`.

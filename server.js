@@ -845,6 +845,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.split('?')[0] === '/partidas') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); return res.end(JSON.stringify(partidas()));
   }
+  /* the models pack (models/pack/<id>.glb, tools/pack/build.js): only those file names, read from that folder, cached a day */
+  const pk = req.method === 'GET' && /^\/models\/pack\/([a-z0-9_]+)\.glb$/.exec(req.url.split('?')[0]);
+  if (pk) return fs.readFile(path.join(__dirname, 'models', 'pack', pk[1] + '.glb'), (err, buf) => {
+    if (err) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('404'); }
+    res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': buf.length, 'cache-control': 'public, max-age=86400' }); res.end(buf);
+  });
   if (req.method !== 'GET' || req.url.split('?')[0] !== '/') { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('404'); }
   fs.readFile(PAGE, (err, buf) => {
     if (err) { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Não foi possível ler a página do jogo.'); }
@@ -884,7 +890,7 @@ wss.on('connection', ws => {
 });
 const beat = setInterval(() => {
   for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); }
-}, 10000);
+}, Math.max(1000, +process.env.BEAT || 10000));   // BEAT=<ms>: the heartbeat's period (tests/net.js gives its test server a long one)
 wss.on('close', () => clearInterval(beat));
 
 anaPrune(); setInterval(anaPrune, 6 * 3600e3).unref();

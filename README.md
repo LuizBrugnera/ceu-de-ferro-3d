@@ -13,6 +13,8 @@ npm start
 
 Abra `http://localhost:8080`. Para outra porta, `PORT=9000 npm start`. O jogo precisa do servidor: toda partida é numa sala, e quem entra sozinho joga contra a IA. Abrir `Céu de Ferro 3D.html` direto, sem servidor, mostra só o hangar e o aviso de como iniciar o servidor.
 
+**Pack de modelos.** O servidor também entrega os modelos 3D livres de `models/pack/` (veículos, soldados e civis animados, armas e objetos; fontes, autores e licenças em `models/LICENSES.md`, refeitos por `node tools/pack/build.js`). A página os busca sob demanda e, enquanto não chegam ou sem eles (página aberta direto, servidor antigo), usa os modelos de antes. `?pack=0` desliga o pack; a distância e a quantidade de soldados animados seguem a qualidade gráfica do hangar (`?packq=0` a `3` força).
+
 Depois de atualizar o jogo, reinicie o servidor: a página nova funciona com um servidor antigo, mas sem o que ele não conhece (conquista, requisição, rádios, drones, tripulação, obras, sapadores, minas, postos, lançadores de foguetes, economia, general, espectador, logística, recuperação e evacuação, pontes destrutíveis e pontões, reconstrução de pontes e pontões fora das pontes, e as perguntas novas do general: missões, cartão da unidade, lotes e minas).
 
 ## Três jeitos de entrar

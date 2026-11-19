@@ -1,5 +1,10 @@
 # cf-era-padrao: a época padrão é "Hoje"
 
+## Testado em 1cedd86 e 806508d: ok (parte)
+- Navegador (1cedd86): a página abre com "Hoje" marcado (`era === 'modern'`) e o hangar lista F-22, A-10C, Su-57 e Su-25SM. A demo moderna roda sem erro no console. "Entrar na sala" (jato e artilharia) e "Assistir" na época Hoje funcionam.
+- `ERA=ww2 node tests/mcp-live.js` (806508d, depois do #99): **all passed**.
+- **Continua sem teste:** clicar em 1944 e voltar no navegador, e "Entrar na sala" e "Assistir" em 1944. Em bfbba9e a página parou na abertura por um erro dos 3 lados (`addHeli` lendo `hp` de `undefined`), já avisado, e isso impediu a conferência.
+
 ## O que mudou
 - `Céu de Ferro 3D.html`: `era` começa em `'modern'` (era `'ww2'`) e o botão "Hoje" vem marcado no HTML. Isso vale para o hangar, "Entrar na sala", assistir e a demo inicial, pois todos leem `era`.
 - README: nota de que o hangar abre em Hoje.

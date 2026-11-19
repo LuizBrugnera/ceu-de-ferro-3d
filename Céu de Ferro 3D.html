@@ -6917,9 +6917,9 @@ function spawnPlayer() {
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
-  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s);
+  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s) + (u.cox || 0);
   u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * L; u.z = p.z + p.dx * L; u.y = hgt(u.x, u.z);
-  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
+  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2) + (u.cox || 0); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
 }
 /* one ground vehicle whoever drives it: h hull heading, ty turret yaw from the hull, tp gun pitch, f the gun line.
    ctl is all a controller (AI, player input) may touch: aim is the direction the turret slews to, aim2 a free gun's own line,
@@ -8846,6 +8846,113 @@ function bump(u, x, z, cx, cz) {
   if (slow < 1) u.sp = clamp(u.sp, -u.def.spd * slow, u.def.spd * slow);
   return BUMP;
 }
+/* ---------- hull against hull (VCOL) ----------
+   After every vehicle has moved, each ground vehicle is a capsule (the segment between its fore and aft circles of its half width) and two
+   that overlap are pushed apart by weight (ramW; m0 for a hull with none): the lighter is shoved further, a fixed one (an emplaced gun) does
+   not move, nor does one another client drives (u.net: it gives its own share on its own client, so the room settles as one). A hull on its
+   rail is pushed along its rail (s) and to its side (u.cox, which place and tripMove add to its lane and which eases back at `back` m/s); one
+   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow: each hull takes hit of its hp times its blow squared, its blow
+   2 * (the other's weight share) * closing speed / v[1], so a car that rams a tank pays for it and a tank barely feels a car; a heavy tracked
+   hull (tank) closing at crush.v on a hull of crush.w weight or less drives over it (crush.dmg of its hp more, and the tank slows). Every
+   client deals only its own hulls' blows and pushes (rx), as RAM does; no message. cd: s between two blows of one hull. A rail hull with a
+   hull ahead in contact is held (its brain's rest, rest s); held jam s in a row it sidesteps side m round it (ease m/s), as the off-rail
+   brains already do by jammed. cell: the broad phase's grid, m; dy: two hulls further apart in height do not touch (a bridge and the road under) */
+const VCOL = { on: 1, cell: 16, dy: 4, m0: .3, v: [2.5, 20], hit: .25, e: .2, cd: .6, crush: { w: .2, v: 4, dmg: .5, slow: .7 }, rest: .6, jam: 2, side: 4.5, ease: 1.5, back: .5 };
+const VG = new Map(), VB = [], VP = [], SS = { s: 0, t: 0 };
+/* the closest points of segments a-b and c-d: their parameters s (on a-b) and t (on c-d), in SS */
+function segSeg(ax, az, bx, bz, cx, cz, dx, dz) {
+  const ux = bx - ax, uz = bz - az, vx = dx - cx, vz = dz - cz, rx = ax - cx, rz = az - cz, a = ux * ux + uz * uz, e = vx * vx + vz * vz, f = vx * rx + vz * rz;
+  let s = 0, t = 0;
+  if (a < 1e-9 && e < 1e-9) { SS.s = SS.t = 0; return SS; }
+  if (a < 1e-9) t = clamp(f / e, 0, 1);
+  else {
+    const c = ux * rx + uz * rz;
+    if (e < 1e-9) s = clamp(-c / a, 0, 1);
+    else {
+      const b = ux * vx + uz * vz, den = a * e - b * b;
+      s = den > 1e-9 ? clamp((b * f - c * e) / den, 0, 1) : 0; t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+    }
+  }
+  SS.s = s; SS.t = t; return SS;
+}
+const vcolIm = u => (u.fixed ? 0 : 1 / (ramW(u) || VCOL.m0));   // the inverse of its weight: 0, it does not move
+/* moves hull u by px pz: along and beside its rail on one, over the ground off one (not into the water or off the map) */
+function vcolMove(u, px, pz) {
+  const fx = Math.cos(u.h), fz = -Math.sin(u.h), al = px * fx + pz * fz, la = px * -fz + pz * fx;
+  if (u.rail) {
+    const T = u.trip;
+    if (T) T.s = clamp(T.s + al, 0, T.p.len);
+    else u.s = clamp(u.s + al * u.ds, 0, S.T.routes[u.ri].len);
+    u.cox = clamp((u.cox || 0) + la * (T ? 1 : u.ds), -VCOL.side * 1.5, VCOL.side * 1.5);
+  } else {
+    const x = u.x + px, z = u.z + pz, y = hgt(x, z);
+    if (y <= S.T.WL + .3 && !u.def.swim || x < 0 || x > S.W || Math.abs(z) > S.HW) return;
+    u.y = y;
+  }
+  u.x += px; u.z += pz;
+}
+/* one blow of hull u, closing at v m/s, of weight share k (2 * the other's share): it pays hit of its hp times its blow squared */
+function vcolHit(u, o, v, k, x, z, crush) {
+  if (u.net || u.dead || S.t < (u.vcT || 0)) return;
+  u.vcT = S.t + VCOL.cd;
+  const imp = k * v / VCOL.v[1], by = o.team !== u.team ? o : null, h = { k: HK.blast, pt: 0 };
+  damageUnit(u, u.def.hp * (VCOL.hit * imp * imp + (crush ? VCOL.crush.dmg : 0)), by, true, h);
+  for (let i = 0; i < 2; i++) puff(x + rand(-1, 1), u.y + rand(.5, 2), z + rand(-1, 1), 'dust', 1.5, rand(-2, 2), rand(0, 2), rand(-2, 2));
+  const d = dist(u, S.ear); if (d < 1500) { fx.boom(8 + 10 * Math.min(1, imp), d); if (u === S.my) S.shake = Math.max(S.shake, .2 + .35 * Math.min(1, imp)); }
+}
+function vehCol(dt) {
+  if (!VCOL.on) return;
+  let C = VCOL.cell; VG.clear(); VB.length = 0;
+  for (const u of S.units) if (!u.dead) C = Math.max(C, 2 * u.def.env[3] + 1);   // a cell no smaller than two hulls end to end: the 3 x 3 cells round one hold all it can touch
+  for (const u of S.units) {
+    if (u.dead || u.gone) continue;
+    if (!u.rail) u.cox = 0;
+    else if (u.cox || u.coxW) { if (S.t - (u.vcC || -9) > VCOL.jam) u.coxW = 0; const w = u.coxW || 0; if (w !== u.cox) u.cox += clamp(w - u.cox, -(w ? VCOL.ease : VCOL.back) * dt, (w ? VCOL.ease : VCOL.back) * dt); }
+    const e = u.def.env, hw = e[5], off = Math.max(0, e[3] - hw), cx = Math.cos(u.h), cz = -Math.sin(u.h), i = Math.floor(u.x / C), j = Math.floor(u.z / C), key = i * 65536 + j;
+    const b = VP[VB.length] || (VP[VB.length] = { u: null, ax: 0, az: 0, bx: 0, bz: 0, r: 0, i: 0, j: 0, n: 0 }); b.u = u;   // a pool: nothing is kept on the unit
+    b.ax = u.x + cx * off; b.az = u.z + cz * off; b.bx = u.x - cx * off; b.bz = u.z - cz * off; b.r = hw; b.i = i; b.j = j; b.n = VB.length;
+    VB.push(b); const l = VG.get(key); if (l) l.push(b); else VG.set(key, [b]);
+  }
+  for (const A of VB) for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+    const l = VG.get((A.i + di) * 65536 + A.j + dj); if (!l) continue;
+    for (const B of l) if (B.n > A.n) vcolPair(A, B, dt);
+  }
+  for (const b of VB) b.u = null;
+}
+function vcolPair(A, B, dt) {
+  const a = A.u, b = B.u;
+  if (Math.abs(a.y - b.y) > VCOL.dy || Math.abs(a.x - b.x) > A.r + B.r + 20 || Math.abs(a.z - b.z) > A.r + B.r + 20) return;
+  const ia = vcolIm(a), ib = vcolIm(b), ma = !a.net && ia > 0, mb = !b.net && ib > 0;
+  if (!ma && !mb) return;
+  const q = segSeg(A.ax, A.az, A.bx, A.bz, B.ax, B.az, B.bx, B.bz), px = A.ax + (A.bx - A.ax) * q.s, pz = A.az + (A.bz - A.az) * q.s, qx = B.ax + (B.bx - B.ax) * q.t, qz = B.az + (B.bz - B.az) * q.t;
+  let nx = px - qx, nz = pz - qz, d = Math.hypot(nx, nz);
+  const pen = A.r + B.r - d; if (pen <= 0) return;
+  if (d > 1e-4) { nx /= d; nz /= d; } else { nx = a.x - b.x; nz = a.z - b.z; d = Math.hypot(nx, nz); if (d > 1e-4) { nx /= d; nz /= d; } else { nx = Math.sin(a.h); nz = Math.cos(a.h); } }   // n: from b to a
+  const sa = ia / (ia + ib), sb = 1 - sa, cx = (px + qx) / 2, cz = (pz + qz) / 2;
+  if (ma) vcolMove(a, nx * pen * sa, nz * pen * sa);
+  if (mb) vcolMove(b, -nx * pen * sb, -nz * pen * sb);
+  /* who is held: a rail hull whose nose is into the other; held jam s it sidesteps round it, to the side it already is on */
+  for (const [u, o, s] of [[a, b, -1], [b, a, 1]]) {
+    if (u.net || !u.rail || !u.ai) continue;
+    const fx = Math.cos(u.h), fz = -Math.sin(u.h);
+    if ((fx * nx + fz * nz) * s < .3) continue;
+    u.ai.rest = Math.max(u.ai.rest || 0, S.t + VCOL.rest);
+    if (S.t - (u.vcC || -9) > 1) u.vcJ = S.t; u.vcC = S.t;
+    if (S.t - u.vcJ > VCOL.jam && !u.coxW) { const l = (u.x - o.x) * -fz + (u.z - o.z) * fx; u.coxW = (l > .5 ? 1 : l < -.5 ? -1 : (u.id && u.id.length & 1) ? 1 : -1) * VCOL.side * (u.trip ? 1 : u.ds); }
+  }
+  /* the blow: closing speed along n, the speeds it leaves (an inelastic knock, e of it back), and what each pays */
+  const van = a.v.x * nx + a.v.z * nz, vbn = b.v.x * nx + b.v.z * nz, vc = vbn - van;
+  if (vc <= 0) return;
+  const j = (1 + VCOL.e) * vc / ((ia + ib) || 1);
+  for (const [u, im, s] of [[a, ia, 1], [b, ib, -1]]) if (!u.net && !u.rail && im > 0) { const f = Math.cos(u.h) * nx - Math.sin(u.h) * nz; u.sp = clamp(u.sp + s * j * im * f / GSPD, -u.def.spd, u.def.spd); }
+  if (vc < VCOL.v[0] || ia + ib <= 0) return;
+  const K = VCOL.crush, wa = ramW(a), wb = ramW(b);
+  const crA = b.kind === 'tank' && wa <= K.w && vc >= K.v && vbn > K.v / 2 && !a.def.rad, crB = a.kind === 'tank' && wb <= K.w && vc >= K.v && -van > K.v / 2 && !b.def.rad;   // a light car under a tank's tracks
+  vcolHit(a, b, vc, 2 * sa, cx, cz, crA); vcolHit(b, a, vc, 2 * sb, cx, cz, crB);
+  if (crA && !b.net && !b.rail) b.sp *= K.slow;
+  if (crB && !a.net && !a.rail) a.sp *= K.slow;
+}
 function turret(u, dt) {
   const d = u.def, a = u.ctl.aim, sl = d.sl * u.mod.slew;
   if (a && d.sl) {
@@ -8893,7 +9000,7 @@ function placeOn(u, p, s, l) {
 function tripMove(u, dt) {
   const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt * dirtK(u, T.p, T.s));   // slower on a dirt road on wheels (map version 8)
   if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
-  placeOn(u, T.p, T.s, orgTrip(u, T, dt));
+  placeOn(u, T.p, T.s, orgTrip(u, T, dt) + (u.cox || 0));   // + where a hull it met pushed it (VCOL)
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
   if (T.s >= T.p.len - 1e-6) tripEnd(u);
 }
@@ -11293,6 +11400,7 @@ function step(dt) {
   for (const p of S.planes) { if (p.net) { stepGhost(p, dt); continue; } if (p.ai && !p.dead) aiPlane(p, dt); stepPlane(p, dt); }
   heliStep(dt);
   for (const u of S.units) if (!u.dead) stepUnit(u, dt);
+  vehCol(dt);   // hull against hull, once all have moved (VCOL)
   for (const m of S.men) { if (!m.dead) stepMan(m, dt); else if (S.t - m.deadT > MAN.body) m.gone = true; }
   a0 = AIB.now(); AIB.u += a0 - a1;
   fortMen(dt);

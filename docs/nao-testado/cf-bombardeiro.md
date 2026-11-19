@@ -67,7 +67,7 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
   - inimigo por `foeSide(t, ...)`;
   - `spotted(o, t)` (visão por lado);
   - posições que o lado viu por `sX`/`sZ` (P3).
-- `droneRail(team)` do `main` mirava `S.base[1 - team]`, que não existe para o lado 2. Agora mira `foeBase(team)` (o mesmo erro valia para os drones kamikaze da IA insurgente do P7).
+- `droneRail(team)` mirava `S.base[1 - team]`, que não existe para o lado 2. Corrigi com `foeBase`, mas o `main` (P1, #92) corrigiu o mesmo com `eBase`, e na junção ficou a versão do `main`.
 - `server.js`:
   - os bombardeiros vão para `MSIDE`, que agora diz o lado de cada modelo;
   - nas listas `MODELS` eles entram no fim, para nenhum índice antigo mudar.

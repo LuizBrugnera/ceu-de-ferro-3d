@@ -259,7 +259,7 @@ async function runAsk(q) {
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
   mk: 'w', lat: 'i', roe: 'w', brk: 'n', nd: 'w', rt: 'P', role: 'w', qrf: 'i' };
-const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap'];   // the relay's gask kinds; it passes on k, x, z, a and id
+const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap'];   // the relay's gask kinds; it passes on k, x, z, a and id
 const isNum = v => typeof v === 'number' && Number.isFinite(v), isInt = v => Number.isInteger(v);
 function rawCmd(c) {   // returns an error string or null
   if (!c || typeof c !== 'object' || Array.isArray(c)) return 'command must be an object';

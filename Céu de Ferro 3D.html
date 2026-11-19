@@ -13780,7 +13780,7 @@ const OPS = {
     }
     if (op.st === 'form') {   // every element to its start point; H-hour is set when the last is there
       const G = INC.op, at = q => { const L = lead(q), p = q.axo === op ? q.fp : q.ord; return !!L && (q.halt || (p.x !== undefined && Math.hypot(L.x - p.x, L.z - p.z) < G.ready)); }, ready = l.filter(at).length;
-      if (age > (S.cq ? CQ.form : CMD.formMax)) { C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Reunião para ' + gName(O) + ' demorou demais: assalto cancelado', O); return opEnd(C, op); }
+      if (age > (op.formT || (S.cq ? CQ.form : CMD.formMax))) { C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Reunião para ' + gName(O) + ' demorou demais: assalto cancelado', O); return opEnd(C, op); }   // M2: an assault by its approaches waits for its farthest squad's walk (op.formT)
       if (ready >= l.length || (ready >= Math.max(op.walk ? 1 : 2, Math.ceil(l.length * (op.walk ? .5 : .6))) && age > CMD.form * 2)) { op.st = 'prep'; op.H = Math.max(S.t + G.h[op.walk ? 0 : 1], op.Hu || 0); gLog(t, 'atk', (op.walk ? 'Avanço sobre ' : 'Reunião pronta para ') + gName(O) + ': hora H em ' + Math.round(op.H - S.t) + ' s', O); for (const q of l) q.late = !at(q); }
       return;
     }
@@ -13932,14 +13932,15 @@ function cmdAttack(C, sq) {
     const e = { x: o.x, z: o.z, ri, sd, nm: gName(P), n: pool.length, own, foe, need, walk }; ev.push(e);
     if (pool.length < min || own / foe < need) { e.why = pool.length < min ? 'pool' : 'weak'; continue; }
     e.why = 'go';
-    if (ap && !apGet(C, P, sd) && apAsk(C, P, sd)) { e.why = 'ap'; C.gate = 'ap'; break; }   // M2: its approaches are planned in this plan's next pieces, the assault the next turn
     if (walk && go.length) continue;   // a walk into an empty point is no front of a campaign: it goes on its own, the next turn
-    go.push({ P, sd, pool, walk, own, foe });
+    go.push({ P, sd, pool, walk, own, foe, e });
     if (!camp || walk || go.length >= room - on) break;   // one assault a turn (a walk at once, as before), or with a campaign every front the side may hold
   }
+  const wait = ap ? go.filter(g => !apGet(C, g.P, g.sd) && apAsk(C, g.P, g.sd)) : [];
+  if (wait.length) { for (const g of wait) g.e.why = 'ap'; C.gate = 'ap'; return; }   // M2: the approaches of each front are planned in this plan's next pieces, the assault (or campaign) the next turn
   if (go.length > 1) return campAI(C, sq, go);   // more than one front at once: a campaign with a common H-hour (F4)
   if (go.length) { const g = go[0]; genCmd(t, Object.assign({ c: 'atk' }, g.P.tw ? { pi: gPts().indexOf(g.P.tw) } : { ri: g.P.ri, s: g.P.s }, { sd: g.sd, ids: g.pool.map(q => q.id) }), 'ai', g); return; }
-  if (C.gue || C.gate === 'ap') return;   // map version 4: harassing (gue), it asks for no assault squads; nor while its approaches are planned
+  if (C.gue) return;   // map version 4: harassing (gue), it asks for no assault squads
   C.want = { ri: P0.ri, n: D.push }; gLog(t, 'rf', 'Sem força para atacar ' + gName(P0) + ': pede ' + D.push + ' esquadras', routeAt(R[P0.ri], P0.s), 'want' + P0.ri);
 }
 /* an assault, opened: what cmdAttack applies once it has chosen (also for the general's own order: U carries forming-up, second axis, H-hour, smoke) */
@@ -21587,8 +21588,8 @@ anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) 
    bridge falls or a pontoon goes up); the rest is a job of pieces (tmJob) for each side every TM.every s, the sides TM.every / 2 apart,
    TM.per pieces a frame inside the commanders' share of the AI's frame (AIB.g), built aside and swapped in whole. TMB: the job's own time,
    per frame and per refresh, read only. TM.on 0 leaves it out (a measurement's control). Until the
-   commander's first look (cmdSense) C.known is empty and so are the enemy's layers. Nothing the commander chooses reads the map yet (M2
-   will). gask tmap: one layer at TM.ask m */
+   commander's first look (cmdSense) C.known is empty and so are the enemy's layers. The AI's assault reads it for its approaches (M2, AP below;
+   without the map it is planned as before). gask tmap: one layer at TM.ask m */
 const TM = { on: 1, cell: 200, every: 4, per: 1, losN: 2, step: 100, ask: 1000, half: 210, hide: .6, far: .4, scr: .5, tgt: 2, max: 64, fold: 8,
   obs: { pt: [1500, 12], base: [1500, 12], fort: [900, 2.5], man: [900, 2], veh: [1500, 3], fix: [1500, 3] },
   reach: { inf: 300, tank: 1000, lav: 700, aa: 600, art: 400, truck: 200, car: 300, rad: 300 },
@@ -21768,8 +21769,8 @@ newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !
 /* ---------- the approaches (M2 of the general's manoeuvre): the cheapest tactical way to each side of an objective, on the side's tactical map ----------
    apBuild(C, P, sd): a Dijkstra over the cells of side C's tactical map (C.tm, TM.cell m) from the start of the attack (apStart: the nearest place the side
    holds on side sd of objective P, AP.start m to CMD.reach m from it, else its road AP.back m short of it), a cell costing TM.cell x (1 + AP.kV x the enemy's
-   sight there (v) + AP.kF x its strength (f / (f + AP.fK))) x (1 - AP.wood x its share of wood) x AP.road where a road runs; water (a share over AP.wet)
-   is no way but where a standing bridge or ford crosses it, and two cells that only touch at a corner of no way are not a way. Around the objective a
+   sight there (v) + AP.kF x its strength (f / (f + AP.fK))) x (1 - AP.wood x its share of wood) x AP.road where a road runs; water (a share over AP.wet,
+   or the river's course) is no way but where a standing bridge or ford crosses it, and two cells that only touch at a corner of no way are not a way. Around the objective a
    ring AP.r m (AP.rTw for a town of the old map) in AP.sec sectors: the cheapest cell of each; the AP.n cheapest at least AP.apart degrees apart are the
    approaches, each with its way (cells, from the start), its length, minutes on foot at MAN.pace, exposure (the share of the way where v > AP.exp), wood
    (the share in wood over a half), the share along the axis' road (within AP.axD m of it), the angle off the axis (0: straight down the road from side sd,
@@ -21778,12 +21779,12 @@ newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !
    (AP.pops cells) at a time inside the commander's plan (apWork, AP.per a plan), at once for a question (gask ap) or an assault opened before its turn
    (apNow). The tree of the search also gives every squad its way in to its element's assembly (apWalk). An AI assault (atkAp) is then free of the axis:
    its squads come from any road within CMD.reach m (apPool), and from a quiet post too (apLend: a line or wood post with no enemy known within
-   AP.lend.r m for AP.lend.calm s, its road keeping AP.lend.keep posts, at most AP.lend.n an assault; opFree sends it back to its post); the main
-   element goes by the cheapest approach and, with two squads or more, the second by the next one no longer than AP.long times it; each walks quiet and
-   at a run to its assembly out of sight, and at H-hour along its approach through the assault position into the objective. APB: the searches' cost,
-   read only. AP.on 0: the assault as before (by the axis) */
-const AP = { on: 1, kV: 4, kF: 2, fK: 3, wood: .25, road: .85, wet: .1, r: [300, 500], rTw: [500, 700], sec: 8, apart: 60, n: 3, ttl: 20, per: 2, pops: 1200,
-  exp: .3, axD: 150, long: 1.8, near: 200, start: [600, 2500], back: 1500, asm: { min: 600, max: 1200, kV: 10, at: 700 }, spread: [30, 26], pts: 24,
+   AP.lend.r m for AP.lend.calm s, a point it holds keeping another squad in it and its road AP.lend.keep posts, at most AP.lend.n an assault;
+   opFree sends it back to its post); the main element goes by the cheapest approach and, with two squads or more, the second by the next one no
+   longer than AP.long times it; each walks quiet and at a run to its assembly out of sight (the forming up waits for the farthest walk at AP.pace
+   m/s, op.formT, up to CMD.formMax s), and at H-hour along its approach through the assault position into the objective. APB: the searches' cost, read only. AP.on 0: the assault as before (by the axis) */
+const AP = { on: 1, kV: 4, kF: 2, fK: 3, wood: .25, road: .85, wet: .1, r: [300, 500], rTw: [500, 700], sec: 8, apart: 60, n: 3, ttl: 20, per: 2, pops: 600,
+  exp: .3, axD: 150, long: 1.8, near: 200, pace: 2.5, slack: 60, start: [600, 2500], back: 1500, asm: { min: 600, max: 1200, kV: 10, at: 700 }, spread: [30, 26], pts: 24,
   lend: { r: 1200, calm: 180, n: 2, keep: 1, hit: 30, jobs: { line: 1, wood: 1 } }, ask: 800 };
 const APB = { n: 0, ms: 0, worst: 0, piece: 0, stat() { const r = v => Math.round(v * 100) / 100; return { searches: APB.n, avg: APB.n ? r(APB.ms / APB.n) : 0, worst: r(APB.worst), piece: r(APB.piece) }; } };
 const apOn = () => !!AP.on && !!S.T.net && S.T.mv >= 4;
@@ -21793,12 +21794,14 @@ const apXZ = (Z, q) => ({ x: (q % Z.nx + .5) * Z.c, z: -Z.HW + ((q / Z.nx | 0) +
 function apPass(Z) {
   const key = (S && S.brk) || '';
   if (Z.ap && Z.ap.key === key) return Z.ap.pass;
-  const n = Z.nx * Z.nz, pass = new Uint8Array(n), br = new Uint8Array(n), cut = S.bre, N = S.T.net;
-  if (N) for (const b of brOf(S.T)) if (!cut || cut[b.e] !== Infinity) {
-    const E = N.e[b.e], a = Math.min(b.ends[0].s, b.ends[1].s) - 60, e = Math.max(b.ends[0].s, b.ends[1].s) + 60;
-    for (let s = a; s <= e; s += 20) { const p = routeAt(E.p, s); br[apCell(Z, p.x, p.z)] = 1; }
+  const n = Z.nx * Z.nz, pass = new Uint8Array(n), br = new Uint8Array(n), wet = new Uint8Array(n), cut = S.bre, N = S.T.net, T = S.T;
+  if (N) for (const b of brOf(T)) {   // a crossing's channel is water; while its bridge stands (or a pontoon) it and its ends are a way
+    const E = N.e[b.e], a = Math.min(b.ends[0].s, b.ends[1].s), e = Math.max(b.ends[0].s, b.ends[1].s), up = !cut || cut[b.e] !== Infinity;
+    for (let s = a - 60; s <= e + 60; s += 20) { const p = routeAt(E.p, s), q = apCell(Z, p.x, p.z); if (up) br[q] = 1; if (s >= a && s <= e && Math.abs(p.x - T.rx(p.z)) < b.gw) wet[q] = 1; }
   }
-  for (let q = 0; q < n; q++) pass[q] = Z.water[q] > AP.wet && !br[q] ? 0 : 1;
+  /* the river's own course, which a cell's sixteen samples may step over */
+  if (T.rx) for (let z = -Z.HW; z <= Z.HW; z += 25) { const x = T.rx(z); if (x > 0 && x < Z.W && hgtT(T, x, z) <= T.WL + .3) wet[apCell(Z, x, z)] = 1; }
+  for (let q = 0; q < n; q++) pass[q] = (Z.water[q] > AP.wet || wet[q]) && !br[q] ? 0 : 1;
   Z.ap = { key, pass }; return pass;
 }
 /* the objective's place, the axis' forming-up place (CMD.fup m short of it on its road from side sd) and the key of the cache */
@@ -21917,14 +21920,20 @@ function apQuiet(C, sq) {
   for (const q of sq) {
     if (!AP.lend.jobs[q.job]) continue;
     const L = q.men.find(m => !m.dead); if (q.apK === undefined) q.apK = S.t;
-    if (L && (cmdKnown(C, L.x, L.z, AP.lend.r) > 0 || q.men.some(m => !m.dead && S.t - m.hitT < AP.lend.hit))) q.apK = S.t;
+    if (L && (cmdKnown(C, L.x, L.z, AP.lend.r) > 0 || q.men.some(m => !m.dead && m.hitT >= 0 && S.t - m.hitT < AP.lend.hit))) q.apK = S.t;
   }
 }
-/* may post q lend its squad to an assault (economy of force): quiet for AP.lend.calm s, its road keeping AP.lend.keep posts besides it */
+/* may post q lend its squad to an assault (economy of force): quiet for AP.lend.calm s, and the floor kept without it (apFloor) */
 function apLend(C, sq, q) {
-  if (!AP.lend.jobs[q.job] || q.op || q.live < 3 || q.lift || q.ord.k !== 'hold' || q.ord.b || q.ord.tw || q.ord.T || q.ord.es) return false;
+  if (!AP.lend.jobs[q.job] || q.op || q.live < 3 || q.lift || (q.ord.k !== 'hold' && q.ord.k !== 'observe') || q.ord.b || q.ord.T || q.ord.es) return false;
   if (q.apK === undefined || S.t - q.apK < AP.lend.calm) return false;
-  return sq.filter(o => o !== q && o.ri === q.ri && !o.op && o.live > 0 && (AP.lend.jobs[o.job] || o.job === 'garr' || o.job === 'held')).length >= AP.lend.keep;
+  return apFloor(sq, q, []);
+}
+/* the floor of the defence without q (and the ones already lent): a post holding a point leaves another squad in it; any other, AP.lend.keep posts on its road */
+function apFloor(sq, q, lent) {
+  const stay = o => o !== q && !lent.includes(o) && !o.op && o.live > 0;
+  if (q.ord.tw) return sq.some(o => stay(o) && o.ord.tw === q.ord.tw);
+  return sq.filter(o => stay(o) && o.ri === q.ri && (AP.lend.jobs[o.job] || o.job === 'garr' || o.job === 'held')).length >= AP.lend.keep;
 }
 /* a squad of any road within reach of P's place (atkFit with AP): its leader AP.near m to CMD.reach m from it */
 function apFit(q, P, sd) { const L = q.men.find(m => !m.dead); if (!L) return false; const d = hdist(L, apObj(P, sd).o); return d > AP.near && d < CMD.reach; }
@@ -21932,8 +21941,12 @@ function apFit(q, P, sd) { const L = q.men.find(m => !m.dead); if (!L) return fa
 function apPool(C, sq, P, sd, o, n) {
   const dd = new Map(), d = q => { if (!dd.has(q)) { const L = q.men.find(m => !m.dead); dd.set(q, L ? hdist(L, o) : 1e9); } return dd.get(q); };
   const free = sq.filter(q => atkFit(q, P, sd)).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || d(a) - d(b));
-  const lent = free.length >= n ? [] : sq.filter(q => apLend(C, sq, q) && apFit(q, P, sd)).sort((a, b) => d(a) - d(b)).slice(0, AP.lend.n);
-  return free.concat(lent).slice(0, n);
+  const lent = [];
+  if (free.length < n) for (const q of sq.filter(q => apLend(C, sq, q) && apFit(q, P, sd)).sort((a, b) => d(a) - d(b))) {
+    if (lent.length >= Math.min(AP.lend.n, n - free.length)) break;
+    if (apFloor(sq, q, lent)) lent.push(q);   // the floor counts the ones already lent
+  }
+  return free.concat(lent);
 }
 /* an AI assault by the approaches of plan pl: the elements, their assemblies out of sight and their ways in; the rest as atkOpen's */
 function atkAp(C, P, sd, pool, walk, own, foe, pl) {
@@ -21955,6 +21968,8 @@ function atkAp(C, P, sd, pool, walk, own, foe, pl) {
     const wp = apWalk(pl, L.x, L.z, a.cells[m.i], p.x, p.z);
     opTake(op, q, Object.assign({ k: 'hold', ri, s: clamp(sOn(ri, p.x, p.z), 0, r.len), x: p.x, z: p.z, R: 12, fast: 1, quiet: 1 }, wp ? { wp } : {}));
   });
+  const far = pool.reduce((m, q) => Math.max(m, q.ord.wp ? q.ord.wp.len : q.cnP && q.cnP.O.wp ? q.cnP.O.wp.len : 0), 0);
+  op.formT = clamp(far / AP.pace + AP.slack, S.cq ? CQ.form : CMD.formMax, CMD.formMax);   // the time to form up: the farthest walk at AP.pace m/s and AP.slack s more, from the usual to CMD.formMax
   const lent = pool.filter(q => !FREE[q.job]).length, deg = a => a.ang + '°';
   gLog(t, 'atk', (walk ? 'Ocupação de ' : 'Assalto planejado contra ') + gName(P) + ': ' + pool.length + (pool.length > 1 ? ' esquadras' : ' esquadra') + (a1 ? ' por duas abordagens (' + deg(a0) + ' e ' + deg(a1) + ' do eixo)' : ' pela abordagem a ' + deg(a0) + ' do eixo') +
     ', reunião fora da vista' + (lent ? ', ' + lent + (lent > 1 ? ' emprestadas de postos quietos' : ' emprestada de um posto quieto') : '') + ', força ' + gN(own) + ' contra ' + gN(foe), a0.asm, 0, o);
@@ -21964,11 +21979,12 @@ function atkAp(C, P, sd, pool, walk, own, foe, pl) {
    straight in from where it is (a squad that waited, or an overwatch called in) */
 function apOrd(op, q, O) {
   if (q.apo !== op) return O;
-  if (O.k === 'assault' && q.apw && q.ord.k === 'hold') return Object.assign(O, { wp: q.apw });
+  if (O.k === 'assault' && q.apw) return Object.assign(O, { wp: q.apw });   // from wherever it got to: setOrd takes it up at the nearest point of the way
   if (O.k === 'overwatch' && q.apv) { const e = q.apv[q.apv.length - 1]; return Object.assign(O, { x: e.x, z: e.z, wp: q.apv }); }
   return O;
 }
-const apIn = (op, q) => { if (q.apo === op && !q.ord.wp) q.s = clamp(op.O.s, 0, S.T.routes[op.ri].len); };   // no way of its own: the anchor on the objective, the men straight in
+opFree = (g => q => { q.apo = q.apw = q.apv = null; g(q); })(opFree);   // out of its op, a squad keeps none of the plan (its ways, the search's tree)
+const apIn = (op, q) => { if (q.apo === op && !cnOrd(q).wp) q.s = clamp(op.O.s, 0, S.T.routes[op.ri].len); };   // no way of its own: the anchor on the objective, the men straight in
 /* the way back of an AP squad to its assembly (op 'back') */
 function apBack(op, q, O) {
   if (q.apo !== op || !op.pl) return O;

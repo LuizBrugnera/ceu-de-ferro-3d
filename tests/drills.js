@@ -276,10 +276,10 @@ console.log('-- honesty: only what the squad perceived --');
 if (SECS) for (const era of ['ww2', 'modern']) {
   const C = H.load({ seed: 9, mapv: 4 }), $ = C.$, S = C.newState(era, null, { watch: 1 });
   const bad = [], seen = {}; let n = 0;
-  C.$('drRun = (f => (o, p) => { __chk(o, p); return f(o, p); })(drRun)'); C.__chk = (o, p) => {
+  C.$('drRun = (f => (o, p) => { __chk(o, p); return f(o, p); })(drRun)'); C.__chk = (o, p) => {   // what a drill is about must be believed when it is an enemy (com-carro's friendly tank is the squad's own side)
     if (o.dr && o.dr.id === p.D.id) return;
     n++; seen[p.D.id] = (seen[p.D.id] || 0) + 1; const f = typeof p.f === 'object' ? p.f : {};
-    if (f.of && !(o.bel && o.bel.has(f.of))) bad.push(p.D.id + ': ' + (f.of.kind || (f.of.man ? 'man' : 'plane')) + ' not believed');
+    if (f.of && f.of.team !== o.team && !(o.bel && o.bel.has(f.of))) bad.push(p.D.id + ': ' + (f.of.kind || (f.of.man ? 'man' : 'plane')) + ' not believed');
     if (p.D.id === 'artilharia' && !(o.drB || []).length) bad.push('artilharia without a burst');
   };
   C.run(SECS);

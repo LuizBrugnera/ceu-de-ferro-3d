@@ -82,9 +82,12 @@ console.log('-- the AI\'s campaign: two fronts with the force for it in one turn
     for (const q of free.slice(k * 3, k * 3 + 3)) { q.job = 'held'; q.jk = 0; q.ri = O.ri; q.s = s; q.ord = { k: 'hold', ri: O.ri, s }; q.back = null; }
     Cm.post[O.ri] = 'atk'; Cm.known.push({ man: 1, dead: false, sx: p.x, sz: p.z, x: p.x, z: p.z, moveT: -99 });
   });
-  $('cmdAttack')(Cm, S.squads.filter(q => q.team === t && q.live > 0 && !q.state && !q.net));
+  const sqs = () => S.squads.filter(q => q.team === t && q.live > 0 && !q.state && !q.net);
+  $('cmdAttack')(Cm, sqs()); const nap = Cm.ev.filter(e => e.why === 'ap').length;
+  ok(Cm.gate === 'ap' && !(Cm.camp || []).length && nap >= 2, 'first the approaches of its ' + nap + ' fronts are asked for (M2), nothing opened yet');
+  for (let i = 0; i < 4 && Cm.gate === 'ap'; i++) { $('aiDrain')($('apWork')(Cm)); $('cmdAttack')(Cm, sqs()); }   // AP.per plans a plan of the commander
   const K = (Cm.camp || [])[0], A = K ? K.ops.filter(o => o.k === 'atk') : [], main = A.filter(o => o.cr === 'main');
-  ok(K && K.by === 'ai' && A.length >= 2, 'the AI opens a campaign of ' + A.length + ' assaults in one turn (' + Cm.ev.map(e => e.nm + ' ' + e.why).join(', ') + ')');
+  ok(K && K.by === 'ai' && A.length >= 2, 'then the AI opens a campaign of ' + A.length + ' assaults in one turn (' + Cm.ev.map(e => e.nm + ' ' + e.why).join(', ') + ')');
   if (K) {
     ok(main.length === 1 && A.every(o => o.cr === 'main' || o.cr === 'sec') && new Set(A.map(o => o.ri)).size === A.length && A.every(o => o.Hu === K.H) && K.H - S.t >= CAMP.H[0] && K.H - S.t <= CAMP.H[1],
       'on different roads, one main effort, the same H-hour (in ' + Math.round(K.H - S.t) + ' s)');

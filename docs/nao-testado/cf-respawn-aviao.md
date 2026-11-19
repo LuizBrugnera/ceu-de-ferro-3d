@@ -6,14 +6,14 @@
 - `wreckFall(p, dt)`: o ramo de queda de `stepPlane` virou uma função própria, sem mudança de física. O destroço cai sozinho, solta fumaça e, ao bater num objeto ou no chão, estoura e some (`hitObj` com `OBJD.crash` só na cópia do dono, `!p.net`).
 - `step`: acabada a contagem (e sem espera de modelo nem de rádio, e com a economia liberando), o jogador entra na próxima aeronave mesmo com o destroço ainda no ar. O destroço deixa de ser do jogador (`P.me = 0`) e segue em `S.planes` até cair.
 - Online, `Net.fall(g)`: quando o dono de um destroço já está em outra aeronave (`state`/`hstate` de uma nova) ou trocou de classe (`swap`), o fantasma abatido continua caindo na cópia de cada um (`g.fall`, `stepGhost` chama `wreckFall`) em vez de sumir no ar (antes `g.gone = true`) ou explodir no ar (antes, no `swap`).
-- `aarShow`: o embrulho que o M8 (#60) pôs logo antes de `/* ---------- 3D scene` só roda onde a função existe (`typeof aarShow === 'function'`). Sem isso, nenhuma suíte carregava a página (`ReferenceError: aarShow is not defined` no `harness.js`); no navegador nada muda.
 - `tests/respawn-air.js`: a regressão. `tests/README.md`: a linha dela.
 
 **Testado:**
-- `node tests/respawn-air.js`: 45 ok (192 s). Contra a página de antes (só com a correção do `aarShow`), 27 falhas: avião volta em 9,0 s, helicóptero em 5,8 s, e online o fantasma some no ar.
+- `node tests/respawn-air.js`: 45 ok (192 s). Contra a página de antes, 27 falhas: avião volta em 9,0 s, helicóptero em 5,8 s, e online o fantasma some no ar.
 - `node tests/heli.js` (57 ok) e `node tests/damage.js` (58 ok).
 
 **Não testado:**
+- Depois do merge com o `main` de 2026-11-19 (a82df2b), nada roda: o `main` chama `dsOf` e `myRoutes`, que não estão definidos em lugar nenhum da página (`ReferenceError` em `newState → fortInit → lineS` e em `spawnPlayer`). Todas as suítes param no carregamento, com ou sem esta mudança, e no navegador uma partida não deve abrir. Os números acima são do branch antes do merge (base 62bfe42). O merge só juntou a linha da contagem: o `cqOut(S.me)` novo do `main` vem primeiro, e depois a volta sem esperar o destroço.
 - As suítes online pelo servidor de verdade: no `main` elas já não passam. Com dois clientes, o servidor derruba as duas conexões (código 1006) cerca de 1 s depois do welcome; `node tests/heli-online.js` falha igual com a página de antes. Por isso a parte online de `respawn-air.js` liga anfitrião e convidado no mesmo processo (as mensagens `state`, `hstate`, `swap` e `down` passam de um `Net.rx` ao outro), sem o `server.js`. Vale investigar à parte.
 - Nenhuma outra suíte (`loadout*.js`, `soak.js`, `online.js`, `heli-online.js`, `world.js`, `sh tests/all.sh`).
 - No navegador: a câmera e o HUD na troca para a aeronave nova com o destroço ainda caindo; o painel "onde entrar" com a economia ligada (`ecoMe` agora é chamado assim que a contagem acaba, não depois que o destroço cai).

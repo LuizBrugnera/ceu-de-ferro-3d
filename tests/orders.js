@@ -75,7 +75,9 @@ console.log('-- attack: N squads the general picks, each on its own axis --');
   ok(qs.every((q, i) => !q.live || q.rd || q.fd < 300 || gone[i] > 400), 'two minutes on each has gone a good way along its way at a run (or rides, or fights): ' + gone.map(Math.round).join(', ') + ' m');
   ok(qs.every(q => !q.live || q.op === op), 'and the AI left them in the general\'s operation');
   const f = cmd({ c: 'free', ids: qs.map(q => q.id) });
-  ok(f.ok && qs.every(q => !q.live || !q.op), 'free hands them back to the AI');
+  // a routed squad is out of the general's hands (gSq) while it runs: the operation that free left empty lets it go when it ends, a second later
+  const rt = qs.filter(q => q.live && q.state && q.op); ok(f.ok && qs.every(q => !q.live || !q.op || rt.includes(q)), 'free hands them back to the AI');
+  if (rt.length) { C.run(2, () => park(S)); ok(rt.every(q => !q.op), 'and a routed one when the operation it was left in ends (' + rt.length + ')'); }
 }
 
 console.log('-- routes: defend through waypoints, move and assault with a route --');

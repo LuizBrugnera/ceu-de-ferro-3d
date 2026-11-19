@@ -141,7 +141,7 @@ const RX = {
       if (room.size > 0 && m.ns !== undefined && m.ns !== room.ns) return send(c.ws, { t: 'error', code: 'sides' });   // and the sides', when the page says its own
       const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Espectador';
       c.player = { id: nextId++, name, cls: 'spec', model: '', side: -1, kills: 0, deaths: 0, ai: 0 }; c.spec = 1; c.room = room; room.specs.add(c);
-      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, players: [...room.values()].map(o => o.player) }));
+      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, man2: 1, players: [...room.values()].map(o => o.player) }));
       send(c.ws, { t: 'fcap', v: 1 }); send(c.ws, { t: 'dcap', v: 1 });
       if (room.host) send(room.host.ws, { t: 'sjoin', id: c.player.id });
       return;
@@ -162,7 +162,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1, man2: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves

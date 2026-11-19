@@ -6104,6 +6104,25 @@ for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.va
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
 const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {} };
 let S = null;
+/* ---- the sides (3 lados, P0). S.N sides (newState sets it): 2 (every match of two) or 3 (the Frente atual with three: 0 EUA, 1 Rússia, 2 Insurgentes).
+   SIDES() the side numbers 0 .. S.N - 1 (a frozen array, [0, 1] with no match); bySide(f) an array with f(t) for each side; isSide(t) t is one of them;
+   ALL() the bitmask of every side; S.rel[a][b] 'foe' or 'ally' (everyone against everyone by default, D7: no interface yet); foe(a, b) on two side
+   numbers: b is an enemy of a (foe(a, t) on two entities is still the targeting rule, below); foes(t) the sides at war with t; foeBase(t, x, z) the
+   enemy base nearest x, z (nearest t's own base without them). With two sides every one is today's game: SIDES() [0, 1], ALL() 3, foes(t) [1 - t],
+   foeBase(t) S.base[1 - t]. SIDEMAX: the most sides a match may have */
+const SIDEMAX = 3, SIDEL = [];
+const SIDES = () => { const n = (S && S.N) || 2; return SIDEL[n] || (SIDEL[n] = Object.freeze([...Array(n).keys()])); };
+const bySide = f => SIDES().map(f);
+const isSide = t => Number.isInteger(t) && t >= 0 && t < ((S && S.N) || 2);
+const ALL = () => (1 << ((S && S.N) || 2)) - 1;
+const relNew = n => Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => (a === b ? 'ally' : 'foe')));
+const foeSide = (a, b) => a !== b && !(S && S.rel && S.rel[a] && S.rel[a][b] === 'ally');
+const foes = t => SIDES().filter(b => foeSide(t, b));
+const foeBase = (t, x, z) => {
+  const o = x === undefined ? S.base[t] : { x, z }; let best = null, bd = Infinity;
+  for (const b of foes(t)) { const B = S.base[b]; if (!B) continue; const d = Math.hypot(B.x - o.x, B.z - o.z); if (d < bd) { bd = d; best = B; } }
+  return best;
+};
 
 /* ---------- terrain: a height grid generated once per era, with valleys cut along the roads ---------- */
 /* MAPV: the map's version. 1 is the first map, two roads; 2 adds the road network (RN, T.net), 3 the new places and points, 4 the centre axis and the manoeuvres,
@@ -6666,7 +6685,7 @@ function newState(eraId, model, o) {
     os: new Uint8Array(T.nid + NDYN + NECO), oh: new Float32Array(T.nid + NDYN + NECO), ot: new Float32Array(T.nid + NDYN + NECO).fill(-99), om: new Uint32Array(T.nid + NDYN + NECO), oq: 0,
     cmd: null, cue: null, rd: 0, sup: [], eco: null, gcm: null, gsq: null, t0: 0, chg: [], spawnAt: 0, bm: null, bw: null, tw: null, planT: 0, planK: 0, fld: Array.from({ length: N }, () => ({ next: FIELD.reinf, bT: 0 })), ofa: new Map(), dyn: new Map(), wob: [], olog: [], osm: [], holes: [], nav: [], nrev: 0, navT: -1 };
   S.mv = o.net ? (Net.mv || 1) : MAPV;
-  S.N = N;
+  S.N = N; S.rel = relNew(N);
   for (const o of T.objs) S.oh[o.id] = o.hp;
   if ((!S.demo || S.watch) && (!S.net || Net.cq)) cqInit(o.len);
   cityInit();
@@ -6873,7 +6892,7 @@ function spawnColumn(team, nt, na, ntr, ri, s0, nar, nsq) {
 const squadsOf = t => S.squads.reduce((a, q) => a + (q.team === t && q.col && q.live > 0 && !q.state ? 1 : 0), 0) + S.units.reduce((a, u) => a + (u.team === t && !u.dead && u.cargo && !u.fld ? 1 : 0), 0);
 function demoKeepAlive() {
   const r = S.T.routes[0], mid = routeAt(r, r.len * .5);
-  for (let t = 0; t < 2; t++) {
+  for (let t = 0; t < SIDES().length; t++) {
     const side = S.E.sides[S.fac[t]], sg = dsOf(t, 0), x = mid.x - mid.dx * sg * 2500, z = mid.z - mid.dz * sg * 2500, h = headTo(x, z, mid.x, mid.z);
     const live = S.planes.filter(p => p.team === t && !p.dead);
     if (!live.some(p => p.role === 'fighter')) addPlane(side.fighter, t, x, hgt(x, z) + rand(500, 900), z + rand(-500, 500), h, true, 'fighter');
@@ -6939,7 +6958,7 @@ function misBirth(o, was) {
 }
 /* Dispatch: fn's newborn take order M's mission (t: the side, -1 either). dispatchIf: inside an order already open for t, fn is part of it */
 function dispatch(t, M, fn) {
-  const D = S.dsp || (S.dsp = { n: 0, cur: null, log: [[], []] }), was = D.cur;
+  const D = S.dsp || (S.dsp = { n: 0, cur: null, log: bySide(() => []) }), was = D.cur;
   D.cur = Object.assign({ id: 0, t: S.t, team: t, n: 0 }, M);
   try { return fn(); } finally { D.cur = was; }
 }
@@ -6966,7 +6985,7 @@ function misFrom(q, M) {
 /* a report up to the side's commander (only where the battle is simulated) */
 function rep(o, k, data) {
   if ((S.net && !S.host) || !o || !o.mis) return;
-  const M = o.mis, R = S.rep || (S.rep = [[], []]), L = R[o.team]; if (!L) return;
+  const M = o.mis, R = S.rep || (S.rep = bySide(() => [])), L = R[o.team]; if (!L) return;
   if (k === 'done' || k === 'inviable') M.st = k;
   const at = o.men ? o.men.find(m => !m.dead) || o.men[0] : o;
   L.push({ t: S.t, k, mis: M.id, kind: M.kind, d: M.d, op: M.op, x: at ? Math.round(at.x) : 0, z: at ? Math.round(at.z) : 0, data: data || null });
@@ -7031,9 +7050,9 @@ demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeep
    each by an order with its mission */
 function director(dt) {
   misTick(dt);
-  const first = !S.dir, D = S.dir || (S.dir = [0, 1].map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
-  if (!first && gpOn()) { gpMeter(); for (let t = 0; t < 2; t++) gpStep(t, D[t], dt); return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
-  for (let t = 0; t < 2; t++) {
+  const first = !S.dir, D = S.dir || (S.dir = SIDES().map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
+  if (!first && gpOn()) { gpMeter(); for (let t = 0; t < SIDES().length; t++) gpStep(t, D[t], dt); return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
+  for (let t = 0; t < SIDES().length; t++) {
     const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3);
     const cnt = (l, f) => l.reduce((a, o) => a + (o.team === t && !o.dead && !!o.ai && f(o) ? 1 : 0), 0), need = k => (cqFree(t, k) ? Math.max(0, DIR[k][n] - cnt(S.units, u => u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq))) : 0);
     T.air -= dt; T.col -= dt;
@@ -7156,7 +7175,7 @@ function gpMeter() {
   if (k2 === k) return;
   S.popK = k2;
   const ms = v => (+v.toFixed(2)).toString().replace('.', ','), why = 'IA do anfitrião em ' + ms(st.avg) + ' ms por quadro em média nos últimos ' + Math.round(st.s) + ' s (orçamento ' + ms(AIB.avg) + ' ms; pior quadro ' + ms(st.worst) + ' ms, comandante ' + ms(st.gen) + ' ms)';
-  for (const t of [0, 1]) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: ' + why);   // every step in the log (one a period at most), the last one too
+  for (const t of SIDES()) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: ' + why);   // every step in the log (one a period at most), the last one too
 }
 /* the missions a Dispatch order fielded (its id) take what the order says beyond the birth: latitude, ROE, break-off, H-hour */
 function gpMis(id, c) {
@@ -8445,7 +8464,7 @@ function scanDir(a, oc) {
   return { x: Math.cos(y), y: 0, z: -Math.sin(y) };
 }
 function claim(a, t) {   // a knows t: its side may be told
-  const K = t.kn || (t.kn = [null, null]), k = K[a.team];
+  const K = t.kn || (t.kn = bySide(() => null)), k = K[a.team];
   if (!k || S.t - k.last > SHARE.fresh) K[a.team] = { t0: S.t, last: S.t, by: a }; else { k.last = S.t; if (k.by.dead) k.by = a; }
 }
 function told(a, t, oc, d, air) {   // has one of its side that knows t told a, yet
@@ -8523,7 +8542,7 @@ function grade(a, t) {
   if (!notice(a, t)) return 0;
   const e = a.pm.get(t); return S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1;
 }
-const foe = (a, t) => t.team !== a.team || (ffOn() && !!a.ai && dist(a, t) > LADDER.far && grade(a, t) === 2 && a.pm.get(t).mis);   // an enemy; or, at long range with friendly fire on, a friend only recognized that it took for one
+const foe = (a, t) => (typeof a === 'number' ? foeSide(a, t) : foeSide(a.team, t.team) || (ffOn() && !!a.ai && dist(a, t) > LADDER.far && grade(a, t) === 2 && a.pm.get(t).mis));   // two side numbers: foeSide (P0); two entities: an enemy; or, at long range with friendly fire on, a friend only recognized that it took for one
 const idd = (a, t) => !!t && grade(a, t) >= 3;   // identified: a guided weapon may go
 /* has o made t out (for the map of what the side knows): a player's own eyes always count, an AI's only once it knows, and age s after it did */
 function aware(o, t, age) {
@@ -11925,7 +11944,7 @@ const Net = {
     }
   },
   roll() {
-    if (S && S.net) { S.humans = [0, 0]; for (const p of Net.players.values()) S.humans[pSide(p)]++; }
+    if (S && S.net) { S.humans = bySide(() => 0); for (const p of Net.players.values()) S.humans[pSide(p)]++; }
     Net.ui.roster();
   },
   /* a ghost fires what its owner announced: ordnance i of a plane or a vehicle's sam, at the same target, the missile under the same id */
@@ -11956,7 +11975,7 @@ const Net = {
       for (const e of m.e) {
         if (!Array.isArray(e) || (e.length !== 8 && e.length !== 9)) continue;
         const [id, team, x, z, a, pg, hp, st, lc] = e, i = id - S.T.nid;
-        if (!(i >= 32 && i < NDYN) || !(team === 0 || team === 1)) continue;
+        if (!(i >= 32 && i < NDYN) || !isSide(team)) continue;
         let b = S.sup.find(b => b.id === id); seen.add(id);
         if (b && (b.team !== team || Math.abs(b.x - x) + Math.abs(b.z - z) > 1)) { b.gone = true; if (!b.dead) dropObj(b.o); b = null; S.sup = alive(S.sup); }   // the id went to another base
         if (!b) { if (st === 2) continue; b = addSup(id, team, x, z, a, 0); }
@@ -12872,7 +12891,7 @@ trnSlow = (f => dt => {
   const R = S.rider;
   if (R && R.dead && R.in && S.my === R.in) { alight(R); playerDown(R.lastBy); }
   f(dt);
-  const sim = !S.net || S.host, K = BODY.keep, H = [S.my].concat(S.net ? [...Net.ghosts.values()] : []).filter(o => o && !o.dead), L = [[], []];
+  const sim = !S.net || S.host, K = BODY.keep, H = [S.my].concat(S.net ? [...Net.ghosts.values()] : []).filter(o => o && !o.dead), L = bySide(() => []);
   for (const u of S.units) {
     if (!u.occ || u.dead) continue;
     if (u.lim && S.t > u.lim) { u.dead = u.gone = true; continue; }
@@ -13062,7 +13081,7 @@ Net.rx.crew = (f => m => {
 Net.rx.swap = (f => m => { const p = Net.players.get(m.id); if (p && !m.no) p.cap = 0; f(m); })(Net.rx.swap);
 /* the host's rows say which side a vehicle with seats is on */
 Net.rx.ai = (f => m => {
-  if (S.net && !S.host && m.k === 1 && Array.isArray(m.e)) for (const e of m.e) { const g = Net.ai.get(e[0]); if (g && g.occ && g.net && (e[2] === 0 || e[2] === 1)) g.team = e[2]; }
+  if (S.net && !S.host && m.k === 1 && Array.isArray(m.e)) for (const e of m.e) { const g = Net.ai.get(e[0]); if (g && g.occ && g.net && isSide(e[2])) g.team = e[2]; }
   f(m);
 })(Net.rx.ai);
 
@@ -13939,7 +13958,7 @@ function helpRows(t, P) {
 /* online (welcome hlp: 1): the host's calls to each side (hlp, rows as helpRows', the asker's player id last), a guest's call (hask k, p where, q the target) and answer (hacc id) */
 Object.assign(Net, { hlp: false, hv: -1, hT: 0,
   helps() {
-    for (const t of [0, 1]) Net.send('hlp', { s: t, e: (S.help ? S.help.l : []).filter(R => R.team === t && (R.st === 'open' || R.st === 'on' || R.st === 'up')).slice(-24).map(R => [R.id, NEEDK.indexOf(R.k), Math.round(R.x), Math.round(R.z), R.pl ? 2 : R.resp ? 1 : 0, R.pid || 0]) });
+    for (const t of SIDES()) Net.send('hlp', { s: t, e: (S.help ? S.help.l : []).filter(R => R.team === t && (R.st === 'open' || R.st === 'on' || R.st === 'up')).slice(-24).map(R => [R.id, NEEDK.indexOf(R.k), Math.round(R.x), Math.round(R.z), R.pl ? 2 : R.resp ? 1 : 0, R.pid || 0]) });
   } });
 Net.tick = (g => dt => { g(dt); if (S && S.net && S.host && Net.hlp && S.help && (S.help.v !== Net.hv || Date.now() - Net.hT > 3000) && Date.now() - Net.hT > 500) { Net.hv = S.help.v; Net.hT = Date.now(); Net.helps(); } })(Net.tick);
 Net.rx.welcome = (g => m => { Net.hlp = m.hlp === 1; g(m); })(Net.rx.welcome);
@@ -13974,7 +13993,7 @@ const DRILL = { on: 1, stick: .3, min: 3, max: 90, cool: 20, hist: 8 };
 const DRILLS = [];
 const drCls = o => (o.men ? 'inf' : o.heli ? 'heli' : o.def && o.def.vmax ? 'plane' : o.kind || '');
 const drOf = (id, c) => DRILLS.find(D => D.id === id && (c === undefined || D.cls === c));   // an id may have an entry for each class (drFor)
-const drCount = () => S.drN || (S.drN = { all: [{}, {}], sn: [{}, {}] });
+const drCount = () => S.drN || (S.drN = { all: bySide(() => ({})), sn: bySide(() => ({})) });
 /* the nearest of o's beliefs that f passes (its target in o) */
 const belNear = (o, f) => { let best = null; if (o.bel) for (const [t, b] of o.bel) if (!t.dead && f(b, t) && (!best || b.d < best.d)) best = Object.assign(b, { o: t }); return best; };
 /* what a squad is and has, once a think, for its drills: null when it cannot drill (broken, aboard, gone) */
@@ -14018,7 +14037,7 @@ function drRun(o, p) {
   if (d && d.id === D.id) { if (f) Object.assign(d, f); d.u = p.u; if (d.re && D.act) { d.re = 0; D.act(o, d); } return; }
   if (d) drEnd(o, 'next');
   const n = (o.dr = Object.assign({ id: D.id, s: D.s, T0: S.t, T: S.t + (D.max || DRILL.max), n: 0 }, f, { u: p.u })), C = drCount(), t = o.team;
-  if (t === 0 || t === 1) { C.all[t][D.id] = (C.all[t][D.id] || 0) + 1; C.sn[t][D.id] = (C.sn[t][D.id] || 0) + 1; }
+  if (isSide(t)) { C.all[t][D.id] = (C.all[t][D.id] || 0) + 1; C.sn[t][D.id] = (C.sn[t][D.id] || 0) + 1; }
   if (D.act) D.act(o, n);
 }
 /* o's drill is over: into its history, the same one only after cool s, and its men back to their order */
@@ -15003,7 +15022,7 @@ function heliShots(p, dt) {
 }
 function heliStep(dt) {
   if (!S.modern) return;
-  const H = S.hl || (S.hl = { wave: 0, d: [0, 1].map(() => ({ air: 0, lift: HDIR.every * .4 })), acc: 0 });
+  const H = S.hl || (S.hl = { wave: 0, d: SIDES().map(() => ({ air: 0, lift: HDIR.every * .4 })), acc: 0 });
   for (const p of S.planes) {
     if (!p.heli) continue;
     if (!p.dead) heliShots(p, dt);
@@ -15019,11 +15038,11 @@ function heliStep(dt) {
   if (S.over && !S.demo) return;
   const side = t => S.E.sides[S.fac[t]];
   if (S.demo && !S.watch) {
-    for (let t = 0; t < 2; t++) { const D = H.d[t]; if ((D.air -= dt) <= 0 && heliCount(t, p => p.def.atk) < HDIR.demo.atk) { heliAir(t, side(t).heli, 1500); D.air = HDIR.demo.every; } }
+    for (let t = 0; t < SIDES().length; t++) { const D = H.d[t]; if ((D.air -= dt) <= 0 && heliCount(t, p => p.def.atk) < HDIR.demo.atk) { heliAir(t, side(t).heli, 1500); D.air = HDIR.demo.every; } }
     return;
   }
   if (S.net && (!S.host || !Net.hl)) return;
-  for (let t = 0; t < 2; t++) {
+  for (let t = 0; t < SIDES().length; t++) {
     const D = H.d[t], n = Math.min(S.humans[t], 3);
     if (gpOn()) { gpHeli(t, D); continue; }
     if ((D.air -= dt) <= 0 && cqFree(t, 'heli') && heliCount(t, p => p.def.atk) < HDIR.atk[n] && ecoUse(t, 'heli')) { heliAir(t, side(t).heli); D.air = HDIR.air; }
@@ -15193,7 +15212,7 @@ step = (g => dt => { g(dt); if (VET.on && (!S.net || S.host) && (S.vetT = (S.vet
 /* the general's view and its MCP state: each squad's name, rank and experience; the veterans of the side among its vehicles and aircraft */
 genVM = (g => (t, all) => {
   const V = g(t, all); if (!V || !V.u) return V;
-  const sim = !S.net || S.host, pos = new Map(), cnt = [0, 0], mine = s => s === t || V.all;
+  const sim = !S.net || S.host, pos = new Map(), cnt = bySide(() => 0), mine = s => s === t || V.all;
   if (sim) for (const l of [S.units, S.planes]) for (const o of l) if (!o.dead && mine(o.team)) pos.set(o.x + ',' + o.z, o);
   for (const e of V.u) {
     if (!mine(e.t) || e.age !== undefined) continue;
@@ -15202,7 +15221,7 @@ genVM = (g => (t, all) => {
     else if (sim) o = pos.get(e.x + ',' + e.z) || null;
     const l = o ? vetLvl(o) : 0; if (l) { e.vl = l; if (l >= 2) cnt[e.t]++; }
   }
-  if (sim && V.f) for (const s of [0, 1]) if (mine(s)) V.f[s].vet = cnt[s];
+  if (sim && V.f) for (const s of SIDES()) if (mine(s)) V.f[s].vet = cnt[s];
   return V;
 })(genVM);
 genState = (g => t => {
@@ -15556,7 +15575,7 @@ function coverV7(T, era, sd) {
 function fortAdd(id, k, team, x, z, a, prog, pre) {
   const T = S.T, F = FORT.K[k], K = OBJ[F.obj], oa = a + Math.PI / 2, y = hgtT(T, x, z);
   const o = { id, k: F.obj, K, x, y, z, hw: F.size[0] / 2, hd: F.size[1] / 2, h: 0, a: oa, c: Math.cos(oa), s: Math.sin(oa), rd: 0, r: Math.hypot(F.size[0], F.size[1]) / 2, hp: K.hp[0] };
-  const f = (o.ft = { id, k, F, team, x, y, z, a, prog: 0, o, pre: !!pre, br: null, dead: false, gone: false, n: 0, workT: S.t, pts: null, in: [0, 0], tg: null });
+  const f = (o.ft = { id, k, F, team, x, y, z, a, prog: 0, o, pre: !!pre, br: null, dead: false, gone: false, n: 0, workT: S.t, pts: null, in: bySide(() => 0), tg: null });
   T.byId[id] = o; S.os[id] = 0; S.oh[id] = o.hp; S.ot[id] = -99;
   cellsOf(T, o, c => { const l = S.dyn.get(c); if (l) l.push(o); else S.dyn.set(c, [o]); });
   S.forts.push(f); S.fn++; fortAt(f, prog); return f;
@@ -15849,7 +15868,7 @@ Object.assign(Net, { ft: false, fq: false, facc: 0,
     for (const e of m.e) {
       if (!Array.isArray(e) || e.length !== 9) continue;
       const [id, k, team, x, z, a, pg, hp, st] = e, i = id - T.fid;
-      if (!(i >= FORT.pre && i < FORT.slots) || !FORT.K[k] || !(team === 0 || team === 1)) continue;
+      if (!(i >= FORT.pre && i < FORT.slots) || !FORT.K[k] || !isSide(team)) continue;
       let f = S.forts.find(f => f.id === id); seen.add(id);
       if (f && (f.k !== k || f.team !== team || Math.abs(f.x - x) + Math.abs(f.z - z) > 1)) { fortDrop(f); f = null; S.forts = alive(S.forts); }
       if (!f) { if (st === 2) continue; f = fortAdd(id, k, team, x, z, a, 0); }
@@ -16067,7 +16086,7 @@ function cityPlan(T, era) {
 /* the structure of a building: what each of its elements is */
 function bldMake(q, off) {
   const K = q.K, nx = q.nx, nz = q.nz, nl = q.nl, oZ = nl * nz * (nx + 1), oS = oZ + nl * (nz + 1) * nx, oR = oS + nl * nx * nz, n = oR + nx * nz, kd = new Uint8Array(n), st = nl > 1, sx = nx - 1, sz = nz - 1;
-  const B = { K, t: q.t, nx, nz, nl, bw: q.bw, bd: q.bd, sh: q.sh, oZ, oS, oR, n, off, kd, st, sx, sz, top: st ? (K.roof === 'flat' ? nl : nl - 1) : 0, post: new Uint8Array((nx + 1) * (nz + 1)), mat: CITY.mat[K.mat], rev: 0, in: [0, 0], tg: null, doom: null, ent: null, tint: q.tint, sa: 0 };
+  const B = { K, t: q.t, nx, nz, nl, bw: q.bw, bd: q.bd, sh: q.sh, oZ, oS, oR, n, off, kd, st, sx, sz, top: st ? (K.roof === 'flat' ? nl : nl - 1) : 0, post: new Uint8Array((nx + 1) * (nz + 1)), mat: CITY.mat[K.mat], rev: 0, in: bySide(() => 0), tg: null, doom: null, ent: null, tint: q.tint, sa: 0 };
   const h = (a, b) => hash2(a + q.x * .37, b + q.z * .53, 7), win = (L, a, b) => (h(a + L * 13, b) < K.win ? 2 : 1), mid = nz >> 1;
   for (let L = 0; L < nl; L++) {
     for (let j = 0; j < nz; j++) for (const i of [0, nx]) kd[(L * nz + j) * (nx + 1) + i] = st && j === sz && i === nx ? 1 : !L && K.gate && j === mid ? 4 : win(L, i, j + 40);
@@ -16811,7 +16830,7 @@ function aiMortar(m, dt) {
 }
 
 /* ---------- the commander: what it knows ---------- */
-const cmdOf = t => (S.cmd || (S.cmd = [0, 1].map(t => perInit({ t, doc: CMD.doc[CMD.use[t]] || CMD.doc.balanced, ops: [], amb: [], ambT: [], fm: [], own: [], enemy: [], front: [], foe: [], ratio: [], post: [], known: [], inf: null, nx: 0, nz: 0, focus: null, hit: null, peak: 0, thr: 0, atkT: CMD.open, sc: {}, took: [], scd: new Set(), want: null, last: null, cue: null, man: [], mev: [], mcd: {}, taste: null, kz: null, fb: [], resAt: null, gue: null, mid: 0, mnT: 0, fpN: 0, fpT: -1 }))))[t];
+const cmdOf = t => (S.cmd || (S.cmd = SIDES().map(t => perInit({ t, doc: CMD.doc[CMD.use[t]] || CMD.doc.balanced, ops: [], amb: [], ambT: [], fm: [], own: [], enemy: [], front: [], foe: [], ratio: [], post: [], known: [], inf: null, nx: 0, nz: 0, focus: null, hit: null, peak: 0, thr: 0, atkT: CMD.open, sc: {}, took: [], scd: new Set(), want: null, last: null, cue: null, man: [], mev: [], mcd: {}, taste: null, kz: null, fb: [], resAt: null, gue: null, mid: 0, mnT: 0, fpN: 0, fpT: -1 }))))[t];
 const cmdInf = (C, x, z) => (C.inf ? C.inf[clamp((z + S.HW) / CMD.cell | 0, 0, C.nz - 1) * C.nx + clamp(x / CMD.cell | 0, 0, C.nx - 1)] : 0);
 const cmdBias = (t, o) => { const F = S.cmd && S.cmd[t].focus; return F && Math.abs(o.x - F.x) < F.r && Math.abs(o.z - F.z) < F.r ? CMD.air : 0; };
 /* the known enemy's strength within r m of a point, and where its middle is (KN) */
@@ -17425,7 +17444,7 @@ function manEnd(C, op) {
 /* the one door: a manoeuvre for side t, from by (ai me mcp sys); R: what the AI resolved (R.spec the spec it chose, R.res). { ok, why, id } */
 function opNew(t, spec, by, R) {
   by = by || 'ai';
-  if ((t !== 0 && t !== 1) || !spec || typeof spec !== 'object') return gBad('kind');
+  if (!isSide(t) || !spec || typeof spec !== 'object') return gBad('kind');
   if (!(S.T.mv >= 4) || !S.cq || (S.net && !S.host)) return gBad('off');
   if (S.cq.ph) return gBad('over');
   if (by !== 'ai' && by !== 'sys' && genSeat(t) !== by) return gBad('ctl');
@@ -18786,7 +18805,7 @@ function* planJob(t) {
   const C = cmdOf(t), F = S.fld[t], Q = SQUAD[S.era].length, have = {}, sq = [], tag = (j, k) => (have[j] || (have[j] = [])).push(k), live = () => { for (let i = sq.length; i--;) if (!(sq[i].live > 0)) sq.splice(i, 1); };
   let men = 0;
   for (const m of S.men) if (!m.dead && m.team === t) men++;
-  if (!S.cq) for (const w of towns()) { const n = [0, 0]; for (const m of S.men) if (!m.dead && Math.hypot(m.x - w.x, m.z - w.z) < FIELD.town) n[m.team]++; for (const a of [0, 1]) if (n[a] >= FIELD.held && !n[1 - a]) w.hold = a; }
+  if (!S.cq) for (const w of towns()) { const n = bySide(() => 0); for (const m of S.men) if (!m.dead && Math.hypot(m.x - w.x, m.z - w.z) < FIELD.town) n[m.team]++; for (const a of SIDES()) if (n[a] >= FIELD.held && !n.some((v, b) => b !== a && v)) w.hold = a; }
   for (const u of S.units) if (u.team === t && !u.dead && u.cargo) { men += u.cargo.length; if (u.fld) tag(u.job, u.jk); }
   for (const q of S.squads) {
     if (q.team !== t || q.net || !q.live || q.state) continue;
@@ -19162,7 +19181,7 @@ function rqAI(t, kind, ri, to) {
   if (!Q || Q.ph || !cqSim() || S.t < (Q.rq[who] || 0) || !cqFree(t, kind) || (!ecoGate() && Q.tk[t] - cost < Q.tk0 * CMD.rq.keep)) return null;
   if ((kind === 'car' || kind === 'truck') && S.units.reduce((n, u) => n + (u.team === t && !u.dead && u.left ? 1 : 0), 0) >= RQ.parked) return null;
   const e = rqEntry(t, ri, to); if (rqStock(e.id).n < 1 || !ecoUse(t, kind)) return null;
-  rqStock(e.id).n--; if (!ecoGate()) Q.tk[t] -= cost; Q.rq[who] = S.t + RQ.cool; (Q.rqa || (Q.rqa = [[], []]))[t].push(kind); return e;
+  rqStock(e.id).n--; if (!ecoGate()) Q.tk[t] -= cost; Q.rq[who] = S.t + RQ.cool; (Q.rqa || (Q.rqa = bySide(() => [])))[t].push(kind); return e;
 }
 function cmdReq(C) {
   const t = C.t, G = CMD.rq, Q = S.cq, W = C.want;
@@ -19240,7 +19259,7 @@ function radScan() {
   S.rl = L;
   if (!S.cq || S.cq.ph || (S.net && !Net.cq)) return;
   const T = S.radT || (S.radT = [RAD.ai.every, RAD.ai.every]);
-  for (let t = 0; t < 2; t++) {
+  for (let t = 0; t < SIDES().length; t++) {
     const id = S.E.sides[S.fac[t]].rad, have = S.units.reduce((n, u) => n + (u.def.rad && u.team === t && !u.dead && !!u.ai && !u.ai.park ? 1 : 0), 0);
     if (have >= RAD.ai.n) { T[t] = Math.max(T[t], S.t + RAD.ai.again); continue; }
     if (!id || S.t < T[t]) continue;
@@ -19697,7 +19716,7 @@ function droneShoot(m) {
 aiMan = (g => (m, dt) => { const c = m.ctl; if (m.fly) { c.mx = c.mz = 0; c.fire = c.run = c.ads = false; c.st = 1; return; } g(m, dt); droneShoot(m); })(aiMan);
 /* every sq-th squad of a side takes an operator along, while the side has fewer than ops of them */
 addSquad = (g => (team, x, z, ri, s, kits, off) => {   // off: the squad is getting out of what carried it, and is who it was
-  const q = g(team, x, z, ri, s, kits), id = droneOn() && !off ? INF.modern[S.fac[team]].find(k => KITS[k].drone) : null, n = S.dsq || (S.dsq = [0, 0]);
+  const q = g(team, x, z, ri, s, kits), id = droneOn() && !off ? INF.modern[S.fac[team]].find(k => KITS[k].drone) : null, n = S.dsq || (S.dsq = bySide(() => 0));
   if (!id || q.men.some(m => m.def.drone) || q.men.length < 3 || n[team]++ % DAI.sq !== 1 || S.men.length >= IAI.cap || S.men.filter(m => !m.dead && m.team === team && m.def.drone).length >= DAI.ops) return q;
   dwith(() => { const i = q.men.length, c = clearOf(x + 3 + i, z + 2, 1, {}), m = addMan(id, team, c.x, c.z, team ? Math.PI : 0); m.ai = manBrain(i); m.sq = q; m.ai.gx = m.x; m.ai.gz = m.z; q.men.push(m); if (S.host) Net.own(m); });
   q.n0 = q.live = q.men.length; return q;
@@ -20615,7 +20634,7 @@ function genVM(t, all) {
     }
     put(s, e);
   };
-  for (let s = 0; s < 2; s++) {
+  for (let s = 0; s < SIDES().length; s++) {
     const real = s === t || all;
     if (real) {
       for (const q of S.squads) {
@@ -20670,10 +20689,10 @@ function genVM(t, all) {
   if (C) for (const ri in C.sc) { const s = C.sc[ri]; if (s) sc.push({ ri: +ri, from: lead(s.q), p: routeAt(R[ri], s.s), left: s.T - S.t }); }
   const MV = C ? genManV(C) : null;
   return genNet({ t, all, T: S.t, over: !!S.over, res: Q ? Q.res : null, net: !!S.net, host: !S.net || !!S.host, cmd: !!C,
-    nm: [0, 1].map(i => S.E.sides[S.fac[i]].name), doc: C ? GEN.doc[docK(C)] || '' : '',
+    nm: SIDES().map(i => S.E.sides[S.fac[i]].name), doc: C ? GEN.doc[docK(C)] || '' : '',
     tk: Q ? Q.tk.slice() : null, tk0: Q ? Q.tk0 : 0, clock: Q ? Q.T : null, held: Q ? [cqHeld(0), cqHeld(1)] : null, lost: Q ? Q.lost : null, trend: S.gtk || [],
     pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, cap: p.cap, base: p.base, tw: p.tw, w: p.w.slice(), links: p.links }))
-      : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: [0, 0], links: [] })),
+      : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: bySide(() => 0), links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
     sup: S.sup.filter(b => !b.dead && (all || b.team === t || spotted(b, t))).map(b => ({ x: b.x, z: b.z, t: b.team, prog: b.prog, a: b.a })),
     forts: S.forts.filter(o => !o.dead && (all || o.team === t || o.pre)).map(o => ({ x: o.x, z: o.z, a: o.a, k: o.k, t: o.team, prog: o.prog })),
@@ -20914,10 +20933,10 @@ Net.rx.ecs = m => {
 Net.rx.gen = m => {
   if (!enetG() || (m.s !== S.me && !S.spec) || !m.v || typeof m.v !== 'object') return;
   enetT0(m);
-  (S.gcm || (S.gcm = [null, null]))[m.s] = { v: m.v, rx: S.t };
+  (S.gcm || (S.gcm = bySide(() => null)))[m.s] = { v: m.v, rx: S.t };
   const J = Object.keys(GEN.tag), K = Object.keys(GEN.ord), G = new Map(), q = Array.isArray(m.q) ? m.q : [];
   for (let i = 0; i + 5 < q.length; i += 6) { const dx = q[i + 4], dz = q[i + 5], d = dx || dz; G.set(q[i], { job: J[q[i + 1] - 1] || '', k: K[q[i + 2] - 1] || '', op: GOP[q[i + 3]] || '', dx: d ? dx : undefined, dz: d ? dz : undefined }); }
-  (S.gsq || (S.gsq = [null, null]))[m.s] = G;
+  (S.gsq || (S.gsq = bySide(() => null)))[m.s] = G;
 };
 Net.rx.glog = m => {
   if (!enetG() || (m.s !== S.me && !S.spec) || !Array.isArray(m.e)) return;
@@ -21009,7 +21028,7 @@ function ecoAdopt() {
   for (const e of E.l) if (e.dead) ecoClear(e);
   for (const u of S.units) if (u.fixed && u.kind === 'aa' && !u.dead && !u.es) { const s = E.l.find(s => s.team === u.team && !s.dead && hdist(u, s) < ECO.gd.r); if (s) u.es = s; }   // a site's AA adopted from the old host: still not the base's (director)
   for (const t of lsN()) E.d[t].aiT = S.t + 1;
-  Net.eq = true; Net.ej = ''; Net.gl = [null, null]; Net.en = { ecs: ENET.ecs, gen: ENET.gen, glog: 0, keep: 0 };
+  Net.eq = true; Net.ej = ''; Net.gl = bySide(() => null); Net.en = { ecs: ENET.ecs, gen: ENET.gen, glog: 0, keep: 0 };
 }
 Net.adopt = (f => () => { f(); S.gcm = S.gsq = null; ecoAdopt(); manAdopt(); })(Net.adopt);
 /* map version 4: the new host starts its manoeuvres afresh (the squads came back without their ops; what a manoeuvre had set is undone) */
@@ -21020,7 +21039,7 @@ function manAdopt() {
 }
 
 Net.rx.welcome = (old => m => {
-  Net.eco = m.eco === 1; Net.gen = m.gen === 1; Net.gc2 = m.gc === 2; Net.gn = Array.isArray(m.gn) ? m.gn.slice(0, 3) : [0, 0]; Net.gk = Array.isArray(m.gk) ? m.gk.slice(0, 3) : [0, 0];
+  Net.eco = m.eco === 1; Net.gen = m.gen === 1; Net.gc2 = m.gc === 2; Net.gn = Array.isArray(m.gn) ? m.gn.slice(0, SIDEMAX) : bySide(() => 0); Net.gk = Array.isArray(m.gk) ? m.gk.slice(0, SIDEMAX) : bySide(() => 0);
   old(m);
 })(Net.rx.welcome);
 
@@ -23273,7 +23292,7 @@ const sapOn = () => !S.net || Net.sap;
 const mines = () => S.mines || (S.mines = []);
 const mineName = (k, team) => SAP.names[S.era][S.fac[team]][k];
 const mineKnown = (o, t) => o.team === t || !!(o.kn & (1 << t));
-const sus = t => { const a = S.msus || (S.msus = [[], []]); return a[t] || (a[t] = []); };
+const sus = t => { const a = S.msus || (S.msus = bySide(() => [])); return a[t] || (a[t] = []); };
 /* the pouch: a sapper's mines are filled where its charges are */
 addMan = (g => (id, team, x, z, h) => { const m = g(id, team, x, z, h); if (m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } return m; })(addMan);
 refill = (g => (m, dep) => { g(m, dep); if (dep && m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } })(refill);
@@ -23583,7 +23602,7 @@ walk = (g => (P, I, dt) => {
 const MROWS = 40;
 Object.assign(Net, { sap: false, mq: false, mqn: 0,
   mines() {
-    const r = n => +n.toFixed(1), l = mines().filter(o => !o.gone).map(o => [o.id, o.k, o.team, r(o.x), r(o.z), o.kn & 3]), n = Math.ceil(l.length / MROWS) || 1;
+    const r = n => +n.toFixed(1), l = mines().filter(o => !o.gone).map(o => [o.id, o.k, o.team, r(o.x), r(o.z), o.kn & ALL()]), n = Math.ceil(l.length / MROWS) || 1;
     Net.mq = false; Net.mqn = (Net.mqn + 1) % 1e6;
     for (let i = 0; i < n; i++) Net.send('mine', { q: Net.mqn, i, n, e: l.slice(i * MROWS, (i + 1) * MROWS), s: S.mseq || 0 });
   } });
@@ -23595,7 +23614,7 @@ Net.rx.mine = m => {
   if (!S || !S.net || S.host || !Array.isArray(m.e) || !Number.isInteger(m.i) || !Number.isInteger(m.n)) return;
   if (Number.isInteger(m.s)) S.mseq = Math.max(S.mseq || 0, m.s);
   const b = m.i && S.mbuf && S.mbuf.q === m.q ? S.mbuf : (S.mbuf = { q: m.q, l: [] });
-  for (const e of m.e) if (Array.isArray(e) && e.length === 6 && (e[1] === 0 || e[1] === 1) && (e[2] === 0 || e[2] === 1)) b.l.push(e);
+  for (const e of m.e) if (Array.isArray(e) && e.length === 6 && (e[1] === 0 || e[1] === 1) && isSide(e[2])) b.l.push(e);
   if (m.i !== m.n - 1) return;
   const was = new Map(mines().map(o => [o.id, o])), now = [];
   for (const [id, k, team, x, z, kn] of b.l) {
@@ -23609,7 +23628,7 @@ Net.rx.mine = m => {
 Net.rx.mboom = m => {
   if (!S || !S.net || !Array.isArray(m.p)) return;
   if (S.mgone && S.mgone.has(m.id)) return;
-  const o = mines().find(o => o.id === m.id) || { id: m.id, k: m.k ? 1 : 0, team: m.s ? 1 : 0, x: m.p[0], y: hgt(m.p[0], m.p[1]), z: m.p[1], kn: 3, gone: false };
+  const o = mines().find(o => o.id === m.id) || { id: m.id, k: m.k ? 1 : 0, team: isSide(m.s) ? m.s : m.s ? 1 : 0, x: m.p[0], y: hgt(m.p[0], m.p[1]), z: m.p[1], kn: ALL(), gone: false };
   const P = S.my, A = o.k ? SAP.ap : SAP.at, v = P && !P.dead && !o.k ? [P, P.in].find(u => u && u.kind && !u.net && hdist(u, o) < A.r + 2) : null;
   mineBoom(o, v || null, false);
 };
@@ -25089,7 +25108,7 @@ function skyFire() {
 /* the AI's lights in the dark */
 function skyAI() {
   const A = SKY.ai, lit = (x, z) => S.ill.some(i => Math.hypot(i.x - x, i.z - z) < SKY.ill[i.k][0] * A.near);
-  const one = S.illSq || (S.illSq = [0, 0]);   // a side's squads fire one flare in side s
+  const one = S.illSq || (S.illSq = bySide(() => 0));   // a side's squads fire one flare in side s
   for (const q of S.squads) {
     if (q.net || S.t < one[q.team] || S.t < (q.illT || 0)) continue;
     const m = q.men.find(m => !m.dead && m.ai && m.ln && S.t - m.ln.t < A.heard && m.ln.of && m.ln.of.team !== m.team); if (!m) continue;
@@ -25097,8 +25116,8 @@ function skyAI() {
     if (lit(x, z)) continue;
     q.illT = S.t + A.sq; one[q.team] = S.t + A.side; skyIll(0, m.x, m.y + 1.5, m.z, x, z, m.team, 1.5);
   }
-  S.illArt = S.illArt || [0, 0];
-  for (let t = 0; t < 2; t++) {
+  S.illArt = S.illArt || bySide(() => 0);
+  for (let t = 0; t < SIDES().length; t++) {
     if (S.t < S.illArt[t]) continue;
     const gun = S.units.find(u => !u.dead && u.ai && u.team === t && u.kind === 'art'); if (!gun) continue;
     let p = null;
@@ -25320,7 +25339,7 @@ setObj = (g => (o, st, by, quiet) => {
   brSync();
   if (!quiet) gLogBoth(brName(o.br) + ' destruída', o.br);
 })(setObj);
-const gLogBoth = (s, at) => { if (S.cmd) for (const t of [0, 1]) gLog(t, 'eng', s, at, 'brx' + s); };
+const gLogBoth = (s, at) => { if (S.cmd) for (const t of SIDES()) gLog(t, 'eng', s, at, 'brx' + s); };
 /* a demolition charge at either end of a bridge, as against a base (S.chg; the charge is the soldier's) */
 const brEnd = (b, p, R) => b.ends.find(e => hdist(e, p) < (R || BR.reach)) || null;
 function brPlant(m, b) {
@@ -25559,8 +25578,8 @@ function brView(t) {
   return { ok: true, why: '', on: brOn() ? 1 : 0, br: brs().map(b => { const f = brPont(b); return { id: b.i, nm: brName(b), c: b.c, x: Math.round(b.x), z: Math.round(b.z), st: brDown(b) ? 'down' : S.os[b.id] ? 'hurt' : 'ok', hp: Math.round(Math.max(0, S.oh[b.id]) / b.o.hp * 100), open: brOpen(b) ? 1 : 0,
     pont: f ? { team: f.team === t ? 'own' : 'foe', pg: Math.round(f.prog * 100) } : null, ri: b.rs.map(r => r[0]), ends: b.ends.map(e => ({ x: Math.round(e.x), z: Math.round(e.z), home: brHome(t, e) ? 1 : 0 })) }; }) };
 }
-genQuery = (f => (t, q) => (q && q.q === 'brg' && (t === 0 || t === 1) ? brView(t) : f(t, q)))(genQuery);
-genAnswer = (f => (s, q) => (q && q.q === 'brg' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: brView(s) } : f(s, q)))(genAnswer);
+genQuery = (f => (t, q) => (q && q.q === 'brg' && isSide(t) ? brView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'brg' && isSide(s) ? { ok: true, why: '', id: 0, r: brView(s) } : f(s, q)))(genAnswer);
 Object.assign(GEN.no, { down: 'A ponte já caiu', whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', server: 'O servidor desta sala é antigo: sem pontes destrutíveis' });
 Object.assign(GEN.cn, { demolish: 'demolir ponte', cross: 'lançar pontão' });
 /* ---- online: welcome br: 1; the bridges' stages travel in the obj lines (and to whoever comes later, with every other object's) ---- */
@@ -25696,9 +25715,9 @@ function genMines(t) {
 const W13Q = { missions: (t, q) => genMissions(t), unit: (t, q) => { const c = Number.isInteger(q.id) ? genCard(t, q.id) : null; return c ? Object.assign({ ok: true, why: '' }, c) : { ok: false, why: 'id' }; },
   lots: (t, q) => genLots(t), mines: (t, q) => genMines(t) };
 const W13CUT = { missions: ['air', 'veh', 'sq'], threats: ['camp', 'l'], mines: ['sus', 'foe', 'own'], lots: ['lots'] };
-genQuery = (f => (t, q) => (q && Object.hasOwn(W13Q, q.q) && (t === 0 || t === 1) ? W13Q[q.q](t, q) : f(t, q)))(genQuery);
+genQuery = (f => (t, q) => (q && Object.hasOwn(W13Q, q.q) && isSide(t) ? W13Q[q.q](t, q) : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => {
-  if (!q || (s !== 0 && s !== 1) || !(Object.hasOwn(W13Q, q.q) || q.q === 'threats')) return f(s, q);
+  if (!q || !isSide(s) || !(Object.hasOwn(W13Q, q.q) || q.q === 'threats')) return f(s, q);
   const r = genQuery(s, q); if (r && r.ok === false) return { ok: false, why: r.why || 'shape', id: 0 };
   for (const k of W13CUT[q.q] || []) while (JSON.stringify(r).length > 15000 && Array.isArray(r[k]) && r[k].length) { r[k] = r[k].slice(0, r[k].length >> 1); r.cut = 1; }
   return { ok: true, why: '', id: 0, r };
@@ -25745,7 +25764,7 @@ function brUrgent() {
   if (!S.cmd || !S.cq || !(S.T.mv >= 4) || (S.net && !S.host) || S.cq.ph || S.t < (S.brU || 0)) return;
   S.brU = S.t + BR.reb.urg;
   if (!brOn() || (S.net && !Net.brb)) return;
-  for (const t of [0, 1]) {
+  for (const t of SIDES()) {
     const C = S.cmd[t]; if (!C || genBy(t, 'atk') !== 'ai') continue;
     const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), X = { t, C, free: manFree(all) };
     for (const b of brs()) {
@@ -26069,10 +26088,10 @@ function perInit(C) {
 /* newState's per and dif: [side 0, side 1]; 'sort' draws one of PERS; the commanders already made take it at once */
 function perSet(o) {
   const kp = Object.keys(PERS), pick = v => (v === 'sort' ? kp[Math.floor(Math.random() * kp.length) % kp.length] : Object.hasOwn(PERS, v) ? v : null);
-  S.per = [0, 1].map(t => pick(Array.isArray(o.per) ? o.per[t] : null));
-  S.dif = [0, 1].map(t => (Array.isArray(o.dif) && DIFK.includes(o.dif[t]) ? o.dif[t] : 'normal'));
+  S.per = SIDES().map(t => pick(Array.isArray(o.per) ? o.per[t] : null));
+  S.dif = SIDES().map(t => (Array.isArray(o.dif) && DIFK.includes(o.dif[t]) ? o.dif[t] : 'normal'));
   if (S.cmd) for (const C of S.cmd) perInit(C);
-  if (!S.net || S.host) for (const t of [0, 1]) if (S.per[t] || S.dif[t] !== 'normal') { const P = perOf(t), D = difOf(t); gLog(t, 'eng', 'General da IA: ' + (P ? P.nm + ' (' + P.s + ')' : 'doutrina ' + (GEN.doc[CMD.use[t]] || '').toLowerCase()) + '; dificuldade ' + D.nm + ', plano a cada ' + D.plan + ' s', null, 'per'); }
+  if (!S.net || S.host) for (const t of SIDES()) if (S.per[t] || S.dif[t] !== 'normal') { const P = perOf(t), D = difOf(t); gLog(t, 'eng', 'General da IA: ' + (P ? P.nm + ' (' + P.s + ')' : 'doutrina ' + (GEN.doc[CMD.use[t]] || '').toLowerCase()) + '; dificuldade ' + D.nm + ', plano a cada ' + D.plan + ' s', null, 'per'); }
 }
 newState = (g => (e, m, o) => { const s = g(e, m, o); perSet(o || {}); return s; })(newState);
 /* the production plan: the personality's mix, never past what the kind may be (0 at least) */
@@ -26175,7 +26194,7 @@ function habView(C) {
 }
 genVM = (g => (t, all) => {
   const V = g(t, all);
-  if (V && (t === 0 || t === 1) && (!S.net || S.host)) {
+  if (V && isSide(t) && (!S.net || S.host)) {
     const P = perOf(t), D = difOf(t), C = S.cmd && S.cmd[t];
     V.per = P ? { k: S.per[t], nm: P.nm, s: P.s } : null; V.dif = { k: DIFK.find(k => DIF[k] === D), nm: D.nm, plan: D.plan }; V.hab = habView(C);
   }
@@ -26185,11 +26204,11 @@ GENK.push('per', 'dif', 'hab');
 genState = (g => t => { const o = g(t), V = genVM(t, false); if (o && V) { o.per = V.per || null; o.dif = V.dif || null; o.hab = V.hab || []; } return o; })(genState);
 /* the host migrating: the backup (sent where the economy runs) carries each side's personality and difficulty, so the next host's general is the same
    one; without the economy the next host's general is its own hangar's */
-ecoPack = (g => () => Object.assign(g(), { gp: [S.per || [null, null], S.dif || ['normal', 'normal']] }))(ecoPack);
+ecoPack = (g => () => Object.assign(g(), { gp: [S.per || bySide(() => null), S.dif || bySide(() => 'normal')] }))(ecoPack);
 ecoUnpack = (g => K => {
   g(K);
   const P = K && Array.isArray(K.gp) && K.gp;
-  if (P && Array.isArray(P[0]) && Array.isArray(P[1])) { S.per = [0, 1].map(t => (Object.hasOwn(PERS, P[0][t]) ? P[0][t] : null)); S.dif = [0, 1].map(t => (DIFK.includes(P[1][t]) ? P[1][t] : 'normal')); if (S.cmd) for (const C of S.cmd) perInit(C); }
+  if (P && Array.isArray(P[0]) && Array.isArray(P[1])) { S.per = SIDES().map(t => (Object.hasOwn(PERS, P[0][t]) ? P[0][t] : null)); S.dif = SIDES().map(t => (DIFK.includes(P[1][t]) ? P[1][t] : 'normal')); if (S.cmd) for (const C of S.cmd) perInit(C); }
 })(ecoUnpack);
 /* the analytics: the header names each side's personality and difficulty, for the review and the AI × AI tournaments */
 anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) { h.per = anaSides(anaN()).map(t => (S.per && S.per[t]) || ''); h.dif = anaSides(anaN()).map(t => (S.dif && S.dif[t]) || 'normal'); } })(anaBegin);
@@ -26600,8 +26619,8 @@ function tmLayer(C, k) { const M = C && C.tm; return M && TML.includes(k) ? M[k]
 function tmStep(dt) {
   if (!TM.on || !S.cmd) return;
   const a0 = AIB.now();
-  if (TMB.S !== S) { TMB.S = S; TMB.n = TMB.sum = TMB.worst = TMB.pieces = 0; TMB.ref = [0, 0]; TMB.refN = [0, 0]; S.tmJ = [null, null]; S.tmT = [0, TM.every / 2]; S.tmA = [0, 0]; }
-  for (const t of [0, 1]) {
+  if (TMB.S !== S) { TMB.S = S; TMB.n = TMB.sum = TMB.worst = TMB.pieces = 0; TMB.ref = bySide(() => 0); TMB.refN = bySide(() => 0); S.tmJ = bySide(() => null); S.tmT = bySide(t => t * TM.every / SIDES().length); S.tmA = bySide(() => 0); }
+  for (const t of SIDES()) {
     if (!S.cmd[t]) continue;
     if ((S.tmT[t] -= dt) <= 0) { S.tmT[t] += TM.every; if (S.tmJ[t]) { const b = AIB.now(); S.tmJ[t] = aiDrain(S.tmJ[t]); S.tmA[t] += AIB.now() - b; tmDone(t); } S.tmJ[t] = tmJob(t); S.tmA[t] = 0; }
     if (S.tmJ[t]) { const b = AIB.now(); S.tmJ[t] = aiJob(S.tmJ[t], TM.per); S.tmA[t] += AIB.now() - b; TMB.pieces += TM.per; if (!S.tmJ[t]) tmDone(t); }
@@ -26628,8 +26647,8 @@ function tmAsk(t, k) {
   }
   return r;
 }
-genQuery = (f => (t, q) => (q && q.q === 'tmap' && (t === 0 || t === 1) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
-genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && (s === 0 || s === 1))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
+genQuery = (f => (t, q) => (q && q.q === 'tmap' && isSide(t) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && isSide(s))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
 /* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
    Four procedures of the general, made through opNew (so the person and the MCP have them too: man k=ambush | interdict | guard, x z), each
@@ -27367,8 +27386,8 @@ function apAnswer(t, q) {
     a: pl.A.map(a => ({ ang: a.ang, len: a.len, min: a.min, exp: a.exp, wood: a.wood, axis: a.axis, cost: R(a.cost), pos: [R(a.pos.x), R(a.pos.z)], pv: Math.round(a.pos.v * 100), asm: [R(a.asm.x), R(a.asm.z)], av: Math.round(a.asm.v * 100),
       pts: a.cells.filter((c, i) => i % 2 === 0 || i === a.cells.length - 1).slice(-AP.pts).map(c => { const p = apXZ(pl.Z, c); return [R(p.x), R(p.z)]; }) })) };
 }
-genQuery = (f => (t, q) => (q && q.q === 'ap' && (t === 0 || t === 1) ? apAnswer(t, q) : f(t, q)))(genQuery);
-genAnswer = (f => (s, q) => { if (!(q && q.q === 'ap' && (s === 0 || s === 1))) return f(s, q); const r = apAnswer(s, q); return r.why ? { ok: false, why: r.why, id: 0 } : { ok: true, why: '', id: 0, r }; })(genAnswer);
+genQuery = (f => (t, q) => (q && q.q === 'ap' && isSide(t) ? apAnswer(t, q) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => { if (!(q && q.q === 'ap' && isSide(s))) return f(s, q); const r = apAnswer(s, q); return r.why ? { ok: false, why: r.why, id: 0 } : { ok: true, why: '', id: 0, r }; })(genAnswer);
 /* ---------- the manoeuvre procedures (M3 of the general's manoeuvre): how an AI assault uses its approaches ----------
    When the AI opens an assault by its approaches (atkAp, M2), prPick scores the procedures that fit the plan and the odds, and draws one among the
    PR.top best, weighted by the square of the score (as cmdManJob draws its manoeuvres). Score = PR.val of the objective x chance (the odds own / foe, the
@@ -28244,7 +28263,7 @@ function bmrView(t) {
 }
 ecoView = (g => t => Object.assign(g(t), { works: bmrView(t) }))(ecoView);
 ecsOf = (g => t => { const o = g(t), w = bmrView(t); o.wk = [w.spentLastMinute.en, w.spentLastMinute.mt, w.crates, w.spentTotal.en, w.spentTotal.mt, w.sup.n, w.sup.cap, w.field.n, w.field.cap].map(v => Math.round(v)); return o; })(ecsOf);
-Net.rx.ecs = (g => m => { g(m); if (S && S.eco && (m.s === 0 || m.s === 1) && Array.isArray(m.wk) && m.wk.every(v => Number.isFinite(v))) S.eco.d[m.s].wkv = m.wk.slice(0, 9); })(Net.rx.ecs);
+Net.rx.ecs = (g => m => { g(m); if (S && S.eco && isSide(m.s) && Array.isArray(m.wk) && m.wk.every(v => Number.isFinite(v))) S.eco.d[m.s].wkv = m.wk.slice(0, 9); })(Net.rx.ecs);
 /* one line of the works for the General View and the economy rows */
 function bmrLine(t) {
   const w = bmrView(t), s = w.spentLastMinute, n = v => Math.round(v);
@@ -28662,7 +28681,7 @@ function m5Lg(t, o) {
 const MM = { on: 1, fail: -.3, ok: .15, rec: -.15, half: 600, lo: .25, hi: 1.4, lim: 1, hn: 4, keep: 24,
   tau: { blz: 1.6, gue: 1.7, ret: .6, art: .7, log: 1 }, apN: { facil: 1, moderado: 2, normal: 3, dificil: 3 },
   man: { fail: -.25, ok: .1, r: 350, keep: 16 }, lg: { k: .6, edge: 1.5, half: 900, keep: 16 }, pack: 15000 };
-const mmS = t => { const L = S.gmem || (S.gmem = [null, null]); return L[t] || (L[t] = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }); };
+const mmS = t => { const L = S.gmem || (S.gmem = bySide(() => null)); return L[t] || (L[t] = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }); };
 const mmDecay = (e, half) => (e ? e.v * Math.pow(.5, Math.max(0, S.t - e.T) / (half || MM.half)) : 0);
 const mmObj = o => Math.round(o.x) + ',' + Math.round(o.z);
 /* a value of map M at key k: moved by dv, faded first */
@@ -28752,7 +28771,7 @@ function mmMan(C, all) {
 }
 /* an op's end: an assault's outcome (its objective ours, or consolidating) and a manoeuvre's (the point it went for ours) */
 opEnd = (g => (C, op) => {
-  if (MM.on && C && (C.t === 0 || C.t === 1) && op && !op.over && (!S.net || S.host)) {
+  if (MM.on && C && isSide(C.t) && op && !op.over && (!S.net || S.host)) {
     const t = C.t;
     if (op.k === 'atk' && op.mm && !op.mm.done && !(op.pr === 'p12' && op.st === 'rec')) mmOut(C, op, !!((op.O.tw && op.O.tw.hold === t) || op.st === 'cons'), op.why);
     else if (op.man) {
@@ -28774,7 +28793,7 @@ lgConvoy = (g => (t, o, why) => {
   return r;
 })(lgConvoy);
 lgLost = (g => (o, c, n0) => {
-  if (MM.on && o && !o.heli && (o.team === 0 || o.team === 1) && (!S.net || S.host)) {
+  if (MM.on && o && !o.heli && isSide(o.team) && (!S.net || S.host)) {
     const M = mmS(o.team);
     if (c && c.mmRi !== undefined) { mmMove(M.lg, c.n + ':' + c.mmRi, 1, MM.lg.half, 3); mmTrim(M.lg, MM.lg.keep); }
     const e = S.T.mv >= 4 && S.T.net ? habEdge(o.x, o.z) : -1;
@@ -28828,14 +28847,14 @@ function mmUnpack(t, B) {
 }
 ecoPack = (g => () => {
   const K = g(); if (!MM.on || !S.gmem) return K;
-  K.mm = [0, 1].map(mmPack);
+  K.mm = SIDES().map(mmPack);
   if (JSON.stringify(K).length > MM.pack) delete K.mm;   // the relay's keep has a size; the economy first
   return K;
 })(ecoPack);
 ecoUnpack = (g => K => {
   g(K);
   if (!K || !Array.isArray(K.mm)) return;
-  try { const L = [0, 1].map(t => (K.mm[t] ? mmUnpack(t, K.mm[t]) : null)); S.gmem = L; } catch (e) { /* a broken memory: the general starts without one */ }
+  try { const L = SIDES().map(t => (K.mm[t] ? mmUnpack(t, K.mm[t]) : null)); S.gmem = L; } catch (e) { /* a broken memory: the general starts without one */ }
 })(ecoUnpack);
 /* Everything above runs without a browser (tests/harness.js, the headless tools): simulation code goes above this line, view code below it (tests/sim-split.js) */
 /* ---------- 3D scene (three.js) ---------- */
@@ -28991,7 +29010,7 @@ function buildUnit(u, wreck) {
     box(g, d.l * .24, .3, d.w * .6, dark, d.l * .32, .5 + d.hh + .15, 0, 'engine');
     tur.position.set(tx, .5 + d.hh + th / 2, 0); gun.position.x = tl / 2;
     if (d.open) {
-      for (const s of SIDES) box(tur, tl, th, .12, M2, 0, 0, s * tw / 2, 'hull');
+      for (const s of LRS) box(tur, tl, th, .12, M2, 0, 0, s * tw / 2, 'hull');
       box(tur, .12, th, tw, M2, -tl / 2, 0, 0, 'hull'); box(tur, .14, th * 1.15, tw * .8, M2, tl / 2 - .1, th * .08, 0, 'gun'); box(tur, tl * .4, th * .6, tw * .7, dark, -tl * .22, -th * .15, 0, 'ammo');
     } else { box(tur, tl, th, tw, M2, 0, 0, 0, 'hull'); box(tur, tl * .3, .25, tw * .5, dark, -tl * .2, th / 2 + .12, 0); }
     add(gun, new THREE.Mesh(cylX(.24, .2, d.g, 8), M2), 'gun').position.x = d.g / 2; box(gun, .6, .46, .46, dark, d.g - .35, 0, 0, 'gun'); box(gun, d.g * .35, .34, .5, M2, d.g * .18, -.3, 0, 'gun');
@@ -29997,7 +30016,7 @@ const onScr = s => s.front && s.x > 0 && s.x < cw && s.y > 0 && s.y < ch;
    free: looks along the aim, not the gun. optic: round sight, world marks are clipped to it. inst: the CK cockpit whose live instruments replace the text panel.
    lift: how far the damage panel stands above the bottom of the screen, clear of what the seat draws in that corner */
 const FM = new THREE.Matrix4(), FE = FM.elements, FQ = new THREE.Quaternion(), FV = new THREE.Vector3(), F1 = new THREE.Vector3(1, 1, 1), FU = new THREE.Euler(), YA = new THREE.Vector3(0, 1, 0);
-const MONO = "px 'Share Tech Mono', ui-monospace, monospace", SIDES = [-1, 1], CORN = [[-1, -1], [1, -1], [1, 1], [-1, 1]], DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]], DASH = [5, 4], SOLID = [];
+const MONO = "px 'Share Tech Mono', ui-monospace, monospace", LRS = [-1, 1], CORN = [[-1, -1], [1, -1], [1, 1], [-1, 1]], DIR4 = [[1, 0], [-1, 0], [0, 1], [0, -1]], DASH = [5, 4], SOLID = [];
 let fF = 1, sx = 0, sy = 0, sz = 0, fpOn = false;
 function fpFrame(q) { const e = camSt.eye; FM.compose(FV.set(e.x, e.y, e.z), q, F1).premultiply(camera.matrixWorldInverse); fF = ch / (2 * Math.tan(camera.fov * Math.PI / 360)); }
 function fpPt(x, y, z) {
@@ -30199,7 +30218,7 @@ function fpJetHud(P, C, blink) {
     if (Math.abs(e) > 85) continue;
     const er = e / 57.3, ce = Math.cos(er), se = Math.sin(er), w = (e ? .085 : .22) / ce, gap = .03 / ce;
     hx.setLineDash(e < 0 ? DASH : SOLID); hx.beginPath();
-    for (const s of SIDES) {
+    for (const s of LRS) {
       if (!fpDir(Math.cos(hd - s * gap) * ce, se, -Math.sin(hd - s * gap) * ce)) continue; const ax = sx, ay = sy;
       if (!fpDir(Math.cos(hd - s * w) * ce, se, -Math.sin(hd - s * w) * ce)) continue;
       hx.moveTo(ax, ay); hx.lineTo(sx, sy);
@@ -30242,7 +30261,7 @@ function fpMfd(P, C, acc, blink) {
   const d = P.def, hw = panelHalf(C), zc = clamp(hw * 1000 - 105, 100, 210), s = 190, y0 = 24, G = '#7dffa0';
   if (!fpPlane(C.px - .002, C.py, 0)) return;
   hx.textBaseline = 'middle';
-  for (const sg of SIDES) {
+  for (const sg of LRS) {
     const x = sg * zc - s / 2;
     hx.fillStyle = '#2b3236'; hx.fillRect(x - 10, y0 - 10, s + 20, s + 20); hx.fillStyle = '#03100b'; hx.fillRect(x, y0, s, s);
     hx.fillStyle = '#596268'; for (let i = 0; i < 5; i++) { hx.fillRect(x + 22 + i * 34, y0 - 8, 12, 5); hx.fillRect(x + 22 + i * 34, y0 + s + 3, 12, 5); }
@@ -30352,9 +30371,9 @@ function fpGunner(P, u, ink, acc) {
   } else {   // triangle on the bore, stadia triangles 4 mils apart, and a range scale beside them
     const s = Math.max(F * .004, 9 * u);
     hx.moveTo(cx, cy); hx.lineTo(cx - s * .55, cy + s); hx.lineTo(cx + s * .55, cy + s); hx.closePath();
-    for (let i = 1; i <= 3; i++) for (const sg of SIDES) { const x = cx + sg * i * s * 1.6; hx.moveTo(x, cy); hx.lineTo(x - s * .28, cy + s * .5); hx.lineTo(x + s * .28, cy + s * .5); hx.closePath(); }
+    for (let i = 1; i <= 3; i++) for (const sg of LRS) { const x = cx + sg * i * s * 1.6; hx.moveTo(x, cy); hx.lineTo(x - s * .28, cy + s * .5); hx.lineTo(x + s * .28, cy + s * .5); hx.closePath(); }
     hx.fill(); hx.beginPath();
-    for (const sg of SIDES) { hx.moveTo(cx + sg * s * 6.2, cy); hx.lineTo(cx + sg * R * .9, cy); }
+    for (const sg of LRS) { hx.moveTo(cx + sg * s * 6.2, cy); hx.lineTo(cx + sg * R * .9, cy); }
     hx.moveTo(cx - s * 6.2, cy); hx.lineTo(cx - s * 6.2, cy + Math.min(R * .8, mil * 3000));
     for (let r = st; r <= 3000 && mil * r < R * .8; r += st) { const y = cy + mil * r; hx.moveTo(cx - s * 6.2, y); hx.lineTo(cx - s * 6.2 - ((r / st) % 2 ? 6 : 12) * u, y); }
     hx.stroke();
@@ -30770,15 +30789,15 @@ function dmgPanel(P, u, ink, acc, seat, blink) {
   if (P.heli) heliPanel(P, D, I, st, paint, u); else
   if (P.kind) {   // the part volumes themselves, the turret's turned with it
     const e = P.def.env, k = Math.min(32 * u / e[5], 52 * u / e[3]);
-    const rect = (d, i) => { const b = d.box; for (const s of b[6] ? SIDES : [0]) { const w = b[6] ? (b[5] - b[6]) / 2 : b[5], z = b[2] + s * ((b[6] || 0) + w); hx.beginPath(); hx.rect((z - w) * k, -(b[0] + b[3]) * k, 2 * w * k, 2 * b[3] * k); paint(st[i]); } };
+    const rect = (d, i) => { const b = d.box; for (const s of b[6] ? LRS : [0]) { const w = b[6] ? (b[5] - b[6]) / 2 : b[5], z = b[2] + s * ((b[6] || 0) + w); hx.beginPath(); hx.rect((z - w) * k, -(b[0] + b[3]) * k, 2 * w * k, 2 * b[3] * k); paint(st[i]); } };
     D.forEach((d, i) => { if (d.box && !d.tur && !d.det) rect(d, i); });
     hx.save(); hx.translate(0, -P.def.tx * k); hx.rotate(-P.ty); D.forEach((d, i) => { if (d.tur) rect(d, i); }); hx.restore();
     D.forEach((d, i) => { if (d.det && !d.tur) rect(d, i); });
   } else {   // the outlines of the model: wings in their two sections and tailplane, fuselage, fins, and what sits inside
     const m = P.def.mdl, hb = D[0].box, wb = D[I.tipR].box, k = Math.min(38 * u / (wb[2] + wb[5]), 52 * u / hb[3]), xc = hb[0], last = m.wings.length - 1, T = DMG.tip;
     const poly = (pts, s) => { hx.beginPath(); pts.forEach((p, i) => (i ? hx.lineTo(p[1] * MS * k, (xc - p[0] * MS) * k) : hx.moveTo(p[1] * MS * k, (xc - p[0] * MS) * k))); hx.closePath(); paint(s); };
-    const rect = (i, hw) => { const b = D[i].box; for (const s of b[6] && !hw ? SIDES : [0]) { const w = hw || (b[6] ? (b[5] - b[6]) / 2 : b[5]) * k, z = b[2] + s * ((b[6] || 0) + w / k); hx.beginPath(); hx.rect(z * k - w, (xc - b[0] - b[3]) * k, 2 * w, 2 * b[3] * k); paint(st[i]); } };
-    m.wings.forEach((w, n) => { for (const s of SIDES) {
+    const rect = (i, hw) => { const b = D[i].box; for (const s of b[6] && !hw ? LRS : [0]) { const w = hw || (b[6] ? (b[5] - b[6]) / 2 : b[5]) * k, z = b[2] + s * ((b[6] || 0) + w / k); hx.beginPath(); hx.rect(z * k - w, (xc - b[0] - b[3]) * k, 2 * w, 2 * b[3] * k); paint(st[i]); } };
+    m.wings.forEach((w, n) => { for (const s of LRS) {
       const at = t => [[w.a[0] + (w.a[2] - w.a[0]) * t, s * (w.z0 + w.span * t)], [w.a[1] + (w.a[3] - w.a[1]) * t, s * (w.z0 + w.span * t)]], sec = (a, b, i) => { const p = at(a), q = at(b); poly([p[0], q[0], q[1], p[1]], st[i]); };
       if (n === last) sec(0, 1, s < 0 ? I.stabL : I.stabR); else { sec(0, T, s < 0 ? I.wingL : I.wingR); sec(T, 1, s < 0 ? I.tipL : I.tipR); }
     } });
@@ -31005,38 +31024,38 @@ function buildTrn(u, wreck) {
   tur.add(gun); g.add(tur);
   if (K === 'lav') {
     const [tl, tw, th, tx] = d.t, y0 = .5, r = .5;
-    for (const x of T.ax) for (const s of SIDES) wheel(x, s * W * .43, r, W * .16, s < 0 ? 'wheelL' : 'wheelR');
+    for (const x of T.ax) for (const s of LRS) wheel(x, s * W * .43, r, W * .16, s < 0 ? 'wheelL' : 'wheelR');
     const prism = (pts, w, m, pid) => { const sh = new THREE.Shape(); pts.forEach((p, i) => (i ? sh.lineTo(p[0], p[1]) : sh.moveTo(p[0], p[1]))); const ge = new THREE.ExtrudeGeometry(sh, { depth: w, bevelEnabled: false }); ge.translate(0, 0, -w / 2); return add(g, new THREE.Mesh(ge, m), pid); };
     prism([[-L / 2, y0 + .12], [L / 2 - T.bow, y0], [L / 2, y0 + H * .5], [L / 2 - T.bow * 1.15, y0 + H], [-L / 2, y0 + H]], W * .7, M, 'hull');   // the boat hull, drawn to a point at the bow
     prism([[-L / 2 + .05, y0 + H * .45], [L / 2 - T.bow * .5, y0 + H * .45], [L / 2 - T.bow * 1.2, y0 + H + .02], [-L / 2 + .05, y0 + H + .02]], W * .88, M, 'hull');   // the sponsons over the wheels
     box(g, .07, H * .42, W * .62, M2, L / 2 - T.bow * .55, y0 + H * .8, 0, 'hull', -Math.atan2(H * .5, T.bow * 1.15) + Math.PI / 2);   // trim vane folded on the glacis
     box(g, L * .22, .08, W * .3, dark, L * .22, y0 + H + .05, W * .2, 'engine'); box(g, .5, .22, .22, dark, L * .12, y0 + H * .8, W * .46, 'engine');   // engine grille and exhaust
-    for (const s of T.props > 1 ? SIDES : [0]) add(g, new THREE.Mesh(cylX(.2, .2, .4, 8), dark), 'hull').position.set(-L * .5 + .05, y0 + .25, s * W * .22);
-    for (const s of SIDES) box(g, .06, H * .45, .5, M2, -L * .5 + .02, y0 + H * .62, s * .3, 'hull');   // rear doors
+    for (const s of T.props > 1 ? LRS : [0]) add(g, new THREE.Mesh(cylX(.2, .2, .4, 8), dark), 'hull').position.set(-L * .5 + .05, y0 + .25, s * W * .22);
+    for (const s of LRS) box(g, .06, H * .45, .5, M2, -L * .5 + .02, y0 + H * .62, s * .3, 'hull');   // rear doors
     tur.position.set(tx, y0 + H + th / 2, 0); box(tur, tl, th, tw, M2, 0, 0, 0, 'turret'); box(tur, tl * .5, th * .7, tw * .5, M2, tl * .5, -.05, 0, 'turret', -.25); gun.position.x = tl * .55;
     add(gun, new THREE.Mesh(cylX(.07, .055, d.g, 8), dark), 'gun').position.x = d.g / 2; box(gun, .3, .12, .12, dark, d.g - .2, 0, 0, 'gun'); add(gun, new THREE.Mesh(cylX(.04, .04, .7, 6), dark), 'gun').position.set(.35, 0, .2);
-    box(tur, .35, .2, .3, dark, -tl * .15, th / 2 + .1, -tw * .22); for (const s of SIDES) box(tur, .3, .16, .12, dark, tl * .1, .05, s * (tw / 2 + .08));   // sight and smoke launchers
+    box(tur, .35, .2, .3, dark, -tl * .15, th / 2 + .1, -tw * .22); for (const s of LRS) box(tur, .3, .16, .12, dark, tl * .1, .05, s * (tw / 2 + .08));   // sight and smoke launchers
   } else {
     const truck = K === 'truck', r = truck ? .5 : .42, y0 = truck ? .78 : .45, cab = d.cab, hw = W * .5, by = y0 + H;
-    T.ax.forEach((x, i) => { for (const s of SIDES) wheel(x, s * (hw - .12), r, truck && i ? .5 : .28, 'wheels'); });
+    T.ax.forEach((x, i) => { for (const s of LRS) wheel(x, s * (hw - .12), r, truck && i ? .5 : .28, 'wheels'); });
     if (truck) {
       const cl = T.hood ? 1.5 : 1.7, bx = cab - cl / 2 - .1, bl = bx + L / 2;   // the bed runs from behind the cab to the tail
       box(g, L * .96, .22, W * .5, dark, 0, y0 - .05, 0, 'hull');
-      box(g, cl, 1.35, W * .9, M, cab, y0 + .75, 0, 'hull'); box(g, .06, .5, W * .78, glass, cab + cl / 2 + .01, y0 + 1.05, 0, 'hull'); for (const s of SIDES) box(g, cl * .5, .42, .05, glass, cab + .1, y0 + 1.05, s * (W * .45 + .01), 'hull');
-      if (T.hood) { box(g, T.hood, .75, W * .62, M, cab + cl / 2 + T.hood / 2, y0 + .42, 0, 'engine'); box(g, .08, .6, W * .5, dark, cab + cl / 2 + T.hood + .02, y0 + .4, 0, 'engine'); for (const s of SIDES) box(g, T.hood * .9, .12, .35, M2, cab + cl / 2 + T.hood / 2, y0 + .12, s * (hw - .2), 'hull'); }
+      box(g, cl, 1.35, W * .9, M, cab, y0 + .75, 0, 'hull'); box(g, .06, .5, W * .78, glass, cab + cl / 2 + .01, y0 + 1.05, 0, 'hull'); for (const s of LRS) box(g, cl * .5, .42, .05, glass, cab + .1, y0 + 1.05, s * (W * .45 + .01), 'hull');
+      if (T.hood) { box(g, T.hood, .75, W * .62, M, cab + cl / 2 + T.hood / 2, y0 + .42, 0, 'engine'); box(g, .08, .6, W * .5, dark, cab + cl / 2 + T.hood + .02, y0 + .4, 0, 'engine'); for (const s of LRS) box(g, T.hood * .9, .12, .35, M2, cab + cl / 2 + T.hood / 2, y0 + .12, s * (hw - .2), 'hull'); }
       else { box(g, .1, .55, W * .7, dark, cab + cl / 2 + .03, y0 + .35, 0, 'engine'); box(g, 1.1, .9, W * .8, M2, cab - cl / 2 - .6, y0 + .5, 0, 'engine'); }
       const b0 = (T.hood ? bx : bx - 1.2), bL = b0 + L / 2, bc = b0 - bL / 2;
-      box(g, bL, .14, W * .96, M2, bc, y0 + .2, 0, 'hull'); for (const s of SIDES) box(g, bL, .55, .08, M2, bc, y0 + .52, s * W * .47, 'hull'); box(g, .08, .55, W * .96, M2, b0, y0 + .52, 0, 'hull');
-      if (T.tilt) { for (const s of SIDES) box(g, bL, .95, .06, cv, bc, y0 + 1.25, s * W * .47, 'hull'); box(g, bL, .08, W * .98, cv, bc, y0 + 1.75, 0, 'hull'); box(g, .06, .95, W * .96, cv, b0, y0 + 1.25, 0, 'hull'); }
+      box(g, bL, .14, W * .96, M2, bc, y0 + .2, 0, 'hull'); for (const s of LRS) box(g, bL, .55, .08, M2, bc, y0 + .52, s * W * .47, 'hull'); box(g, .08, .55, W * .96, M2, b0, y0 + .52, 0, 'hull');
+      if (T.tilt) { for (const s of LRS) box(g, bL, .95, .06, cv, bc, y0 + 1.25, s * W * .47, 'hull'); box(g, bL, .08, W * .98, cv, bc, y0 + 1.75, 0, 'hull'); box(g, .06, .95, W * .96, cv, b0, y0 + 1.25, 0, 'hull'); }
     } else {
       box(g, L * .96, H * .75, W * .9, M, 0, y0 + H * .38, 0, 'hull');
       box(g, T.hood, H * .5, W * .78, M, L * .48 - T.hood / 2, y0 + H * .8, 0, 'engine', T.rib ? -.12 : 0); box(g, .07, H * .55, W * .6, dark, L * .48 + .02, y0 + H * .55, 0, 'engine');
-      for (const x of T.ax) for (const s of SIDES) box(g, 1, .08, .3, M2, x, y0 + H * .55, s * (hw - .1), 'hull');   // mudguards
+      for (const x of T.ax) for (const s of LRS) box(g, 1, .08, .3, M2, x, y0 + H * .55, s * (hw - .1), 'hull');   // mudguards
       if (T.roof) {
         const rl = L * .5, rx = cab - rl * .45; box(g, rl, .6, W * .86, M, rx, by + .22, 0, 'hull'); box(g, .07, .42, W * .76, glass, rx + rl / 2 + .02, by + .25, 0, 'hull', -.3);
-        for (const s of SIDES) box(g, rl * .7, .3, .05, glass, rx + .15, by + .28, s * W * .435, 'hull');
+        for (const s of LRS) box(g, rl * .7, .3, .05, glass, rx + .15, by + .28, s * W * .435, 'hull');
         if (T.slant) box(g, 1.3, .08, W * .84, M, rx - rl / 2 - .5, by + .2, 0, 'hull', .5); else box(g, L * .22, .5, W * .86, M, -L * .37, by + .15, 0, 'hull');
-      } else { box(g, .06, .55, W * .8, glass, cab + .75, by + .28, 0, 'hull', -.2); box(g, .5, .25, W * .86, cv, -L * .42, by + .1, 0, 'hull'); for (const s of SIDES) box(g, L * .5, .12, .06, M2, -L * .1, by - .02, s * W * .45, 'hull'); }
+      } else { box(g, .06, .55, W * .8, glass, cab + .75, by + .28, 0, 'hull', -.2); box(g, .5, .25, W * .86, cv, -L * .42, by + .1, 0, 'hull'); for (const s of LRS) box(g, L * .5, .12, .06, M2, -L * .1, by - .02, s * W * .45, 'hull'); }
       if (T.spare === 1) { const b = new THREE.Mesh(new THREE.CylinderGeometry(.36, .36, .16, 12), dark); b.position.set(L * .48 - T.hood * .45, y0 + H * 1.1, 0); b.rotation.z = -.12; add(g, b, 'hull'); }
       if (T.spare === 2) add(g, new THREE.Mesh(cylX(.36, .36, .16, 12), dark), 'hull').position.set(-L * .5 - .06, y0 + H * .6, W * .2);
       if (T.grille) for (let i = -3; i <= 3; i++) box(g, .03, H * .45, .05, M, L * .48 + .06, y0 + H * .55, i * W * .08, 'engine');
@@ -31072,23 +31091,23 @@ buildTrn = (f => (u, wreck) => {
   const L = d.l, W = d.w, H = d.hh, by = .45 + H, dark = mat(0x1c1d1e), M2 = mat(wreck ? 0x1f1f1c : u.col[1]);
   const box = (w, hh, dp, m, x, y, z, rz, rx) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, hh, dp), m); b.position.set(x, y, z); if (rz) b.rotation.z = rz; if (rx) b.rotation.x = rx; g.add(b); return b; };
   if (d.svc === 'arv') {
-    for (const s of SIDES) box(L * .9, .5, .4, dark, 0, .35, s * W * .5);   // the tracks
-    for (const s of SIDES) box(.14, 2.4, .14, M2, L * .18, by + 1.05, s * W * .28, .35, -s * .18);   // the A-frame of the crane, folded forward
+    for (const s of LRS) box(L * .9, .5, .4, dark, 0, .35, s * W * .5);   // the tracks
+    for (const s of LRS) box(.14, 2.4, .14, M2, L * .18, by + 1.05, s * W * .28, .35, -s * .18);   // the A-frame of the crane, folded forward
     box(.16, .16, W * .62, M2, L * .18 - .45, by + 2.15, 0); box(.1, 1.2, .06, dark, L * .18 - .5, by + 1.5, 0);   // its head and the hook
     box(.25, .8, W * .92, M2, -L * .5 - .12, .7, 0, -.35);   // the spade at the tail
     box(L * .25, .35, W * .7, M2, -L * .3, by + .1, 0);   // the winch
   } else if (d.svc === 'rpr') {   // the repair truck: the workshop body, its lockers and the jib of its crane over the tail
     const bl = L * .58, bx = -L * .5 + bl / 2 + .05, yel = mat(wreck ? 0x2a2820 : 0xc9a227);
     box(bl, 1.35, W * .94, M2, bx, by + .55, 0);
-    for (const s of SIDES) for (let i = 0; i < 3; i++) box(bl * .26, .8, .03, dark, bx - bl * .33 + i * bl * .33, by + .5, s * (W * .47 + .02));   // the tool lockers
-    for (const s of SIDES) box(bl * .9, .08, .04, yel, bx, by + 1.05, s * (W * .47 + .03));   // the band that tells it from a cargo truck
+    for (const s of LRS) for (let i = 0; i < 3; i++) box(bl * .26, .8, .03, dark, bx - bl * .33 + i * bl * .33, by + .5, s * (W * .47 + .02));   // the tool lockers
+    for (const s of LRS) box(bl * .9, .08, .04, yel, bx, by + 1.05, s * (W * .47 + .03));   // the band that tells it from a cargo truck
     box(.25, .9, .25, dark, -L * .5 + .3, by + 1.65, 0); box(1.9, .14, .14, dark, -L * .5 + .9, by + 2.1, 0, -.25);   // the crane's post and its jib
     box(.05, .7, .05, dark, -L * .5 + 1.75, by + 1.9, 0);   // the hook
     box(.18, .14, .18, mat(wreck ? 0x2a2820 : 0xd98a1a), d.cab, by + .95, 0);   // the beacon on the cab
   } else {
     const red = mat(wreck ? 0x2b1f1c : 0xb3201d), wh = mat(wreck ? 0x3a3a36 : 0xe8e6df), bl = L * .55, bx = -L * .5 + bl / 2 + .05;
     box(bl, 1.25, W * .92, wh, bx, by + .5, 0);   // the box behind the cab
-    for (const s of SIDES) { box(.8, .22, .02, red, bx, by + .55, s * (W * .46 + .02)); box(.22, .8, .02, red, bx, by + .55, s * (W * .46 + .02)); }
+    for (const s of LRS) { box(.8, .22, .02, red, bx, by + .55, s * (W * .46 + .02)); box(.22, .8, .02, red, bx, by + .55, s * (W * .46 + .02)); }
     box(.8, .02, .22, red, bx, by + 1.14, 0); box(.22, .02, .8, red, bx, by + 1.14, 0);
   }
   return g;
@@ -31105,7 +31124,7 @@ buildTrn = (f => (u, wreck) => {
   const box = (to, w, h, dp, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), m); b.position.set(x, y, z); to.add(b); return b; };
   if (!wreck) { box(g, .04, 1.3, .04, dark, -d.l * .45, by + .65, -W * .4); box(g, .55, .35, .02, mat(FACTIONS.modern.insurgentes.side.mark), -d.l * .45 - .28, by + 1.1, -W * .4); }   // the flag
   if (d.id === 'tecSpg9' && gun) { const t = new THREE.Mesh(cylX(.1, .1, 2.1, 10), dark); t.position.set(.5, .12, 0); gun.add(t); }
-  if (d.id === 'tecZu' && gun) for (const s of SIDES) { const t = new THREE.Mesh(cylX(.05, .04, 2.2, 8), dark); t.position.set(.9, .1, s * .22); gun.add(t); }
+  if (d.id === 'tecZu' && gun) for (const s of LRS) { const t = new THREE.Mesh(cylX(.05, .04, 2.2, 8), dark); t.position.set(.9, .1, s * .22); gun.add(t); }
   if (d.id === 'vbied' && !wreck) { const c = mat(0x5b5f57); for (let i = 0; i < 3; i++) box(g, .45, .5, .45, c, -d.l * .3 + i * .5, by - .1, 0); box(g, .02, .02, W * .7, mat(0xb3201d), -d.l * .1, by + .2, 0); }   // the drums and the wire
   return g;
 })(buildTrn);
@@ -32202,7 +32221,7 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
     hx.strokeStyle = hot && blink ? '#ffffff' : cqCol(p.hold); hx.lineWidth = hot ? 2.2 : 1.3; hx.strokeRect(x + .5, y0 + .5, w - 1, h - 1);
     txt(p.L, x + w / 2, y0 + 3 * u, 12 * u, '#ffffff', 'center');
     if (many) { if (p.w[me] > 0) { hx.fillStyle = FRIEND; hx.fillRect(x + u, y0 + h + 2 * u, 4 * u, 3 * u); } foes.forEach((t, j) => { if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + w - 5 * u * (j + 1), y0 + h + 2 * u, 4 * u, 3 * u); } }); }
-    else for (const t of [0, 1]) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
+    else for (const t of SIDES()) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
     x += w + g;
   }
   let xt = x + 5 * u;
@@ -32424,7 +32443,7 @@ function genOpen(v, user) {
 /* the bar: names, which tab and chips are on, what shows in this mode */
 function genBar() {
   if (!S) return;
-  const nm = [0, 1].map(i => S.E.sides[S.fac[i]].name), net = !!S.net && !S.spec, watch = playMode === 'watch' && !S.net;
+  const nm = SIDES().map(i => S.E.sides[S.fac[i]].name), net = !!S.net && !S.spec, watch = playMode === 'watch' && !S.net;
   $('#genN0').textContent = nm[0]; $('#genN1').textContent = nm[1];
   $('#genSide').hidden = net || !!gorSeat();
   for (const b of $('#genSide').children) b.setAttribute('aria-selected', String(+b.dataset.gs === GV.t));
@@ -34042,7 +34061,7 @@ function buildHeli(id) {
   const fs = new THREE.Shape(); m.fin.forEach((p, i) => (i ? fs.lineTo(p[0], p[1]) : fs.moveTo(p[0], p[1]))); fs.closePath();
   const fg = new THREE.ExtrudeGeometry(fs, { depth: .14, bevelEnabled: false }); fg.translate(0, 0, -.07); tag('hull', new THREE.Mesh(fg, pmat('hull', d.c2, { side: THREE.DoubleSide })));
   box('hull', d.c2, m.stab[3], .08, m.stab[2] * 2, m.stab[0], m.stab[1], 0);
-  for (const s of SIDES) {
+  for (const s of LRS) {
     const e = m.eng, pid = s > 0 ? 'engR' : 'engL', n = tag(pid, new THREE.Mesh(cylX(e[3] * .8, e[3], e[4], 8), pmat(pid, d.c2))); n.position.set(e[0], e[1], s * e[2]);
     const ex = tag(pid, new THREE.Mesh(cylX(e[3] * .55, e[3] * .6, .5, 8), pmat(pid, DK))); ex.position.set(e[0] - e[4] / 2 - .2, e[1], s * e[2]);
     const w = m.wing, z0 = rmax * m.sz * .7; box('hull', d.c2, w[3], .13, w[2], w[0], w[1], s * (z0 + w[2] / 2));
@@ -34068,8 +34087,8 @@ function buildHeli(id) {
   U.guns = [];
   const mount = (x, y, z, L) => { const tu = new THREE.Group(), gn = new THREE.Group(); tu.position.set(x, y, z); tu.add(gn); g.add(tu); const br = new THREE.Mesh(cylX(.06, .06, L, 6), mat(DK)); br.position.x = L / 2; gn.add(br); U.guns.push({ tu, gn }); return tu; };
   if (m.chin) { const tu = mount(m.chin[0], m.chin[1], 0, m.chin[2]); tu.add(new THREE.Mesh(new THREE.BoxGeometry(.6, .34, .5), mat(DK))); }
-  else for (const s of SIDES) mount(m.door[0], m.door[1], s * m.door[2], 1.1);
-  if (m.door) for (const s of SIDES) { box('hull', DK, 1.5, 1.15, .05, m.door[0] - .95, .05, s * rmax * m.sz * .985); for (const x of [-2.1, -3]) box('hull', GL, .55, .5, .05, m.door[0] + x, .35, s * rmax * m.sz * .96); }
+  else for (const s of LRS) mount(m.door[0], m.door[1], s * m.door[2], 1.1);
+  if (m.door) for (const s of LRS) { box('hull', DK, 1.5, 1.15, .05, m.door[0] - .95, .05, s * rmax * m.sz * .985); for (const x of [-2.1, -3]) box('hull', GL, .55, .5, .05, m.door[0] + x, .35, s * rmax * m.sz * .96); }
   if (m.nose) box('hull', DK, m.nose[2], m.nose[2], m.nose[2] * 1.2, m.nose[0], m.nose[1], 0);
   g.scale.setScalar(MS); return g;
 }
@@ -34077,7 +34096,7 @@ function buildHeli(id) {
 function syncHelis(dt) {
   if (wo && !wo.pads && S.modern) {
     wo.pads = 1;
-    for (let t = 0; t < 2; t++) for (let i = 0; i < HFM.pad.n; i++) {
+    for (let t = 0; t < SIDES().length; t++) for (let i = 0; i < HFM.pad.n; i++) {
       const q = heliPad(t, i), y = hgt(q.x, q.z) + .35, pad = new THREE.Group();
       const c = new THREE.Mesh(new THREE.CylinderGeometry(11, 11, .3, 24), mat(0x44474a)); pad.add(c);
       for (const [w, dp, x] of [[5, .9, -2.6], [5, .9, 2.6], [.9, 6, 0]]) { const b = new THREE.Mesh(new THREE.BoxGeometry(dp, .08, w), mat(0xd8d3bd)); b.position.set(x, .2, 0); pad.add(b); }
@@ -34203,7 +34222,7 @@ function fpHeli(P, u, ink, acc, disp, blink) {
   const hd = Math.atan2(-P.f.z, P.f.x), col = 'rgba(120,255,170,.85)';
   hx.strokeStyle = col; hx.fillStyle = col; hx.lineWidth = 1.3; hx.font = 11 * u + MONO; hx.textAlign = 'center';
   const cut = sightClip(SEAT.heli);
-  for (const s of SIDES) { if (fpDir(Math.cos(hd + s * .06), 0, -Math.sin(hd + s * .06))) { const x0 = sx, y0 = sy; if (fpDir(Math.cos(hd + s * .2), 0, -Math.sin(hd + s * .2))) { hx.beginPath(); hx.moveTo(x0, y0); hx.lineTo(sx, sy); hx.stroke(); } } }
+  for (const s of LRS) { if (fpDir(Math.cos(hd + s * .06), 0, -Math.sin(hd + s * .06))) { const x0 = sx, y0 = sy; if (fpDir(Math.cos(hd + s * .2), 0, -Math.sin(hd + s * .2))) { hx.beginPath(); hx.moveTo(x0, y0); hx.lineTo(sx, sy); hx.stroke(); } } }
   if (fpDir(P.f.x, P.f.y, P.f.z)) { hx.beginPath(); hx.moveTo(sx - 9, sy); hx.lineTo(sx - 3, sy); hx.moveTo(sx + 3, sy); hx.lineTo(sx + 9, sy); hx.moveTo(sx, sy - 9); hx.lineTo(sx, sy - 3); hx.stroke(); hx.fillText(String(Math.round(((Math.atan2(P.f.x, -P.f.z) * 57.3) + 360) % 360)).padStart(3, '0'), sx, sy - 26 * u); }
   if (cut) hx.restore();
   const hw = panelHalf(C), per = hw >= .34 ? 6 : 3, pit = Math.min(138, hw * 2000 / per), r = pit * .43, row = r * 2.2 + 14;
@@ -34291,7 +34310,7 @@ function buildDrone(o) {
 }
 buildWorld = (g => () => {
   g(); gDr = new THREE.Group(); scene.add(gDr);
-  if (S.modern) for (let t = 0; t < 2; t++) {   // the rail the long-range drone leaves from
+  if (S.modern) for (let t = 0; t < SIDES().length; t++) {   // the rail the long-range drone leaves from
     const r = droneRail(t), sd = ERAS[S.era].sides[S.fac[t]], m = new THREE.Group(), bed = new THREE.Mesh(new THREE.BoxGeometry(7, 1.1, 2.6), mat(sd.col2)), rail = new THREE.Mesh(new THREE.BoxGeometry(8, .25, .5), mat(0x2c2f31)), cab = new THREE.Mesh(new THREE.BoxGeometry(2, 1.6, 2.5), mat(sd.col));
     bed.position.y = 1.1; rail.position.set(.8, 3, 0); rail.rotation.z = .45; cab.position.set(-3.6, 1.9, 0); m.add(bed, rail, cab); m.position.set(r.x, r.y, r.z); m.rotation.y = r.h; scene.add(m);
   }

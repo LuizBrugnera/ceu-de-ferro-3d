@@ -8605,7 +8605,7 @@ function step(dt) {
   if (S.over) return;
   if (P && P.dead && S.respawn > 0 && !S.hold) {   // what was lost may be on its countdown: the player waits for it, or picks something else
     S.respawn -= dt;
-    if (S.respawn <= 0) { if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
+    if (S.respawn <= 0) { if (cqOut(S.me)) S.respawn = 1; else if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
   }
   if (!S.net || S.host) { a0 = AIB.now(); director(dt); AIB.g += AIB.now() - a0; }
 }
@@ -16046,7 +16046,7 @@ function thbSense(C) {
   if (Q) Q.p.forEach((p, i) => {
     const was = pc[i] === undefined ? p.c : pc[i]; pc[i] = p.c;
     if (p.hold !== t) return;
-    const E = cmdKnown(C, p.x, p.z, CMD.thr), kx = KN.n ? KN.x : p.x, kz = KN.n ? KN.z : p.z, ex = (p.c - was) * own < -1e-4;   // its bar moving away from this side: being taken
+    const E = cmdKnown(C, p.x, p.z, CMD.thr), kx = KN.n ? KN.x : p.x, kz = KN.n ? KN.z : p.z, ex = p.c - was < -1e-4;   // its bar going down (P2: c is the holder's progress): being taken
     if (E > THB.min || ex) see('p' + i, 'pt', p, gName(p), p.base >= 0 ? THB.val.base : p.tw ? THB.val.town : THB.val.pt, E, ex, kx, kz, 'p' + i);
   });
   const hit = id => S.ot[id] !== undefined && S.t - S.ot[id] < THB.hit;
@@ -16309,8 +16309,34 @@ function ptsOf() {
 }
 function cqInit(len) {
   const L = CQ.len[len] ? len : CQ.def, tk = Math.round(CQ.len[L][2] * CQ.era[S.era] * (S.mv >= 3 ? RN.tk[S.era] : 1));
-  S.cq = { len: L, T: CQ.len[L][1] * 60, T0: CQ.len[L][1] * 60, tk: [tk, tk], tk0: tk, p: ptsOf().map(d => Object.assign({}, d, { hold: d.own, c: d.own < 0 ? 0 : d.own ? 1 : -1, w: [0, 0] })), ph: 0, res: null, fr: 0, acc: 0, endT: 0,
-    lost: [[0, 0, 0], [0, 0, 0]], rd: [{}, {}], st: { k: 0, d: 0, c: 0 }, stock: {}, rq: {} };
+  S.cq = { len: L, T: CQ.len[L][1] * 60, T0: CQ.len[L][1] * 60, tk: SIDES().map(() => tk), tk0: tk, p: ptsOf().map(d => Object.assign({}, d, { hold: d.own, cap: -1, c: d.own < 0 ? 0 : 1, w: SIDES().map(() => 0) })), ph: 0, res: null, place: null, fr: 0, acc: 0, endT: 0,
+    lost: SIDES().map(() => [0, 0, 0]), rd: SIDES().map(() => ({})), out: SIDES().map(() => 0), ord: [], st: { k: 0, d: 0, c: 0 }, stock: {}, rq: {} };
+}
+/* N sides (P2): a point is hold (its side or -1), cap (the side taking a neutral one, or -1) and c, the progress 0..1 of the holder,
+   or of cap on a neutral point. With 2 sides it is the old signed bar: c_old = (hold >= 0 ? hold : cap) ? c : -c. out[t]: 0 alive, or why
+   side t is out (1 its tickets, 3 its main base), ord the order they went out in */
+const cqOut = t => !!(S.cq && S.cq.out && S.cq.out[t]);
+const cqLive = () => SIDES().filter(t => !cqOut(t));
+const cqSide = p => (p.hold >= 0 ? p.hold : p.cap);
+const cqHot = p => { let n = 0; for (const v of p.w) if (v > 0) n++; return n > 1; };
+const cqFoeW = (p, t) => { let m = 0; p.w.forEach((v, s) => { if (s !== t && v > m) m = v; }); return m; };
+/* the placing: the sides alive first, by points, then (tk) by tickets; then the ones out, the last out first. win: the first, unless tied with the second */
+function cqRank(tk = true) {
+  const Q = S.cq, h = SIDES().map(cqHeld), key = t => [h[t], tk ? Q.tk[t] : 0], live = cqLive().sort((a, b) => h[b] - h[a] || (tk ? Q.tk[b] - Q.tk[a] : 0));
+  const place = live.concat(Q.ord.slice().reverse()), a = place[0], b = live[1];
+  return { win: a === undefined ? -1 : b !== undefined && key(a)[0] === key(b)[0] && key(a)[1] === key(b)[1] ? -1 : a, place };
+}
+/* side s is out: its points go neutral (while others still play on), its director stops, its players watch; the last side standing wins */
+function cqOust(s, why) {
+  const Q = S.cq, N = S.E.sides; if (!Q || Q.out[s] || Q.ph) return;
+  Q.out[s] = why; Q.ord.push(s);
+  const live = cqLive();
+  if (live.length <= 1) return cqEnd(live.length ? live[0] : -1, why);
+  for (const p of Q.p) { if (p.hold === s) { p.hold = -1; p.cap = -1; p.c = 0; } else if (p.cap === s) { p.cap = -1; p.c = 0; } }
+  if (S.cmd && S.cmd[s]) S.cmd[s].out = 1;
+  cqSay(N[S.fac[s]].name + ' foi eliminado: ' + (why === 3 ? 'a base principal caiu' : 'os tíquetes acabaram'), s);
+  for (const t of live) gLog(t, 'rep', N[S.fac[s]].name + ' foi eliminado');
+  if (s === S.me) S.banner = { text: 'Seu lado foi eliminado', sub: 'A partida segue entre os outros lados: você assiste até o fim.', life: 8 };
 }
 const cqSim = () => !!S.cq && (!S.net || S.host);
 const cqHeld = t => S.cq.p.reduce((a, p) => a + (p.hold === t ? 1 : 0), 0);
@@ -16345,7 +16371,7 @@ function cqDead(o) {
   cmdLoss(o);
 }
 /* is the director free to replace a loss of that kind on side t: always where the general produces (the time to make it is the wait) */
-const cqFree = (t, k) => !S.cq || gpOn() || !(S.t < (S.cq.rd[t][k] || 0));
+const cqFree = (t, k) => !S.cq || (!cqOut(t) && (gpOn() || !(S.t < (S.cq.rd[t][k] || 0))));   // a side that is out gets nothing more
 /* what the player lost comes back after a while: cdKey the model, cdOf how long, cdLeft what is left of it */
 const cdKey = (cls, model) => cls + ':' + model;
 function cdOf(cls, model) {
@@ -16359,7 +16385,7 @@ const cdStart = (cls, model) => { if (PCD && S.cq) (S.cd || (S.cd = {}))[cdKey(c
 /* how long a player of side t waits to come back */
 const cqWait = t => (S.cq ? CQ.wait[0] + CQ.wait[1] * clamp(1 - Math.max(0, S.cq.tk[t]) / (S.cq.tk0 * CQ.low), 0, 1) : 4);
 /* may side t enter at point p: '' or foe (not its own), fight (contested), unsafe (an enemy within CQ.safe m) */
-const cqSpawnWhy = (p, t) => (p.hold !== t ? 'foe' : p.w[1 - t] > 0 || Math.abs(p.c) < 1 ? 'fight' : S.units.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) || S.men.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) ? 'unsafe' : '');
+const cqSpawnWhy = (p, t) => (p.hold !== t ? 'foe' : cqOut(t) ? 'foe' : cqFoeW(p, t) > 0 || p.c < 1 ? 'fight' : S.units.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) || S.men.some(o => !o.dead && o.team !== t && hdist(o, p) < CQ.safe + p.r) ? 'unsafe' : '');
 function cqSay(text, t) {
   S.feed.push({ text, life: 6, team: t }); if (S.feed.length > 4) S.feed.shift();
 }
@@ -16368,16 +16394,17 @@ function cqFlip(p, was) {
   if (p.hold < 0) { if (cqSim()) Q.tk[was] -= CQ.lost; cqSay(N[S.fac[was]].name + ' perdeu ' + p.L + ' · ' + p.name, was); gLog(was, 'rep', 'Perdemos ' + p.L + ' · ' + p.name, p); }
   else {
     if (cqSim()) Q.tk[p.hold] = Math.min(Q.tk0, Q.tk[p.hold] + CQ.took);
-    cqSay(N[S.fac[p.hold]].name + ' tomou ' + p.L + ' · ' + p.name, p.hold); gLog(p.hold, 'rep', 'Tomamos ' + p.L + ' · ' + p.name, p); gLog(1 - p.hold, 'rep', 'O inimigo tomou ' + p.L + ' · ' + p.name, p);
+    cqSay(N[S.fac[p.hold]].name + ' tomou ' + p.L + ' · ' + p.name, p.hold); gLog(p.hold, 'rep', 'Tomamos ' + p.L + ' · ' + p.name, p); for (const s of SIDES()) if (s !== p.hold && !cqOut(s)) gLog(s, 'rep', (S.N > 2 ? N[S.fac[p.hold]].name : 'O inimigo') + ' tomou ' + p.L + ' · ' + p.name, p);
     if (here && p.hold === S.me) { Q.st.c++; S.floats.push({ x: me.x, y: me.y + 6, z: me.z, text: 'Ponto capturado: ' + p.name, life: 3 }); }
   }
   S.tw = null; for (const C of S.cmd || []) C.took = [];
   if (was >= 0 && S.cmd && p.hold !== was) S.cmd[was].atkT = Math.min(S.cmd[was].atkT, S.t + INC.op.ctr);
 }
-function cqEnd(win, why) {
+function cqEnd(win, why, place) {
   const Q = S.cq; if (Q.ph) return;
-  Q.ph = 1; Q.res = [win, why]; Q.endT = S.t; Q.left = CQ.next;
-  endGame(win < 0 ? 'Empate' : win === S.me ? 'Vitória' : 'Derrota');
+  Q.ph = 1; Q.res = [win, why]; Q.place = place || cqRank().place; Q.endT = S.t; Q.left = CQ.next;
+  const i = Q.place.indexOf(S.me);
+  endGame(win < 0 ? 'Empate' : win === S.me ? 'Vitória' : S.N > 2 && i > 0 ? 'Derrota · ' + (i + 1) + 'º lugar' : 'Derrota');
 }
 function cqStep(dt) {
   const Q = S.cq;
@@ -16387,27 +16414,43 @@ function cqStep(dt) {
   Q.T -= dt;
   if ((Q.acc += dt) < .25) return;
   const e = Q.acc, P = Q.p; Q.acc = 0;
-  for (const p of P) p.w[0] = p.w[1] = 0;
-  const put = (o, w) => { for (const p of P) if (Math.abs(o.x - p.x) < p.r && Math.abs(o.z - p.z) < p.r && hdist(o, p) < p.r) p.w[o.team] += w; };
+  for (const p of P) p.w.fill(0);
+  const put = (o, w) => { for (const p of P) if (Math.abs(o.x - p.x) < p.r && Math.abs(o.z - p.z) < p.r && hdist(o, p) < p.r && o.team < p.w.length) p.w[o.team] += w; };
   for (const m of S.men) if (!m.dead && !m.in && !m.down) put(m, CQ.w.inf);
   for (const u of S.units) if (!u.dead && CQ.w[u.kind] && !(u.ai && u.ai.park) && !u.lim) put(u, CQ.w[u.kind]);
-  const tied = [cqTied(0), cqTied(1)];
+  const tied = SIDES().map(t => (cqOut(t) ? new Set() : cqTied(t)));
   let fr = -1, fs = 0;
   for (const p of P) {
-    const d = p.w[1] - p.w[0], t = d > 0 ? 1 : 0, was = p.hold, may = p.hold === t || p.links.some(i => P[i].hold === t);
-    if (d && may) p.c = clamp(p.c + (t ? 1 : -1) * Math.min(Math.abs(d), CQ.max) / CQ.t * e, -1, 1);
-    else if (!p.w[0] && !p.w[1]) { const g = was < 0 || !tied[was].has(p.i) ? 0 : was ? 1 : -1, k = e / (g || was < 0 ? CQ.idle : CQ.cut); p.c = Math.abs(g - p.c) <= k ? g : p.c + Math.sign(g - p.c) * k; }
-    if (was >= 0 && (was ? p.c <= 0 : p.c >= 0)) { p.hold = -1; cqFlip(p, was); }
-    if (p.hold < 0 && Math.abs(p.c) >= 1) { p.hold = p.c > 0 ? 1 : 0; cqFlip(p, was); }
-    const sc = p.base >= 0 ? 0 : (p.w[0] && p.w[1] ? 3 : 0) + (Math.abs(p.c) < 1 ? 2 : 0) + (p.hold < 0 ? 1 : 0);
+    let L = -1, a = 0, b = 0;   // the side with the most weight in it, and the margin over the next
+    p.w.forEach((v, t) => { if (v > a) { b = a; a = v; L = t; } else if (v > b) b = v; });
+    const d = a - b, was = p.hold, may = L >= 0 && !cqOut(L) && (p.hold === L || p.links.some(i => P[i].hold === L)), k = Math.min(d, CQ.max) / CQ.t * e;
+    if (d > 0 && may) {
+      if (p.hold === L) p.c = Math.min(1, p.c + k);   // its own: back to full
+      else if (p.hold >= 0) { p.c -= k; if (p.c <= 0) { p.hold = -1; p.cap = L; p.c = Math.min(1, -p.c); cqFlip(p, was); } }   // another's: down to neutral, and L starts taking it
+      else if (p.cap === L || p.cap < 0) { p.cap = L; p.c = Math.min(1, p.c + k); }
+      else { p.c -= k; if (p.c <= 0) { p.cap = L; p.c = Math.min(1, -p.c); } }   // neutral, being taken by another: undo that first
+    } else if (!a) {   // empty: settles back to its holder while tied to its base, else goes neutral in cut s; a neutral one back to nobody's
+      if (p.hold >= 0) { p.c = tied[p.hold].has(p.i) ? Math.min(1, p.c + e / CQ.idle) : p.c - e / CQ.cut; if (p.c <= 0) { p.hold = -1; p.cap = -1; p.c = 0; cqFlip(p, was); } }
+      else { p.c = Math.max(0, p.c - e / CQ.idle); if (!p.c) p.cap = -1; }
+    }
+    if (p.hold < 0 && p.cap >= 0 && p.c >= 1) { p.hold = p.cap; p.cap = -1; p.c = 1; cqFlip(p, was); }
+    const sc = p.base >= 0 ? 0 : (cqHot(p) ? 3 : 0) + (p.c < 1 ? 2 : 0) + (p.hold < 0 ? 1 : 0);
     if (sc > fs) { fs = sc; fr = p.ri; }
-    if (p.base >= 0 && p.hold === 1 - p.base) return cqEnd(p.hold, 3);
+    if (p.base >= 0 && p.hold >= 0 && p.hold !== p.base && !cqOut(p.base)) { cqOust(p.base, 3); if (Q.ph) return; }   // a main base taken: its side is out
   }
   if (fr >= 0) Q.fr = fr;
-  const n0 = cqHeld(0), n1 = cqHeld(1), m = n0 - n1;
-  if (m) Q.tk[m > 0 ? 1 : 0] -= CQ.bleed[Math.min(Math.abs(m), CQ.bleed.length - 1)] / 60 * e;
-  if (Q.tk[0] <= 0 || Q.tk[1] <= 0) return cqEnd(Q.tk[0] <= 0 && Q.tk[1] <= 0 ? (m ? +(m < 0) : -1) : +(Q.tk[0] <= 0), 1);
-  if (Q.T <= 0) cqEnd(m ? +(m < 0) : Q.tk[0] === Q.tk[1] ? -1 : +(Q.tk[1] > Q.tk[0]), 2);
+  const live = cqLive(), held = SIDES().map(cqHeld);
+  for (const s of live) {   // a side behind the leader in points bleeds by how far behind (2 sides: the old rule)
+    let m = 0; for (const o of live) if (o !== s) m = Math.max(m, held[o] - held[s]);
+    if (m > 0) Q.tk[s] -= CQ.bleed[Math.min(m, CQ.bleed.length - 1)] / 60 * e;
+  }
+  const z = live.filter(s => Q.tk[s] <= 0);
+  if (z.length) {
+    if (z.length >= live.length) { const r = cqRank(false); return cqEnd(r.win, 1, r.place); }   // all out of tickets at once: the points decide
+    for (const s of z) cqOust(s, 1);
+    if (Q.ph) return;
+  }
+  if (Q.T <= 0) { const r = cqRank(); cqEnd(r.win, 2, r.place); }
 }
 /* the point the player's body stands in, for the capture bar */
 function cqHere() {
@@ -16423,9 +16466,11 @@ Net.ui.rematch = () => {};
 Net.cqNew = () => { Net.cqn++; Net.cqSend(1); Net.ui.rematch(); };
 Net.cqSend = (fresh) => {
   const Q = S.cq, p = []; if (!Q) return;
-  if (!fresh) for (const o of Q.p) p.push(o.hold, Math.round(o.c * 100), Math.round(o.w[0] * 10), Math.round(o.w[1] * 10));
+  const v2 = Q.tk.length > 2;   // cq v2 (3 sides): a point [hold, c in hundredths, cap, the weights in tenths]; 2 sides keep v1, the signed bar
+  if (!fresh) for (const o of Q.p) { if (v2) p.push(o.hold, Math.round(o.c * 100), o.cap, ...o.w.map(v => Math.round(v * 10))); else { const sd = cqSide(o); p.push(o.hold, Math.round((sd === 1 ? o.c : sd === 0 ? -o.c : 0) * 100), Math.round(o.w[0] * 10), Math.round(o.w[1] * 10)); } }
   Net.cqacc = 0;
-  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: Q.lost[0].concat(Q.lost[1]) }, !fresh && Q.res && { r: Q.res, w: Math.max(0, Math.round(Q.left)) },
+  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: [].concat(...Q.lost) }, v2 && { v: 2, o: Q.out.slice() },
+    !fresh && Q.res && { r: v2 ? Q.res.concat(Q.place || []) : Q.res, w: Math.max(0, Math.round(Q.left)) },
     !fresh && Net.lg && S.lg && { sk: Q.p.map(o => (o.base < 0 && o.hold >= 0 ? Math.floor(o.lc || 0) : -1)) }));   // logistics (lg): the crates of each point, -1 none
 };
 /* friendly fire is a rule of the room: the host's choice (message ff), which a server that does not know it never carries, and then nobody hurts a friend */
@@ -16439,15 +16484,22 @@ Net.rx.cq = m => {
   const Q = S && S.cq;
   if (!S || !S.net || S.host || !Net.cq || !Array.isArray(m.p) || !Array.isArray(m.k)) return;
   if (m.n !== Net.cqn) { Net.cqn = m.n; return Net.ui.rematch(); }
-  if (!Q || m.p.length !== Q.p.length * 4) return;
-  Q.T = m.T; Q.tk = m.k.slice(0, 2); Q.tk0 = m.k0 || Q.tk0; Q.len = CQ.len[m.len] ? m.len : Q.len;
-  if (Array.isArray(m.l) && m.l.length === 6) Q.lost = [m.l.slice(0, 3), m.l.slice(3)];
-  Q.p.forEach((p, i) => { const was = p.hold; p.hold = m.p[i * 4]; p.c = m.p[i * 4 + 1] / 100; p.w[0] = m.p[i * 4 + 2] / 10; p.w[1] = m.p[i * 4 + 3] / 10; if (p.hold !== was && (p.hold >= 0 || was >= 0)) cqFlip(p, was); });
-  if (m.ph === 1 && !Q.ph && Array.isArray(m.r)) cqEnd(m.r[0], m.r[1]);
+  const NN = Q ? Q.tk.length : 2, v2 = m.v === 2, st = v2 ? 3 + NN : 4;
+  if (!Q || m.p.length !== Q.p.length * st || m.k.length < NN || (!v2 && NN > 2)) return;
+  Q.T = m.T; Q.tk = m.k.slice(0, NN); Q.tk0 = m.k0 || Q.tk0; Q.len = CQ.len[m.len] ? m.len : Q.len;
+  if (Array.isArray(m.l) && m.l.length === 3 * NN) Q.lost = Q.tk.map((_, t) => m.l.slice(3 * t, 3 * t + 3));
+  Q.p.forEach((p, i) => {
+    const was = p.hold, j = i * st; p.hold = m.p[j];
+    if (v2) { p.c = m.p[j + 1] / 100; p.cap = m.p[j + 2]; for (let t = 0; t < NN; t++) p.w[t] = m.p[j + 3 + t] / 10; }
+    else { const c = m.p[j + 1] / 100; p.c = Math.abs(c); p.cap = p.hold >= 0 || !c ? -1 : c > 0 ? 1 : 0; p.w[0] = m.p[j + 2] / 10; p.w[1] = m.p[j + 3] / 10; }
+    if (p.hold !== was && (p.hold >= 0 || was >= 0)) cqFlip(p, was);
+  });
+  if (v2 && Array.isArray(m.o)) m.o.forEach((w, t) => { if (w && t < NN && !Q.out[t] && !Q.ph) { Q.out[t] = w; Q.ord.push(t); if (t === S.me) S.banner = { text: 'Seu lado foi eliminado', sub: 'A partida segue entre os outros lados: você assiste até o fim.', life: 8 }; cqSay(S.E.sides[S.fac[t]].name + ' foi eliminado', t); } });
+  if (m.ph === 1 && !Q.ph && Array.isArray(m.r)) cqEnd(m.r[0], m.r[1], v2 && m.r.length > 2 ? m.r.slice(2) : null);
   if (Q.ph) Q.left = m.w || 0;
 };
 Net.tick = (tick => dt => { tick(dt); if (S.net && S.host && Net.cq && S.cq && (Net.cqacc += dt) >= .5) Net.cqSend(); })(Net.tick);
-Net.adopt = (old => () => { old(); const Q = S.cq; if (Q) { Q.rd = [{}, {}]; if (Q.ph) { Q.left = Math.max(Q.left || 0, 5); Q.again = 0; } } })(Net.adopt);
+Net.adopt = (old => () => { old(); const Q = S.cq; if (Q) { Q.rd = Q.tk.map(() => ({})); if (Q.ph) { Q.left = Math.max(Q.left || 0, 5); Q.again = 0; } } })(Net.adopt);
 Net.kill = (old => (g, det) => { if (g && !g.dead && S.host && g.pid) cqDead(g); old(g, det); })(Net.kill);
 /* ---------- requisition (RQ): a soldier on foot draws a vehicle at a depot ----------
    A depot (rqDepot): the main base (k 1), a finished supply base of the side (k 2), or a point it holds, uncontested, with such a base
@@ -16670,7 +16722,7 @@ function radGuard(t, sq) {
   }
 }
 fortPlan = (f => (t, sq) => { f(t, sq); radGuard(t, sq); })(fortPlan);
-cqDead = (f => o => { const Q = S.cq, was = o.cqd; f(o); if (Q && o.cqd && !was && o.def && o.def.rad) Q.tk[1 - o.team] = Math.min(Q.tk0, Q.tk[1 - o.team] + RAD.bonus[o.man ? 0 : 2]); })(cqDead);
+cqDead = (f => o => { const Q = S.cq, was = o.cqd; f(o); if (!Q || !o.cqd || was || !o.def || !o.def.rad) return; const by = o.lastBy, k = by && by.team !== undefined && by.team !== o.team ? by.team : Q.tk.length > 2 ? -1 : 1 - o.team; if (k >= 0 && !cqOut(k)) Q.tk[k] = Math.min(Q.tk0, Q.tk[k] + RAD.bonus[o.man ? 0 : 2]); })(cqDead);   // the radio bonus: to the side that killed it
 /* the squad that waits for the assault brings an operator in place of its last rifleman */
 jobKits = (f => (t, job) => { const i = job === 'push' ? INF[S.era][S.fac[t]].findIndex(id => KITS[id].rad) : -1, Q = SQUAD[S.era]; return i < 0 || (S.net && !Net.cq) ? f(t, job) : Q.slice(0, 2).concat(Q.slice(3), [i]); })(jobKits);
 Net.rx.rad = m => { if (!S.net || S.host || !Array.isArray(m.e)) return; S.rl = m.e.filter(e => Array.isArray(e) && e.length === 7).map(e => ({ id: e[0], k: e[1], team: e[2], x: e[3], z: e[4], n: e[5], w: e[6], o: null })); for (const u of S.units) if (u.def.rad && u !== S.my) u.dep = S.rl.some(r => r.k === 2 && Math.abs(r.x - u.x) < 8 && Math.abs(r.z - u.z) < 8) ? 1 : 0; };
@@ -17846,7 +17898,7 @@ function gLog(t, k, s, at, key, tg) {
 /* the tickets now and then, for the panel's trend (called each frame; one comparison when it is not time) */
 function genSample() {
   if (!S || !S.cq || S.t < (S.gtkT || 0)) return;
-  S.gtkT = S.t + GEN.tk; (S.gtk || (S.gtk = [])).push([Math.round(S.t), Math.round(S.cq.tk[0]), Math.round(S.cq.tk[1])]);
+  S.gtkT = S.t + GEN.tk; (S.gtk || (S.gtk = [])).push([Math.round(S.t)].concat(S.cq.tk.map(Math.round)));
   if (S.gtk.length > 400) S.gtk.shift();
 }
 /* what the commander is doing, in a word and a reason: a plain mapping of its state (ops, threat, want, timers), it decides nothing */
@@ -17991,7 +18043,7 @@ function genVM(t, all) {
   return genNet({ t, all, T: S.t, over: !!S.over, res: Q ? Q.res : null, net: !!S.net, host: !S.net || !!S.host, cmd: !!C,
     nm: [0, 1].map(i => S.E.sides[S.fac[i]].name), doc: C ? GEN.doc[docK(C)] || '' : '',
     tk: Q ? Q.tk.slice() : null, tk0: Q ? Q.tk0 : 0, clock: Q ? Q.T : null, held: Q ? [cqHeld(0), cqHeld(1)] : null, lost: Q ? Q.lost : null, trend: S.gtk || [],
-    pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, base: p.base, tw: p.tw, w: [p.w[0], p.w[1]], links: p.links }))
+    pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, cap: p.cap, base: p.base, tw: p.tw, w: p.w.slice(), links: p.links }))
       : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: [0, 0], links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
     sup: S.sup.filter(b => !b.dead && (all || b.team === t || spotted(b))).map(b => ({ x: b.x, z: b.z, t: b.team, prog: b.prog, a: b.a })),
@@ -19799,7 +19851,7 @@ function genState(t) {
   }
   const log = (S.glog ? S.glog.l[t] : []).slice(-20).map(e => ({ t: e.t, k: e.k, s: e.s, x: e.x, z: e.z }));
   const o = { t, T: S.t, ctl: V.ctl || { seat: 'ai', eco: 'ai', atk: 'ai', def: 'ai', sup: 'ai' }, doc: V.doc, over: V.over, res: V.res, tk: V.tk, clock: V.clock,
-    pts: V.pts.map((p, i) => ({ i, L: p.L, name: p.name, x: p.x, z: p.z, hold: p.hold, c: p.c, base: p.base })),
+    pts: V.pts.map((p, i) => ({ i, L: p.L, name: p.name, x: p.x, z: p.z, hold: p.hold, c: p.c, cap: p.cap === undefined ? -1 : p.cap, base: p.base })),
     roads: V.road ? V.road.map((r, ri) => ({ ri, own: r.own, foe: r.foe, k: r.k, post: r.post })) : null,
     sq, veh, foe, ops: V.ops, fm: V.fm, post: V.post, want: V.want, gate: V.gate, eco: S.eco ? ecoView(t) : null, log, thb: V.thb || [], camp: V.camp || [] };
   return JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
@@ -25109,6 +25161,8 @@ aarShow = (g => (R, sub) => {
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
 const FRIEND = '#6fc3b2', FOE = '#e2604f';
+/* 3 sides (P2): each enemy in its own colour, by side (0 EUA violet-blue, 1 Rússia red, 2 Insurgentes ochre); 2 sides: the one FOE */
+const FOEC = ['#8f86ff', '#e2604f', '#d9a441'], foeCol = s => (S && S.N > 2 && FOEC[s]) || FOE;
 let renderer, scene, camera, cw = 1, ch = 1, dpr = 1, frameId = 0;
 let gPlanes, gUnits, gWrecks, gDebris, gBombs, gMissiles, gFlares, gSup, gEco, gGhost, tracers, sparks, skyDome, shadows = [];
 const MAXB = 700, MAXP = 1500;
@@ -28382,39 +28436,48 @@ aarShow = (f => (R, sub) => {
 })(aarShow);
 
 /* ---------- conquest: the strip, the capture bar, the marks, the result and the requisition ---------- */
-const cqCol = t => (t < 0 ? '#aeb6b3' : t === S.me ? FRIEND : FOE), mmss = s => { s = Math.max(0, Math.ceil(s)); return (s / 60 | 0) + ':' + String(s % 60).padStart(2, '0'); };
+const cqCol = t => (t < 0 ? '#aeb6b3' : t === S.me ? FRIEND : foeCol(t)), mmss = s => { s = Math.max(0, Math.ceil(s)); return (s / 60 | 0) + ':' + String(s % 60).padStart(2, '0'); };
 const cqDist = d => (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km');
-/* the top strip: my tickets, the points in chain order from my base (filled by c, bordered by the holder, a white blink while both sides
-   stand in one, a tick under it for each side inside), the enemy's tickets, the clock. Returns how far down it reaches */
+/* the order of the strip: 2 sides, the chain from my base; 3 sides (P2), mine by distance to my base, then the others the same way */
+function cqOrder(me) {
+  const Q = S.cq; if (Q.tk.length <= 2) return me ? Q.p.slice().reverse() : Q.p;
+  const b = S.base[me] || Q.p[0], d = p => hdist(p, b);
+  return Q.p.filter(p => p.hold === me).sort((a, c) => d(a) - d(c)).concat(Q.p.filter(p => p.hold !== me).sort((a, c) => d(a) - d(c)));
+}
+/* the top strip: my tickets, the points (filled by c in the colour of who holds or takes it, bordered by the holder, a white blink while
+   two sides stand in one, a tick under it for each side inside), each enemy's tickets in its colour (✕ once out), the clock. Returns how far down it reaches */
 function hudCq(P, u, ink, acc, disp, blink, mapV) {
-  const Q = S.cq, me = S.me, n = Q.p.length, w = 21 * u, g = 3 * u, h = 19 * u, tw = 44 * u, W = n * (w + g) - g + 2 * (tw + 8 * u), x0 = cw < 720 ? 8 : cw / 2 - W / 2, y0 = 8, L = me ? Q.p.slice().reverse() : Q.p;
+  const Q = S.cq, me = S.me, n = Q.p.length, foes = Q.tk.map((_, t) => t).filter(t => t !== me), w = 21 * u, g = 3 * u, h = 19 * u, tw = 44 * u, W = n * (w + g) - g + (1 + foes.length) * (tw + 8 * u), x0 = cw < 720 ? 8 : cw / 2 - W / 2, y0 = 8, L = cqOrder(me), many = Q.tk.length > 2;
+  const tkS = t => (cqOut(t) ? '✕' : String(Math.max(0, Math.ceil(Q.tk[t]))));
   hx.fillStyle = 'rgba(8,12,13,.5)'; hx.fillRect(x0 - 4, y0 - 4, W + 8, h + 24 * u);
-  txt(String(Math.max(0, Math.ceil(Q.tk[me]))), x0 + tw, y0, 17 * u, FRIEND, 'right', disp);
+  txt(tkS(me), x0 + tw, y0, 17 * u, FRIEND, 'right', disp);
   let x = x0 + tw + 8 * u;
   for (const p of L) {
-    const k = Math.abs(p.c), hot = p.w[0] > 0 && p.w[1] > 0;
+    const k = p.c, hot = cqHot(p), sd = cqSide(p);
     hx.fillStyle = 'rgba(8,12,13,.8)'; hx.fillRect(x, y0, w, h);
-    if (k > 0) { hx.globalAlpha = p.hold < 0 ? .5 : .9; hx.fillStyle = cqCol(p.c > 0 ? 1 : 0); hx.fillRect(x, y0 + h * (1 - k), w, h * k); hx.globalAlpha = 1; }
+    if (k > 0 && sd >= 0) { hx.globalAlpha = p.hold < 0 ? .5 : .9; hx.fillStyle = cqCol(sd); hx.fillRect(x, y0 + h * (1 - k), w, h * k); hx.globalAlpha = 1; }
     hx.strokeStyle = hot && blink ? '#ffffff' : cqCol(p.hold); hx.lineWidth = hot ? 2.2 : 1.3; hx.strokeRect(x + .5, y0 + .5, w - 1, h - 1);
     txt(p.L, x + w / 2, y0 + 3 * u, 12 * u, '#ffffff', 'center');
-    for (const t of [0, 1]) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
+    if (many) { if (p.w[me] > 0) { hx.fillStyle = FRIEND; hx.fillRect(x + u, y0 + h + 2 * u, 4 * u, 3 * u); } foes.forEach((t, j) => { if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + w - 5 * u * (j + 1), y0 + h + 2 * u, 4 * u, 3 * u); } }); }
+    else for (const t of [0, 1]) if (p.w[t] > 0) { hx.fillStyle = cqCol(t); hx.fillRect(x + (t === me ? 2 * u : w - 8 * u), y0 + h + 2 * u, 6 * u, 3 * u); }
     x += w + g;
   }
-  txt(String(Math.max(0, Math.ceil(Q.tk[1 - me]))), x + 5 * u, y0, 17 * u, FOE, 'left', disp);
+  let xt = x + 5 * u;
+  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
   let y = y0 + h + 26 * u;
   const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere() : null;
   if (p) {
-    const k = ((me ? p.c : -p.c) + 1) / 2, a = p.w[me], b = p.w[1 - me], may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
-    const st = a > 0 && b > 0 && a === b ? 'DISPUTADO' : a > b ? (!may ? 'SEM LIGAÇÃO COM UM PONTO SEU' : k >= 1 ? 'SEU' : p.hold === me ? 'DEFENDENDO' : 'CAPTURANDO') : b > a ? 'PERDENDO' : p.hold === me ? 'SEU' : p.hold < 0 ? 'NEUTRO' : 'DO INIMIGO';
+    const sd = cqSide(p), k = sd === me ? .5 + .5 * p.c : sd < 0 ? .5 : .5 - .5 * p.c, a = p.w[me] || 0, b = cqFoeW(p, me), may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
+    const st = a > 0 && b > 0 && a === b ? 'DISPUTADO' : a > b ? (!may ? 'SEM LIGAÇÃO COM UM PONTO SEU' : k >= 1 ? 'SEU' : p.hold === me ? 'DEFENDENDO' : 'CAPTURANDO') : b > a ? 'PERDENDO' : p.hold === me ? 'SEU' : p.hold < 0 ? 'NEUTRO' : many ? 'DE ' + S.E.sides[S.fac[p.hold]].name.toUpperCase() : 'DO INIMIGO';
     txt(p.L + ' · ' + p.name.toUpperCase(), cw / 2, y, 12 * u, ink, 'center');
-    hx.fillStyle = FOE; hx.globalAlpha = .75; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw, 6 * u); hx.globalAlpha = 1; hx.fillStyle = FRIEND; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw * k, 6 * u);
+    hx.fillStyle = sd >= 0 && sd !== me ? cqCol(sd) : FOE; hx.globalAlpha = .75; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw, 6 * u); hx.globalAlpha = 1; hx.fillStyle = FRIEND; hx.fillRect(cw / 2 - bw / 2, y + 16 * u, bw * k, 6 * u);
     hx.strokeStyle = 'rgba(8,12,13,.85)'; hx.lineWidth = 1; hx.strokeRect(cw / 2 - bw / 2 - .5, y + 16 * u - .5, bw + 1, 6 * u + 1);
     txt(f(a) + ' × ' + f(b) + ' · ' + st, cw / 2, y + 25 * u, 11 * u, a > 0 && b > 0 && blink ? '#ffffff' : ink, 'center');
     y += 40 * u;
   }
-  if (!mapV && !P.dead) {   // the nearest points that matter: what my side may take, and what it holds with the enemy in it
-    const l = Q.p.filter(o => o !== p && (o.hold === me ? o.w[1 - me] > 0 : o.links.some(i => Q.p[i].hold === me))).sort((a, b) => hdist(a, P) - hdist(b, P)).slice(0, 3);
+  if (!mapV && !P.dead) {   // the nearest points that matter: what my side may take, and what it holds with an enemy in it
+    const l = Q.p.filter(o => o !== p && (o.hold === me ? cqFoeW(o, me) > 0 : o.links.some(i => Q.p[i].hold === me))).sort((a, b) => hdist(a, P) - hdist(b, P)).slice(0, 3);
     for (const o of l) {
       const s = proj(o.x, hgt(o.x, o.z) + 34, o.z); if (!onScr(s) || s.y < y + 10) continue;
       bracket(s.x, s.y, 8, cqCol(o.hold), true); txt(o.L, s.x, s.y - 6 * u, 11 * u, '#ffffff', 'center'); txt(cqDist(hdist(o, P)), s.x, s.y + 12, 10 * u, cqCol(o.hold), 'center');
@@ -28424,13 +28487,13 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
   }
   return y;
 }
-/* the points on a map: a ring in the holder's colour, filled as far as it is taken, and its letter on a large one */
+/* the points on a map: a ring in the holder's colour, filled as far as it is held or taken in that side's colour, and its letter on a large one */
 function cqMarks(X, Y, u, big) {
   const Q = S.cq, r = big ? 9 : 4.5; if (!Q) return;
   for (const p of Q.p) {
-    const x = X(p.x), y = Y(p.z), hot = p.w[0] > 0 && p.w[1] > 0;
+    const x = X(p.x), y = Y(p.z), hot = cqHot(p), sd = cqSide(p);
     hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fillStyle = 'rgba(8,12,13,.7)'; hx.fill();
-    if (p.c) { hx.beginPath(); hx.arc(x, y, r * Math.sqrt(Math.abs(p.c)), 0, TAU); hx.fillStyle = cqCol(p.c > 0 ? 1 : 0); hx.globalAlpha = .8; hx.fill(); hx.globalAlpha = 1; }
+    if (p.c && sd >= 0) { hx.beginPath(); hx.arc(x, y, r * Math.sqrt(p.c), 0, TAU); hx.fillStyle = cqCol(sd); hx.globalAlpha = .8; hx.fill(); hx.globalAlpha = 1; }
     hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.strokeStyle = hot && (S.t * 5 | 0) % 2 ? '#ffffff' : cqCol(p.hold); hx.lineWidth = big ? 2 : 1.3; hx.stroke();
     if (big) txt(p.L, x, y - 6 * u, 11 * u, '#ffffff', 'center');
   }
@@ -28443,12 +28506,20 @@ function overFill() {
   tl.textContent = ''; sc.textContent = '';
   $('#overTitle').textContent = S.why || 'Partida encerrada';
   if (!Q || !Q.res) { $('#overWhy').textContent = ''; return; }
-  const [win, why] = Q.res, lose = 1 - win;
+  const [win, why] = Q.res, many = Q.tk.length > 2, pl = Q.place || cqRank().place, lose = many ? pl[pl.length - 1] : 1 - win;
+  if (many) {   // 3 sides (P2): the placing, 1st, 2nd and 3rd, each with its points, tickets and losses
+    $('#overWhy').textContent = win < 0 ? 'Empate: o tempo acabou com os primeiros iguais em pontos e tíquetes.' : N(win) + ' venceu: ' + (why === 2 ? 'o tempo acabou e ficou em 1º (lados de pé, depois pontos, depois tíquetes).' : 'foi o último lado de pé.');
+    row(tl, 'Sua colocação', (pl.indexOf(me) + 1) + 'º de ' + pl.length); row(tl, 'Tempo de partida', mmss(Q.T0 - Math.max(0, Q.T)));
+    row(tl, 'Seus abates', Q.st.k); row(tl, 'Suas capturas', Q.st.c); row(tl, 'Suas quedas', Q.st.d);
+    for (const h of ['Lado', 'Pontos', 'Tíquetes', 'Perdas: soldados / veículos / aeronaves']) cell(h, 'h');
+    pl.forEach((t, i) => { cell((i + 1) + 'º · ' + N(t) + (t === win ? ' · vitória' : Q.out[t] ? ' · eliminado' : ''), t === me ? 'f' : 'e'); cell(cqHeld(t)); cell(Math.max(0, Math.ceil(Q.tk[t]))); cell(Q.lost[t].join(' / ')); });
+  } else {
   $('#overWhy').textContent = win < 0 ? 'O tempo acabou com os dois lados iguais em pontos e tíquetes.' : N(win) + ' venceu: ' + (why === 1 ? 'os tíquetes de ' + N(lose) + ' acabaram.' : why === 3 ? 'a base principal de ' + N(lose) + ' foi tomada.' : 'o tempo acabou e ' + (cqHeld(win) !== cqHeld(lose) ? 'tinha mais pontos.' : 'tinha mais tíquetes.'));
   row(tl, 'Pontos', cqHeld(me) + ' × ' + cqHeld(1 - me)); row(tl, 'Tíquetes', Math.max(0, Math.ceil(Q.tk[me])) + ' × ' + Math.max(0, Math.ceil(Q.tk[1 - me]))); row(tl, 'Tempo de partida', mmss(Q.T0 - Math.max(0, Q.T)));
   row(tl, 'Seus abates', Q.st.k); row(tl, 'Suas capturas', Q.st.c); row(tl, 'Suas quedas', Q.st.d);
   for (const h of ['Lado', 'Pontos', 'Tíquetes', 'Perdas: soldados / veículos / aeronaves']) cell(h, 'h');
   for (const t of [me, 1 - me]) { cell(N(t) + (t === win ? ' · vitória' : ''), t === me ? 'f' : 'e'); cell(cqHeld(t)); cell(Math.max(0, Math.ceil(Q.tk[t]))); cell(Q.lost[t].join(' / ')); }
+  }
   if (S.net) {
     for (const h of ['Jogador', 'Abates', 'Quedas', 'IA']) cell(h, 'h');
     for (const o of [...Net.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths).slice(0, 12)) { cell((o.id === Net.id ? '▸ ' : '') + o.name, pSide(o) === me ? 'f' : 'e'); cell(o.kills); cell(o.deaths); cell(o.ai || 0); }
@@ -28591,7 +28662,7 @@ const GLAY = [
   { id: 'fx', nm: 'Efeitos', on: 1, draw: gFx }];
 const gLay = id => GLAY.find(L => L.id === id), GVSPD = [1, 2, 4], gMono = k => (k | 0) + 'px "Share Tech Mono",ui-monospace,monospace', gHead = (k, big) => (k | 0) + 'px "' + (S.modern ? 'Chakra Petch' : 'Saira Stencil One') + '",Impact,sans-serif';
 const gAcc = () => (S.modern ? '#63d2e6' : '#e6b53a');
-const gCol = (V, s) => (s === V.t ? FRIEND : s < 0 ? '#aeb6b3' : FOE);
+const gCol = (V, s) => (s === V.t ? FRIEND : s < 0 ? '#aeb6b3' : foeCol(s));
 const gE = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
 
 function genOpen(v, user) {
@@ -28803,8 +28874,8 @@ function gObj(g, V, P, now) {
   for (const p of V.pts) {
     if (!gOn(P, p.x, p.z, 80)) continue;
     const x = P.X(p.x), y = P.Y(p.z), r = Math.max(9 * P.k, (p.r || 60) * P.s), hc = gCol(V, p.hold), a = Math.abs(p.c);
-    g.beginPath(); g.arc(x, y, r, 0, TAU); g.globalAlpha = .12 + .3 * a; g.fillStyle = p.c === 0 ? '#aeb6b3' : gCol(V, p.c < 0 ? 0 : 1); g.fill(); g.globalAlpha = 1; g.strokeStyle = hc; g.lineWidth = 2; g.stroke();
-    if (p.w && p.w[0] && p.w[1]) { g.setLineDash([4, 4]); gRing(g, x, y, r + 4, '#ece6d6', 1.2); g.setLineDash([]); }
+    g.beginPath(); g.arc(x, y, r, 0, TAU); g.globalAlpha = .12 + .3 * a; g.fillStyle = !p.c || cqSide(p) < 0 ? '#aeb6b3' : gCol(V, cqSide(p)); g.fill(); g.globalAlpha = 1; g.strokeStyle = hc; g.lineWidth = 2; g.stroke();
+    if (p.w && cqHot(p)) { g.setLineDash([4, 4]); gRing(g, x, y, r + 4, '#ece6d6', 1.2); g.setLineDash([]); }
     if (p.L) gTxt(g, p.L, x, y + 5 * P.k, 14 * P.k, '#ece6d6', 'center');
   }
 }

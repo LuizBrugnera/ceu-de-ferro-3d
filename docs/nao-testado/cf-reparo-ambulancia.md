@@ -20,7 +20,7 @@ Pedido do capitão: "adicione caminhão de reparo e ambulância". Implementado s
 
 ## O que NÃO foi testado
 
-- Nenhuma suíte rodou. Só fiz o smoke: o servidor sobe e serve a página (HTTP 200); pelo harness (com um stub de `aarShow` e `lg: 0`, porque o harness já quebra no main por `aarShow` e `m5Lg`), uma partida IA × IA de 1944 e de hoje carrega e roda alguns segundos sem erro, um caminhão de reparo parado ao lado de um tanque leva o casco de 39 a 51 em 2 s, `disp amb` responde ok e o plano lista `rpr` e `amb`.
+- Nenhuma suíte rodou. Só fiz o smoke: o servidor sobe e serve a página (HTTP 200); pelo harness (com um stub de `aarShow` e `lg: 0`, porque o harness já quebra no main por `aarShow` e `m5Lg`), uma partida IA × IA de 1944 e de hoje carrega e roda alguns segundos sem erro, um caminhão de reparo parado ao lado de um tanque leva o casco de 39 a 51 em 2 s, `disp amb` responde ok e o plano lista `rpr` e `amb`. Esse smoke foi antes de juntar o `origin/main`. Depois do merge, só conferi a sintaxe (`node --check` no script da página, em `server.js` e em `mcp-general.js`) e que o servidor sobe e serve a página (200). O harness não carrega mais o main: além de `aarShow` e `m5Lg`, faltam `mmMan` e `mmW` antes do corte.
 - Navegador: o `chrome-devtools-axi` estourou o tempo ao abrir a página de 2,5 MB, então **não vi a página no navegador**: modelo 3D, cartão do hangar, painel da Visão de General, nada disso foi visto.
 - Online: nada testado (convidado dirigindo ambulância ou caminhão de reparo, fantasma parado reparando o veículo do convidado, servidor aceitando os modelos novos).
 - Ambulância do jogador embarcando e entregando feridos; caminhão de reparo da IA indo e voltando sozinho; `repv`, `disp rpr`; ROE.
@@ -45,4 +45,4 @@ Pedido do capitão: "adicione caminhão de reparo e ambulância". Implementado s
 5. MCP: `get_recovery` (ver `reserve.rpr` e `damaged`), `send_repair_truck {x,z}`, `dispatch_units {kind:'rpr', mission:'repair', x, z}`, `set_production_plan {kind:'amb', count:2}`; `get_state` mostra a reserva com `arv`/`amb`/`rpr` com o nome certo (antes, com o REC, saía `pow`/`mine`).
 6. ROE: partida IA × IA com uma ambulância parada perto da frente; o diário e o comportamento não devem mostrar tanques ou infantaria mirando nela.
 7. Online: dois navegadores, o convidado de caminhão de reparo e de ambulância; o anfitrião com um tanque avariado ao lado do caminhão do convidado parado.
-8. Suítes: `node tests/rec.js`, `node tests/production.js`, `node tests/mission.js`, `node tests/rec-relay.js`, `node tests/rec-online.js`. Antes, consertar o harness no main (`aarShow` e `m5Lg` definidos depois do marcador `/* ---------- 3D scene`).
+8. Suítes: `node tests/rec.js`, `node tests/production.js`, `node tests/mission.js`, `node tests/rec-relay.js`, `node tests/rec-online.js`. Antes, consertar o harness no main: `aarShow`, `m5Lg`, `mmMan` e `mmW` são definidos depois do marcador `/* ---------- 3D scene` (ou trocados de lugar).

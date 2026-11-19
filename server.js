@@ -63,7 +63,7 @@ for (const era in MODELS) { const m = MODELS[era]; rooms[era].ns = 2; rooms[era]
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
 /* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
-   the repair trucks are a player's too, so they are also in the trn lists above, each in its side's half */
+   the repair trucks are a player's too, so they are also in the trn lists above, each on its side in MSIDE */
 const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54', 'opelw', 'gmcw'], modern: ['m88a2', 'brem1', 'm997', 'uaz452', 'm1089', 'mtoub'] };
 for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);
 let nextId = 1;
@@ -601,13 +601,13 @@ RX.gres = (c, m) => {
    here, at the end of their lists, so that no older index moves; they field only in a room of 3 sides (join refuses one in a room of 2) */
 const MSIDE = {
   ww2: [
-    ['stuka', 'bf109', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251'],
-    ['spit', 'p47', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht']],
+    ['stuka', 'bf109', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
+    ['spit', 'p47', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
   modern: [
     ['f22', 'a10', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
-      'hmmwv', 'hemtt', 'lav25', 'm577', 'ah64', 'uh60'],
+      'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60'],
     ['su57', 'su25', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
-      'tigr', 'ural', 'btr82', 'mtlbu', 'mi28', 'mi8'],
+      'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
     ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
       'tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
 {

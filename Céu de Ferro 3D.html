@@ -13884,11 +13884,11 @@ const OPS = {
     if (op.st === 'set') {
       if (op.sprung) { op.st = 'fire'; cmdMission(C, 'he', s.x + s.dx * ds * 150, s.z + s.dz * ds * 150, 4, 40, op); return; }
       if (!op.tank && C.post[s.ri] !== 'atk' && S.t - op.T0 < A.hold) {
-        const u = S.units.find(u => u.kind === 'tank' && u.ai && !u.net && !u.dead && u.team === t && u.ri === s.ri && u.rail && !u.ai.amb && !u.ai.tgt && Math.abs(u.s - s.s) < 1500 && S.t - u.hitT > 20);
+        const u = m5Tank(t, s.x, s.z, M5.amb.reach, s.ri, s.s);   // M5: from any axis near, by road (it was its own axis within 1500 m)
         for (const sd of u ? [1, -1] : []) {
           const b = routeAt(r, clamp(s.s - ds * 120, 0, r.len)), x = b.x - b.dz * 100 * sd, z = b.z + b.dx * 100 * sd, y = hgt(x, z);
           if (op.tank || y < S.T.WL + 1 || !los({ x, z }, y + 2.5, op.kz, hgt(op.kz.x, op.kz.z) + 2)) continue;
-          op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; gLog(t, 'amb', 'Carro de combate posto à espera junto à emboscada', { x, z });
+          op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; m5Amb(u); gLog(t, 'amb', 'Carro de combate posto à espera junto à emboscada', { x, z });
         }
       }
       if (C.doc.bait && !op.bait && l.some(q => q.at) && S.t - op.T0 > 30) {   // a patrol goes out to be seen and comes back through the ambush
@@ -14966,11 +14966,11 @@ OPS.blk = (C, op) => {
     if (!op.arr && l.every(q => q.at)) op.arr = S.t;
     if (op.arr && S.t - op.arr > A.hold) return off('nenhum veículo passou em ' + A.hold + ' s');
     if (!op.tank && op.arr) {   // a tank free near by lies in wait beside it, as an ambush's does
-      const u = S.units.find(u => u.kind === 'tank' && u.ai && !u.net && !u.dead && u.team === t && u.rail && !u.ai.amb && !u.ai.tgt && hdist(u, s) < BLKX.tank && S.t - u.hitT > 20);
+      const u = m5Tank(t, s.x, s.z, M5.on ? M5.amb.reach : BLKX.tank);   // M5: from farther, by road
       for (const sd of u ? [1, -1] : []) {
         const x = s.x - s.dz * 100 * sd, z = s.z + s.dx * 100 * sd, y = hgt(x, z);
         if (op.tank || y < S.T.WL + 1 || !los({ x, z }, y + 2.5, op.kz, hgt(op.kz.x, op.kz.z) + 2)) continue;
-        op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; gLog(t, 'amb', 'Carro de combate posto à espera junto ao bloqueio', { x, z });
+        op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; m5Amb(u); gLog(t, 'amb', 'Carro de combate posto à espera junto ao bloqueio', { x, z });
       }
     }
   } else if (op.st === 'fire') {
@@ -18320,7 +18320,7 @@ function lgConvoy(t, o, why) {
   if (L.cv.filter(c => c.t === t && c.c > 0).length >= LG.cmax) return 'conv';
   if (lgCap(o) - o.lc - lgInb(t, key) <= 0) return 'full';
   if (d.mt < LG.mt) return 'mt';
-  const { ri, s } = lgS(o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);
+  const { ri, s } = m5Lg(t, o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);   // M5: the axis drawn among those that cost about the same
   d.mt -= LG.mt;
   const paid = v => Object.assign(v, { lgp: 1 });   // paid for by the main base: not by a node it is born near
   const M = { kind: 'lift', why: 'comboio de suprimento: ' + nm + (why ? ' (' + why + ')' : ''), target: { ri, s } }, u = dispatch(t, M, () => paid(errand(t, 'truck', ri, s0, [{ s, k: 'sup' }, { s: s0, k: 'bye' }])));
@@ -28718,6 +28718,160 @@ function frame(now) {
     Net.tick(dt);
   }
   updateCamera(dt); syncScene(dt); if (!GV.on) render3d(); drawHud(); audioTick(dt); genSample(); if (GV.on) genFrame(now);
+}
+/* ---------- vehicles off the rail (M5 of the general's manoeuvre; not tested, see docs/nao-testado/cf-m5-veiculos-trilho.md) ----------
+   The AI's vehicles rode their axis most of the time (the scout measured ~86%). Here:
+   - the cost of a road edge for side t (m5Cost) is today's (length times class, times 1 + C.et) times 1 + what the tactical map (M1, C.tm)
+     says along it, the mean of its samples: kV the enemy's sight (v), kF its strength (f, f / (1 + f)), kP our losses (p, the same), kT its
+     traffic (t). Kept per side until the map's next refresh (C.m5e, C.m5n). jit: a draw of 1 to 1 + M5.jit an edge, so ways that cost about
+     the same take turns (the logistics: no habit for the enemy to lie in wait on);
+   - tripTac: a trip (tripTo's record) by that cost. Every AI vehicle's trip by tripTo takes it while the side has a map (tripTo is wrapped);
+     trucks and cars draw the jitter;
+   - the assault's armour (m5Atk): when the AI opens an assault that is not a walk, up to M5.atk.n[0] tanks (n[1] with 3 squads or more)
+     riding an axis within M5.reach m of the objective, idle and whole, go by the tactical trip to the road nearest a firing place off the
+     front of the objective (m5Spot: the assault position of an approach of the planner's (M2, op.pl.A), one the squads do not take first, else
+     theirs, M5.atk.front to M5.atk.rear degrees off the axis; else the best cell of a ring of M5.atk.r m:
+     little sight, strength and losses, cover, the objective in view, near a road, off the assault's line, op.ax, by M5.atk.front degrees or more), then
+     hold there (u.ai.m5) firing at what they see, until the op ends or falls back, the tank is hurt below M5.atk.hp, or M5.atk.hold s pass;
+     then they go back to the nearest axis by a trip (m5Home);
+   - the ambush and the roadblock: the tank that lies in wait may come from any axis within M5.amb.reach m (it was its own axis within 1500 m,
+     or 900 m for the roadblock), and goes there by the tactical trip to the road nearest its place, its wait made longer by the ride;
+     afterwards it goes home by a trip when it is off its road (m5Home);
+   - the convoys (m5Lg): among the axes a node lies on (rs[j]), the ones within M5.lg.k of the cheapest (length times 1 + lgThr) are drawn,
+     the one the last convoy to that node took left out when there is another.
+   M5.on 0 leaves all of it out. Only the host (or solo) runs any of it: it moves AI vehicles (no u.net) */
+const M5 = { on: 1, kV: 3, kF: 1.5, kP: .6, kT: .3, jit: .15, reach: 4000, near: 300, road: 250, onRoad: 60, back: 200,
+  atk: { n: [1, 2], r: [380, 520], front: 35, rear: 120, hold: 480, hp: .5, retry: 20, apart: 250, much: 3 },
+  amb: { reach: 3500 }, lg: { k: .15 } };
+/* the tactical multiplier of each edge for commander C (null without a map) */
+function m5Edge(C) {
+  const M = C && C.tm, N = S.T && S.T.net;
+  if (!M || !N || !M.v) return null;
+  if (C.m5e && C.m5n === M.n && C.m5e.length === N.e.length) return C.m5e;
+  const a = new Float32Array(N.e.length), cl = (x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
+  for (const e of N.e) {
+    let v = 0, f = 0, p = 0, tr = 0; const sm = e.smp || [], n = sm.length || 1;
+    for (const s of sm) { const q = cl(s.x, s.z), ff = M.f[q] || 0, pp = M.p[q] || 0; v += M.v[q] || 0; f += ff / (1 + ff); p += pp / (1 + pp); tr += M.t[q] || 0; }
+    a[e.i] = 1 + (M5.kV * v + M5.kF * f + M5.kP * p + M5.kT * tr) / n;
+  }
+  C.m5n = M.n; return (C.m5e = a);
+}
+const m5Jit = () => { const N = S.T.net, a = new Float32Array(N.e.length); for (let i = 0; i < a.length; i++) a[i] = 1 + Math.random() * M5.jit; return a; };
+/* the cost of an edge for side t: today's, times the map's, times the jitter */
+function m5Cost(t, mode, jit) {
+  const C = S.cmd && S.cmd[t], base = edgeCostOf(C, mode || 'veh'), m = m5Edge(C);
+  if (!m && !jit) return null;
+  return e => base(e) * (m ? m[e.i] : 1) * (jit ? jit[e.i] : 1);
+}
+/* tripTo by the tactical cost; o.max: no trip longer than that */
+function tripTac(u, x, z, o) {
+  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
+  o = o || {}; const cost = m5Cost(u.team, 'veh', o.jit); if (!cost) return null;
+  const p = tripOf(u.x, u.z, x, z, { mode: 'veh', cost }); if (!p || (o.max && p.len > o.max)) return null;
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
+}
+tripTo = (g => (u, x, z, o) => {
+  if (!M5.on || !u || u.net || !u.ai || !S.cmd || !S.cmd[u.team] || !S.cmd[u.team].tm) return g(u, x, z, o);
+  return tripTac(u, x, z, Object.assign({}, o, { jit: u.kind === 'truck' || u.kind === 'car' ? m5Jit() : null })) || g(u, x, z, o);
+})(tripTo);
+/* the seconds a trip takes the vehicle at full drive */
+const m5Eta = (u, T) => (T && T.p ? T.p.len / Math.max(1, u.def.spd * GSPD) : 0);
+/* send u toward (x, z) by the tactical trip to the road nearest it: true when it went (or is already near) */
+function m5Go(u, x, z, why) {
+  if (hdist(u, { x, z }) < M5.near) return true;
+  const n = netNear(x, z), gx = n.d > M5.onRoad ? n.x : x, gz = n.d > M5.onRoad ? n.z : z;
+  return !!tripTac(u, gx, gz, { why, max: M5.reach * 2 });
+}
+/* a tank that can be taken for the general's manoeuvre: an AI tank riding an axis, idle and whole */
+const m5Free = (u, t) => u.kind === 'tank' && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.tgt && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && u.hp >= u.max * .6 && S.t - u.hitT > 20;
+/* the nearest such tank of side t to (x, z) within r m (or on axis ri within 1500 m along it when ri is given: today's choice), or null */
+function m5Tank(t, x, z, r, ri, s) {
+  let b = null, bd = 1e9;
+  for (const u of S.units) {
+    if (!m5Free(u, t)) continue;
+    const d = hdist(u, { x, z }), ok = (ri !== undefined && u.ri === ri && Math.abs(u.s - s) < 1500) || (M5.on && d < r);
+    if (ok && d < bd) { b = u; bd = d; }
+  }
+  return b;
+}
+/* a tank sent to wait at an ambush or a roadblock rides there by road; its wait is made longer by the ride */
+function m5Amb(u) {
+  const P = u.ai.amb; if (!M5.on || !P) return;
+  if (m5Go(u, P.x, P.z, 'amb')) P.T += m5Eta(u, u.trip);
+}
+/* back to the nearest axis by a trip when far off it, else to its brain's way home */
+function m5Home(u) {
+  const A = u.ai, p = railOf(u.x, u.z);
+  u.ri = p.ri; u.s = p.s; A.off = clamp(p.off, -150, 150); A.back = 0;
+  if (!M5.on || u.trip || u.dead || (A.tgt && !A.tgt.dead) || S.t - u.hitT < 5 || p.d < M5.back) return;
+  const r = S.T.routes[p.ri], q = routeAt(r, clamp(p.s, 0, r.len)), was = u.rail; u.rail = true;
+  if (!tripTo(u, q.x, q.z, { why: 'home' })) u.rail = was;
+}
+tankAmb = (g => (u, A) => { const P = A.amb, r = g(u, A); if (!r && P && !A.amb) m5Home(u); return r; })(tankAmb);
+/* the firing place for a tank of op (an assault), away from those taken: { x, z } or null */
+function m5Spot(C, op, taken) {
+  const O = op.O, M = C.tm, R = M5.atk, far = p => taken.every(q => Math.hypot(q.x - p.x, q.z - p.z) >= R.apart);
+  const ok = (x, z) => x > 100 && x < S.W - 100 && Math.abs(z) < S.HW - 100 && hgt(x, z) > S.T.WL + 1;
+  const used = Array.isArray(op.ap) ? op.ap : [], all = op.pl && Array.isArray(op.pl.A) ? op.pl.A : [];
+  for (const a of all.filter(a => !used.includes(a)).concat(used)) {   // the planner's approaches (M2): one the squads do not take first (fire from another side), then theirs
+    const x = a && a.pos && a.pos.x, z = a && a.pos && a.pos.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z) || a.ang < R.front || a.ang > R.rear) continue;
+    if (ok(x, z) && far({ x, z })) return { x, z };
+  }
+  const cl = (x, z) => (M ? clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1) : -1), oy = hgt(O.x, O.z) + 2;
+  let b = null, bs = 1e9;
+  for (let k = 0; k < 16; k++) for (const r of R.r) {
+    const a = k * Math.PI / 8, x = O.x + Math.cos(a) * r, z = O.z + Math.sin(a) * r;
+    if (!ok(x, z) || !far({ x, z })) continue;
+    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = netNear(x, z);
+    let sc = ang < R.front ? 1 : ang > R.rear ? .6 : 0;   // off the front, not behind the enemy
+    if (q >= 0) { const f = M.f[q] || 0, p = M.p[q] || 0; sc += M5.kV * (M.v[q] || 0) + M5.kF * f / (1 + f) + M5.kP * p / (1 + p) - (M.o[q] || 0); }
+    if (!los({ x, z }, hgt(x, z) + 2.5, O, oy)) sc += 1;
+    sc += Math.max(0, n.d - M5.road) / 1000;
+    if (sc < bs) { bs = sc; b = { x, z }; }
+  }
+  return b;
+}
+/* the assault's armour: the tanks that go the back roads to fire on the objective from off its front */
+function m5Atk(C, op) {
+  if (!M5.on || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
+  op.m5T = S.t + M5.atk.retry; op.m5 = op.m5 || [];
+  const t = C.t, O = op.O, want = (op.sq.length >= 3 ? M5.atk.n[1] : M5.atk.n[0]) - op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op).length;
+  for (let i = 0; i < want; i++) {
+    const u = m5Tank(t, O.x, O.z, M5.reach); if (!u) return;
+    if (C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) return;   // the last tank of a road held with difficulty stays
+    const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) return;
+    if (!m5Go(u, sp.x, sp.z, 'atk')) { op.m5T = S.t + M5.atk.retry; return; }
+    const eta = m5Eta(u, u.trip);
+    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + eta + M5.atk.hold, k: 'atk' }; op.m5.push(u);
+    gLog(t, 'atk', 'Carro de combate vai por estradas secundárias apoiar o assalto a ' + gName(O) + ' pelo flanco' + (eta ? ' (' + Math.round(eta / 60 * 10) / 10 + ' min)' : ''), sp, 'm5a' + op.id + '.' + i);
+  }
+}
+atkOpen = (g => (...a) => { const op = g(...a); if (op && a[0]) m5Atk(a[0], op); return op; })(atkOpen);
+OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && (op.st === 'form' || op.st === 'prep' || op.st === 'screen')) m5Atk(C, op); })(OPS.atk);
+/* a tank holding its firing place: its brain fights as ever from off its road; the drive is the place's */
+AI.tank = (old => (u, dt) => {
+  const A = u.ai, H = A && A.m5;
+  if (!H) return old(u, dt);
+  const op = H.op;
+  if (!M5.on || op.over || op.st === 'back' || op.st === 'cons' || S.t > H.T || u.hp < u.max * M5.atk.hp) { A.m5 = null; m5Home(u); return old(u, dt); }
+  u.rail = false; old(u, dt); u.rail = false;
+  if (A.amb) return;
+  driveTo(u, H.x, H.z);
+  if (!(A.tgt && !A.tgt.dead) && !A.inf && !A.low) u.ctl.aim = vnorm({ x: op.O.x - u.x, y: 0, z: op.O.z - u.z });
+})(AI.tank);
+/* a convoy's axis: one of those a node lies on that cost about the least, not the last one taken to it when there is another */
+function m5Lg(t, o) {
+  const b = lgS(o);
+  if (!M5.on || o.sup || !Array.isArray(o.rs)) return b;
+  const c = [];
+  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri]) return; c.push({ ri, s, c: Math.abs(s - endS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) }); });
+  if (c.length < 2) return b;
+  const lo = Math.min(...c.map(q => q.c)), M = S.m5lg || (S.m5lg = {}), key = t + ':' + lgKey(o);
+  let ok = c.filter(q => q.c <= lo * (1 + M5.lg.k));
+  if (ok.length > 1 && M[key] !== undefined) ok = ok.filter(q => q.ri !== M[key]) || ok;
+  const p = ok[Math.floor(Math.random() * ok.length)] || b;
+  M[key] = p.ri; return { ri: p.ri, s: p.s };
 }
 function boot() {
   try {

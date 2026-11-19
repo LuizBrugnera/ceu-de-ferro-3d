@@ -413,6 +413,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
     <button class="chip" id="genAll" type="button" aria-pressed="false">Ver tudo (V)</button>
     <button class="chip" id="genInf" type="button" aria-pressed="false">Influência (I)</button>
     <button class="chip" id="genKz" type="button" aria-pressed="false" title="Onde este lado vem perdendo gente e máquinas">Zonas de morte (Z)</button>
+    <button class="chip" id="genTm" type="button" aria-pressed="false" title="Mapa tático, só com o que este lado sabe: cada clique troca a camada (vigilância inimiga, tráfego inimigo, gargalos, força inimiga, ocultação, nossas perdas, frente) e por fim desliga">Mapa tático: desligado</button>
     <button class="chip" id="genSpd" type="button" hidden>×1 (&lt; &gt;)</button>
     <button class="chip" id="genPause" type="button" hidden>Pausar (Espaço)</button>
     <button class="chip" id="genOut" type="button">Fechar (Tab)</button>
@@ -8373,6 +8374,7 @@ function step(dt) {
   if ((!S.net || S.host) && !S.over) {   // the commanders, each at its own cadence (planDue: the difficulty's, W17), a piece of the plan a frame (the one that is not done when the next starts is finished first)
     if ((S.planT -= dt) <= 0) { const k = planDue(); if (k >= 0) { if (S.planJ) plan(S.planK, S.planJ, Infinity); S.planJ = plan((S.planK = k), true) || null; } }
     if (S.planJ) S.planJ = plan(S.planK, S.planJ, Math.max(1, Math.round(dt * 60 * SLICE.plan))) || null;
+    tmStep(dt);   // the tactical map (M1): a piece a frame of each side's refresh
   } else S.planJ = null;
   AIB.g += AIB.now() - a0;
   trnStep(dt);
@@ -20801,6 +20803,200 @@ ecoUnpack = (g => K => {
 })(ecoUnpack);
 /* the analytics: the header names each side's personality and difficulty, for the review and the AI × AI tournaments */
 anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) { h.per = [0, 1].map(t => (S.per && S.per[t]) || ''); h.dif = [0, 1].map(t => (S.dif && S.dif[t]) || 'normal'); } })(anaBegin);
+/* ---------- the tactical map (M1 of the general's manoeuvre): seven layers on a grid of TM.cell m, by side, from what the side knows ----------
+   Each side's commander keeps C.tm, a Float32Array a layer over cells of TM.cell m (index j * nx + i, x = i * cell, z = -S.HW + j * cell):
+   f the enemy's strength the side knows of (C.known, where it was reported, CMD.val each spread over TM.reach m by its class, falling off to
+   the edge) and fo its own; v where the enemy sees, 0 to 1: the known observers (TM.obs: the points and bases the enemy holds, its dug-in
+   works that every side sees, its units and men seen in the last CMD.mem s, its fixed guns seen once) looking every TM.step m along a line
+   over the ground (a hill hides), the woods and houses on the way screening it (TM.scr a step, gone at 1), less with the distance and less
+   where the cell itself hides (TM.hide x o); o the cover of the cell, the same for both sides (woods, houses, a fold of the ground); t the
+   enemy's traffic the side has seen (its habits, W17: C.hu and C.hp, the highest on the edges through the cell) and nx, when the next pass
+   is due (match s, -1 unknown); p where this side lost men and machines (own losses, CMD.val, at the cell's grain, fading by half every
+   TM.half s); k the choke points (bridges and fords, junctions, the ways out of a town, a stretch of road with no way round, from the road
+   network and the state of the bridges: the same for both sides); l the front, -1 the enemy's to 1 ours, by own and enemy strength, and fr the
+   cells where it turns. Nothing here reads where an unseen enemy is: only C.known, what both sides see (the points, the works, the ground)
+   and the side's own. The ground's part (o, k and the heights the sight runs over) is the terrain's, built once (tmStatic, again when a
+   bridge falls or a pontoon goes up); the rest is a job of pieces (tmJob) for each side every TM.every s, the sides TM.every / 2 apart,
+   TM.per pieces a frame inside the commanders' share of the AI's frame (AIB.g), built aside and swapped in whole. TMB: the job's own time,
+   per frame and per refresh, read only. TM.on 0 leaves it out (a measurement's control). Until the
+   commander's first look (cmdSense) C.known is empty and so are the enemy's layers. Nothing the commander chooses reads the map yet (M2
+   will). gask tmap: one layer at TM.ask m */
+const TM = { on: 1, cell: 200, every: 4, per: 1, losN: 2, step: 100, ask: 1000, half: 210, hide: .6, far: .4, scr: .5, tgt: 2, max: 64, fold: 8,
+  obs: { pt: [1500, 12], base: [1500, 12], fort: [900, 2.5], man: [900, 2], veh: [1500, 3], fix: [1500, 3] },
+  reach: { inf: 300, tank: 1000, lav: 700, aa: 600, art: 400, truck: 200, car: 300, rad: 300 },
+  k: { bridge: 1, node: .5, nodeUp: .1, nodeMax: .8, exit: .5, alt: .6, altAt: 2, altK: 3 },
+  nm: { f: 'Força inimiga', v: 'Vigilância inimiga', o: 'Ocultação', t: 'Tráfego inimigo', p: 'Nossas perdas', k: 'Gargalos', l: 'Frente' } };
+const TML = ['f', 'v', 'o', 't', 'p', 'k', 'l'];
+const TMB = { S: null, ms: 0, n: 0, sum: 0, worst: 0, ref: [0, 0], refN: [0, 0], pieces: 0,
+  stat() { return { frames: TMB.n, avg: TMB.n ? Math.round(TMB.sum / TMB.n * 1000) / 1000 : 0, worst: Math.round(TMB.worst * 1000) / 1000, refresh: TMB.ref.map(v => Math.round(v * 100) / 100), refreshes: TMB.refN.slice() }; } };
+/* the ground's part, once a terrain and the state of its bridges: the grid, the heights every TM.step m, each cell's share of wood, of
+   houses, of road and of water, the folds, the cover o, the screen a line of sight crosses, the choke points k */
+function tmStatic(T) {
+  const key = S && S.T === T ? S.brk || '' : '', Z = T.tms;
+  if (Z && Z.key === key) return Z;
+  if (Z) return (T.tms = Object.assign({}, Z, { key, k: tmChoke(T, Z) }));   // a bridge fell or a pontoon went up: only the choke points change
+  const c = TM.cell, W = T.W || S.W, HW = T.HW || S.HW, nx = Math.ceil(W / c), nz = Math.ceil(2 * HW / c), n = nx * nz, hs = TM.step, hx = Math.ceil(W / hs) + 1, hz = Math.ceil(2 * HW / hs) + 1;
+  const hg = new Float32Array(hx * hz), h = new Float32Array(n), wood = new Float32Array(n), bld = new Float32Array(n), road = new Float32Array(n), water = new Float32Array(n), m = 4;
+  for (let j = 0; j < hz; j++) for (let i = 0; i < hx; i++) hg[j * hx + i] = hgtT(T, Math.min(W, i * hs), Math.min(HW, -HW + j * hs));
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    let r = 0, w = 0, v = 0, y = 0;
+    for (let b = 0; b < m; b++) for (let a = 0; a < m; a++) {
+      const x = (i + (a + .5) / m) * c, z = -HW + (j + (b + .5) / m) * c, k = clamp(Math.round((z - T.z0) / T.cz), 0, T.N) * (T.N + 1) + clamp(Math.round((x - T.x0) / T.cx), 0, T.N), g = hgtT(T, x, z);
+      if (T.kind[k] === 9) r++; else if (T.kind[k] === 1) w++;
+      if (g <= T.WL + .3) v++;
+      y += g;
+    }
+    const q = j * nx + i; road[q] = r / (m * m); wood[q] = w / (m * m); water[q] = v / (m * m); h[q] = y / (m * m);
+  }
+  for (const o of T.houses || []) { const i = o.x / c | 0, j = (o.z + HW) / c | 0; if (i >= 0 && j >= 0 && i < nx && j < nz) bld[j * nx + i] = Math.min(1, bld[j * nx + i] + .2); }
+  const fold = new Float32Array(n), o = new Float32Array(n), scr = new Float32Array(n);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    let s = 0, k = 0;
+    for (let b = j - 2; b <= j + 2; b++) for (let a = i - 2; a <= i + 2; a++) if ((a !== i || b !== j) && a >= 0 && b >= 0 && a < nx && b < nz) { s += h[b * nx + a]; k++; }
+    const q = j * nx + i; fold[q] = k ? clamp((s / k - h[q]) / TM.fold, 0, 1) : 0;
+    scr[q] = Math.max(wood[q], bld[q]); o[q] = water[q] > .5 ? 0 : clamp(scr[q] + .3 * fold[q], 0, 1);
+  }
+  const Z2 = { key, c, nx, nz, W, HW, hs, hx, hz, hg, h, wood, bld, road, water, fold, o, scr, k: null };
+  Z2.k = tmChoke(T, Z2);
+  return (T.tms = Z2);
+}
+/* the choke points, 0 to 1 a cell: a bridge (at a ford, while it carries; a pontoon too), a junction of three roads or more, where a road leaves
+   a town, and a stretch whose way round (the network without it, the fallen bridges cut) is TM.k.altAt times as long or more, or none */
+function tmChoke(T, Z) {
+  const K = TM.k, nx = Z.nx, nz = Z.nz, c = Z.c, k = new Float32Array(nx * nz), N = T.net;
+  const put = (x, z, v, r) => { const i = x / c | 0, j = (z + Z.HW) / c | 0; for (let b = j - (r || 0); b <= j + (r || 0); b++) for (let a = i - (r || 0); a <= i + (r || 0); a++) if (a >= 0 && b >= 0 && a < nx && b < nz) { const w = a === i && b === j ? v : v * .5; if (w > k[b * nx + a]) k[b * nx + a] = w; } };
+  if (!N) return k;
+  const cut = S && S.T === T && S.bre ? S.bre : null;
+  for (const b of brOf(T)) if (!cut || cut[b.e] !== Infinity) put(b.x, b.z, K.bridge, 1);   // the bridges stand at the fords of the network
+  for (const q of N.n) { const d = q.e.filter(i => !cut || cut[i] !== Infinity).length; if (d >= 3) put(q.x, q.z, Math.min(K.nodeMax, K.node + K.nodeUp * (d - 3)), 1); }
+  const tw = (S && S.T === T && S.cq ? S.cq.p.filter(p => p.tw) : T.towns || []), R = FIELD.town;
+  for (const e of N.e) for (const w of tw) for (let i = 1; i < e.p.length; i++) {
+    const a = e.p[i - 1], b = e.p[i], da = Math.hypot(a.x - w.x, a.z - w.z) - R, db = Math.hypot(b.x - w.x, b.z - w.z) - R;
+    if (da * db < 0) { const f = da / (da - db); put(a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f, K.exit, 0); }
+  }
+  const len = i => (cut && cut[i] === Infinity ? Infinity : N.e[i].len * (cut ? cut[i] : 1)), far = (s, g, skip) => {   // the shortest way from node s to g without edge skip (Dijkstra over the few nodes)
+    const d = new Float64Array(N.n.length).fill(Infinity), done = new Uint8Array(N.n.length); d[s] = 0;
+    for (;;) { let u = -1; for (let i = 0; i < d.length; i++) if (!done[i] && d[i] < Infinity && (u < 0 || d[i] < d[u])) u = i; if (u < 0 || u === g) break; done[u] = 1; for (const ei of N.n[u].e) { if (ei === skip) continue; const E = N.e[ei], v = E.a === u ? E.b : E.a, w = d[u] + len(ei); if (w < d[v]) d[v] = w; } }
+    return d[g];
+  };
+  for (const e of N.e) {
+    if (len(e.i) === Infinity) continue;
+    const r = far(e.a, e.b, e.i) / Math.max(1, e.len), v = r === Infinity ? K.alt : clamp((r - K.altAt) / K.altK, 0, 1) * K.alt;
+    if (v > 0) for (const p of e.smp) put(p.x, p.z, v, 0);
+  }
+  return k;
+}
+/* the side's own losses at the map's grain (cmdLoss, which keeps C.kz at the influence grid's) */
+function tmLoss(o) {
+  if (!S.cmd || o.team === undefined || !S.cmd[o.team]) return;
+  const C = S.cmd[o.team], c = TM.cell, nx = Math.ceil(S.W / c), nz = Math.ceil(2 * S.HW / c);
+  if (!C.tmP || C.tmP.length !== nx * nz) { C.tmP = new Float32Array(nx * nz); C.tmPT = S.t; }
+  C.tmP[clamp((o.z + S.HW) / c | 0, 0, nz - 1) * nx + clamp(o.x / c | 0, 0, nx - 1)] += o.man ? 1 : CMD.val[tk(o)] || 1;
+}
+cmdLoss = (g => o => { g(o); tmLoss(o); })(cmdLoss);
+/* the observers side t knows of the enemy: { x, z, e (eye, m over the ground), r (reach) }, at most one a cell (the farthest-seeing), TM.max of them */
+function tmObs(C) {
+  const t = C.t, c = TM.cell, O = TM.obs, by = new Map(), add = (x, z, d) => {
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    const q = clamp((z + S.HW) / c | 0, 0, Math.ceil(2 * S.HW / c) - 1) * 65536 + clamp(x / c | 0, 0, Math.ceil(S.W / c) - 1), o = by.get(q);
+    if (!o || d[0] * (1 + d[1] / 100) > o.r * (1 + o.e / 100)) by.set(q, { x, z, r: d[0], e: d[1], pr: d === O.pt || d === O.base ? 2 : d === O.fort ? 0 : 1 });
+  };
+  if (S.cq) for (const p of S.cq.p) if (p.hold === 1 - t) add(p.x, p.z, p.base >= 0 ? O.base : O.pt);   // who holds a point every side knows
+  for (const f of S.forts) if (!f.dead && f.team === 1 - t && f.pre) add(f.x, f.z, O.fort);   // the works dug before the match: on every map
+  for (const o of C.known) if (!o.dead) add(o.sx, o.sz, o.man ? O.man : O.veh);
+  for (const u of S.units) if (!u.dead && u.fixed && u.team === 1 - t && u.seenT > -99) add(u.sx !== undefined ? u.sx : u.x, u.sz !== undefined ? u.sz : u.z, O.fix);   // a gun that does not move, once seen
+  return [...by.values()].sort((a, b) => b.pr - a.pr || b.r - a.r || a.x - b.x || a.z - b.z).slice(0, TM.max);
+}
+/* what observer o sees of the grid: v[cell] = max(v, its look there) */
+function tmLook(Z, o, v) {
+  const c = Z.c, nx = Z.nx, nz = Z.nz, hs = Z.hs, hx = Z.hx, hz = Z.hz, HW = Z.HW, hg = Z.hg, scr = Z.scr, ob = Z.o, st = TM.step, tg = TM.tgt, sk = TM.scr, far = TM.far, hide = TM.hide, sqrt = Math.sqrt, ceil = Math.ceil;
+  const ox = o.x, oz = o.z, i0 = Math.min(nx - 1, Math.max(0, ox / c | 0)), j0 = Math.min(nz - 1, Math.max(0, (oz + HW) / c | 0)), q0 = j0 * nx + i0, R = ceil(o.r / c), r2 = o.r * o.r;
+  const hAt = (x, z) => { let a = (z + HW) / hs + .5 | 0, b = x / hs + .5 | 0; a = a < 0 ? 0 : a >= hz ? hz - 1 : a; b = b < 0 ? 0 : b >= hx ? hx - 1 : b; return hg[a * hx + b]; }, y0 = hAt(ox, oz) + o.e;
+  for (let j = Math.max(0, j0 - R), j1 = Math.min(nz - 1, j0 + R); j <= j1; j++) for (let i = Math.max(0, i0 - R), i1 = Math.min(nx - 1, i0 + R); i <= i1; i++) {
+    const q = j * nx + i, dx = (i + .5) * c - ox, dz = -HW + (j + .5) * c - oz, d2 = dx * dx + dz * dz;
+    if (d2 > r2) continue;
+    const d = sqrt(d2); let s = 0;
+    if (q !== q0) {
+      const n = ceil(d / st), dy = hAt(ox + dx, oz + dz) + tg - y0;
+      for (let a = 1; a < n; a++) {
+        const f = a / n, x = ox + dx * f, z = oz + dz * f;
+        if (y0 + dy * f < hAt(x, z)) { s = 1; break; }   // the ground in the way
+        let pj = (z + HW) / c | 0, pi = x / c | 0; pj = pj < 0 ? 0 : pj >= nz ? nz - 1 : pj; pi = pi < 0 ? 0 : pi >= nx ? nx - 1 : pi;
+        const p = pj * nx + pi; if (p !== q && p !== q0 && (s += scr[p] * sk) >= 1) break;   // woods and houses on the way
+      }
+    }
+    if (s >= 1) continue;
+    const w = (1 - s) * (1 - far * d / o.r) * (1 - hide * ob[q]);
+    if (w > v[q]) v[q] = w;
+  }
+}
+/* strength spread by class: each known (sx, sz) or own unit stamps CMD.val falling off to TM.reach m */
+function tmStamp(Z, a, x, z, kind, val) {
+  const c = Z.c, nx = Z.nx, nz = Z.nz, HW = Z.HW, r = TM.reach[kind] || TM.reach.inf, R = Math.ceil(r / c), i0 = Math.min(nx - 1, Math.max(0, x / c | 0)), j0 = Math.min(nz - 1, Math.max(0, (z + HW) / c | 0)), r2 = r * r;
+  for (let j = Math.max(0, j0 - R), j1 = Math.min(nz - 1, j0 + R); j <= j1; j++) for (let i = Math.max(0, i0 - R), i1 = Math.min(nx - 1, i0 + R); i <= i1; i++) {
+    const dx = (i + .5) * c - x, dz = -HW + (j + .5) * c - z, d2 = dx * dx + dz * dz;
+    if (d2 <= r2 || (i === i0 && j === j0)) { const k = 1 - Math.sqrt(d2) / r; a[j * nx + i] += val * (k > .25 ? k : .25); }
+  }
+}
+/* one refresh of side t's map, a piece at a time; the new layers replace the old at the end */
+function* tmJob(t) {
+  const C = cmdOf(t), Z = tmStatic(S.T), n = Z.nx * Z.nz, V = CMD.val, T0 = S.t;
+  const f = new Float32Array(n), fo = new Float32Array(n), v = new Float32Array(n), tr = new Float32Array(n), nxt = new Float32Array(n).fill(-1), l = new Float32Array(n), fr = new Uint8Array(n);
+  for (const o of C.known) if (!o.dead) tmStamp(Z, f, o.sx, o.sz, o.man ? 'inf' : tk(o), o.man ? V.inf : V[tk(o)] || 1);
+  for (const u of S.units) if (!u.dead && u.team === t && !u.fixed && V[u.kind]) tmStamp(Z, fo, u.x, u.z, tk(u), V[u.kind]);
+  yield;
+  for (const m of S.men) if (!m.dead && m.team === t && !m.in) tmStamp(Z, fo, m.x, m.z, 'inf', V.inf);
+  yield;
+  for (let q = 0; q < n; q++) { const a = fo[q], b = f[q]; l[q] = a + b > .05 ? (a - b) / (a + b + 1) : 0; }
+  for (let j = 0; j < Z.nz; j++) for (let i = 0; i < Z.nx; i++) { const q = j * Z.nx + i; if (l[q] > .05 && ((i + 1 < Z.nx && l[q + 1] < -.05) || (j + 1 < Z.nz && l[q + Z.nx] < -.05) || (i && l[q - 1] < -.05) || (j && l[q - Z.nx] < -.05))) fr[q] = 1; }
+  yield;
+  const obs = tmObs(C);
+  for (let i = 0; i < obs.length; i += TM.losN) { for (let a = i; a < Math.min(obs.length, i + TM.losN); a++) tmLook(Z, obs[a], v); yield; }
+  if (C.hu && S.T.net && C.hu.length === S.T.net.e.length) S.T.net.e.forEach((e, i) => {
+    if (!(C.hu[i] > 0)) return; const H = habOf(C, i); if (!(H.h > 0)) return;
+    for (const p of e.smp) { const q = clamp((p.z + S.HW) / Z.c | 0, 0, Z.nz - 1) * Z.nx + clamp(p.x / Z.c | 0, 0, Z.nx - 1); if (H.h > tr[q]) tr[q] = H.h; if (H.next >= 0 && (nxt[q] < 0 || H.next < nxt[q])) nxt[q] = H.next; }
+  });
+  let p = C.tmP && C.tmP.length === n ? C.tmP : null;
+  if (p) { const k = Math.pow(.5, (S.t - (C.tmPT || S.t)) / TM.half); if (k < 1) for (let q = 0; q < n; q++) p[q] *= k; C.tmPT = S.t; p = p.slice(); }
+  C.tm = { T: T0, n: ((C.tm && C.tm.n) || 0) + 1, nx: Z.nx, nz: Z.nz, c: Z.c, f, fo, v, o: Z.o, t: tr, nxt, p: p || new Float32Array(n), k: Z.k, l, fr, obs: obs.length };
+}
+/* side t's layer k (a key of TML) as it stands, or null */
+function tmLayer(C, k) { const M = C && C.tm; return M && TML.includes(k) ? M[k] : null; }
+/* each step on the host: start each side's refresh on its turn, then TM.per pieces of each running one */
+function tmStep(dt) {
+  if (!TM.on || !S.cmd) return;
+  const a0 = AIB.now();
+  if (TMB.S !== S) { TMB.S = S; TMB.n = TMB.sum = TMB.worst = TMB.pieces = 0; TMB.ref = [0, 0]; TMB.refN = [0, 0]; S.tmJ = [null, null]; S.tmT = [0, TM.every / 2]; S.tmA = [0, 0]; }
+  for (const t of [0, 1]) {
+    if (!S.cmd[t]) continue;
+    if ((S.tmT[t] -= dt) <= 0) { S.tmT[t] += TM.every; if (S.tmJ[t]) { const b = AIB.now(); S.tmJ[t] = aiDrain(S.tmJ[t]); S.tmA[t] += AIB.now() - b; tmDone(t); } S.tmJ[t] = tmJob(t); S.tmA[t] = 0; }
+    if (S.tmJ[t]) { const b = AIB.now(); S.tmJ[t] = aiJob(S.tmJ[t], TM.per); S.tmA[t] += AIB.now() - b; TMB.pieces += TM.per; if (!S.tmJ[t]) tmDone(t); }
+  }
+  const ms = AIB.now() - a0; TMB.n++; TMB.sum += ms; if (ms > TMB.worst) TMB.worst = ms;
+}
+const tmDone = t => { TMB.ref[t] = S.tmA[t]; TMB.refN[t]++; };
+/* a whole refresh now (tests, the first look of a guest's question) */
+function tmNow(t) { const C = cmdOf(t); aiDrain(tmJob(t)); return C.tm; }
+/* gask tmap: side t's layer k at TM.ask m a cell (the highest of the fine cells, the mean for the cover and the front), numbers in a: 0 to
+   100 for v, o, t, k (per cent) and l (-100 to 100), strength and losses to a tenth; age: s since the refresh. none: 1 before the first */
+function tmAsk(t, k) {
+  k = k === undefined ? 'v' : k;
+  if (!TML.includes(k)) return null;
+  const C = S.cmd && S.cmd[t], M = C && C.tm, c = TM.ask, nx = Math.ceil(S.W / c), nz = Math.ceil(2 * S.HW / c), r = { k, nm: TM.nm[k], c, nx, nz, x0: 0, z0: -S.HW, age: 0, a: [] };
+  if (!M) { r.none = 1; return r; }
+  const L = M[k], f = c / M.c, mean = k === 'o' || k === 'l', raw = k === 'f' || k === 'p';
+  r.age = Math.round((S.t - M.T) * 10) / 10;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    let s = 0, w = -Infinity, n = 0;
+    for (let b = j * f; b < Math.min(M.nz, (j + 1) * f); b++) for (let a = i * f; a < Math.min(M.nx, (i + 1) * f); a++) { const v = L[b * M.nx + a]; s += v; n++; if (v > w) w = v; }
+    const v = n ? (mean ? s / n : w) : 0;
+    r.a.push(raw ? Math.round(v * 10) / 10 : Math.round(v * 100));
+  }
+  return r;
+}
+genQuery = (f => (t, q) => (q && q.q === 'tmap' && (t === 0 || t === 1) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && (s === 0 || s === 1))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
+newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -24198,12 +24394,13 @@ $('#btnSound').addEventListener('click', () => {
    the panels are rebuilt twice a second, and only when their text changed; closed, it costs one test a frame. GLAY: the layers, drawn in
    order, a row more is a layer more (res is reserved for the economy: V.eco). Text goes in by textContent only. No random numbers here */
 const GV = { on: false, t: 0, all: false, inf: false, lab: true, spd: 1, S: null, T: null, img: null, cx: 0, cz: 0, sc: 0, fit: 0,
-  V: null, drawT: 0, vmT: 0, panT: 0, drag: null, ping: null, cv: $('#genMap'), g: null, w: 0, h: 0, d: 1, sig: {}, seen: 0 };
+  V: null, drawT: 0, vmT: 0, panT: 0, drag: null, ping: null, cv: $('#genMap'), g: null, w: 0, h: 0, d: 1, sig: {}, seen: 0, tmk: '', tmR: null, tmQ: 0, tmP: 0, tmC: null, tmKey: '' };
 GV.g = GV.cv.getContext('2d');
 const GLAY = [
   { id: 'ter', nm: 'Terreno', on: 1, draw: gTerrain },
   { id: 'inf', nm: 'Influência', on: 0, key: 'KeyI', draw: gInfl },
   { id: 'kz', nm: 'Zonas de morte', on: 0, key: 'KeyZ', draw: gKz },
+  { id: 'tm', nm: 'Mapa tático', on: 1, draw: gTm },
   { id: 'obj', nm: 'Objetivos', on: 1, draw: gObj },
   { id: 'res', nm: 'Recursos', on: 1, draw: gRes },
   { id: 'eng', nm: 'Obras e bases', on: 1, draw: gWorks },
@@ -24226,7 +24423,7 @@ function genOpen(v, user) {
   GV.on = true; box.hidden = false; S.input = {};
   if (document.pointerLockElement) document.exitPointerLock();
   if ((S.net && !S.spec) || gorSeat()) { GV.t = S.me; GV.all = false; }
-  if (GV.S !== S) { GV.S = S; GV.t = S.net || playMode === 'play' ? S.me : GV.t; GV.fit = 0; GV.V = null; GV.ping = null; GV.sig = {}; }
+  if (GV.S !== S) { GV.S = S; GV.t = S.net || playMode === 'play' ? S.me : GV.t; GV.fit = 0; GV.V = null; GV.ping = null; GV.sig = {}; GV.tmR = null; GV.tmKey = ''; GV.tmP = 0; }
   if (GV.T !== S.T) { GV.T = S.T; GV.img = null; }
   GV.drawT = GV.vmT = GV.panT = 0; GV.V = null; GV.w = 0;
   genBar();
@@ -24241,6 +24438,7 @@ function genBar() {
   $('#genAll').hidden = net; $('#genAll').setAttribute('aria-pressed', String(GV.all));
   $('#genInf').setAttribute('aria-pressed', String(!!gLay('inf').on)); GV.inf = !!gLay('inf').on;
   $('#genKz').setAttribute('aria-pressed', String(!!gLay('kz').on));
+  $('#genTm').setAttribute('aria-pressed', String(!!GV.tmk)); $('#genTm').textContent = 'Mapa tático: ' + (GV.tmk ? TM.nm[GV.tmk] : 'desligado');
   $('#genSpd').hidden = !watch; $('#genPause').hidden = !watch;
   $('#genSpd').textContent = '×' + GV.spd + ' (< >)'; $('#genPause').textContent = paused ? 'Continuar (Espaço)' : 'Pausar (Espaço)';
   $('#genWarn').hidden = playMode !== 'play';
@@ -24273,6 +24471,7 @@ function genAct(a) {
   else if (a === 'inf') gLay('inf').on = gLay('inf').on ? 0 : 1;
   else if (a === 'lab') gLay('lab').on = gLay('lab').on ? 0 : 1;
   else if (a === 'kz') gLay('kz').on = gLay('kz').on ? 0 : 1;
+  else if (a === 'tm') { GV.tmk = GVTM[(GVTM.indexOf(GV.tmk) + 1) % GVTM.length]; GV.tmR = null; GV.tmQ = 0; }
   else if (a === 'fit') genFit();
   else if (a === 'pause') { if (playMode !== 'watch' || S.net) return; paused = !paused; }
   else if (a === 'spd+' || a === 'spd-') { if (playMode !== 'watch' || S.net) return; const i = GVSPD.indexOf(GV.spd); GV.spd = GVSPD[clamp(i + (a === 'spd+' ? 1 : -1), 0, GVSPD.length - 1)]; }
@@ -24648,6 +24847,38 @@ function gManV(g, V, P, now) {
     });
   }
 }
+/* the tactical map (M1): the chosen layer of side V.t's map (GV.tmk, '' off), a cell a pixel of an image drawn over the ground. The host and
+   solo read the commander's own map (200 m); a guest asks the host (gask tmap) every TM.every s for the layer at TM.ask m. The caption says
+   which layer and how old it is: what the side knew then, never more */
+const GVTM = ['', 'v', 't', 'k', 'f', 'o', 'p', 'l'], GVTMC = { v: [255, 90, 74], t: [255, 179, 71], k: [197, 140, 255], f: [226, 96, 79], o: [123, 201, 111], p: [255, 122, 60] };
+function gTmGrid(V) {
+  const k = GV.tmk, C = V.host && S.cmd ? S.cmd[V.t] : null;
+  if (C) { const M = C.tm; return M ? { k, n: M.n, nx: M.nx, nz: M.nz, c: M.c, a: M[k], fr: M.fr, age: S.t - M.T, sc: 1 } : null; }
+  if (!S.net || S.spec || V.t !== S.me) return null;
+  const now = AIB.now();
+  if (!GV.tmP && (!GV.tmR || GV.tmR.k !== k || now - GV.tmQ > TM.every * 1000)) { GV.tmQ = now; GV.tmP = 1; genAsk({ q: 'tmap', k }, r => { GV.tmP = 0; if (r && r.ok && r.r && r.r.k === GV.tmk && Array.isArray(r.r.a)) GV.tmR = Object.assign({ rx: S.t }, r.r); }); }
+  const R = GV.tmR; if (!R || R.k !== k || R.none || !(R.nx > 0 && R.nz > 0 && R.a.length === R.nx * R.nz)) return null;
+  return { k, n: 'g' + R.rx, nx: R.nx, nz: R.nz, c: R.c, a: R.a, fr: null, age: (R.age || 0) + S.t - R.rx, sc: k === 'f' || k === 'p' ? 1 : .01 };
+}
+function gTm(g, V, P) {
+  if (!GV.tmk || typeof document === 'undefined') return;
+  const G = gTmGrid(V); if (!G || !G.a) return;
+  const key = G.k + '|' + G.n + '|' + V.t + '|' + G.nx;
+  if (GV.tmKey !== key) {
+    const cv = GV.tmC || (GV.tmC = document.createElement('canvas')); cv.width = G.nx; cv.height = G.nz;
+    const x = cv.getContext('2d'), im = x.createImageData(G.nx, G.nz), d = im.data, fc = [111, 195, 178], ec = [226, 96, 79];
+    for (let q = 0; q < G.nx * G.nz; q++) {
+      const r = (+G.a[q] || 0) * G.sc; let c = GVTMC[G.k], al;
+      if (G.k === 'l') { c = r > 0 ? fc : ec; al = Math.min(.45, Math.abs(r) * .45); if (G.fr && G.fr[q]) { c = [236, 230, 214]; al = .7; } }
+      else al = G.k === 'f' || G.k === 'p' ? Math.min(.6, r / (r + 3) * .8) : Math.min(.6, r * .6);
+      d[q * 4] = c[0]; d[q * 4 + 1] = c[1]; d[q * 4 + 2] = c[2]; d[q * 4 + 3] = Math.round(clamp(al, 0, 1) * 255);
+    }
+    x.putImageData(im, 0, 0); GV.tmKey = key;
+  }
+  g.imageSmoothingEnabled = false; g.drawImage(GV.tmC, P.X(0), P.Y(-S.HW), G.nx * G.c * P.s, G.nz * G.c * P.s); g.imageSmoothingEnabled = true;
+  const wide = GV.w >= 981, cx = wide ? 340 : 36, cy = GV.h - (wide ? 70 : GV.h * .45);
+  gTxt(g, TM.nm[G.k] + ' · o que este lado sabe · há ' + Math.max(0, Math.round(G.age)) + ' s', cx + 24, cy + 30, 11, '#ece6d6');
+}
 /* the kill zones: where this side has been losing men and machines, the hottest cells of its grid (V.kz), a heat over the map; off until asked (Z) */
 function gKz(g, V, P) {
   const Z = V.kz; if (!Z || !Array.isArray(Z.a) || !Number.isFinite(Z.c)) return;
@@ -24776,6 +25007,7 @@ $('#genSide').addEventListener('click', e => { const b = e.target.closest('[data
 $('#genAll').addEventListener('click', () => genAct('all'));
 $('#genInf').addEventListener('click', () => genAct('inf'));
 $('#genKz').addEventListener('click', () => genAct('kz'));
+$('#genTm').addEventListener('click', () => genAct('tm'));
 $('#genSpd').addEventListener('click', () => genAct('spd'));
 $('#genPause').addEventListener('click', () => genAct('pause'));
 $('#genOut').addEventListener('click', () => genOpen(false, true));

@@ -24058,6 +24058,181 @@ MANG.inf = (g => (C, X) => {
   }
   return out;
 })(MANG.inf);
+/* ---------- M7 of the general's manoeuvre: the same manoeuvre tools for a person and the MCP (report §13; não testado, see docs/nao-testado/cf-m7-jogador-mcp.md) ----------
+   Four manoeuvres of its own (and M4's ambush and guard) through the one door (genCmd man -> opNew), for whoever holds the chair (a person, the MCP; the AI's own choice of them is M3/M4's):
+     fixflank (ffk, P1): one squad fixes the objective from the approach nearest the axis (overwatch from M7.fix m), n squads (1-3) go by approach ap
+       (0-2 of gask ap, default the best that is not the fixing one, or the route rt) to its assault position, quiet; H-hour when they are there (or
+       M7.late x their walk + M7.slack s late, never before spec.H s): fire on the objective (a mission when a mortar or battery reaches), then M7.fire s
+       later the manoeuvre assaults. Ends when the point is ours, the manoeuvre lost M7.lost of its men before H, or the assault has nobody left.
+     envelop (env, P2): as fixflank with two manoeuvre elements, ap and ap2 (default the two best that are not the fixing one), n squads each.
+     turn (trn, P3): n squads (default 2) go round by the safest foot way (footPath, or the route rt) to the junction (3 roads or more) or bridge end
+       nearest x z (within M7.node m) and dig in there, facing the enemy's base: the enemy's road is cut. Off when the enemy known there is M7.foe x them.
+     penet (pen, P5): n squads (default 3) assault the stretch of front at x z together; in, they go on to the strongest choke point (k layer) M7.deep m
+       or less beyond, toward the enemy's base, and hold it M7.hold s. Off when the enemy known there is M7.foe x them before they are in.
+     ambush and guard: M4's own doors (emb, grd: embOpen and MANO.grd pick the site, the form and the squads); this block only lets the man
+       command name a road edge e (its middle) and gives guard f mine, an anti-tank field at the junction or bridge M4 guards.
+   Squads: those named (ids), else the nearest free ones within M7.reach m (the AI's free list for 'ai'; for a person, any squad of a line, wood,
+   road, held, push or ambush post not in an operation but its own orders). The approaches are M2's (apNow): only what the side knows. */
+const M7 = { n: { ffk: 1, env: 1, trn: 2, pen: 3 }, reach: 4500, late: 1.3, slack: 60, fire: 20, fix: 400, lost: .5, node: 800, foe: 2, hold: 60, deep: [300, 1500], live: 3,
+  jobs: { held: 1, road: 1, line: 1, wood: 1, push: 1, amb: 1 } };
+Object.assign(MANC, { fixflank: ['ffk', 'atk'], envelop: ['env', 'atk'], turn: ['trn', 'atk'], penet: ['pen', 'atk'] });   // ambush and guard are M4's (emb, grd)
+Object.assign(MANT, { ffk: { w: 1, T: 1200, cd: 20 }, env: { w: 1, T: 1200, cd: 20 }, trn: MANT.trn || { w: 1, T: 900, cd: 20 }, pen: { w: 1, T: 900, cd: 20 } });   // trn: M3's own (the AI's P3) when it is there, so its odds and choke thresholds stay
+Object.assign(GEN.man, { ffk: 'Fixar e flanquear', env: 'Envolvimento', trn: 'Desbordamento', pen: 'Penetração' });
+Object.assign(GEN.mfem, { pen: 1 });
+Object.assign(GEN.mtag, { ffk: 'FXF', env: 'ENV', trn: 'DSB', pen: 'PEN' });
+Object.assign(GEN.mlg, { ffk: 'fixação no eixo, manobra por uma abordagem', env: 'fixação e duas manobras', trn: 'tropa no entroncamento ou ponte atrás do inimigo', pen: 'assalto concentrado num trecho da frente' });
+Object.assign(GEN.cn, { man: GEN.cn.man || 'manobra' });
+Object.assign(GEN.no, { ap: 'Sem abordagem: o mapa tático do lado ainda não chega a esse objetivo', cd: GEN.no.cd || 'Essa manobra ainda está em espera', n: GEN.no.n || 'Número de esquadras inválido',
+  path: GEN.no.path || 'Nenhum caminho a pé seguro até lá', man2: 'O servidor desta sala é antigo: sem as manobras novas' });
+const M7K = { fixflank: 1, envelop: 1, turn: 1, penet: 1, ambush: 1, guard: 1 };
+const m7Lead = q => q.men.find(m => !m.dead && !m.gone) || null;
+/* the squads of an M7 manoeuvre near o: the named ones, else the n nearest free ones within M7.reach m */
+function m7Pool(t, spec, by, o, n) {
+  const named = Array.isArray(spec.ids) && spec.ids.length > 0;
+  const ok = q => q.team === t && !q.net && q.live >= (named ? 2 : M7.live) && !q.state && !q.lift && !q.rd && !(q.op && !q.op.over && q.op.k !== 'usr') && !!m7Lead(q);
+  let L = named ? gSqs(t, spec.ids).filter(ok) : by === 'ai' ? manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)) : S.squads.filter(q => ok(q) && M7.jobs[q.job]);
+  const d = q => { const l = m7Lead(q); return l ? hdist(l, o) : 1e9; };
+  L = L.filter(q => named || d(q) < M7.reach).sort((a, b) => d(a) - d(b) || a.id - b.id);
+  return L.slice(0, n);
+}
+function m7Take(op, q, O) { if (q.op && q.op !== op) { gDrop(q); q.op = null; q.back = null; } opTake(op, q, O); q.late = false; }
+/* a squad's way to x z: the route rt through its points, else the safest foot way the commander finds, else the network on foot */
+function m7Way(C, q, rt, x, z) {
+  const L = m7Lead(q); if (!L) return null;
+  if (rt) return gWay(q, rt, x, z);
+  const w = footPath(C, L.x, L.z, x, z) || tripOf(L.x, L.z, x, z, { mode: 'foot', team: q.team });
+  return w && w.len <= W21.max ? w : null;
+}
+const m7Ord = (k, x, z, o) => { const p = railOf(x, z); return Object.assign({ k, ri: p.ri, s: p.s, x, z, R: 12 }, o || {}); };
+/* the junction (3 roads or more) or the bridge end nearest x z within far m: { x, z, nm } */
+function m7Node(t, x, z, far) {
+  const N = S.T.net; if (!N) return null; let b = null, bd = far;
+  for (const n of N.n) if (n.e.length >= 3) { const d = Math.hypot(n.x - x, n.z - z); if (d < bd) { bd = d; b = { x: n.x, z: n.z, nm: 'o entroncamento ' + (RN.names[n.id] ? RN.names[n.id] + ' ' : '') + gNear(n.x, n.z) }; } }
+  for (const r of brs()) { const d = Math.hypot(r.x - x, r.z - z); if (d < bd && r.ends && r.ends.length) { const e = r.ends.reduce((a, e) => (Math.hypot(e.x - x, e.z - z) < Math.hypot(a.x - x, a.z - z) ? e : a)); bd = d; b = { x: e.x, z: e.z, nm: brName(r).toLowerCase() }; } }
+  return b;
+}
+/* ---- fixflank and envelop: the fixing element and one or two manoeuvre elements by M2's approaches ---- */
+function m7Assault(t, C, spec, by, k) {
+  if (!apOn()) return gBad('mv');
+  const at = manAt(spec); if (!at) return gBad('at');
+  if (at.p && (at.p.hold === t || at.p.base >= 0)) return gBad(at.p.hold === t ? 'own' : 'at');
+  if (!C.tm) return gBad('ap');
+  const P = at.p && S.cq ? cqObj(at.p) : { ri: at.ri, s: at.s, x: at.x, z: at.z, tw: at.p || null }, sd = t ? 1 : -1, pl = apNow(C, P, sd);
+  if (!pl || !pl.A.length) return gBad('ap');
+  const A = pl.A, ix = i => (Number.isInteger(i) && i >= 0 && i < A.length ? A[i] : null), fx = A.reduce((b, a) => (a.ang < b.ang ? a : b), A[0]);
+  if ((spec.ap !== undefined && !ix(spec.ap)) || (spec.ap2 !== undefined && !ix(spec.ap2))) return gBad('ap');
+  const m1 = ix(spec.ap) || A.find(a => a !== fx) || null, m2 = k === 'env' ? ix(spec.ap2) || A.find(a => a !== fx && a !== m1) || null : null;
+  if (!m1 || (k === 'env' && (!m2 || m2 === m1))) return gBad('ap');
+  const rt = gRtIn(spec.rt); if (rt === null) return gBad('rt');
+  const els = k === 'env' ? [m1, m2] : [m1], n = Number.isInteger(spec.n) ? spec.n : M7.n[k], pool = m7Pool(t, spec, by, pl.st, 1 + n * els.length);
+  if (pool.length < 1 + els.length) return gBad(pool.length ? 'sq' : (Array.isArray(spec.ids) && spec.ids.length ? 'sq' : 'sq'));
+  const o = pl.o, fq = pool[0], mq = pool.slice(1);
+  let fc = -1, fd = 1e9; if (fx !== m1 && fx !== m2) for (const c of fx.cells) { const d = Math.abs(hdist(apXZ(pl.Z, c), o) - M7.fix); if (d < fd) { fd = d; fc = c; } }
+  const fp = fc >= 0 ? apXZ(pl.Z, fc) : pl.f;
+  const ways = mq.map((q, i) => { const a = els[i % els.length], L = m7Lead(q); return rt ? gWay(q, rt, a.pos.x, a.pos.z) : apWalk(pl, L.x, L.z, a.cells[a.cells.length - 1], a.pos.x, a.pos.z); });
+  if (ways.some(w => !w)) return gBad('way');
+  const FL = m7Lead(fq), fw = fc >= 0 ? apWalk(pl, FL.x, FL.z, fc, fp.x, fp.z) : m7Way(C, fq, null, fp.x, fp.z);
+  const far = ways.reduce((m, w) => Math.max(m, w.len), 0) / MAN.pace;
+  const op = manOpen(C, k, spec, by, { P: at.p, nm: gName(P), tx: o.x, tz: o.z, ri: P.ri, s: P.s, kz: { x: o.x, z: o.z }, pl, els: els.map(a => ({ ang: a.ang, len: a.len, pos: a.pos })), st: 'go', H: 0,
+    Hm: S.t + far * M7.late + M7.slack, Hs: Number.isFinite(spec.H) ? S.t + spec.H : 0, nM: 0 });
+  m7Take(op, fq, m7Ord('overwatch', fp.x, fp.z, Object.assign({ ax: o.x, az: o.z, fast: 1, quiet: 1 }, fw ? { wp: fw } : {}))); fq.m7e = 0; op.n0 += fq.live;
+  mq.forEach((q, i) => { const a = els[i % els.length]; m7Take(op, q, m7Ord('hold', a.pos.x, a.pos.z, { fast: 1, quiet: 1, wp: ways[i] })); q.m7e = 1 + i % els.length; op.n0 += q.live; op.nM += q.live; });
+  gLog(t, 'atk', GEN.man[k] + ' contra ' + op.nm + ': fixação a ' + fx.ang + '° do eixo, manobra' + (els.length > 1 ? 's' : '') + ' por ' + els.map(a => a.ang + '° (' + gN(a.len / 1000) + ' km, ' + a.exp + '% à vista)').join(' e ') + ', ' + mbSqs(pool.length) + (spec.why && by !== 'ai' ? ' — ' + spec.why : ''), o, 'm7' + op.id);
+  return gYes(op.id);
+}
+function m7AsOps(C, op) {
+  const t = C.t, l = opLive(op), at = { x: op.tx, z: op.tz }, P = op.P, man = l.filter(q => q.m7e > 0), nmK = GEN.man[op.k];
+  if (!l.length) { gLog(t, 'atk', nmK + ' desfeito: sem esquadras', at); return opEnd(C, op); }
+  if (P && P.hold === t) { const q = l[0]; q.back = { k: 'hold', ri: P.ri, s: P.s, x: P.x, z: P.z, tw: P, R: 0 }; q.job = 'held'; q.jk = 0; gLog(t, 'atk', nmK + ': ' + op.nm + ' tomado', at); return opEnd(C, op); }
+  const live = man.reduce((a, q) => a + manLive(q), 0);
+  if (op.st === 'go') {
+    if (!man.length || live < op.nM * M7.lost) { gLog(t, 'atk', nmK + ' desfeito: a manobra perdeu mais da metade antes da hora H', at); return opEnd(C, op); }
+    const inPos = man.every(q => q.at);
+    if ((inPos || S.t > op.Hm) && S.t >= op.Hs) {
+      op.st = 'fire'; op.H = S.t;
+      gLog(t, 'atk', nmK + ': hora H em ' + op.nm + (inPos ? ', manobra em posição' : ', manobra atrasada'), at);
+      if (gFireSrc(t, 'he', op.tx, op.tz) && C.fm.filter(M => !M.dead && S.t < M.T).length < GENC.fm) cmdMission(C, 'he', op.tx, op.tz, 3, GENC.life, op);
+    }
+  } else if (op.st === 'fire' && S.t - op.H >= M7.fire) {
+    op.st = 'hit'; gLog(t, 'atk', nmK + ': assalto pelo flanco em ' + op.nm, at);
+    for (const q of man) m7Take(op, q, { k: 'assault', ri: op.ri, s: op.s, x: op.tx, z: op.tz, tw: P || undefined, R: P ? 0 : 12, rush: 1, ax: op.tx, az: op.tz });
+  } else if (op.st === 'hit' && !man.length) { gLog(t, 'atk', nmK + ': o assalto pelo flanco não tem mais ninguém', at); return opEnd(C, op); }
+}
+MANO.ffk = (t, C, spec, by) => m7Assault(t, C, spec, by, 'ffk');
+MANO.env = (t, C, spec, by) => m7Assault(t, C, spec, by, 'env');
+OPS.ffk = m7AsOps; OPS.env = m7AsOps;
+/* ---- turn: squads dig in at a junction or a bridge end behind the enemy ---- */
+function m7Hold(t, C, spec, by, k) {
+  const at = manAt(spec); if (!at) return gBad('at');
+  const nd = m7Node(t, at.x, at.z, M7.node); if (!nd || !gMapOk(nd.x, nd.z)) return gBad('at');
+  const rt = gRtIn(spec.rt); if (rt === null) return gBad('rt');
+  const pool = m7Pool(t, spec, by, nd, Number.isInteger(spec.n) ? spec.n : M7.n[k]); if (!pool.length) return gBad('sq');
+  const ways = pool.map(q => m7Way(C, q, rt, nd.x, nd.z)); if (ways.some(w => !w)) return gBad('way');
+  const e = S.base[1 - t], a = headTo(nd.x, nd.z, e.x, e.z);
+  const op = manOpen(C, k, spec, by, { nm: nd.nm, kz: { x: nd.x, z: nd.z }, tx: nd.x, tz: nd.z, st: 'go', in: 0 });
+  pool.forEach((q, i) => { m7Take(op, q, m7Ord('hold', nd.x + (i ? (i % 2 ? 25 : -25) : 0), nd.z, { fast: 1, quiet: k === 'trn' ? 1 : 0, wp: ways[i], dig: { k: 1, a } })); op.n0 += q.live; });
+  gLog(t, k === 'grd' ? 'def' : 'atk', (k === 'grd' ? 'Guarda da rua alternativa em ' : 'Desbordamento: ' + mbSqs(pool.length) + ' rumo a ') + nd.nm + (spec.why && by !== 'ai' ? ' — ' + spec.why : ''), nd, 'm7' + op.id);
+  return gYes(op.id);
+}
+function m7HoldOps(C, op) {
+  const t = C.t, l = opLive(op), own = l.reduce((a, q) => a + manLive(q), 0), nmK = GEN.man[op.k];
+  if (!l.length) { gLog(t, 'atk', nmK + ' desfeit' + (GEN.mfem[op.k] ? 'a' : 'o') + ': sem esquadras', op.kz); return opEnd(C, op); }
+  if (cmdKnown(C, op.tx, op.tz, 500) > M7.foe * Math.max(1, own)) { gLog(t, 'atk', nmK + ' em ' + op.nm + ' recua: o inimigo ali tem mais que o dobro', op.kz); return opEnd(C, op); }
+  if (!op.in && l.every(q => q.at)) { op.in = S.t; gLog(t, op.k === 'grd' ? 'def' : 'atk', nmK + ': em posição em ' + op.nm, op.kz); }
+}
+/* trn is also M3's (the AI's turning movement, P3): the AI's own choice (R.res.ch from MANG.trn) keeps M3's open and its op (op.Q set) M3's tick;
+   an order of a person, the MCP or the AI's send_command opens M7's dig-in at a junction or bridge end (merge of M3 and M7; não testado) */
+MANO.trn = (f => (t, C, spec, by, R) => (R && R.res && R.res.ch ? f(t, C, spec, by, R) : m7Hold(t, C, spec, by, 'trn')))(MANO.trn);
+OPS.trn = (f => (C, op) => (op.Q ? f(C, op) : m7HoldOps(C, op)))(OPS.trn);
+/* ---- penet: a narrow front, then on to a choke point beyond ---- */
+MANO.pen = (t, C, spec, by) => {
+  const at = manAt(spec); if (!at) return gBad('at');
+  const rt = gRtIn(spec.rt); if (rt === null) return gBad('rt');
+  const pool = m7Pool(t, spec, by, at, Number.isInteger(spec.n) ? spec.n : M7.n.pen); if (pool.length < 2) return gBad('sq');
+  const ways = pool.map(q => m7Way(C, q, rt, at.x, at.z)); if (ways.some(w => !w)) return gBad('way');
+  const op = manOpen(C, 'pen', spec, by, { nm: at.nm, kz: { x: at.x, z: at.z }, tx: at.x, tz: at.z, st: 'go', in: 0 });
+  pool.forEach((q, i) => { m7Take(op, q, m7Ord('assault', at.x, at.z, { ax: at.x, az: at.z, fast: 1, wp: ways[i] })); op.n0 += q.live; });
+  gLog(t, 'atk', 'Penetração ' + at.nm + ': ' + mbSqs(pool.length) + ' numa frente estreita' + (spec.why && by !== 'ai' ? ' — ' + spec.why : ''), at, 'm7' + op.id);
+  return gYes(op.id);
+};
+OPS.pen = (C, op) => {
+  const t = C.t, l = opLive(op), own = l.reduce((a, q) => a + manLive(q), 0);
+  if (!l.length || own < op.n0 * M7.lost) { gLog(t, 'atk', 'Penetração desfeita: perdas', op.kz); return opEnd(C, op); }
+  if (op.st === 'go') {
+    if (!l.some(q => q.at) && cmdKnown(C, op.tx, op.tz, 400) > M7.foe * own) { gLog(t, 'atk', 'Penetração cancelada: a brecha fechou ' + op.nm, op.kz); return opEnd(C, op); }
+    if (!l.every(q => q.at)) return;
+    op.st = 'exp'; op.in = S.t;
+    const Z = tmStatic(S.T), e = S.base[1 - t], dx = e.x - op.tx, dz = e.z - op.tz, dl = Math.hypot(dx, dz) || 1; let b = -1, bv = .2;
+    for (let q = 0; q < Z.nx * Z.nz; q++) { if (Z.k[q] <= bv) continue; const p = apXZ(Z, q), d = hdist(p, { x: op.tx, z: op.tz }); if (d < M7.deep[0] || d > M7.deep[1] || ((p.x - op.tx) * dx + (p.z - op.tz) * dz) / dl < d * .3 || !gMapOk(p.x, p.z)) continue; bv = Z.k[q]; b = q; }
+    if (b < 0) { gLog(t, 'atk', 'Penetração: brecha aberta ' + op.nm, op.kz); op.st = 'held'; return; }
+    const p = apXZ(Z, b); op.ex = p; gLog(t, 'atk', 'Penetração explora até o ponto-chave ' + gNear(p.x, p.z), p);
+    for (const q of l) m7Take(op, q, m7Ord('hold', p.x, p.z, { fast: 1, wp: m7Way(C, q, null, p.x, p.z) || undefined }));
+  } else if (op.st === 'exp' && l.every(q => q.at)) { op.st = 'held'; op.in = S.t; gLog(t, 'atk', 'Penetração: ponto-chave tomado ' + gNear(op.ex.x, op.ex.z), op.ex); }
+  else if (op.st === 'held' && S.t - op.in > M7.hold) return opEnd(C, op);
+};
+/* ---- ambush: a planned ambush on any road ---- */
+function m7Road(spec) {
+  const N = S.T.net; if (!N) return null; let p;
+  if (Number.isInteger(spec.e) && N.e[spec.e]) { const E = N.e[spec.e], m = routeAt(E.p, E.len / 2); p = { e: E.i, s: E.len / 2, x: m.x, z: m.z }; }
+  else { const a = manAt(spec); if (!a) return null; p = netNear(a.x, a.z); if (p.e < 0 || p.d > GENC.road) return null; }
+  const E = N.e[p.e], a = routeAt(E.p, clamp(p.s - 20, 0, E.len)), b = routeAt(E.p, clamp(p.s + 20, 0, E.len)), L = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  return { e: p.e, x: p.x, z: p.z, dx: (b.x - a.x) / L, dz: (b.z - a.z) / L };
+}
+/* the man command carries the new keys (ap, ap2, f, e, ids) and, for the new kinds, H as the H-hour (turn: its life). ambush and guard are M4's
+   doors (embOpen, MANO.grd): H is their life; e (a road edge) names the place by its middle; guard with f mine also lays an anti-tank field at the
+   guarded junction or bridge once M4 has opened it (ids and the ambush's form f are not M4's: the squads and the form are its own choice) */
+GC.man.f = (f => function (t, c, by, R) {
+  if ((R && R.spec) || !c || !M7K[c.k]) return f.call(this, t, c, by, R);
+  const spec = { c: c.k, at: c.pi, x: c.x, z: c.z, n: c.n, id: c.id, why: c.why, rt: c.rt, ap: c.ap, ap2: c.ap2, f: c.f, e: c.e, ids: c.ids };
+  if (c.k === 'ambush' && Number.isInteger(c.e) && c.pi === undefined && !(Number.isFinite(c.x) && Number.isFinite(c.z))) { const r = m7Road(spec); if (!r) return gBad('amb'); spec.x = r.x; spec.z = r.z; }
+  if (Number.isFinite(c.H)) { if (c.k === 'ambush' || c.k === 'guard' || c.k === 'turn') spec.T = c.H; else spec.H = clamp(c.H, 0, GENC.H[1]); }
+  const r = opNew(t, spec, by, R);
+  if (r && r.ok && c.k === 'guard' && c.f === 'mine') {
+    const C = cmdOf(t), op = C.ops.find(o => o.id === r.id && o.k === 'grd'), e = S.base[1 - t];
+    if (op) { const m = genCmd(t, { c: 'fort', k: 'mineat', x: op.x, z: op.z, a: headTo(op.x, op.z, e.x, e.z), why: 'guarda de ' + op.nm }, by); if (!m.ok) gLog(t, 'def', 'Guarda de ' + op.nm + ': minas recusadas (' + (GEN.no[m.why] || m.why) + ')', op.kz); }
+  }
+  return r && typeof r === 'object' ? r : gBad('off');
+})(GC.man.f);
 /* ---------- the general's fortification plan (AFP): what an AI general orders built to cover its economy and its seat town ----------
    Before it, the AI general's works were only what a quiet squad digs where it stands (fortPlan, aidPosts), the sappers' fields and the dome
    when rounds come down: it never gave a fortify order (W21 fort) of its own, so no AA position, no nest on the approaches, no minefield on
@@ -24455,6 +24630,38 @@ function groundColor(k, x, z, c) {
   if (h > 280) c.lerp(TC.setHex(E.ground[2]), clamp((h - 280) / 170, 0, 1));
   if (h > 640) c.lerp(TC.setHex(P.snow), clamp((h - 640) / 160, 0, 1));
 }
+/* the towns on every map: each built-up place (T.burgs: town, seat town, village, hamlet) as a tinted footprint along its road, from the
+   place's own size (ru, rv), never from its lots: the seat's disguised installation lots are not drawn. The names are drawn live, by the zoom
+   (s px per m): a town's from 30 px/km, a village's from 45, a hamlet's from 90 */
+function burgAng(T, b) {
+  if (b.ma !== undefined) return b.ma;
+  let best = 1e18, a = 0;
+  const scan = p => { for (let i = 1; i < p.length; i++) { const q = p[i - 1], ex = p[i].x - q.x, ez = p[i].z - q.z, L2 = ex * ex + ez * ez || 1, t = clamp(((b.x - q.x) * ex + (b.z - q.z) * ez) / L2, 0, 1), d = Math.hypot(b.x - q.x - ex * t, b.z - q.z - ez * t); if (d < best) { best = d; a = Math.atan2(ez, ex); } } };
+  try { if (b.e !== undefined && T.net && T.net.e[b.e]) scan(T.net.e[b.e].p); else (T.routes || []).forEach(scan); } catch (e) { a = 0; }
+  return (b.ma = a);
+}
+function drawTownsFoot(g, T, X, Z, s) {
+  for (const b of T.burgs || []) {
+    const a = burgAng(T, b), c = Math.cos(a), sn = Math.sin(a), u = b.ru, v = b.rv, hm = b.k === 'hamlet', P = [[-u, -v], [u, -v], [u, v], [-u, v]];
+    g.beginPath(); P.forEach(([pu, pv], i) => { const x = X(b.x + pu * c - pv * sn), y = Z(b.z + pu * sn + pv * c); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath();
+    g.fillStyle = hm ? 'rgba(236,196,120,.16)' : 'rgba(236,196,120,.26)'; g.fill(); g.strokeStyle = 'rgba(236,196,120,.75)'; g.lineWidth = Math.max(.8, hm ? .8 : 1.1); g.stroke();
+  }
+}
+function townLabel(b) {
+  if (b.nm) return b.nm;
+  const p = S.cq && S.cq.p.find(p => hdist(p, b) < 150); if (p) return p.name;
+  return b.k === 'town' ? 'Vila' : b.k === 'village' ? 'Aldeia' : '';
+}
+function drawTownNames(g, X, Z, s, k, on) {
+  const km = s * 1000;
+  for (const b of S.T.burgs || []) {
+    const need = b.k === 'town' ? 30 : b.k === 'village' ? 45 : 90; if (km < need) continue;
+    const nm = townLabel(b), x = X(b.x), y = Z(b.z); if (!nm || (on && !on(x, y))) continue;
+    const fs = clamp(9 + km / 60, 9, 13) * (k || 1), a = clamp((km - need) / need, .35, 1);
+    g.save(); g.globalAlpha = a; g.font = '600 ' + fs + 'px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(8,12,13,.85)'; g.strokeText(nm, x, y); g.fillStyle = '#f4dca4'; g.fillText(nm, x, y); g.restore();
+  }
+}
 /* the battlefield from above, w pixels wide. relief: for the fire-control map, slopes shaded, a contour every 100 m and no roads (it draws its own) */
 function mapImg(w, relief) {
   const T = S.T, P = PAL[S.era], N1 = T.N + 1, h = Math.round(w * 2 * S.HW / S.W), c = new THREE.Color(), cvs = document.createElement('canvas'), up = new Int16Array(w), nc = relief ? new Float32Array(N1 * N1 * 3) : null;
@@ -24473,6 +24680,7 @@ function mapImg(w, relief) {
     im.data.set([c.r * 255, c.g * 255, c.b * 255, 255], (py * w + px) * 4);
   }
   g.putImageData(im, 0, 0);
+  drawTownsFoot(g, T, x => x / S.W * w, z => (z + S.HW) / (2 * S.HW) * h, w / S.W);
   if (relief) return cvs;
   g.strokeStyle = 'rgba(244,232,196,.95)'; g.lineWidth = 1.4;
   drawRoads(g, T, x => x / S.W * w, z => (z + S.HW) / (2 * S.HW) * h, g.lineWidth);
@@ -25833,6 +26041,7 @@ function fpMap(P, u, ink, acc, disp, blink) {
   hx.stroke();
   hx.strokeStyle = 'rgba(244,232,196,.9)'; hx.lineWidth = 1.6;
   drawRoads(hx, S.T, X, Y, hx.lineWidth);
+  drawTownNames(hx, X, Y, 1 / mpp, u, on);
   hx.setLineDash(DASH); hx.strokeStyle = acc; hx.lineWidth = 1.3; hx.beginPath(); hx.arc(X(P.x), Y(P.z), w.range / mpp, 0, TAU); hx.stroke(); hx.setLineDash(SOLID);
   for (const s of S.smokes) { hx.fillStyle = 'rgba(214,216,210,.55)'; hx.beginPath(); hx.arc(X(s.x), Y(s.z), Math.max(3, (s.r || SMOKE.r) / mpp), 0, TAU); hx.fill(); }
   const px = X(P.x), py = Y(P.z), ax = X(F.x), ay = Y(F.z), ok = !!sol && sol.ok, col = ok ? acc : FOE, br = Math.atan2(F.z - P.z, F.x - P.x), hf = Math.hypot(P.f.x, P.f.z) || 1;
@@ -27872,7 +28081,7 @@ function gTerrain(g, V, P) {
   g.globalAlpha = 1; g.fillStyle = 'rgba(26,32,33,.7)';
   const hs = Math.max(1.6, 9 * P.s);
   for (const o of S.T.houses) if (S.os[o.id] < 2 && gOn(P, o.x, o.z, 4)) g.fillRect(P.X(o.x) - hs / 2, P.Y(o.z) - hs / 2, hs, hs);
-  for (const b of S.T.burgs) if (b.nm && gOn(P, b.x, b.z, 80)) gTxt(g, b.nm, P.X(b.x), P.Y(b.z) - Math.max(8 * P.k, b.rv * P.s) - 4 * P.k, 10 * P.k, 'rgba(236,230,214,.7)', 'center');   // the places of map version 3
+  drawTownNames(g, P.X, P.Y, P.s, P.k, (x, y) => x > -80 && x < GV.w + 80 && y > -30 && y < GV.h + 30);   // the towns, villages and hamlets, named by the zoom
   const wide = GV.w >= 981, cx = (wide ? 340 : 36), cy = GV.h - (wide ? 70 : GV.h * .45), km = 1000 * P.s;
   gHeadAt(g, cx, cy + 6, cx, cy - 24, 8, '#ece6d6'); gLine(g, cx, cy + 14, cx, cy - 16, '#ece6d6', 1.5); gTxt(g, 'N', cx - 4, cy - 29, 12, '#ece6d6');
   gLine(g, cx + 24, cy + 12, cx + 24 + km, cy + 12, '#ece6d6', 2); gTxt(g, '1 km', cx + 24, cy + 7, 11, '#ece6d6');
@@ -29639,6 +29848,7 @@ function hudDroneMap(P, u, ink, acc) {
   hx.fillStyle = '#0c1213'; hx.fillRect(0, 0, cw, ch); hx.drawImage(mapBig, X(0), Y(-S.HW), S.W / mpp, 2 * S.HW / mpp);
   hx.strokeStyle = 'rgba(244,232,196,.9)'; hx.lineWidth = 1.4;
   drawRoads(hx, S.T, X, Y, hx.lineWidth);
+  drawTownNames(hx, X, Y, 1 / mpp, u);
   const mark = (o, col, r, sq) => { const x = X(o.sx === undefined || o.team === P.team ? o.x : o.sx), y = Y(o.sz === undefined || o.team === P.team ? o.z : o.sz); hx.fillStyle = col; hx.beginPath(); if (sq) hx.rect(x - r, y - r, r * 2, r * 2); else { hx.moveTo(x, y - r); hx.lineTo(x + r, y); hx.lineTo(x, y + r); hx.lineTo(x - r, y); } hx.fill(); };
   for (const q of S.units) if (!q.dead && (q.team === P.team || spotted(q))) mark(q, q.team === P.team ? FRIEND : FOE, 4, q.team === P.team);
   for (const b of S.sup) if (!b.dead && (b.team === P.team || spotted(b))) mark(b, b.team === P.team ? FRIEND : FOE, 6, true);
@@ -30397,6 +30607,103 @@ drawHud = (g => () => {
   const f = S.forts.find(f => (f.k === 7 || f.k === 9 || f.k === 10) && f.prog < 1 && !f.dead && builds(P, f));
   if (f) { txt((f.k === 9 ? 'RECONSTRUINDO A PONTE ' : f.k === 10 ? 'CONSTRUINDO A PONTE NOVA ' : 'LANÇANDO O PONTÃO ') + Math.round(f.prog * 100) + '%' + (f.n > 1 ? '  ·  ' + gN(f.n) + ' construtores' : ''), cw / 2, ch * .76, 12 * u, S.modern ? '#63d2e6' : '#e6b53a', 'center'); }
 })(drawHud);
+/* ---------- M7 on the general's view (não testado): the new manoeuvres, the approaches panel and their layer ----------
+   Campanha > Manobras gets the six new kinds (fixflank envelop turn penet ambush guard; click the target), and under them: the approach the
+   manoeuvre takes (Auto, A1-A3 of the last approaches asked), the ambush's form (linear, em L), the guard's (posto, minas), three chips for the
+   tactical map's layers (Vigilância, Tráfego inimigo, Gargalos), and "Ver abordagens": click an enemy point and the host answers gask ap (M2);
+   the three ways are drawn on the map in colours with time and exposure, and each has "Fixar e flanquear por An" (one click). The selected squads go
+   with the order (ids). The new manoeuvres in force are drawn on the same layer (their way and target). An older relay (no man2 in welcome) refuses
+   them before they go. Net.man2: the relay passes ap, ap2, f and e */
+Net.rx.welcome = (old => m => { Net.man2 = m.man2 === 1; old(m); })(Net.rx.welcome);
+GORMAN.push(...['fixflank', 'envelop', 'turn', 'penet', 'ambush', 'guard'].filter(k => !GORMAN.includes(k)));
+Object.assign(GOR.w13, { ap: -1, f: 'lin', gf: 'post' });
+GV.ap = null; GV.apP = 0;
+GORW.ap = 1;
+Object.defineProperty(GORT, 'ap', { enumerable: true, get: () => 'Abordagens: clique num ponto inimigo' });
+const M7AC = ['#ffd166', '#5ec8f2', '#ef7fd0'];
+gorSend = (g => c => {
+  if (c && c.c === 'man' && M7K[c.k] && S.net && !S.host && !Net.man2) return gorToast(GEN.no.man2, true);
+  return g(c);
+})(gorSend);
+gorTarget = (g => (px, py, shift) => {
+  const m = GOR.mode, W = GOR.w13;
+  if (m === 'ap') {
+    const w = gorW(px, py), pt = gorPt(px, py), q = { q: 'ap', x: Math.round(pt ? pt.p.x : w.x), z: Math.round(pt ? pt.p.z : w.z) };
+    GV.apP = 1; gorToast('Abordagens: perguntando ao anfitrião…');
+    genAsk(q, r => { GV.apP = 0; if (r && r.ok && r.r && Array.isArray(r.r.a)) { GV.ap = Object.assign({ pi: pt ? pt.i : undefined, rx: S.t }, r.r); W.ap = -1; } else gorToast('Abordagens: ' + (r && r.r && r.r.none ? 'o mapa tático do lado ainda não está pronto' : gorWhy(r ? r.why : 'wait')), true); GOR.sig = {}; GV.drawT = 0; });
+    if (!shift) GOR.mode = ''; GOR.sig = {}; gorBar(); return;
+  }
+  if (m === 'man' && M7K[W.man]) {
+    const w = gorW(px, py), pt = gorPt(px, py), ids = gorIds(), r1 = v => Math.round(v * 10) / 10, c = Object.assign({ c: 'man', k: W.man }, pt ? { pi: pt.i } : { x: r1(w.x), z: r1(w.z) });
+    if ((W.man === 'fixflank' || W.man === 'envelop') && W.ap >= 0) c.ap = W.ap;
+    if (W.man === 'guard' && W.gf === 'mine') c.f = 'mine';
+    if (ids.length) c.ids = ids;
+    gorSend(c); if (!shift) GOR.mode = ''; GOR.sig = {}; gorBar(); return;
+  }
+  return g(px, py, shift);
+})(gorTarget);
+gorAct = (g => (d, shift) => {
+  const W = GOR.w13;
+  if (d.a === 'm7ap') { W.ap = +d.n; GOR.sig = {}; }
+  else if (d.a === 'm7f') { W.f = d.k; GOR.sig = {}; }
+  else if (d.a === 'm7gf') { W.gf = d.k; GOR.sig = {}; }
+  else if (d.a === 'm7tm') { GV.tmk = GV.tmk === d.k ? '' : d.k; GV.tmR = null; GV.tmQ = 0; GV.drawT = 0; genBar(); GOR.sig = {}; }
+  else if (d.a === 'm7go') { const A = GV.ap; if (A) { const c = { c: 'man', k: d.k, x: A.x, z: A.z, ap: +d.n }; if (A.pi !== undefined) { delete c.x; delete c.z; c.pi = A.pi; } if (d.k === 'envelop') c.ap2 = +d.n2; const ids = gorIds(); if (ids.length) c.ids = ids; gorSend(c); } }
+  else if (d.a === 'm7clr') { GV.ap = null; GOR.sig = {}; GV.drawT = 0; }
+  else return g(d, shift);
+  if (GV.V && GOR.tab !== 'sit') gorCmdPanel(GV.V);
+})(gorAct);
+gorCampP = (g => V => {
+  g(V);
+  const sec = $('#gcMan'); if (!sec) return;
+  let el = $('#gcM7'); if (!el) { el = gE('div'); el.id = 'gcM7'; sec.appendChild(el); }
+  const W = GOR.w13, tac = gorTac(), A = GV.ap, sg = JSON.stringify([W.ap, W.f, W.gf, W.man, GV.tmk, GOR.mode, tac, A && [A.nm, A.rx], gorIds().length]);
+  if (GOR.sig.m7 === sg) return; GOR.sig.m7 = sg;
+  const btn = gorBtn, row = kids => { const d = gE('div', 'gc-row'); d.append(...kids); return d; }, n = A ? A.a.length : 3;
+  const kids = [
+    row([gE('span', '', 'Abordagem'), btn('Auto', { a: 'm7ap', n: -1 }, 'A manobra vai pela melhor abordagem que não é a da fixação', W.ap < 0)].concat([...Array(n).keys()].map(i => btn('A' + (i + 1), { a: 'm7ap', n: i }, 'Fixar e flanquear / envolver pela abordagem A' + (i + 1) + (A && A.a[i] ? ' (' + A.a[i].ang + '° do eixo, ' + A.a[i].min + ' min, ' + A.a[i].exp + '% à vista)' : ''), W.ap === i)))),
+    row([gE('span', '', 'Guarda'), btn('Posto', { a: 'm7gf', k: 'post' }, 'Uma esquadra entrincheirada no entroncamento ou ponte', W.gf !== 'mine'), btn('Minas', { a: 'm7gf', k: 'mine' }, 'Posto e um campo minado anticarro ali', W.gf === 'mine')]),
+    row([gE('span', '', 'Camadas'), ...[['v', 'Vigilância'], ['t', 'Tráfego inimigo'], ['k', 'Gargalos']].map(([k, t]) => btn(t, { a: 'm7tm', k }, 'Camada do mapa tático: ' + TM.nm[k] + ' (o que este lado sabe)', GV.tmk === k))]),
+    row([btn('Ver abordagens', { a: 'mode', m: 'ap' }, 'Clique num ponto inimigo: as 3 abordagens do seu lado, com tempo e exposição', GOR.mode === 'ap', !tac)].concat(A ? [btn('Limpar', { a: 'm7clr' }, 'Tira as abordagens do mapa')] : []))];
+  if (A) {
+    const ul = gE('ul', 'gc-list');
+    ul.append(gE('li', 'sub', 'Abordagens de ' + A.nm + (A.st && A.st.nm ? ' a partir de ' + A.st.nm : '') + ' · há ' + Math.max(0, Math.round(S.t - A.rx + (A.age || 0))) + ' s'));
+    A.a.forEach((a, i) => {
+      const li = gorLi('A' + (i + 1) + ' · ' + a.ang + '° do eixo · ' + gN(a.len / 1000) + ' km · ' + a.min + ' min a pé · ' + a.exp + '% à vista · ' + a.wood + '% na mata', [btn('Fixar e flanquear por A' + (i + 1), { a: 'm7go', k: 'fixflank', n: i }, 'Uma esquadra fixa pelo eixo; a manobra vai por A' + (i + 1), undefined, !tac)]
+        .concat(A.a.length >= 3 && i > 0 ? [btn('Envolver', { a: 'm7go', k: 'envelop', n: i, n2: i === 1 ? 2 : 1 }, 'Duas manobras: A' + (i + 1) + ' e A' + (i === 1 ? 3 : 2), undefined, !tac)] : []));
+      li.firstChild.style.color = M7AC[i % 3]; ul.appendChild(li);
+    });
+    kids.push(ul);
+  }
+  el.replaceChildren(...kids);
+})(gorCampP);
+/* the new manoeuvres in the view: the way of their first squad and their target (genManOp of the other kinds is untouched) */
+genManOp = (g => (C, op) => {
+  const e = g(C, op);
+  if (e && ['ffk', 'env', 'trn', 'pen'].includes(op.k)) {
+    e.nm = String(op.nm || ''); e.to = gXZ(op.kz || { x: op.tx, z: op.tz });
+    const q = opLive(op).find(q => q.m7e > 0 && q.ord && q.ord.wp) || opLive(op).find(q => q.ord && q.ord.wp); if (q) e.path = genPath(q.ord.wp);
+  }
+  return e;
+})(genManOp);
+function gAp(g, V, P, now) {
+  const k = P.k, A = GV.ap && V.t === S.me ? GV.ap : null, own = gCol(V, V.t), dash = -(now / 40) % 18;
+  if (A) A.a.forEach((a, i) => {
+    const c = M7AC[i % 3], pts = (a.pts || []).map(p => [P.X(p[0]), P.Y(p[1])]); if (pts.length < 2) return;
+    g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]);
+    g.lineTo(P.X(A.x), P.Y(A.z)); g.strokeStyle = c; g.lineWidth = 2.4; g.globalAlpha = .9; g.stroke(); g.globalAlpha = 1;
+    if (a.asm) gRing(g, P.X(a.asm[0]), P.Y(a.asm[1]), 6 * k, c, 1.6);
+    if (a.pos) { const x = P.X(a.pos[0]), y = P.Y(a.pos[1]); gRing(g, x, y, 5 * k, c, 2.2); gTxt(g, 'A' + (i + 1) + ' · ' + a.min + ' min · ' + a.exp + '% à vista · ' + a.ang + '°', x + 8 * k, y - 6 * k, 10.5 * k, c); }
+  });
+  if (A) gRing(g, P.X(A.x), P.Y(A.z), 10 * k, '#ece6d6', 1.6);
+  for (const o of V.ops || []) {
+    if (!['ffk', 'env', 'trn', 'pen'].includes(o.k) || !o.to) continue;
+    const tx = P.X(o.to.x), ty = P.Y(o.to.z);
+    if (o.path && o.path.length >= 4) { g.beginPath(); g.moveTo(P.X(o.path[0]), P.Y(o.path[1])); for (let i = 2; i + 1 < o.path.length; i += 2) g.lineTo(P.X(o.path[i]), P.Y(o.path[i + 1])); g.setLineDash([8, 6]); g.lineDashOffset = dash; g.strokeStyle = own; g.lineWidth = 1.8; g.stroke(); g.setLineDash([]); }
+    gRing(g, tx, ty, 9 * k, own, 1.8); gTxt(g, (GEN.mtag[o.k] || o.k.toUpperCase()) + ' · ' + (o.nm || ''), tx, ty - 13 * k, 10.5 * k, own, 'center');
+  }
+}
+GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'unit')), 0, { id: 'ap', nm: 'Abordagens e manobras', on: 1, draw: gAp });
 function frame(now) {
   requestAnimationFrame(frame);
   const dt = Math.min(.05, (now - lastT) / 1000 || .016); lastT = now;

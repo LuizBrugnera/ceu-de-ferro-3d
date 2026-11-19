@@ -68,3 +68,13 @@ Partidas IA × IA de 12 min ou mais nas duas épocas, com `PR.on` 1 e 0 (os scri
 - `AIB.stat()` e `APB.stat()`.
 
 Teste de cenário sugerido (`tests/procedures.js`): uma vila com rua paralela, que deve dar P1 com chegada ≥ 60°; a manobra derrubada no meio, que deve virar frontal ou cancelar; razão 3:1 sem flanco, que deve dar P6; um ponto forte com gargalo fraco atrás, que deve dar `trn`.
+
+## Junção com o M7 (merge do `main`, não testado)
+
+O M7 (ferramentas de manobra para o jogador e o MCP) também define o `trn` ("Desbordamento", `man k=turn`). Na junção ficaram os dois:
+
+- a escolha da própria IA (`MANG.trn`, com `R.res.ch`) abre o `trn` do M3 (`MANO.trn` do M3, op com `op.Q`, tick `OPS.trn` do M3);
+- uma ordem de uma pessoa, do MCP ou do `send_command` abre o `trn` do M7 (`m7Hold`, `m7HoldOps`: cavar no entroncamento ou cabeceira de ponte);
+- `MANT.trn` fica o do M3 (`w` .9, `cd` 180, `ratio`, `k`, `f`, `d`...): o M7 não o sobrescreve mais. Efeito: depois de um `trn`, uma ordem de `turn` espera 180 s em vez de 20 s.
+
+Conferir: o AI abre `trn` pelo caminho do M3; `order_maneuver` com `turn` abre pelo do M7; os dois encerram pelo tick certo. O `mcp-general.js` também tinha marcadores de conflito já commitados no branch do PR; ficou a linha do `main` (que já lista `turn`).

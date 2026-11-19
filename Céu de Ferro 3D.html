@@ -14339,6 +14339,7 @@ function cnStep(dt) {
     if (S.t >= P.at && q.cnL > 0) {
       q.cnP = null; const s = cnSt(q.team); s.del++; s.lat += S.t - P.T0; if (P.st !== 2) s.late++;
       const was = N.ctx; N.ctx = -1; try { setOrd(q, P.O); } finally { N.ctx = was; }
+      if (P.mis && q.mis) Object.assign(q.mis, P.mis);   // the mission the general gave with it (mis)
       cnTx(q);
     } else if (S.t - P.T0 > CN.lose) {
       q.cnP = null; cnSt(q.team).lost++;
@@ -14374,10 +14375,19 @@ setOrd = (g => (q, O) => {
   const N = S.cn;
   if (!N || !CN.on || N.ctx < 0 || N.ctx !== q.team || q.net || !O || !q.ord || q.cnL === undefined || (S.net && !S.host)) return g(q, O);
   const P = q.cnP;
-  if (P) { P.O = O; return; }
+  if (P) { P.O = O; P.mis = null; return; }
   q.cnP = { O, T0: S.t, at: S.t + cnLag(q, q.cnL, ++N.n), st: q.cnL }; q.at = false; cnSt(q.team).sent++;
 })(setOrd);
 squadThink = (g => q => { g(q); if (q.cnP) q.at = false; })(squadThink);
+/* the general's mis command: the mission it gives travels with the squad's order (P.mis), and the squad takes both when the order arrives */
+GC.mis.f = (g => (t, c, by) => {
+  const qs = cnOn() && c ? gSqs(t, c.ids) : [], was = qs.map(q => (q.mis ? Object.assign({}, q.mis) : null)), r = g(t, c, by);
+  if (r && r.ok) qs.forEach((q, i) => {
+    const P = q.cnP, M = q.mis, W = was[i]; if (!P || !M || !W) return;
+    P.mis = {}; for (const k of ['kind', 'area', 'why', 'lat', 'roe', 'brk', 'when']) if (M[k] !== W[k]) { P.mis[k] = M[k]; M[k] = W[k]; }
+  });
+  return r;
+})(GC.mis.f);
 /* what the commander believes a squad is doing: the order on its way, else the one it has */
 const cnOrd = q => (q.cnP ? q.cnP.O : q.ord);
 /* the side whose commander speaks: inside its plan and its commands */

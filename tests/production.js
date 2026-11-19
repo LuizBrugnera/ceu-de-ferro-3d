@@ -110,6 +110,10 @@ console.log('-- the commands pplan, disp, mis and the question plan --');
   ok(cmd({ c: 'disp', k: 'tank', x: -50, z: 0 }).why === 'map' && cmd({ c: 'disp', k: 'boat', pi: P.i }).why === 'kind', 'disp refuses a place off the map and an unknown kind');
   const q = S.squads.find(q => q.team === 1 && q.live > 0 && q.id);
   r = cmd({ c: 'mis', ids: [q.id], mk: 'recon', x: P.x + 50, z: P.z, lat: 2, brk: .3 });
+  if (q.cnP) {   // the order goes by radio (the command network): the squad keeps its mission until the order with the new one arrives
+    ok(r.ok && q.mis.kind !== 'recon' && q.cnP.mis && q.cnP.mis.kind === 'recon', 'mis by radio: the new mission travels with the order (' + Math.round(q.cnP.at - S.t) + ' s)');
+    C.run(70, () => { park(S); return q.cnP ? undefined : false; });
+  }
   ok(r.ok && q.mis.kind === 'recon' && q.mis.lat === 2 && q.mis.brk === .3 && Math.abs(q.mis.area.x - P.x - 50) < 1 && q.ord && q.ord.k === 'observe' && q.men.every(m => m.dead || m.mis === q.mis), 'mis: a squad takes a recon mission, observing there, latitude 2, break-off .3 (op ' + r.id + ')');
   ok(cmd({ c: 'mis', ids: [q.id], mk: 'dance', x: P.x, z: P.z }).why === 'kind', 'mis refuses a mission kind it does not know');
   const A = $('genAnswer')(1, { q: 'plan' });

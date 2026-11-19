@@ -11447,7 +11447,21 @@ function swim(u, dt) {
    the road where a side's soldiers enter, for whoever takes the wheel, lane m off its middle, replaced after again s.
    TCOL: wheeled armour a column brings by the number of its tanks, max on a side at once, each with a squad while the men on the map are
    under cap of IAI.cap; it lets the squad off at dis m of an enemy and fights on beside it. gun: how far a car's gun opens up */
-const RUNS = { patrol: 1, men: 3, fetch: 1, again: 30, lane: 10 }, POOL = { kinds: ['car', 'truck'], lane: 15, again: 60 };
+const RUNS = { patrol: 1, men: 3, fetch: 1, again: 30, lane: 10 }, POOL = { kinds: ['car', 'truck'], lane: 15, again: 60, near: 120 };
+/* the parked vehicles of the pool (u.pool) that are not its one of kind k at its place now (at: on the front road, by where the soldiers enter):
+   one left where a ride (MAN.ride) gave up, on the road that was the front before, or a second one at the place, empty and with no player (or guest)
+   within BODY.keep.near, goes back to the reserve (it was drawn from it) instead of standing there for the rest of the match */
+function poolTrim(t, k, at) {
+  const H = [S.my].concat(S.net ? [...Net.ghosts.values()] : []).filter(o => o && !o.dead);
+  let keep = null;
+  for (const u of S.units) {
+    if (!u.pool || u.team !== t || u.kind !== k || u.dead || u.gone || u.net || !parked(u) || u.left || u.trip || u.run || u.mr || u.gp || u.pid || u === S.my) continue;
+    if (at(u) && !keep) { keep = u; continue; }
+    if ((u.cargo && u.cargo.length) || (u.occ && u.occ.some(Boolean)) || H.some(o => hdist(o, u) < BODY.keep.near)) continue;
+    u.dead = u.gone = true;
+    if (ecoGate() && !S.eco.open && ECO.unit[k]) ecoBack(t, k, 1);
+  }
+}
 const TCOL = { lav: [0, 1, 1, 1, 2, 2], max: 2, cap: .85, dis: 450, gun: 500, sp: .012, inf: 600 };
 function errand(team, kind, ri, s0, legs, o) {
   const u = addUnit(kind, team, 0, 0, null, false, ri, s0, (team ? 1 : -1) * RUNS.lane, 0);
@@ -11543,9 +11557,11 @@ function trnPlan(t, sq) {
   const mine = S.units.filter(u => u.team === t && !u.dead && u.occ), s0 = endS(t, ri, SPAWN.inf);
   if (S.demo && !S.watch) return;
   POOL.kinds.forEach((k, i) => {
-    if (mine.some(u => u.kind === k && parked(u) && Math.abs(u.s - s0) < 120) || S.t < (F.pool || (F.pool = [0, 0]))[i]) return;
+    const at = u => u.ri === ri && Math.abs(u.s - s0) < POOL.near;
+    poolTrim(t, k, at);
+    if (mine.some(u => u.kind === k && parked(u) && (u.pool && u.trip ? true : at(u))) || S.t < (F.pool || (F.pool = [0, 0]))[i]) return;   // one out on a ride (MAN.ride) comes back to its place: no other in the meantime
     if (!ecoUse(t, k)) return; const u = addUnit(k, t, 0, 0, null, false, ri, s0 - ds * 14 * i, -ds * POOL.lane, 0);
-    u.fld = 1; u.ai.park = 1; F.pool[i] = S.t + (gpOn() ? GP.run : POOL.again);
+    u.fld = 1; u.ai.park = 1; u.pool = 1; F.pool[i] = S.t + (gpOn() ? GP.run : POOL.again);
   });
   if (S.t < (F.runT || 0)) return;
   const runs = mine.filter(u => u.run), n = k => runs.reduce((a, u) => a + (u.run.k === k ? 1 : 0), 0);
@@ -17597,7 +17613,7 @@ function rideGo(C, q, op, O, now) {
     if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - q.ts) / MAN.pace * K.gain)) { mrw('gain'); continue; }
     const home = { x: u.x, z: u.z }, p3 = tripOf(d.D.x, d.D.z, home.x, home.z, { mode: 'veh', team: q.team }); if (!p3) return false;
     const p = polyOf([...p1, ...d.p2, ...p3]), T = S.t + 1.6 * p.len / spd + K.wait;
-    q.rd = { u, st: 'call', wp, sP, D: d.D, sD: d.s, T, home }; mrd().go++;
+    q.rd = { u, st: 'call', wp, sP, D: d.D, sD: d.s, T, home, eta: S.t + Math.max(tu, ts) }; mrd().go++;
     u.trip = { p, s: 0, ri: p3.ri, s1: p3.s1, T, drop: false, back: null, gone: false, why: 'ride', rq: q, ev: [{ s: p1.len, k: 'pick' }, { s: p1.len + d.p2.len, k: 'drop' }] };
     return true;
   }
@@ -17606,7 +17622,11 @@ function rideGo(C, q, op, O, now) {
 /* a place along the vehicle's trip where it does something (tripMove) */
 function rideEv(u, E) {
   const q = u.trip && u.trip.rq, R = q && q.rd; if (!R || R.u !== u) return;
-  if (E.k === 'pick') { if (rideBoard(u, q) === 'wait') u.trip.ev.unshift(E); }   // the squad is not all there yet: the vehicle waits
+  if (E.k === 'pick') {   // the squad is not all there yet: the vehicle waits, MAN.ride.wait s past when the squad was due at most, then the squad walks on and the vehicle goes home
+    if (rideBoard(u, q) !== 'wait') return;
+    if (S.t > (R.eta || 0) + MAN.ride.wait) { mrw('late'); mrd().off++; manRideEnd(q); return; }
+    u.trip.ev.unshift(E);
+  }
   else if (E.k === 'drop' && u.mr === q) { const p = railOf(u.x, u.z); u.ri = p.ri; u.s = p.s; letOff(u, false); }
 }
 function rideBoard(u, q) {
@@ -35038,6 +35058,338 @@ function skyScene() {
   });
 }
 syncScene = (g => dt => { g(dt); skyScene(); })(syncScene);
+/* ---------- graphics quality: the look of the ground, the light, the sky and the haze ----------
+   GFX: the quality the player picked in the hangar (0 Baixa, 1 Média, 2 Alta), kept in localStorage; gfxLevel() reads it, and whatever draws
+   the world reads it when buildWorld() runs: a change in the hangar builds the world behind it again. GFXQ[lv]: what each level draws:
+   dpr, the most pixels per CSS pixel; det, the ground (0 one detail texture over the colours, 1 the ground's kinds blended with ragged edges,
+   rock on the slopes, bare soil and relief in the light, 2 a finer layer up close); water (1 waves, sky and sun on it); clouds (0 the old
+   blobs in one mesh, 1 soft puffs); shadow (m around the camera the sun casts real shadows in; 0 none); aniso, the textures' anisotropy.
+   ENVL: the light, by the sun's height e (0 at the horizon): the sun's colour from low (lo) to high (hi), how much light the sun and the sky
+   give (sun, hemi, of the old .85 and .78), the sky's tint and the ground's bounce (hc, gc), the haze (H m, the height over the water its
+   density halves in about .7 of; k: how thick at the ground; glow: the sunlit haze toward the sun, more when it is low), and the evening's
+   warmth over the horizon (warm, at most dusk of it); the ground's sand, snow, rock and soil colours, how much its relief catches the light
+   (bump), how much of its colours' saturation it keeps and how bright they are (sat, tone: a sober, photographic look); cloud: the puffs. With nothing picked, the first
+   world picks by the video card (gfxAuto). Whatever draws the world (grass, trees) reads gfxLevel() and GFXQ[lv]; on Alta the sun's shadow
+   falls from the meshes of the units, planes, wrecks, trees, rocks, bushes and houses, looked over twice a second, so new meshes in those groups cast too.
+   None of it changes what the AI or the player can see: that is skySee() */
+const GFXQ = [
+  { k: 'baixa', nm: 'Baixa', sub: 'leve', dpr: 1, det: 0, water: 0, clouds: 0, shadow: 0, aniso: 1 },
+  { k: 'media', nm: 'Média', sub: 'padrão', dpr: 1.5, det: 1, water: 1, clouds: 1, shadow: 0, aniso: 4 },
+  { k: 'alta', nm: 'Alta', sub: 'detalhe', dpr: 2, det: 2, water: 1, clouds: 1, shadow: 320, aniso: 8 }];
+const GFX = { lv: 1, key: 'ceu-de-ferro-3d-graficos', saved: false };
+const gfxLevel = () => GFX.lv;
+try { const q = GFXQ.findIndex(g => g.k === localStorage.getItem(GFX.key)); if (q >= 0) { GFX.lv = q; GFX.saved = true; } } catch (e) {}
+/* with nothing picked yet, the first world looks at the video card: Baixa on one built into the processor (or drawn in software), Média otherwise */
+function gfxAuto() {
+  if (GFX.saved || GFX.auto || !renderer) return; GFX.auto = true;
+  let s = ''; try { const gl = renderer.getContext(), e = gl.getExtension('WEBGL_debug_renderer_info'); s = e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch (e) {}
+  GFX.lv = /intel|llvmpipe|swiftshader|software|apple|adreno|mali|powervr|radeon\(tm\) graphics|vega \d+ graphics/i.test(s) && !/nvidia|geforce|rtx|radeon rx|arc\(tm\) a\d/i.test(s) ? 0 : 1;
+  for (const b of document.querySelectorAll('.tab[data-gfx]')) b.setAttribute('aria-selected', String(b.dataset.gfx === GFXQ[GFX.lv].k));
+}
+const ENVL = { lo: [1, .52, .26], hi: [1, .96, .89], sun: [.55, 1.02], hemi: [.62, .64], hc: 0xd6e2f4, gc: 0x5a5a44,
+  H: 1200, k: 2.1, glow: [.5, .16], warm: [0xffb27a, .32], sand: 0xc2b48a, snow: 0xeef0f2, rock: 0x7d786c, soil: 0x6f5c44, bump: 1.6, sat: .56, tone: .93,
+  cloud: { n: 46, more: 40, puffs: [8, 14], size: [220, 520] } };
+/* the uniforms every material with fog shares (plain objects, so three.js passes them by reference instead of copying them): the sun's
+   direction and its glow in the haze (sun.w), its colour, and fp: 1/H, the water's height, the haze's k and 1 when the haze is on */
+const ENVU = { sun: { x: -.5, y: .8, z: .35, w: 0 }, sunC: { x: 1, y: .96, z: .89 }, fp: { x: 1 / 1200, y: 52, z: 2.1, w: 0 } };
+const ENV = { at: null, tex: null, puff: null, terrain: null, sky: null, water: null, cloud: null, sh: null, t: 0, c: null };
+if (typeof THREE !== 'undefined') {
+  for (const k in THREE.ShaderLib) { const u = THREE.ShaderLib[k].uniforms; if (u && u.fogColor) Object.assign(u, { fogSun: { value: ENVU.sun }, fogSunC: { value: ENVU.sunC }, fogP: { value: ENVU.fp } }); }
+  const C = THREE.ShaderChunk;
+  C.fog_pars_vertex = '#ifdef USE_FOG\n\tvarying float fogDepth;\n\tvarying vec3 vFogDir;\n#endif';
+  C.fog_vertex = '#ifdef USE_FOG\n\tfogDepth = - mvPosition.z;\n\tvFogDir = ( vec4( mvPosition.xyz, 0.0 ) * viewMatrix ).xyz;\n#endif';
+  C.fog_pars_fragment = '#ifdef USE_FOG\n\tuniform vec3 fogColor;\n\tvarying float fogDepth;\n\tvarying vec3 vFogDir;\n\tuniform vec4 fogSun;\n\tuniform vec3 fogSunC;\n\tuniform vec4 fogP;\n\t#ifdef FOG_EXP2\n\t\tuniform float fogDensity;\n\t#else\n\t\tuniform float fogNear;\n\t\tuniform float fogFar;\n\t#endif\n#endif';
+  /* the haze: thicker low and thinner high (exp(-y/H) integrated along the line of sight), the far end of the old fog still hiding the edge
+     of the map, and the haze toward the sun lit by it */
+  C.fog_fragment = `#ifdef USE_FOG
+	vec3 fogCol = fogColor;
+	#ifdef FOG_EXP2
+		float fogFactor = 1.0 - exp( - fogDensity * fogDensity * fogDepth * fogDepth );
+	#else
+		float fogFactor = smoothstep( fogNear, fogFar, fogDepth );
+		if ( fogP.w > 0.5 ) {
+			float fd = length( vFogDir ), dy = vFogDir.y * fogP.x;
+			float od = fd * exp( - max( cameraPosition.y - fogP.y, 0.0 ) * fogP.x ) * ( abs( dy ) > 1e-3 ? ( 1.0 - exp( - dy ) ) / dy : 1.0 - 0.5 * dy );
+			fogFactor = max( 1.0 - exp( - pow( max( od, 0.0 ) * fogP.z / fogFar, 1.6 ) ), smoothstep( fogFar * 0.55, fogFar, fd ) );
+			float mu = max( dot( vFogDir / max( fd, 1.0 ), fogSun.xyz ), 0.0 );
+			fogCol += fogSunC * fogSun.w * ( pow( mu, 6.0 ) * 0.5 + pow( mu, 32.0 ) * 0.5 );
+		}
+	#endif
+	gl_FragColor.rgb = mix( gl_FragColor.rgb, fogCol, fogFactor );
+#endif`;
+}
+/* periodic value noise, so the textures tile: v(x, y) over a lattice of p cells (x and y in cells), fbm of oct octaves from p0 cells, ridged for rock */
+const envHash = (x, y, s) => { let h = (x * 374761393 + y * 668265263 + s * 982451653) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+function envNoise(x, y, p, s) {
+  const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const x0 = ((xi % p) + p) % p, y0 = ((yi % p) + p) % p, x1 = (x0 + 1) % p, y1 = (y0 + 1) % p;
+  const a = envHash(x0, y0, s), b = envHash(x1, y0, s), c = envHash(x0, y1, s), d = envHash(x1, y1, s);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+function envFbm(x, y, p0, oct, s, ridge) {
+  let t = 0, a = .5, n = 0;
+  for (let o = 0; o < oct; o++) { const p = p0 << o; let v = envNoise(x * p, y * p, p, s + o * 7); if (ridge) v = 1 - Math.abs(v * 2 - 1); t += v * a; n += a; a *= .5; }
+  return t / n;
+}
+const envStretch = (v, k) => clamp((v - .5) * k + .5, 0, 1);
+/* the ground's detail, one 512 px texture that tiles, made here: r fine mottling (grass), g ridged (rock), b soil, a large blotches */
+function envTex() {
+  if (ENV.tex) return ENV.tex;
+  const N = 512, d = new Uint8Array(N * N * 4);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = i / N, y = j / N, k = (j * N + i) * 4;
+    d[k] = envStretch(envFbm(x, y, 32, 4, 1) * .6 + envFbm(x, y, 8, 3, 11) * .4, 1.9) * 255;
+    d[k + 1] = envStretch(envFbm(x, y, 8, 5, 40, true) * .8 + envFbm(x, y, 32, 3, 70) * .2, 2) * 255;
+    d[k + 2] = envStretch(envFbm(x, y, 12, 4, 90), 1.9) * 255;
+    d[k + 3] = envStretch(envFbm(x, y, 4, 5, 130), 2.2) * 255;
+  }
+  /* and its slopes, for the relief in the light: rg how r rises along x and z, ba the same of g (128 flat), so the shader reads the relief
+     smoothly instead of taking it from the screen's pixels */
+  const s = new Uint8Array(N * N * 4), at = (i, j, c) => d[((((j + N) % N) * N) + ((i + N) % N)) * 4 + c], sl = v => clamp(128 + v * 1.4, 0, 255);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const k = (j * N + i) * 4;
+    s[k] = sl(at(i + 1, j, 0) - at(i - 1, j, 0)); s[k + 1] = sl(at(i, j + 1, 0) - at(i, j - 1, 0));
+    s[k + 2] = sl(at(i + 1, j, 1) - at(i - 1, j, 1)); s[k + 3] = sl(at(i, j + 1, 1) - at(i, j - 1, 1));
+  }
+  const tex = (a, n) => { const t = new THREE.DataTexture(a, n, n, THREE.RGBAFormat); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true; return t; };
+  ENV.nrm = tex(s, N);
+  return (ENV.tex = tex(d, N));
+}
+/* a cloud's puff: soft round edges broken by noise */
+function envPuff() {
+  if (ENV.puff) return ENV.puff;
+  const N = 128, d = new Uint8Array(N * N * 4);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = i / N, y = j / N, r = Math.hypot(x - .5, y - .5) * 2, n = envFbm(x, y, 4, 4, 7), k = (j * N + i) * 4;
+    const a = clamp(1 - r * (.75 + .5 * n), 0, 1);
+    d[k] = d[k + 1] = d[k + 2] = 255; d[k + 3] = a * a * (3 - 2 * a) * 255;
+  }
+  const t = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true; t.needsUpdate = true;
+  return (ENV.puff = t);
+}
+const envCol = h => new THREE.Color(h);
+/* the ground's shader, on top of the Phong one: the kinds of ground blended by noise instead of straight between the grid's points */
+function envTerrainHook(sh) {
+  const Q = GFXQ[GFX.lv];
+  Object.assign(sh.uniforms, ENV.tu);
+  sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
+	vec2 eG = vec2( 0.0 );
+	vec2 eUv = vEnvW.xz;
+	vec4 d1 = texture2D( tEnv, eUv * ( 1.0 / 23.0 ) );
+#if ENV_Q == 0
+	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) );
+#else
+	vec4 d2 = texture2D( tEnv, eUv * ( 1.0 / 181.0 ) + vec2( 0.37, 0.71 ) );
+	vec4 d3 = texture2D( tEnv, eUv * ( 1.0 / 1637.0 ) + vec2( 0.13, 0.29 ) );
+	vec3 eB = diffuseColor.rgb * ( 0.86 + 0.28 * d3.a );
+	eB = mix( vec3( dot( eB, vec3( 0.3, 0.59, 0.11 ) ) ), eB, uSat );
+	eB = mix( eB, eB * vec3( 1.1, 1.03, 0.8 ), smoothstep( 0.5, 0.85, d2.a ) * 0.25 );
+	eB = mix( eB, eB * vec3( 0.86, 0.95, 0.88 ), smoothstep( 0.55, 0.9, d3.r ) * 0.4 );
+	float eSoil = smoothstep( 0.56, 0.84, d2.b * 0.6 + d3.b * 0.4 ) * ( 1.0 - vEnvS.x ) * 0.42;
+	eB = mix( eB, uSoil * ( 0.8 + 0.4 * d1.b ), eSoil );
+	float eRock = smoothstep( 0.2, 0.34, 1.0 - vEnvN.y + ( d2.g - 0.5 ) * 0.2 );
+	eB = mix( eB, uRock * ( 0.62 + 0.55 * mix( 0.5, d1.g, eFine ) ) * ( 0.85 + 0.3 * d2.g ), eRock );
+	float eSand = smoothstep( 0.42, 0.58, vEnvS.x + ( d2.r - 0.5 ) * 0.7 );
+	eB = mix( eB, uSand * ( 0.86 + 0.24 * mix( 0.5, d1.b, eFine ) ), eSand );
+	float eSnow = smoothstep( 0.42, 0.58, vEnvS.y + ( d2.r - 0.5 ) * 0.6 - eRock * 0.35 );
+	eB = mix( eB, uSnow * ( 0.93 + 0.08 * d1.r ), eSnow );
+	float eDet = mix( 0.5, mix( d1.r, d1.g, eRock ), eFine );
+	vec4 n1 = texture2D( tEnvN, eUv * ( 1.0 / 23.0 ) ) * 2.0 - 1.0;
+	eG = mix( n1.rg, n1.ba, eRock ) * eFine;
+#if ENV_Q > 1
+	float eNear = 1.0 - smoothstep( 40.0, 220.0, eD );
+	vec4 d4 = texture2D( tEnv, eUv * ( 1.0 / 6.7 ) + vec2( 0.5, 0.2 ) ), n4 = texture2D( tEnvN, eUv * ( 1.0 / 6.7 ) + vec2( 0.5, 0.2 ) ) * 2.0 - 1.0;
+	eDet = mix( eDet, mix( 0.5, d4.r, eNear ), 0.35 );
+	eG += n4.rg * eNear * ( 1.0 - eRock ) * 0.6;
+#endif
+	diffuseColor.rgb = eB * uTone * ( 0.9 + 0.2 * eDet );
+	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
+#endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif');
+}
+/* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
+const ENV_SKY_V = 'varying vec3 vDir;\nvoid main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }';
+const ENV_SKY_F = `uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uDisk; varying vec3 vDir;
+void main() {
+	vec3 d = normalize( vDir ); float mu = max( dot( d, uSun.xyz ), 0.0 );
+	vec3 c = mix( uHor, uZen, pow( clamp( d.y * 1.5, 0.0, 1.0 ), 0.6 ) );
+	c += uSunC * uSun.w * ( pow( mu, 6.0 ) * 0.5 + pow( mu, 32.0 ) * 0.5 );
+	c += uSunC * uDisk * ( smoothstep( 0.99955, 0.99978, mu ) * 2.5 + pow( mu, 700.0 ) * 0.5 );
+	gl_FragColor = vec4( c, 1.0 );
+}`;
+/* the water: two layers of ripples that drift, the sky in it at a grazing look (Fresnel), the sun's glint */
+const ENV_WATER_V = 'varying vec3 vW;\n#include <fog_pars_vertex>\nvoid main() { vW = ( modelMatrix * vec4( position, 1.0 ) ).xyz; vec4 mvPosition = viewMatrix * vec4( vW, 1.0 ); gl_Position = projectionMatrix * mvPosition;\n#include <fog_vertex>\n}';
+const ENV_WATER_F = `uniform sampler2D tEnv; uniform vec3 uDeep; uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uT; uniform float uLit; varying vec3 vW;
+#include <fog_pars_fragment>
+void main() {
+	vec2 p = vW.xz;
+	vec4 a = texture2D( tEnv, p / 97.0 + vec2( uT * 0.011, uT * 0.007 ) ), b = texture2D( tEnv, p / 41.0 - vec2( uT * 0.006, uT * 0.013 ) );
+	vec3 n = normalize( vec3( ( a.r - 0.5 ) + ( b.b - 0.5 ), 2.6, ( a.b - 0.5 ) + ( b.r - 0.5 ) ) );
+	vec3 v = normalize( cameraPosition - vW ), r = reflect( - v, n );
+	float fr = 0.03 + 0.97 * pow( 1.0 - max( dot( n, v ), 0.0 ), 5.0 );
+	vec3 sky = mix( uHor, uZen, clamp( r.y * 1.8, 0.0, 1.0 ) );
+	vec3 c = mix( uDeep * uLit, sky, fr ) + uSunC * pow( max( dot( r, uSun.xyz ), 0.0 ), 260.0 ) * 2.2 * uSun.w;
+	gl_FragColor = vec4( c, 0.93 );
+	#include <fog_fragment>
+}`;
+/* the clouds: puffs that always face the camera, in one draw; lit on top, shaded below, faded out when the camera flies into them */
+const ENV_CLOUD_V = `uniform float uFar; varying vec2 vUv; varying float vY; varying float vA;
+void main() {
+	vec3 c = ( modelMatrix * instanceMatrix * vec4( 0.0, 0.0, 0.0, 1.0 ) ).xyz; float s = length( instanceMatrix[ 0 ].xyz );
+	vec4 mv = viewMatrix * vec4( c, 1.0 ); mv.xy += position.xy * s;
+	float d = length( mv.xyz ); vUv = uv; vY = position.y; vA = smoothstep( s * 0.4, s * 1.5, d ) * ( 1.0 - smoothstep( uFar * 0.7, uFar, d ) );
+	gl_Position = projectionMatrix * mv;
+}`;
+const ENV_CLOUD_F = 'uniform sampler2D tPuff; uniform vec3 uLit; uniform vec3 uShade; uniform float uOp; varying vec2 vUv; varying float vY; varying float vA;\nvoid main() { float a = texture2D( tPuff, vUv ).a * uOp * vA; if ( a < 0.01 ) discard; gl_FragColor = vec4( mix( uShade, uLit, smoothstep( -0.5, 0.45, vY ) ), a ); }';
+/* after buildWorld(): the ground, the sky, the water and the clouds of the new scene take the level's look */
+function envApply() {
+  gfxAuto();
+  const Q = GFXQ[GFX.lv], T = S.T, P = PAL[S.era], E = S.E, L = ENVL;
+  ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
+  ENVU.fp.x = 1 / L.H; ENVU.fp.y = T.WL; ENVU.fp.z = L.k; ENVU.fp.w = 1;
+  const tex = envTex(); tex.anisotropy = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate = true;
+  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone } };
+  const clouds = [];
+  scene.traverse(o => {
+    if (!o.isMesh || !o.geometry) return;
+    if (o.material.vertexColors && o.geometry.type === 'PlaneGeometry') ENV.terrain = o;
+    else if (o.geometry.type === 'PlaneGeometry' && o.material.isMeshPhongMaterial && o.material.transparent && Math.abs(o.position.y - T.WL) < .01) ENV.water = o;
+    else if (o.geometry.type === 'IcosahedronGeometry' && o.material.opacity === .7) clouds.push(o);
+  });
+  /* the ground: smooth light, and per point how much sand (by the water) and snow (high up) it is, its own colour without them */
+  if (ENV.terrain) {
+    const g = ENV.terrain.geometry, n = g.attributes.position.count, s = new Float32Array(n * 2), col = g.attributes.color.array, c = ENV.c.a;
+    for (let k = 0; k < n; k++) {
+      const h = T.h[k], hc = clamp(h, T.WL + 4.01, 640);
+      s[k * 2] = clamp((T.WL + 6 - h) / 4, 0, 1); s[k * 2 + 1] = clamp((h - 640) / 160, 0, 1);
+      if (hc !== h) { T.h[k] = hc; groundColor(k, g.attributes.position.getX(k), g.attributes.position.getZ(k), c); T.h[k] = h; col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b; }
+    }
+    g.setAttribute('envS', new THREE.BufferAttribute(s, 2)); g.attributes.color.needsUpdate = true;
+    const m = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 3, specular: 0x0c0c0c });
+    m.onBeforeCompile = envTerrainHook; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv;
+    ENV.terrain.material.dispose(); ENV.terrain.material = m;
+  }
+  /* the sky dome: the same mesh, its own shader; skyScene() still sets material.color (night, weather), which tints the zenith */
+  const tint = new THREE.Color(1, 1, 1);
+  ENV.su = { uZen: { value: new THREE.Color(E.sky[0]) }, uHor: { value: new THREE.Color(E.sky[1]) }, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uDisk: { value: 1 } };
+  if (skyDome) {
+    const m = new THREE.ShaderMaterial({ uniforms: ENV.su, vertexShader: ENV_SKY_V, fragmentShader: ENV_SKY_F, side: THREE.BackSide, depthWrite: false, fog: false });
+    m.color = tint; skyDome.material.dispose(); skyDome.material = m; skyDome.renderOrder = -1; skyDome.frustumCulled = false; ENV.sky = skyDome;
+  }
+  if (ENV.water && Q.water) {
+    const u = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), { fogSun: { value: ENVU.sun }, fogSunC: { value: ENVU.sunC }, fogP: { value: ENVU.fp },
+      tEnv: { value: tex }, uDeep: { value: envCol(P.water).multiplyScalar(.62) }, uZen: ENV.su.uZen, uHor: ENV.su.uHor, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uT: { value: 0 }, uLit: { value: 1 } });
+    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: ENV_WATER_V, fragmentShader: ENV_WATER_F, transparent: true, fog: true });
+    ENV.water.material.dispose(); ENV.water.material = m; ENV.wu = u;
+  } else ENV.water = null;
+  /* the clouds: the 46 blobs in one mesh, or puffs in clusters where the blobs were (and as many again for an overcast sky) */
+  if (clouds.length) {
+    const C = L.cloud;
+    if (!Q.clouds) {
+      const pos = [], base = clouds[0].geometry.toNonIndexed().attributes.position, v = ENV.c.v;
+      for (const o of clouds) { o.updateMatrix(); for (let i = 0; i < base.count; i++) { v.fromBufferAttribute(base, i).applyMatrix4(o.matrix); pos.push(v.x, v.y, v.z); } }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.computeBoundingSphere();
+      ENV.cloud = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }));
+    } else {
+      const sp = clouds.map(o => [o.position.x, o.position.y, o.position.z, o.scale.x, o.scale.z]), list = [];
+      for (let i = 0; i < C.more; i++) sp.push([rand(-3000, S.W + 3000), rand(1400, 2600), rand(-S.HW - 3000, S.HW + 3000), rand(200, 460), rand(160, 380)]);
+      for (const [x, y, z, sx, sz] of sp) { const n = Math.round(rand(C.puffs[0], C.puffs[1])), puffs = []; for (let j = 0; j < n; j++) puffs.push([x + rand(-1, 1) * sx, y + rand(-.25, .45) * 60, z + rand(-1, 1) * sz, rand(C.size[0], C.size[1])]); list.push(puffs); }
+      const n = list.reduce((a, l) => a + l.length, 0), m = new THREE.ShaderMaterial({ uniforms: { tPuff: { value: envPuff() }, uLit: { value: new THREE.Color(1, 1, 1) }, uShade: { value: new THREE.Color(.62, .66, .72) }, uOp: { value: .8 }, uFar: { value: 20000 } },
+        vertexShader: ENV_CLOUD_V, fragmentShader: ENV_CLOUD_F, transparent: true, depthWrite: false });
+      const im = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), m, n), mx = new THREE.Matrix4(); let i = 0;
+      ENV.cn = []; for (const l of list) { for (const [x, y, z, s] of l) im.setMatrixAt(i++, mx.makeScale(s, s, s).setPosition(x, y, z)); ENV.cn.push(i); }
+      im.frustumCulled = false; ENV.cloud = im;
+    }
+    for (const o of clouds) scene.remove(o);
+    scene.add(ENV.cloud);
+  }
+  /* the sun's shadows near the camera (Alta) */
+  renderer.shadowMap.enabled = !!Q.shadow; renderer.shadowMap.type = THREE.PCFShadowMap;
+  let sun = null; scene.traverse(o => { if (o.isDirectionalLight) sun = o; });
+  if (sun && Q.shadow) {
+    const r = Q.shadow, c = sun.shadow.camera; sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -.0006; sun.shadow.normalBias = .6;
+    c.left = c.bottom = -r; c.right = c.top = r; c.near = 10; c.far = 6000; c.updateProjectionMatrix(); scene.add(sun.target); ENV.sh = sun;
+    if (ENV.terrain) ENV.terrain.receiveShadow = true;
+  }
+  ENV.shT = 0; resize();
+}
+/* the lights as the original sky3Init found them, then this look's: a stronger, warmer sun and a bluer, weaker sky */
+sky3Init = (g => () => {
+  g(); const K = SKY3, L = ENVL;
+  if (ENV.at !== scene) return;
+  K.base.hemi = L.hemi[1]; K.base.sun = L.sun[1]; K.base.hc = L.hc; K.cols.hemi.setHex(L.hc);
+  if (K.hemi) K.hemi.groundColor.setHex(L.gc);
+  const m = ENV.terrain && ENV.terrain.material, f = m && m.onBeforeCompile;   // the flares' light on the ground (sky3Init) and then this ground
+  if (m && f !== envTerrainHook) { m.onBeforeCompile = sh => { f(sh); envTerrainHook(sh); }; m.needsUpdate = true; }
+})(sky3Init);
+buildWorld = (g => () => { g(); envApply(); })(buildWorld);
+/* each frame, after skyScene(): the sun's colour and glow by its height, the evening's warmth in the haze, the zenith, the clouds, the water */
+skyScene = (g => () => {
+  g();
+  const K = SKY3, L = ENVL, c = ENV.c;
+  if (!S || !S.sky || ENV.at !== scene || !K.sun) return;
+  const v = c.v.copy(K.sun.position).normalize(), e = v.y, warm = clamp((e - .02) / .6, 0, 1), W = S.wx, wet = Math.max(W.r * .6, W.f * .7), lit = S.sky.L;
+  const sc = c.a.setRGB(L.lo[0] + (L.hi[0] - L.lo[0]) * warm, L.lo[1] + (L.hi[1] - L.lo[1]) * warm, L.lo[2] + (L.hi[2] - L.lo[2]) * warm);
+  K.sun.color.copy(sc); K.sun.intensity *= L.sun[0] / L.sun[1] + (1 - L.sun[0] / L.sun[1]) * warm;
+  if (K.hemi) K.hemi.intensity *= L.hemi[0] / L.hemi[1] + (1 - L.hemi[0] / L.hemi[1]) * warm;
+  ENVU.sun.x = v.x; ENVU.sun.y = v.y; ENVU.sun.z = v.z; ENVU.sun.w = (L.glow[1] + (L.glow[0] - L.glow[1]) * (1 - warm)) * lit * (1 - wet);
+  ENVU.sunC.x = sc.r; ENVU.sunC.y = sc.g; ENVU.sunC.z = sc.b;
+  const dusk = (1 - warm) * lit * (1 - wet) * L.warm[1];
+  if (scene.fog) { scene.fog.color.lerp(c.b.setHex(L.warm[0]), dusk); if (scene.background && scene.background.isColor) scene.background.copy(scene.fog.color); }
+  if (ENV.sky) {
+    const u = ENV.su; ENV.sky.position.copy(camera.position);
+    u.uHor.value.copy(scene.fog ? scene.fog.color : c.b.setHex(S.E.sky[1]));
+    u.uZen.value.setHex(S.E.sky[0]).multiply(ENV.sky.material.color); u.uZen.value.lerp(c.b.setRGB(.42, .4, .62).multiply(ENV.sky.material.color), (1 - warm) * .35 * lit);
+    u.uZen.value.lerp(u.uHor.value, clamp(wet * 1.5, 0, .85));   // rain or fog: one grey lid of cloud
+    u.uDisk.value = lit * (1 - wet * .95);
+  }
+  const Lr = LOOK.moon + (1 - LOOK.moon) * lit;
+  if (ENV.cloud) {
+    const m = ENV.cloud.material;
+    if (m.isShaderMaterial) {
+      const u = m.uniforms, n = ENV.cn, k = L.cloud.n + Math.round(L.cloud.more * clamp(wet * 1.6, 0, 1));
+      ENV.cloud.count = n[Math.min(n.length, k) - 1];
+      u.uLit.value.setRGB(1, 1, 1).lerp(sc, .35).multiplyScalar(Lr * (1 - wet * .45)); u.uShade.value.setRGB(.6, .64, .7).multiplyScalar(Lr * (1 - wet * .55));
+      u.uOp.value = .78 + .2 * wet; u.uFar.value = scene.fog ? Math.max(6000, scene.fog.far * 1.4) : 20000;
+    } else { m.color.setScalar(.25 + .75 * Lr); m.opacity = .7 + .25 * W.r; }
+  }
+  if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; }
+  if (ENV.sh) {   // the shadow's box follows the camera, snapped to its texels so the edges do not crawl
+    const cp = camera.position, r = GFXQ[GFX.lv].shadow, st = r * 2 / 2048, x = Math.round(cp.x / st) * st, z = Math.round(cp.z / st) * st, y = hgt(cp.x, cp.z);
+    ENV.sh.target.position.set(x, y, z); ENV.sh.target.updateMatrixWorld(); ENV.sh.position.set(x + v.x * 3000, y + v.y * 3000, z + v.z * 3000);
+    ENV.sh.castShadow = e > .03 && lit > .2 && wet < .4;
+    if ((ENV.shT = (ENV.shT || 0) - 1) <= 0) {   // what casts: what moves and what stands, looked over twice a second
+      ENV.shT = 30;
+      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, wo && wo.rocks, wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
+      if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
+    }
+  }
+})(skyScene);
+/* the renderer's pixels: the level's most per CSS pixel */
+resize = (g => () => { g(); const d = Math.min(dpr, GFXQ[GFX.lv].dpr); if (renderer && d !== renderer.getPixelRatio()) { renderer.setPixelRatio(d); renderer.setSize(cw, ch, false); } })(resize);
+/* the hangar: the quality, next to the weather; a change builds the world behind the hangar again */
+function gfxSet(q) {
+  const lv = typeof q === 'number' ? q : GFXQ.findIndex(g => g.k === q);
+  if (!GFXQ[lv]) return; GFX.lv = lv; GFX.saved = true;
+  try { localStorage.setItem(GFX.key, GFXQ[lv].k); } catch (e) {}
+  for (const b of document.querySelectorAll('.tab[data-gfx]')) b.setAttribute('aria-selected', String(b.dataset.gfx === GFXQ[lv].k));
+  if (ready && playMode === 'demo') startDemo();   // in a match, the next world takes it
+}
+(() => {
+  if (typeof document === 'undefined' || !document.querySelector) return;
+  const seg = document.createElement('div'); seg.className = 'seg sky-seg'; seg.id = 'gfxs'; seg.setAttribute('role', 'tablist'); seg.setAttribute('aria-label', 'Qualidade gráfica');
+  for (const g of GFXQ) {
+    const b = document.createElement('button'); b.className = 'tab'; b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.gfx = g.k; b.setAttribute('aria-selected', String(g.k === GFXQ[GFX.lv].k));
+    b.title = 'Gráficos ' + g.nm + (g.k === 'baixa' ? ': para placas de vídeo integradas' : g.k === 'alta' ? ': sombras do sol e mais detalhe, para placas dedicadas' : ': chão, água e nuvens detalhados');
+    const t = document.createElement('b'), s = document.createElement('span'); t.textContent = g.nm; s.textContent = 'gráficos ' + g.sub; b.append(t, s);
+    b.addEventListener('click', () => gfxSet(g.k)); seg.append(b);
+  }
+  const w = document.getElementById('wxs'); if (w && w.parentNode) w.parentNode.insertBefore(seg, w.nextSibling); else { const h = document.querySelector('.hg-top'); if (h) h.append(seg); }
+})();
 /* the HUD: the hour, the light and the weather, under the match's bar, and what the keys 6 and 7 give */
 const SKYTXT = { pre: { dia: ['Dia', 'começa às 9 h'], tarde: ['Entardecer', 'anoitece na partida'], noite: ['Noite', 'começa às 23 h'], ciclo: ['Ciclo', 'um dia por hora'] },
   wx: { limpo: ['Limpo', 'sem vento'], chuva: ['Chuva', 'e vento'], neblina: ['Neblina', 'baixa, nos vales'], variavel: ['Variável', 'muda na partida'] } };

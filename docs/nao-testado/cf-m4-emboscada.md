@@ -27,16 +27,17 @@ Tudo num bloco novo no fim da parte de simulação de `Céu de Ferro 3D.html` (p
 - `gen-cmd`, `man-a`, `man-c` e `general` têm falhas **idênticas no `origin/main`** (rodados com `PAGE=` a página do main): já existiam, não são do M4.
 - Smoke final: a página carrega e roda 20 s nos dois mapas sem erro nem NaN; o `server.js` sobe.
 
+## Testado em 9f2a313: ok (tarefa cf-testar-ia)
+
+- `tests/ambush.js` inteiro (SECS=240, com as partidas IA × IA nas duas épocas): passou, já com o M5 rodando no harness (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/75: antes disso o `OPS.amb` morria com `m5Tank is not defined` em toda suíte com emboscada).
+- `tests/tmap.js`, `tests/man-b.js`, `tests/man-view.js`, `tests/personality.js`, `tests/campaign.js` (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/116): passaram. `tests/mcp-general.js`: 2 falhas de códigos do M7 e do #69 (`man2`, `ap`, `nofix`, `cancel`), fora deste pacote.
+- Partidas no harness: 1944 12 min (1 guarda aberta) e hoje 15 min (4 guardas, 3 em posição; emboscadas recusadas por falta de esquadra livre, `emb:sq` 104, `itd:sq` 85): sem erro nem NaN.
+
 ## O que NÃO foi testado
 
-- **Depois da última rodada de testes** mudaram três coisas e só o smoke rodou: (1) a guarda saiu de `C.man` (não ocupa vaga de manobra); (2) os pesos de personalidade foram de `PERS.w` para `M4.per` (com isso `personality.js` passou, mas `ambush.js` não rodou de novo depois); (3) o limite de espera da emboscada virou "no máximo 600 s parada no sítio" (`MANT.emb.far`), em vez de 900/1200 s até a passagem.
-- **Torneio A/B (D10) não feito.** Só 4 partidas de 15 min (1944, sementes 3 e 4, M4 ligado/desligado), antes das mudanças acima: com o M4, a IA abriu 1 emboscada planejada em 4 partidas-lado e 2–3 guardas por partida, mas os bloqueios (`blk`) caíram (a guarda tomava a vaga de manobra: daí a mudança 1). Inconclusivo; a segunda rodada (12 partidas) foi interrompida pela regra nova. O M0 (métricas `mv`/`ab`/`tr`) não estava no main.
-- **Custo por quadro não medido com o M4 isolado.** Nas 4 partidas, `AIB.gen` subiu de ~2,3 para ~3,2–3,7 ms por quadro com o M4 ligado, mas as partidas divergem (mais homens vivos), então não dá para atribuir. O `M4B` foi criado para medir isso e não chegou a rodar. Uma busca `tmWalk` de 2,4 km custa ~0,5 ms no Node (1944).
-- A integração com o M0 (eventos `ab`/`mv` do M4 e o `balance.js`) não rodou; a comparação A/B com as métricas do M0 (o critério D10) fica para depois.
-- Nada depois do merge com o M2 (#45) além do smoke: o M2 e o M4 juntos numa partida (os dois leem o mapa e disputam esquadras livres) nunca rodaram; nem os botões novos da aba Campanha.
-- Partidas online (anfitrião e convidado), o desenho na Visão de General no navegador (rota pontilhada, barra na zona de morte, quadrado da guarda), e o modelo (MCP) mandando `man k=ambush|interdict|guard` de verdade.
-- O contra-flanco numa partida real (o contador `p11` ficou em 0 nas partidas medidas) e a interdição com artilharia de verdade no alcance (no teste não havia canhão; só se viu o pedido).
-- Dificuldade Fácil: os hábitos não são lidos (`look: 0`), então P7/P9 não acontecem nela (por desenho, não verificado em partida).
+- O torneio A/B (D10) e o custo isolado do M4 (`M4B` deu pior chamada de 57 ms no Node desta máquina carregada).
+- Uma emboscada planejada ou uma interdição armada e disparada numa partida longa (nas duas partidas medidas nenhuma: faltaram esquadras livres), o contra-flanco (`p11` 0) e a interdição com artilharia no alcance.
+- Online, o desenho na Visão de General no navegador, o MCP mandando `man k=ambush|interdict|guard` e os botões da aba Campanha.
 
 ## Riscos
 

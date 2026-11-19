@@ -33,14 +33,18 @@ Só a checagem de fumaça (cerca de 1 min):
 - a página carrega no harness. Nas duas épocas, num mapa v6 com economia e o planejador forçado a começar em 0 s a cada 2 s, 25 s de partida rodaram sem erro e sem NaN, e o diário mostra decisões (o ninho na entrada da cidade-sede ordenado, a antiaérea esperando a produção, "nenhuma esquadra livre" na base);
 - o servidor sobe e devolve 200 na página.
 
+## Testado em 9f2a313: ok (tarefa cf-testar-ia)
+
+- `tests/afp.js` (novo, no `tests/all.sh`): trincheiras no limite recusam outra trincheira com `fcap` e **não** impedem um ninho; ninhos no limite recusam outro com `postcap`, com o texto da página; o plano não age antes de `AFP.start`, dá a primeira ordem aos ~100 s pelo `genCmd` (um campo minado, com uma esquadra de guarda a 1,2 km), registra cada decisão em `C.afp.fl` e no diário, a obra fica pronta ~345 s depois e a ordem fecha. Ok.
+- Passaram: `tests/aid.js`, `tests/tmap.js`, `tests/sappers.js`, `tests/eco-war.js`, `tests/w13.js`, `tests/squads.js`; online, sozinhas: `forts-online`, `sappers-online`, `orders-online`.
+- `tests/forts.js` (1 falha de antes do #53 e 7 do #70), `tests/posts.js` (1 de antes do #53, 1 do #70): bisect com o teste de cada commit; nenhuma vem deste pacote. `tests/orders.js` (3): checagens de ponto exato no caminho, a mesma causa do movimento orgânico (#68) vista no `approaches.js`, fora deste pacote. `tests/campaign.js`: com o plano desligado a falha restante é a mesma (não é do AFP).
+- Partidas no harness (1944 12 min, hoje 15 min): ninho na entrada da cidade-sede e posto anticarro prontos; ordens com construtor a 600-2.000 m; a economia poupando para a obra ("a economia poupa 40 de energia e 60 de metal"); muitas recusas por "nenhuma esquadra livre a menos de 2,5 km".
+
 ## O que NÃO foi testado
 
-- Nenhuma suíte (`tests/*.js`) rodou depois da mudança, nem `tests/all.sh`.
-- Não houve medição antes/depois numa partida IA × IA de 15 min ou mais. **Não há números** de quantas obras cada general constrói, nem de quantas ficam prontas.
-- Não foi verificado que o construtor chega, constrói e volta: o fim da operação `usr`, o "porquê" restaurado, a guarnição do posto que chega.
-- Não foram verificados: a posição antiaérea saindo da reserva depois da falta registrada; os campos minados pelo tráfego (dependem de hábitos inimigos, que levam minutos para aparecer); o ninho no gargalo (nível 2); a reconstrução de obra perdida; a poupança da economia (efeito sobre a produção e o equilíbrio).
-- Online (anfitrião com servidor novo): não testado.
-- O custo por quadro do plano: a varredura de entradas é guardada em cache, e as do tráfego e dos gargalos olham no máximo 24 células por plano, mas nada disso foi medido.
+- A medição antes/depois por minuto e por lado (obras por tipo, minas, antiaéreas fixas) em partidas de 15 min ou mais.
+- A antiaérea fixa saindo da reserva depois da falta, os campos minados pelo tráfego, o ninho no gargalo (nível 2), a reconstrução de obra perdida e o efeito da poupança na produção.
+- Online com o anfitrião num navegador, e o custo por quadro do plano.
 
 ## Riscos
 

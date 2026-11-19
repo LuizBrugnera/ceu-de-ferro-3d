@@ -173,6 +173,26 @@ console.log('-- online: the host takes a guest\'s call and answer; a guest reads
   S.net = false;
 }
 
+console.log('-- a supply base answers: a responder with no def of its own, named, and the call seen through --');
+{
+  const { C, $, S, r, mid, at, tank } = box(8);
+  const u = tank(0, mid), p = at(mid - 250), b = C.addSup(S.T.nid + 33, 0, p.x, p.z, 0, 1); u.hp = u.max * .3; u.hitT = -99;
+  let err = null, R = null;
+  try { R = $('helpAsk')(u, 'repair', u, null); } catch (e) { err = e; }
+  ok(!err && R && R.resp === b && !b.def, 'a hurt tank on the base\'s road calls for a repair: the supply base answers (' + (err ? err.message : R && R.st) + ')');
+  ok(!err && diary(S, 0).some(s => s.indexOf($('helpWho')(b) + ' atende') === 0) && typeof $('helpWho')(b) === 'string', '  the diary names it: ' + (err ? '-' : $('helpWho')(b)));
+  err = null; try { C.run(60, () => { u.hitT = -99; u.ai.tgt = null; }); } catch (e) { err = e; }
+  ok(!err && (R.st === 'done' || R.st === 'gone') && !u.hq, '  and the call is seen through without a crash (' + (err ? err.message : R.st) + ')');
+}
+
+console.log('-- an economy watch on map v5 (ww2, seed 3) for 400 s: a supply base answers in it, and no crash in the calls --');
+{
+  const C = H.load({ seed: 3, eco: true, mapv: 5 }), S = C.watch('ww2');
+  let err = null, sup = null; try { C.run(400, () => { if (!sup) sup = S.help && S.help.l.find(R => R.resp && R.resp.sup); }); } catch (e) { err = e; }
+  ok(!err && S.t >= 399, 'the battle runs to ' + Math.round(S.t) + ' s' + (err ? ': ' + err.message : '') + ' (' + (S.help ? S.help.n : 0) + ' calls)');
+  ok(!!sup, '  with a supply base answering a call in it (' + (sup ? sup.k + ', ' + sup.st : 'none: this battle no longer covers the case') + ')');
+}
+
 console.log('-- AI battles: the calls in play --');
 for (const [era, mapv, eco] of [['ww2', 1, 0], ['modern', 4, 1]]) {
   const C = H.load({ seed: 21, mapv, eco }), $ = C.$, S = C.newState(era, C.$('ERAS')[era].sides[0].fighter, { cls: 'plane' });

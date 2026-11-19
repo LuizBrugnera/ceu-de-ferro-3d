@@ -47,7 +47,7 @@ Toda partida é de conquista. Os dois lados disputam uma cadeia de pontos entre 
 
 **Capturar.** Conta quem está dentro do raio (170 m; 230 m nas vilas; 260 m nas bases): soldado a pé 1, tanque e blindado sobre rodas 1,5, antiaérea 0,75, carro e caminhão 0,5. Aeronaves, artilharia, veículos vazios e quem está embarcado não contam. Com um de vantagem um ponto neutro leva 60 s; a vantagem conta até 4. Só se toma um ponto ligado a outro que já é seu. Vazio, o ponto volta devagar ao dono; cortado da base, fica neutro depois de 5 min.
 
-**Tíquetes.** São o moral do lado. Perder uma unidade não custa tíquete: quem paga a perda é a economia, que gastou para fazer a unidade. Perder uma instalação custa: fábrica 15, usina ou mina 8; uma base de suprimento pronta custa 5 e uma cúpula antifoguete 10. Quem tem menos pontos perde 2, 4, 7 ou 10 tíquetes por minuto conforme a diferença. Perder um ponto custa 10 e tomar um devolve 4. Perde quem ficar sem tíquetes ou sem a base principal; no fim do relógio vence quem tem mais pontos e, no empate, mais tíquetes.
+**Tíquetes.** Com a economia, são o moral do lado. Perder uma unidade não custa tíquete: quem paga a perda é a economia, que gastou para fazer a unidade. Perder uma instalação custa: fábrica 15, usina ou mina 8; uma base de suprimento pronta custa 5 e uma cúpula antifoguete 10. Sem a economia (a demonstração, um servidor antigo), cada perda custa como antes: soldado 1, carro ou caminhão 2, blindado sobre rodas, antiaérea ou artilharia 4, veículo-rádio 5, tanque 6, helicóptero 8, avião 10; bases de suprimento e cúpulas não custam tíquetes. Quem tem menos pontos perde 2, 4, 7 ou 10 tíquetes por minuto conforme a diferença. Perder um ponto custa 10 e tomar um devolve 4. Perde quem ficar sem tíquetes ou sem a base principal; no fim do relógio vence quem tem mais pontos e, no empate, mais tíquetes.
 
 **Voltar depois de perder.** A volta é sempre possível. A espera é de 4 s (até 10 s com os tíquetes do lado abaixo de um quarto), e o modelo perdido fica em contagem antes de sair de novo:
 
@@ -81,7 +81,7 @@ Na Frente de 1944 jogam a Luftwaffe e os Aliados; na Frente atual, a Força Azul
 
 **Kits.** Fuzil e metralhadora não fazem nada na blindagem de um tanque. Panzerfaust, Bazooka e RPG são cargas ocas sem guia, melhores pelo flanco e pela traseira; o Javelin trava no alvo e cai no teto; Stinger e Igla buscam o calor e são enganados por flares. O atirador de elite tem luneta com queda do projétil, prende o fôlego com Shift e, hoje, fere veículos leves com o .50. O morteiro (Q pega, M abre o mapa, V troca entre explosiva e fumaça) atira de 150 m a 3 km.
 
-**Trocar no meio da partida.** H (ou o botão "Trocar veículo") abre o quadro com as classes e os modelos do seu lado. Abandonar um veículo inteiro conta como uma perda e põe o modelo em contagem; descer de um transporte não. No quadro, os números escolhem a classe, as setas o modelo e onde entrar, Enter confirma.
+**Trocar no meio da partida.** H (ou o botão "Trocar veículo") abre o quadro com as classes e os modelos do seu lado. Abandonar um veículo inteiro conta como uma perda (sem a economia, custa os tíquetes de uma perda) e põe o modelo em contagem; descer de um transporte não. No quadro, os números escolhem a classe, as setas o modelo e onde entrar, Enter confirma.
 
 ## Requisitar veículos
 

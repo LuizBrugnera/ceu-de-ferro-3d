@@ -46,10 +46,10 @@ const FKINDS = 6;   // the kinds of work fort and fbuild carry
 const rooms = { ww2: new Map(), modern: new Map() };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
-for (const era in MODELS) rooms[era].specs = new Set();
+for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
 /* recovery vehicles and ambulances (rec): the AI's alone, models of its ground rows, never a player's (the page's REC.side is the other copy) */
 const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54'], modern: ['m88a2', 'brem1', 'm997', 'uaz452'] };
-for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);   // spectators: clients with no body, not in the room's map
+for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);
 let nextId = 1;
 
 const model = (era, cls, id) => typeof cls === 'string' && Object.hasOwn(era, cls) && era[cls].includes(id);

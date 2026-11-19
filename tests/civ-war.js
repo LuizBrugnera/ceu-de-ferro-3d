@@ -144,7 +144,7 @@ load({ seed: 34 }); fresh('modern'); C.run(2);
   ok(C.cmdFire(art, 250, w.range, false) === null, 'and waits while it is not identified');
   o.pm = new Map([[e, { kn: true, ic: 1, rc: 1 }]]); e.kn = [{ t0: S.t, last: S.t, by: o }, null];
   ok(C.cmdFire(art, 250, w.range, false) === Mk, 'and goes once it is');
-  const tr = { kind: 'trench', team: 1 }, hs = { kind: 'bld', team: 1 }, eco = { lot: 2, idf: false, team: 1 }, eco2 = { lot: 2, idf: true, team: 1 }, sup = { sup: 1, team: 1 };
+  const tr = { kind: 'trench', team: 1 }, hs = { kind: 'bld', team: 1 }, eco = { lot: 2, idf: false, team: 1 }, eco2 = { lot: 2, idf: true, team: 1 }, sup = { kind: 'sup', sup: 1, team: 1 };
   ok(C.roeIdf(0, tr) && C.roeIdf(0, sup) && !C.roeIdf(0, hs) && !C.roeIdf(0, eco) && C.roeIdf(0, eco2) && C.roeIdf(0, { lot: -1, idf: false, team: 1 }) && !C.roeIdf(0, null),
     'identified: a trench, a supply base, an economy site found out or never disguised; not: a house held by soldiers, a site still disguised on a lot, a bare point');
   /* which civilians a side sees */
@@ -207,6 +207,30 @@ load({ seed: 38 }); fresh('modern'); C.run(2);
   const n0 = S.glog.l[0].length;
   r = C.genCmd(0, { c: 'fire', k: 'he', x: e.sx + 4, z: e.sz - 3, n: 3 }, 'me');
   ok(r.ok && live()[0].tg === e && !S.glog.l[0].slice(n0).some(l => /alvo não identificado/.test(l.s)), 'a person\'s click 5 m off it: accepted with no "alvo não identificado" warning');
+}
+
+console.log('-- a fire mission at a found factory with a merely detected enemy soldier beside it, civilians in sight --');
+load({ seed: 39, eco: true }); fresh('modern'); C.ecoInit(); C.run(2);
+{
+  const f = S.eco && S.eco.l.find(e => e.team === 1 && e.k === 'fab' && !e.dead), Cm = C.cmdOf(0);
+  ok(!!f, 'the economy sandbox has side 1\'s factory');
+  if (f) {
+    f.idf = true;
+    const art = C.addUnit('art', 0, f.x > S.W / 2 ? f.x - 3000 : f.x + 3000, f.z, S.E.sides[S.fac[0]].art, true), w = art.arms[0].d;
+    const c = out()[0], pin = () => { for (const o of S.civs) { o.mode = 2; o.goal = null; o.v = { x: 0, y: 0, z: 0 }; } c.in = null; c.x = f.x + 12; c.z = f.z; c.sn = [S.t, -1e9]; };
+    pin(); C.run(.05, pin);
+    const g = man(1, f.x + 6, f.z + 4, false); g.sx = g.x; g.sz = g.z; g.seenT = S.t; g.moveT = -99; Cm.known = [g];
+    ok(!C.roeIdf(0, g) && C.roeIdf(0, f), 'the guard, a soldier only detected, is not identified; the factory, found, is');
+    const x = Math.round(f.x * 10) / 10, z = Math.round(f.z * 10) / 10, live = () => Cm.fm.filter(M => !M.dead && S.t < M.T && M.k === 'he');
+    C.genCtl(0, 'mcp', { eco: 0, atk: 0, def: 0, sup: 0 });
+    const r = C.genCmd(0, { c: 'fire', k: 'he', x, z, n: 3 }, 'mcp');
+    ok(r.ok && live().length === 1 && live()[0].tg === f, 'a model\'s order at the factory (' + x + ', ' + z + '): accepted, aimed at the factory, not the guard (' + (r.ok ? 'accepted' : r.why) + ')');
+    for (const M of live()) M.dead = true;
+    const M = C.cmdMission(Cm, 'he', f.x, f.z, 3, 90);
+    ok(M.tg === f && !C.roeHeld(0, M.x, M.z, w.r, M.tg) && C.cmdFire(art, 250, w.range, false) === M, 'the AI\'s own strike there carries the factory and the battery takes it');
+    M.dead = true; g.sx = f.x + 40; const M2 = C.cmdMission(Cm, 'he', g.sx, g.sz, 3, 90);
+    ok(M2.tg === g && C.cmdFire(art, 250, w.range, false) === null, 'a burst at the guard alone, 40 m off, is still held');
+  }
 }
 
 console.log('-- the general\'s order: mil --');

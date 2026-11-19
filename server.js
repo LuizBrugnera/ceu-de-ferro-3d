@@ -27,8 +27,8 @@ const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Fer
 /* valid models per room and class, the first half of each list on side 0 and the second on side 1; the page's PLANES, TANKS, AAS, ARTS and
    INF tables are the other copy. inf: the infantry kits, in the order an AI soldier's snapshot row names them by index */
 const MODELS = {
-  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'jeep', 'gmc', 'm3ht'] },
-  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'tigr', 'ural', 'btr82', 'mtlbu'] }
+  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
+  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
 };
 /* helicopters: aircraft to every check of an AI row or a loss, a class of their own to join, swap and hstate. None in 1944 */
 MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8'];
@@ -56,8 +56,9 @@ const rooms = { ww2: new Map(), modern: new Map() };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
-/* recovery vehicles and ambulances (rec): the AI's alone, models of its ground rows, never a player's (the page's REC.side is the other copy) */
-const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54'], modern: ['m88a2', 'brem1', 'm997', 'uaz452'] };
+/* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
+   the repair trucks are a player's too, so they are also in the trn lists above, each in its side's half */
+const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54', 'opelw', 'gmcw'], modern: ['m88a2', 'brem1', 'm997', 'uaz452', 'm1089', 'mtoub'] };
 for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);
 let nextId = 1;
 

@@ -4403,8 +4403,9 @@ function spawnPlayer() {
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
-  const p = routeAt(S.T.routes[u.ri], u.s);
-  u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * u.lane; u.z = p.z + p.dx * u.lane; u.y = hgt(u.x, u.z);
+  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s);
+  u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * L; u.z = p.z + p.dx * L; u.y = hgt(u.x, u.z);
+  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
 }
 /* one ground vehicle whoever drives it: h hull heading, ty turret yaw from the hull, tp gun pitch, f the gun line.
    ctl is all a controller (AI, player input) may touch: aim is the direction the turret slews to, aim2 a free gun's own line,
@@ -4500,7 +4501,7 @@ function tripOf(x0, z0, x1, z1, o) {
     pts.push(...inner(E1, best.B === E1.a ? 0 : E1.len, n1.s));
   }
   pts.push({ x: n1.x, z: n1.z }, { x: x1, z: z1 });
-  const out = polyOf(pts);
+  const out = orgPoly(polyOf(pts));   // its corners rounded (ORG)
   if (E1.c === 0 && n1.d < RN.onAx) { out.ri = E1.ax[0]; out.s1 = E1.ax[1] + n1.s; }
   else if (E1.a2 && n1.d < RN.onAx) { out.ri = E1.a2[0]; out.s1 = E1.a2[1] + E1.a2[2] * n1.s; }   // a class 1 edge of the centre axis (map version 4)
   if (key) (pm || T.pc).set(key, out);
@@ -6212,8 +6213,8 @@ function moveUnit(u, dt) {
   const d = u.def, c = u.ctl, x0 = u.x, y0 = u.y, z0 = u.z, Q = u.mod;
   if (u.fixed) return;
   if (u.def.swim && swim(u, dt)) return;
-  if (u.rail && u.trip) { u.sp = c.drive * d.spd * Q.drive; tripMove(u, dt); }   // map version 4: on a trip it rides the trip's polyline, not its axis
-  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive; const s1 = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); if (S.brc && brStop(u, S.T.routes[u.ri], u.s, s1)) u.sp = 0; else u.s = s1; place(u); }   // a fallen bridge stops it at the bank (W20)
+  if (u.rail && u.trip) { u.sp = c.drive * d.spd * Q.drive * orgPace(u); tripMove(u, dt); }   // map version 4: on a trip it rides the trip's polyline, not its axis
+  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive * orgPace(u); const s1 = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); if (S.brc && brStop(u, S.T.routes[u.ri], u.s, s1)) u.sp = 0; else u.s = s1; place(u); }   // a fallen bridge stops it at the bank (W20)
   else {
     const dir = Math.sign(u.sp || c.drive) || 1, cx = Math.cos(u.h), cz = -Math.sin(u.h);
     const slope = (hgt(u.x + cx * 6 * dir, u.z + cz * 6 * dir) - u.y) / 6, want = c.brake ? 0 : c.drive * d.spd * Q.drive * (c.drive < 0 ? .5 : 1) * clamp(1 - slope * 2.2, .2, 1.15), acc = (c.brake ? 16 : 5) * dt;
@@ -6297,12 +6298,13 @@ function ghostUnit(u, dt) {
 const GOAL = { x: 0, z: 0 };
 const atLimit = u => u.fixed || (u.cnG && S.t < u.cnG.T) || (S.cq ? (u.s - cqNext(u.team, u.ri).rs[u.ri]) * u.ds >= (u.def.rad ? -RAD.ai.back : 0) : (u.s - S.T.routes[u.ri].len / 2) * u.ds >= DIR.push);
 function scan(u) {
-  const A = u.ai; A.fd = 1e9; A.blocked = S.t < A.rest;
+  const A = u.ai; A.fd = 1e9; A.blocked = S.t < A.rest; let held = null;
   for (const o of S.units) {
     if (o === u || o.dead) continue;
     if (o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
-    else if (u.rail && !u.trip && o.rail && !o.trip && o.ri === u.ri && o.lane === u.lane) { const d = (o.s - u.s) * u.ds; if (d > 0 && d < 22) A.blocked = true; }
+    else if (u.rail && !u.trip && o.rail && !o.trip && o.ri === u.ri && o.lane === u.lane) { const d = (o.s - u.s) * u.ds; if (d > 0 && d < 22) held = o; }
   }
+  if (held && !orgPass(u, held)) A.blocked = true;   // held up in its lane: it passes in the other one when that is free (ORG)
   for (const o of S.men) if (!o.dead && o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
 }
 /* ---------- vehicle trips (map version 4): a vehicle on its axis goes by the network to a place off it and rides the way as it rides a route ----------
@@ -6315,14 +6317,14 @@ function tripTo(u, x, z, o) {
   o = o || {}; const p = tripOf(u.x, u.z, x, z, { mode: 'veh', team: u.team }); if (!p) return null;
   return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '' });
 }
-function placeOn(u, p, s) {
-  const q = routeAt(p, s); u.h = Math.atan2(-q.dz, q.dx); u.x = q.x; u.z = q.z; u.y = hgt(u.x, u.z);
+function placeOn(u, p, s, l) {
+  const q = routeAt(p, s); l = l || 0; u.h = Math.atan2(-q.dz, q.dx); u.x = q.x - q.dz * l; u.z = q.z + q.dx * l; u.y = hgt(u.x, u.z);   // l: m to its side of the way (ORG)
 }
 /* T.ev (a manoeuvre squad's ride, MAN.ride): places along the way where the trip does something (k pick: the squad boards; drop: it gets out), in order; the vehicle stops there for a step */
 function tripMove(u, dt) {
   const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt);
   if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
-  placeOn(u, T.p, T.s);
+  placeOn(u, T.p, T.s, orgTrip(u, T, dt));
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
   if (T.s >= T.p.len - 1e-6) tripEnd(u);
 }
@@ -7006,12 +7008,111 @@ function addSquad(team, x, z, ri, s, kits) {
   });
   q.n0 = q.live = q.men.length; S.squads.push(q); return q;
 }
+/* ---------- organic movement (ORG, cf-movimento-organico): squads in formations by the situation, vehicles off the one exact line, rounded ways ----------
+   Everything here is deterministic from hash2 (no Math.random), so two runs of the same match place men and hulls the same; it runs where the AI does (the host).
+   Squads (orgSlot, the moving part of slot): file, a staggered column on both shoulders, each man side[0..1] m out (his own, by hash), gap m
+   apart; wedge, when an enemy is within threat m, on a way of its own across country (a hidden or commander's way) or on an order that goes
+   carefully: wedge[0] m back and wedge[1] m out a rank; line, abreast line m apart, on an assault within close m. On top: each man's own
+   offset jit [lateral, along] m, a smooth noise over wl m of the way; breathe [m, rad/s], the accordion of his own pace; drift [m, wl], the whole
+   squad's own line beside the way (half of it in file), so squads on one road do not walk on one line. A place in the water (under wet m above
+   it: a bridge, a ford, a bank) closes in to bridge m of the way: the squad crosses in single file.
+   Vehicles: veh.wob m of weave of its lane over wl m of road (half again for tracks), the lane eased at lane m/s (a lane change is a glide);
+   its pace varies by pace over pw s; a hull held up in its lane by a slower one passes in the other lane when that is free for pass m (again after
+   passT s); a tracked hull, and a wheeled one with an enemy within thr m, drives open m (wheel m) further out off the road where the ground
+   there and look m ahead is dry, within step m of the road's height and clear of things for clear m, eased at ease m/s (checked every `every`
+   s); on a trip a hull keeps trip m to its side of the way. poly: the corners of a way sharper than ang rad are rounded over up to cut m a side,
+   not where the rounded corner would be in the water. on: 0 turns it all off (the old formation and lines) */
+const ORG = { on: 1, gap: 7, side: [3.5, 7], wedge: [7, 8], line: 8, threat: 900, close: 350, jit: [2.2, 2.5], wl: 45, breathe: [1.6, .07], drift: [5, 140], wet: .6, bridge: 1.2,
+  veh: { wob: 1.6, wl: 70, lane: 1.5, pace: .08, pw: 45, pass: 30, passT: 10, thr: 1500, open: 9, wheel: 5, look: 25, step: 2.5, clear: 5, ease: 1.5, every: 2, trip: 2.5 },
+  poly: { ang: .35, cut: 14 } };
+const orgH = (a, b, c) => hash2(a, b, c) * 2 - 1;
+/* a smooth noise -1..1 along t, a new value every wl, k and sd its stream */
+function orgN(k, t, sd, wl) { const v = t / wl, i = Math.floor(v), f = v - i, w = f * f * (3 - 2 * f); return orgH(i, k, sd) * (1 - w) + orgH(i + 1, k, sd) * w; }
+/* the formation a moving squad takes now */
+function orgForm(q, O) {
+  if (O && O.k === 'assault' && q.fd < ORG.close) return 'line';
+  if (q.fd < ORG.threat || (q.tp && (!O || q.tp !== O.trp)) || (O && (O.quiet || O.k === 'flank' || O.k === 'scout' || O.k === 'bait' || O.k === 'ambush'))) return 'wedge';
+  return 'file';
+}
+/* man i's place in his squad's formation on the move, along its trip (q.tp) or its road */
+function orgSlot(q, i) {
+  const G = ORG, O = q.ord, n = Math.max(q.n0, 1), sd = q.team * 37 + (q.id || 0), F = orgForm(q, O), s0 = q.tp ? q.ts : q.s, sg = q.tp ? 1 : q.ds;
+  let b, l;
+  if (F === 'line') { b = 0; l = (i - (n - 1) / 2) * G.line; }
+  else if (F === 'wedge') { const k = (i + 1) >> 1; b = G.wedge[0] * k; l = (i ? (i % 2 ? 1 : -1) : 0) * G.wedge[1] * k; }
+  else { b = G.gap * i; l = (i % 2 ? 1 : -1) * (G.side[0] + (G.side[1] - G.side[0]) * hash2(sd, i, 3)); }
+  b += orgN(i * 7 + 1, s0, sd, G.wl) * G.jit[1] + Math.sin(S.t * G.breathe[1] + i * 1.7 + sd) * G.breathe[0];
+  l += orgN(i * 7 + 2, s0, sd, G.wl) * G.jit[0] + orgN(97, s0, sd, G.drift[1]) * G.drift[0] * (F === 'file' ? .5 : 1);
+  const p = q.tp ? routeAt(q.tp, s0 - b) : routeAt(S.T.routes[q.ri], s0 - q.ds * b), fx = p.dx * sg, fz = p.dz * sg;
+  let x = p.x - fz * l, z = p.z + fx * l;
+  if (hgt(x, z) < S.T.WL + G.wet) { const c = clamp(l, -G.bridge, G.bridge); x = p.x - fz * c; z = p.z + fx * c; }   // a bridge or a ford: in single file on the way
+  return { x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW) };
+}
+/* a vehicle's own seed (by the order the host made them), whether it runs on tracks, and its pace now */
+const orgSd = u => u.osd || (u.osd = (S.orgN = (S.orgN || 0) + 1) * 13 + u.team);
+const orgTrk = u => u.kind === 'tank' || u.kind === 'art';
+const orgPace = u => (ORG.on && u.ai ? 1 + ORG.veh.pace * orgN(5, S.t, orgSd(u), ORG.veh.pw) : 1);
+/* the lane a rail hull is seen in: its lane, eased (a change of lane is a glide, not a jump); a hull back on its rail after a while takes it at once */
+function orgLane(u) {
+  if (!ORG.on || !u.ai) return u.lane;
+  const dt = S.t - (u.lvT === undefined ? -1e9 : u.lvT); u.lvT = S.t;
+  if (u.lv === undefined || dt > 2) u.lv = u.lane; else u.lv += clamp(u.lane - u.lv, -ORG.veh.lane * dt, ORG.veh.lane * dt);
+  return u.lv;
+}
+/* the weave of a rail hull's lane at s */
+const orgWob = (u, s) => (ORG.on && u.ai && !u.fixed ? orgN(3, s, orgSd(u), ORG.veh.wl) * ORG.veh.wob * (orgTrk(u) ? 1.5 : 1) : 0);
+/* how far further out a rail hull wants to be: open ground beside the road for a tracked one, or a wheeled one under threat */
+function orgWant(u) {
+  const V = ORG.veh, thr = u.ai.fd < V.thr, trk = orgTrk(u);
+  if (!trk && !thr) return 0;
+  const out = (Math.sign(u.lane) || 1) * (trk ? V.open : V.wheel) * (thr ? 1.3 : 1), R = S.T.routes[u.ri];
+  for (const a of [0, V.look]) {   // here and ahead: dry, level with the road and clear
+    const p = routeAt(R, u.s + u.ds * a), L = u.lane + out, x = p.x - p.dz * L, z = p.z + p.dx * L, y = hgt(x, z);
+    if (y < S.T.WL + 1 || Math.abs(y - hgt(p.x, p.z)) > V.step || near(x, z, V.clear).some(o => S.os[o.id] < 2 && !o.K.veil)) return 0;
+  }
+  return out;
+}
+function orgOut(u) {
+  if (!ORG.on || !u.ai || u.fixed) return 0;
+  const V = ORG.veh, gap = S.t - (u.oT === undefined ? -1e9 : u.oT), dt = clamp(gap, 0, 1); u.oT = S.t;
+  if (gap > 2) u.ox = 0;
+  if (S.t >= (u.oN || 0)) { u.oN = S.t + V.every; u.oW = orgWant(u); }
+  const o = u.ox || 0; u.ox = o + clamp((u.oW || 0) - o, -V.ease * dt, V.ease * dt); return u.ox;
+}
+/* a rail hull held up in its lane by o, which is moving (a halted one is a queue, not a slow one) and no enemy near: it takes the other lane when that is free, true then */
+function orgPass(u, h) {
+  const V = ORG.veh, A = u.ai;
+  if (!ORG.on || !u.lane || S.t < (A.pT || 0) || Math.abs(h.sp) < .5 || A.fd < V.thr) return false;
+  for (const o of S.units) if (o !== u && !o.dead && o.rail && !o.trip && o.ri === u.ri && o.lane === -u.lane && Math.abs(o.s - u.s) < V.pass) return false;
+  u.lane = -u.lane; A.pT = S.t + V.passT; return true;
+}
+/* a hull on a trip: the side of the way it keeps, eased from the middle where the trip starts; none where that side is water (a bridge) */
+function orgTrip(u, T, dt) {
+  if (!ORG.on || !u.ai) return 0;
+  const p = routeAt(T.p, T.s), w = (Math.sign(u.lane) || 1) * ORG.veh.trip + orgN(3, T.s, orgSd(u), ORG.veh.wl) * ORG.veh.wob * .6, x = p.x - p.dz * w, z = p.z + p.dx * w, t = hgt(x, z) < S.T.WL + .3 ? 0 : w;
+  T.l = (T.l || 0) + clamp(t - (T.l || 0), -ORG.veh.lane * dt, ORG.veh.lane * dt); return T.l;
+}
+/* a way with its sharp corners rounded (in place, once: the same array stays the way everyone holds); the corner stays where the rounding would be in the water */
+function orgPoly(p) {
+  if (!ORG.on || !p || p.org || p.length < 3) return p;
+  const P = ORG.poly, out = [p[0]];
+  for (let i = 1; i < p.length - 1; i++) {
+    const a = p[i - 1], v = p[i], b = p[i + 1], ax = v.x - a.x, az = v.z - a.z, bx = b.x - v.x, bz = b.z - v.z, la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+    if (la < 1e-6 || lb < 1e-6 || Math.acos(clamp((ax * bx + az * bz) / (la * lb), -1, 1)) < P.ang) { out.push(v); continue; }
+    const c = Math.min(P.cut, la * .3, lb * .3), A = { x: v.x - ax / la * c, z: v.z - az / la * c }, B = { x: v.x + bx / lb * c, z: v.z + bz / lb * c }, M = { x: .25 * A.x + .5 * v.x + .25 * B.x, z: .25 * A.z + .5 * v.z + .25 * B.z };
+    if (hgt(M.x, M.z) < S.T.WL + .5) { out.push(v); continue; }
+    for (const t of [0, .25, .5, .75, 1]) { const u = 1 - t; out.push({ x: u * u * A.x + 2 * t * u * v.x + t * t * B.x, z: u * u * A.z + 2 * t * u * v.z + t * t * B.z }); }   // the quadratic curve from A to B about the corner
+  }
+  out.push(p[p.length - 1]);
+  const q = polyOf(out); p.length = 0; for (const o of q) p.push(o); p.len = q.len; p.org = 1; return p;
+}
 /* a man's place: at the squad's post once it is there (q.at), else in the loose formation around its anchor on the road; at a halt its
    perimeter was formed for (q.drPer: the end of a walk, its order, or the meeting place for its ride), his place in the ring */
 const slot = (q, i) => {
   const O = q.ord, X = q.bg && !q.state ? q.bg[i] : null; if (X) return X;
   const P = q.drPer; if (P && !q.state && P.p[i] && (P.h === O ? q.at : P.h === q.rd && q.halt && q.rd.st !== 'ride')) return P.p[i];
   if (q.at && !q.state && O && O.x !== undefined) { const P = q.pts || (q.pts = ptPts(q, O) || postPts(q.team, O.x, O.z, Math.max(q.n0, 1), O.R, O.k)); return P[i % P.length]; }
+  if (ORG.on) return orgSlot(q, i);   // on the move: the formation of the situation (ORG)
   const p = q.tp ? routeAt(q.tp, q.ts - IAI.form[1] * (i >> 1)) : routeAt(S.T.routes[q.ri], q.s - q.ds * IAI.form[1] * (i >> 1)), off = (i % 2 ? 1 : -1) * (IAI.form[2] + IAI.form[0] * (i >> 1)); return { x: p.x - p.dz * off, z: p.z + p.dx * off };   // on a trip (q.tp) the formation is along it
 };
 /* the places of a post: the corners of the standing houses nearest it that look toward the enemy's base, two men a house, or a ring R m wide */
@@ -7067,7 +7168,7 @@ ORD.move = (q, O) => O.s;   // map version 4: a walk to a place (O.wp the way, O
    along: q.ts, the way is kept in O.trp); an order that brings its own way (O.wp: a path of the commander's) walks that, on any axis */
 function setOrd(q, O) {
   const R = S.T.routes, r = R[q.ri], e = Math.min(q.s, r.len - q.s), net = S.T.mv >= 4;
-  let tp = net && O.wp ? O.wp : null;
+  let tp = net && O.wp ? orgPoly(O.wp) : null;   // the commander's way, its corners rounded once (ORG)
   if (O.ri !== undefined && O.ri !== q.ri) {
     const sw = net && !tp ? swNear(q.ri, q.s, O.ri) : null;
     if (sw) { q.ri = O.ri; q.s = sw.sj; }
@@ -16502,7 +16603,7 @@ Net.kill = (old => (g, det) => { if (g && !g.dead && S.host && g.pid) cqDead(g);
    standing around before no more transports are handed out; refund: the share of the cost that comes back when a requisitioned transport
    is left whole (hp) at a depot. The match's keeper decides (solo, or the host: req and reqa), and the soldier becomes the vehicle
    there, with no loss counted (rqDo) */
-const RQ = { cost: { car: 1, truck: 1, rad: 3, lav: 2, aa: 2, art: 2, tank: 3, heli: 4, plane: 5 }, cool: 60, stock: 3, refill: 90, parked: 4, refund: .5, hp: .8, wait: 2.5,
+const RQ = { cost: { car: 1, truck: 1, amb: 1, rpr: 2, rad: 3, lav: 2, aa: 2, art: 2, tank: 3, heli: 4, plane: 5 }, cool: 60, stock: 3, refill: 90, parked: 4, refund: .5, hp: .8, wait: 2.5,
   why: { depot: 'Fora de um depósito: vá à base principal, a uma base de suprimento pronta ou a um ponto seu com base de suprimento.', air: 'Aeronaves só saem da base principal.', stock: 'Este depósito está sem veículos: chega outro em instantes.', cool: 'Você requisitou há pouco: aguarde.',
     cd: 'Este modelo ainda está na contagem depois de perdido.', tickets: 'Faltam tíquetes ao seu lado.', parked: 'Há veículos demais parados sem ninguém: use um deles.', foot: 'Só um soldado a pé requisita.', server: 'O servidor desta sala ainda não conhece a requisição: ele precisa ser reiniciado.', host: 'O anfitrião não respondeu.', over: 'A partida acabou.' } };
 function rqDepot(o) {
@@ -16513,7 +16614,7 @@ function rqDepot(o) {
   const p = Q.p.find(p => p.base < 0 && hdist(o, p) < p.r && !cqSpawnWhy(p, t) && S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, p) < p.r + 60));
   return p ? { id: p.i + 1, k: 3, x: p.x, z: p.z } : null;
 }
-const rqKind = (cls, model) => (cls === 'trn' ? (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);
+const rqKind = (cls, model) => (cls === 'trn' ? DEFS.trn[model].svc || (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);   // a service vehicle (REC.play) by its own kind
 const rqCost = (cls, model) => RQ.cost[rqKind(cls, model)] || 1;
 function rqStock(id) { const Q = S.cq, s = Q.stock[id] || (Q.stock[id] = { n: RQ.stock, t: S.t }); while (s.n < RQ.stock && S.t - s.t >= RQ.refill) { s.n++; s.t += RQ.refill; } if (s.n >= RQ.stock) s.t = S.t; return s; }
 /* why not, for soldier o of player who (0 solo): '' or a key of RQ.why */
@@ -18066,7 +18167,7 @@ function genVM(t, all) {
    a command or a question of the general, to the host and back. Times on the wire are the match clock (mclock: the host's S.t plus S.t0 here).
    A guest rebuilds the shapes ecoView, ecoVM and genVM read, so every panel runs on it unchanged. Wire kinds are indexes (ecoI, ESK, EWHY,
    GOP and the keys of GEN.tag and GEN.ord), computed when used. No random number is drawn and nothing here runs in solo. */
-const ecoI = () => Object.keys(ECO.unit).concat(Object.keys(ECO.site));
+const ecoI = () => { const u = Object.keys(ECO.unit), x = u.filter(k => Object.hasOwn(REC.unit, k)); return u.filter(k => !x.includes(k)).concat(Object.keys(ECO.site), x); };   // REC's kinds last: the base kinds and the sites keep their numbers with or without them (the MCP reads them so)
 const ESK = ['pow', 'mine', 'fab'], EWHY = ['', 'en', 'mt', 'busy', 'none', 'full'], GOP = ['', 'atk', 'amb', 'ctr', 'usr'];
 /* a producer's place on the wire: 0 none, -1 the HQ, -1 - i the HQ's slot i, a site or base id otherwise */
 const atE = at => (at === null || at === undefined ? 0 : typeof at === 'string' ? -1 - (+at.slice(2) || 0) : at);
@@ -18863,7 +18964,7 @@ Object.assign(GEN.no, { pop: 'Acima do teto de população do lado' });
    guest's entry, rearm or return took or gave; lgx is a guest's load and unload and the host's answer. ECO.on 0, LG.on 0 or a server
    without lg: no S.lg, every hook passes through */
 const LG = { on: 1, cap: { b: 120, p: 60 }, start: { b: 20, p: 30 }, min: 13,
-  cost: { inf: 2, squad: 8, car: 5, truck: 5, lav: 12, aa: 12, rad: 12, art: 15, mrl: 20, tank: 20 }, serve: { veh: 3, man: 1 },
+  cost: { inf: 2, squad: 8, car: 5, truck: 5, amb: 5, rpr: 8, lav: 12, aa: 12, rad: 12, art: 15, mrl: 20, tank: 20 }, serve: { veh: 3, man: 1 },
   truck: 40, lift: 20, mt: 30, mtL: 15, every: 5, max: 2, cmax: 4, near: 90, base: 1600, load: 3, threat: .6, air: 1.5, pri: [0, 1, 2, 4],
   dry: { t: 180, tk: 1 }, lost: 3, grab: { r: 12, own: 30, t: 5, v: .5, far: 2500 },
   tx: { b: 'Base de suprimento', p: 'Ponto', main: 'Base principal', why: { node: 'nó não encontrado', full: 'o nó está cheio', mt: 'falta metal na base principal', conv: 'comboios demais a caminho', lift: 'sem helicóptero de transporte na reserva', era: 'não existe nesta época', dry: 'sem caixas' } } };
@@ -18908,7 +19009,7 @@ function lgCostU(o) {
 function lgCostP(cls, model) {
   const d = DEFS[cls] && DEFS[cls][model], C = LG.cost;
   if (cls === 'inf') return C.inf;
-  if (cls === 'trn') return d ? C[d.rad ? 'rad' : d.kind] || C.truck : C.truck;
+  if (cls === 'trn') return d ? C[d.svc] || C[d.rad ? 'rad' : d.kind] || C.truck : C.truck;
   if (cls === 'art') return lgMrl(d) ? C.mrl : C.art;
   return C[cls] || 0;
 }
@@ -19331,11 +19432,14 @@ const REC = { on: 1, p: .5, over: .7, hp: .25, life: 300, k: { tank: 1, aa: 1, a
   val: { tank: 3, art: 2, aa: 2, lav: 2, rad: 1.5 }, fix: { tank: 10, art: 8, aa: 6, lav: 6, rad: 6 },
   gap: 6, hitch: 6, tow: .55, reach: 12, road: 30, every: 5, max: 2, ahead: 300, safe: 200, seen: 300, grave: 15, hold: 600,
   amb: { n: 4, r: 8, pick: 15, load: 5, area: 250, road: 300 }, heli: { pick: 150, load: 20 },
-  keep: { arv: 1, amb: 1 }, unit: { arv: [15, 25, 30, 'veh'], amb: [10, 10, 12, 'veh'] },
-  side: { ww2: [{ arv: 'bergep', amb: 'kfz31' }, { arv: 'm32', amb: 'wc54' }], modern: [{ arv: 'm88a2', amb: 'm997' }, { arv: 'brem1', amb: 'uaz452' }] },
-  tx: { arv: 'Veículo de recuperação', amb: 'Ambulância' } };
-Object.assign(ECO.tx.u, { arv: REC.tx.arv, amb: REC.tx.amb });
-/* the vehicles: built as the transports are, kept out of every list a player picks from (not enumerable in TRNS): only a general fields them */
+  keep: { arv: 1, amb: 1, rpr: 1 }, unit: { arv: [15, 25, 30, 'veh'], amb: [10, 10, 12, 'veh'], rpr: [12, 20, 25, 'veh'] },
+  side: { ww2: [{ arv: 'bergep', amb: 'kfz31', rpr: 'opelw' }, { arv: 'm32', amb: 'wc54', rpr: 'gmcw' }], modern: [{ arv: 'm88a2', amb: 'm997', rpr: 'm1089' }, { arv: 'brem1', amb: 'uaz452', rpr: 'mtoub' }] },
+  play: { amb: 1, rpr: 1 },   // the kinds a player drives too: in TRNS's lists (the hangar, the list of where to enter, a requisition); the rest only a general fields
+  tx: { arv: 'Veículo de recuperação', amb: 'Ambulância', rpr: 'Caminhão de reparo' } };
+Object.assign(ECO.tx.u, { arv: REC.tx.arv, amb: REC.tx.amb, rpr: REC.tx.rpr });
+/* the vehicles: built as the transports are. The recovery vehicles are kept out of every list a player picks from (not enumerable in TRNS): only a
+   general fields them; the ambulances and the repair trucks (REC.play) are in them. Data-driven: another side's own (the Insurgents) is one more
+   entry of D and of REC.side[era] (and its id in the server's SVC and trn lists) */
 {
   const D = {
     bergep: { name: 'Bergepanther', role: REC.tx.arv, l: 6.9, w: 3.3, hh: 1.4, cab: .4, px: .9, hp: 80, spd: 12, tr: .5, sl: 1.5, el: [-.2, .8], seats: { gun: 1, pax: 2 }, arm: [['hmg', { name: 'MG 34' }]], svc: 'arv' },
@@ -19345,14 +19449,18 @@ Object.assign(ECO.tx.u, { arv: REC.tx.arv, amb: REC.tx.amb });
     kfz31: { name: 'Phänomen Granit (Kfz. 31)', role: REC.tx.amb, l: 5.2, w: 2, hh: 1.1, cab: 1, hp: 18, spd: 16, tr: .75, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
     wc54: { name: 'Dodge WC-54', role: REC.tx.amb, l: 4.9, w: 2, hh: 1.1, cab: 1, hp: 20, spd: 18, tr: .75, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
     m997: { name: 'HMMWV M997', role: REC.tx.amb, l: 5.2, w: 2.2, hh: 1.2, cab: 1, hp: 30, spd: 24, tr: .8, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
-    uaz452: { name: 'UAZ-452A', role: REC.tx.amb, l: 4.4, w: 1.9, hh: 1.2, cab: 1, hp: 18, spd: 22, tr: .8, seats: { pax: 2 }, arm: NOARM, svc: 'amb' } };
+    uaz452: { name: 'UAZ-452A', role: REC.tx.amb, l: 4.4, w: 1.9, hh: 1.2, cab: 1, hp: 18, spd: 22, tr: .8, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
+    opelw: { name: 'Opel Blitz (Werkstattwagen)', role: REC.tx.rpr, l: 6, w: 2.2, hh: 1.1, cab: 1.35, hp: 26, spd: 14, tr: .6, seats: { pax: 2 }, arm: NOARM, svc: 'rpr' },
+    gmcw: { name: 'GMC CCKW (oficina)', role: REC.tx.rpr, l: 6.4, w: 2.2, hh: 1.1, cab: 1.5, hp: 27, spd: 13, tr: .6, seats: { pax: 2 }, arm: NOARM, svc: 'rpr' },
+    m1089: { name: 'FMTV M1089 (socorro e oficina)', role: REC.tx.rpr, l: 7.6, w: 2.45, hh: 1.2, cab: 2.4, hp: 34, spd: 17, tr: .55, seats: { pax: 2 }, arm: NOARM, svc: 'rpr' },
+    mtoub: { name: 'Ural-4320 MTO-UB (oficina)', role: REC.tx.rpr, l: 7.4, w: 2.4, hh: 1.1, cab: 2, hp: 30, spd: 18, tr: .55, seats: { pax: 2 }, arm: NOARM, svc: 'rpr' } };
   for (const era in REC.side) REC.side[era].forEach((o, side) => {
     for (const k in o) {
       const id = o[k], d = Object.assign(D[id], { kind: 'car', era, side, id, trn: 1 }), top = (.5 + d.hh + .6) / 2;
       d.sl = d.sl || 0; d.el = d.el || [0, 0]; d.arms = d.arm.map(([a, x]) => Object.assign({}, ARMS[a], x));
       d.parts = partsOf('car', d, carBoxes(d), GS); d.tx = (d.px || 0) * GS; d.env = [0, top, 0, d.l / 2, top, d.w / 2].map(v => v * GS);
       d.mh = 1.5 + GS * (.5 + d.hh + .75); d.bl = GS * ((d.px || 0) + 1.2); d.hitR = 8; d.crewI = d.parts.findIndex(p => p.id === 'crew'); d.hot = d.parts.find(p => p.burn).box; d.lay = seatLay(d);
-      Object.defineProperty(TRNS, id, { value: d, enumerable: false });
+      Object.defineProperty(TRNS, id, { value: d, enumerable: !!REC.play[k] });
     }
   });
 }
@@ -19470,9 +19578,9 @@ function recDest(t, ri, s, k) {
 const recWhere = to => (to.o ? lgName(to.o) : LG.tx.main);
 /* ---- the recovery vehicle ---- */
 function recFleet(t, k, ri, why, area) {
-  const d = S.eco.d[t], s0 = endS(t, ri, FIELD.main);
-  if (!(d.res[k] || []).length || !ecoUse(t, k)) return null;
-  const u = dispatch(t, { kind: 'support', why, area }, () => Object.assign(addUnit('car', t, 0, 0, REC.side[S.era][S.fac[t]][k], false, ri, s0, (t ? 1 : -1) * RUNS.lane, 0), { fld: 1, lgp: 1, home: s0 }));
+  const d = S.eco.d[t], s0 = endS(t, ri, FIELD.main), id = (REC.side[S.era][S.fac[t]] || {})[k];   // a side with no model of the kind (a faction's own still to come) fields none
+  if (!id || !(d.res[k] || []).length || !ecoUse(t, k)) return null;
+  const u = dispatch(t, { kind: 'support', why, area }, () => Object.assign(addUnit('car', t, 0, 0, id, false, ri, s0, (t ? 1 : -1) * RUNS.lane, 0), { fld: 1, lgp: 1, home: s0 }));
   if (u.mis) Object.assign(u.mis, { kind: 'support', why });
   S.rec.v.push({ t, k, u, T: S.t }); return u;
 }
@@ -19646,7 +19754,7 @@ function recStep(dt) {
     const n = u.mev ? u.mev.n : 0;
     if (lost(u)) {
       if (u.rcv && u.rcv.h && u.rcv.h.tow === u) u.rcv.h.tow = null;
-      gLog(v.t, 'eco', (v.k === 'arv' ? REC.tx.arv : v.k === 'amb' ? REC.tx.amb : 'Helicóptero de evacuação') + ' perdido ' + ecoNear(u.x, u.z) + (n ? ' com ' + recN(n) : ''), u, 'rclost');
+      gLog(v.t, 'eco', (REC.tx[v.k] || 'Helicóptero de evacuação') + ' perdido ' + ecoNear(u.x, u.z) + (n ? ' com ' + recN(n) : ''), u, 'rclost');
     } else { ecoBack(v.t, v.k === 'heli' ? 'lift' : v.k, 1); if (v.k === 'heli') recHand(v.t, n, null); }
   }
   if (R.v.some(v => v.done)) R.v = R.v.filter(v => !v.done);
@@ -19709,6 +19817,215 @@ Object.assign(GEN.cn, { recv: 'recuperar veículo', medv: 'evacuação médica' 
 Object.assign(GEN.no, { tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais, à frente da linha', hurt: 'Nenhum ferido para evacuar ali' });
 genQuery = (f => (t, q) => (q && q.q === 'rec' && (t === 0 || t === 1) ? recView(t) : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => (q && q.q === 'rec' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: recView(s) } : f(s, q)))(genAnswer);
+/* ---------- repair trucks and ambulances at work (SV: the captain's "caminhão de reparo e ambulância", on REC) ----------
+   The ambulances and the repair trucks of REC are a player's too (REC.play: in the hangar, the list of where to enter and a requisition) and
+   they work standing still (under still m/s), whoever drives them, on what is simulated where this runs: the host's (or solo) AI, and on
+   every page its own vehicle or soldier (a ghost is mended by its owner's page).
+   - the repair truck (caminhão de reparo: Opel Blitz Werkstattwagen and GMC CCKW in 1944, FMTV M1089 and Ural-4320 MTO-UB today): every ground
+     vehicle of its side within rpr.r m of it (itself too, and a stopped ghost truck mends this page's own) gets hp % of its hull a second back,
+     up to full, part of every part a second (mend: the fire out at once), and ammo of its rounds a second. Faster than field repair (which
+     brings a part only to a working fraction) and anywhere. Where the economy runs, each hull point costs mt metal of the truck's side;
+     with none left it does not mend. A hulk (REC) is not mended: it is towed.
+   - the ambulance: every soldier of its side within amb.r m gets heal hp a second and stops bleeding; one down and not badly wounded is up
+     at once, a badly wounded one is stabilized (REC.hold). Driven by a player where REC runs (solo or host: the wounded are the AI's), it
+     takes aboard the stabilized and the down within REC.amb.pick m after REC.amb.load s standing, up to REC.amb.n, and standing at a node of
+     its side (a finished supply base within BLD.r, the main base within amb.base m) hands them over (recHand: back to the reserve).
+   - rules of engagement (W14): no AI picks an enemy ambulance as a target (tanks, armoured cars, infantry, aircraft, helicopters, artillery);
+     a round or a blast meant for something else still hurts it.
+   - the general (Apoio, sup, at REC's pace): a repair truck for the largest group of its damaged vehicles (hull under rpr.hurt or burning;
+     none with a known enemy within REC.safe m), no more out than the plan's number (pplan rpr); it goes, stands by the worst of them while
+     anything within rpr.area of the place needs it, waits rpr.wait s for more and goes home. A human or a model: repv { x, z } (the damaged
+     within rpr.area of there), disp { k: rpr | amb, n, mk: repair | medevac, x, z | pi } (it goes to the area and works there, waiting
+     wait s), the plan (pplan rpr | amb) and the question rec (reserve.rpr, damaged). Refused nofix (nothing damaged there), nores, off */
+const SV = { dt: .5, still: 1.2, disp: ['rpr', 'amb'],
+  rpr: { r: 22, hp: 4, part: .1, ammo: .03, mt: .2, hurt: .7, done: .97, area: 400, wait: 20, dwait: 120 },
+  amb: { r: 18, heal: 6, up: .6, base: 250, dwait: 120 } };
+Object.assign(MIS.cls, { rpr: 'repair', amb: 'medevac' });
+GPC.mis.push('repair', 'medevac');
+Object.assign(GP.mix, { rpr: [1, 1, 1], amb: [1, 1, 1] });
+const svStill = u => (u.net ? Math.hypot(u.v ? u.v.x : 0, u.v ? u.v.z : 0) : Math.abs(u.sp || 0)) < SV.still;
+const svNeeds = (o, t, lim) => !o.dead && !o.gone && o.team === t && !o.imm && !o.net && o.max > 0 && (o.hp < o.max * lim || !!o.burn);
+/* side t's damaged vehicles in groups (300 m), the most first: near x z within r when given; lim the hull fraction under which one counts */
+function svGroups(t, x, z, r, lim) {
+  const L = S.units.filter(o => svNeeds(o, t, lim) && !!o.ai && !o.def.svc && (x === undefined || Math.hypot(o.x - x, o.z - z) < r)), out = [];
+  while (L.length) {
+    const a = L.shift(), g = [a];
+    for (let i = L.length - 1; i >= 0; i--) if (hdist(L[i], a) < 300) g.push(L.splice(i, 1)[0]);
+    out.push({ x: g.reduce((s, o) => s + o.x, 0) / g.length, z: g.reduce((s, o) => s + o.z, 0) / g.length, u: g });
+  }
+  return out.sort((a, b) => b.u.length - a.u.length);
+}
+/* ---- the work, where it is simulated ---- */
+function svFix(u, k) {
+  const V = SV.rpr, t = u.team, d = ecoSim() && S.eco.d[t];
+  for (const o of S.units) {
+    if (o.dead || o.gone || o.team !== t || o.net || o.imm || Math.abs(o.x - u.x) > 40 || Math.abs(o.z - u.z) > 40 || hdist(o, u) > V.r + (o.def.env ? o.def.env[3] : 0)) continue;
+    const hurt = o.hp < o.max || !!o.burn || !!(o.mod && o.mod.hurt), low = o.arms && o.arms.some(a => a.d.ammo > 0 && a.ammo !== Infinity && a.ammo < a.d.ammo);
+    if (!hurt && !low) continue;
+    if (hurt) {
+      const add = Math.min(o.max - o.hp, o.max * V.hp / 100 * k), mt = add * V.mt;
+      if (d && d.mt < mt) { if (o === S.my) S.floats.push({ x: o.x, y: o.y + 6, z: o.z, text: 'Sem metal para o reparo', life: 1 }); continue; }
+      if (d) d.mt -= mt;
+      o.hp += add; mend(o, V.part * k);
+      if (o.ai) o.ai.rest = S.t + 1;
+    }
+    if (low) for (const a of o.arms) if (a.d.ammo > 0 && a.ammo !== Infinity && a.ammo < a.d.ammo) { a.ammo = Math.min(a.d.ammo, a.ammo + Math.ceil(a.d.ammo * V.ammo * k)); if (a.he !== undefined) shFix(a); }
+    if (o === S.my && S.t - (S.svF || 0) > 3) { S.svF = S.t; S.floats.push({ x: o.x, y: o.y + 6, z: o.z, text: 'Caminhão de reparo: casco ' + Math.round(o.hp / o.max * 100) + '%', life: 2 }); }
+  }
+}
+function svHeal(u, k) {
+  const V = SV.amb, t = u.team;
+  for (const m of S.men) {
+    if (m.dead || m.gone || m.team !== t || m.net || m.in || Math.abs(m.x - u.x) > V.r || Math.abs(m.z - u.z) > V.r || hdist(m, u) > V.r) continue;
+    if (m.down) {
+      if (!m.ai || m.stab) continue;   // a stabilized one waits for the evacuation
+      if (m.grave && recSim()) { m.stab = S.t; m.down = S.t + REC.hold; m.tr = 0; if (m.resc && m.resc.ai && m.resc.ai.rsc === m) m.resc.ai.rsc = null; m.resc = null; continue; }
+      if (m.resc && m.resc.ai && m.resc.ai.rsc === m) m.resc.ai.rsc = null;
+      m.down = 0; m.tr = 0; m.resc = null; m.hp = m.max * V.up; m.bl = 0; m.sup = S.t + 3; S.saves = (S.saves || 0) + 1;
+      continue;
+    }
+    if (m.hp < m.max || m.bl) {
+      m.hp = Math.min(m.max, m.hp + V.heal * k); m.bl = 0;
+      if (m === S.my && S.t - (S.svF || 0) > 3) { S.svF = S.t; S.floats.push({ x: m.x, y: m.y + 3, z: m.z, text: 'Ambulância: tratado', life: 2 }); }
+    }
+  }
+}
+/* the node a stopped vehicle is at: a finished supply base of its side (the base), the main base (0), or null */
+function svNode(u) {
+  const b = S.sup.find(b => !b.dead && b.prog >= 1 && b.team === u.team && hdist(b, u) < BLD.r);
+  return b || (hdist(u, S.base[u.team]) < SV.amb.base ? 0 : null);
+}
+/* the player's ambulance where REC runs: it loads the wounded it stands by and hands them over at a node */
+function svMine(P, k) {
+  const M = P.svm || (P.svm = { n: 0, T: 0 });
+  const o = svNode(P);
+  if (o !== null && M.n) { recHand(P.team, M.n, o || null); S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text: recN(M.n) + ' entregue' + (M.n > 1 ? 's' : ''), life: 3 }); M.n = 0; M.T = 0; return; }
+  if (M.n >= REC.amb.n || !S.men.some(m => recHurt(m, P.team) && hdist(m, P) < REC.amb.pick && (!recTaken(m) || m.evq === P))) { M.T = 0; return; }
+  if ((M.T += k) < REC.amb.load) return;
+  const R = { n: M.n }; recLoad(P, R, REC.amb.pick, REC.amb.n);
+  if (R.n > M.n) S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text: recN(R.n - M.n) + ' a bordo (' + R.n + '/' + REC.amb.n + '): leve a uma base', life: 3 });
+  M.n = R.n; M.T = 0;
+}
+function svStep(dt) {
+  if (!S || !S.units || (S.svT = (S.svT || 0) - dt) > 0) return;
+  S.svT = SV.dt;
+  let amb = 0;
+  for (const u of S.units) {
+    const v = u.def && u.def.svc; if (!v || v === 'arv' || u.dead || u.gone || u.imm) continue;
+    if (v === 'amb') amb++;
+    if (!svStill(u)) continue;
+    if (v === 'rpr') svFix(u, SV.dt); else svHeal(u, SV.dt);
+  }
+  S.svAmb = amb;
+  const P = S.my;
+  if (P && !P.dead && P.def && P.def.svc === 'amb' && !P.net && S.rec && recSim()) { if (svStill(P)) svMine(P, SV.dt); else if (P.svm) P.svm.T = 0; }
+}
+step = (g => dt => { g(dt); svStep(dt); })(step);
+/* ---- the rules of engagement: an enemy ambulance is no AI's target ---- */
+const svNoAmb = f => (...a) => {
+  if (!S.svAmb) return f(...a);
+  const all = S.units, t = a[0] && a[0].team; S.units = all.filter(o => !(o.def && o.def.svc === 'amb' && o.team !== t));
+  try { return f(...a); } finally { S.units = all; }
+};
+pickGround = svNoAmb(pickGround); aiPick = svNoAmb(aiPick); heliPick = svNoAmb(heliPick); pickFire = svNoAmb(pickFire); manThink = svNoAmb(manThink);
+/* ---- the AI's repair truck ---- */
+function svNext(u, R) {
+  let best = null, bs = -1e9;
+  for (const o of S.units) {
+    if (o === u || !svNeeds(o, u.team, SV.rpr.done) || o.def.svc || Math.hypot(o.x - R.at.x, o.z - R.at.z) > R.r) continue;
+    const sc = (1 - o.hp / o.max) * 3 + (o.burn ? 2 : 0) - hdist(o, u) / 500;
+    if (sc > bs) { bs = sc; best = o; }
+  }
+  return best;
+}
+function aiRpr(u, dt) {
+  const R = u.rpv, c = u.ctl, A = u.ai, V = SV.rpr;
+  c.fire[0] = c.fire[1] = false;
+  if ((A.think -= dt) <= 0) A.think = GAI.think;
+  if (R.st === 'go') {
+    let o = R.o;
+    if (!o || !svNeeds(o, u.team, V.done) || Math.hypot(o.x - R.at.x, o.z - R.at.z) > R.r) { o = R.o = svNext(u, R); R.g = null; }
+    if (!o) {   // nothing to mend: it waits at the place, then goes home
+      if (!R.idle) R.idle = S.t + R.wait;
+      if (S.t > R.idle) { R.st = 'home'; u.rp = null; return; }
+      if (!R.g) R.g = { x: R.at.x, z: R.at.z };
+      if (u.rail || hdist(u, R.g) > 30) recGo(u, R.g, 1); else { c.drive = c.turn = 0; c.brake = true; }
+      return;
+    }
+    R.idle = 0;
+    if (!R.g || hdist(R.g, o) > 8) R.g = { x: o.x, z: o.z };
+    if (!u.rail && hdist(u, o) < V.r * .6 + (o.def.env ? o.def.env[3] : 0)) { c.drive = c.turn = 0; c.brake = true; if (o.ai) o.ai.rest = S.t + 1; }
+    else recGo(u, R.g, 1);
+  } else if (recRoad(u, u.home, 1) < REC.reach) u.dead = u.gone = true;
+}
+for (const k of ['car', 'truck']) if (AI[k]) AI[k] = (f => (u, dt) => (u.rpv && !u.imm ? aiRpr(u, dt) : f(u, dt)))(AI[k]);
+/* an ambulance sent to a place with nobody there yet waits there a while (a dispatch), healing whoever comes */
+aiAmb = (f => (u, dt) => {
+  const R = u.mev, c = u.ctl;
+  if (!R || R.st !== 'go' || !(R.wait > S.t) || R.n || (R.m && recHurt(R.m, u.team))) return f(u, dt);
+  const m = recNext(u, R); if (m) { R.m = m; R.g = null; R.T = 0; return f(u, dt); }
+  c.fire[0] = c.fire[1] = false;
+  const g = R.gw || (R.gw = { x: R.at.x, z: R.at.z });
+  if (u.rail || hdist(u, g) > 30) recGo(u, g, 1); else { c.drive = c.turn = 0; c.brake = true; }
+})(aiAmb);
+/* a repair truck out of the reserve to x z: '' or why not */
+function svSend(t, x, z, why, r, wait) {
+  if (!recSim()) return 'off';
+  const p = railOf(x, z), u = recFleet(t, 'rpr', p.ri, 'reparo de veículos ' + ecoNear(x, z) + (why ? ': ' + why : ''), { x, z, r: r || SV.rpr.area });
+  if (!u) return 'nores';
+  u.rpv = { st: 'go', at: { x, z }, r: r || SV.rpr.area, wait: wait || SV.rpr.wait, o: null, g: null, idle: 0 };
+  gLog(t, 'eco', REC.tx.rpr + ' a caminho ' + ecoNear(x, z) + (why ? ': ' + why : ''), { x, z }, 'svsend');
+  svSend.u = u; return '';
+}
+/* ---- the general ---- */
+recPlan = (f => t => {
+  f(t);
+  const R = S.rec, d = S.eco.d[t], pp = d.pp, cap = pp && pp.f.rpr !== undefined ? pp.f.rpr : 1, out = R.v.filter(v => v.t === t && v.k === 'rpr');
+  if (out.length >= cap || !(d.res.rpr || []).length) return;
+  const C = S.cmd && S.cmd[t], g = svGroups(t, undefined, undefined, 0, SV.rpr.hurt).find(g => !(C && cmdKnown(C, g.x, g.z, REC.safe) > 0) && !out.some(v => v.u.rpv && Math.hypot(v.u.rpv.at.x - g.x, v.u.rpv.at.z - g.z) < SV.rpr.area));
+  if (g) svSend(t, g.x, g.z, g.u.length + (g.u.length > 1 ? ' avariados' : ' avariado'));
+})(recPlan);
+/* what the plan counts out of these kinds: the AI's in the field */
+gpHave = (f => (t, k) => (k === 'rpr' || k === 'amb' ? S.units.reduce((a, u) => a + (u.team === t && !u.dead && !!u.ai && !u.net && u.def.svc === k ? 1 : 0), 0) : f(t, k)))(gpHave);
+recView = (f => t => {
+  const V = f(t); if (!V.on) return V;
+  const d = S.eco && S.eco.d[t];
+  V.reserve.rpr = d ? (d.res.rpr || []).length : 0;
+  V.damaged = recSim() ? svGroups(t, undefined, undefined, 0, SV.rpr.done).slice(0, 8).map(g => ({ x: Math.round(g.x), z: Math.round(g.z), n: g.u.length, hp: Math.round(100 * g.u.reduce((a, o) => a + o.hp / o.max, 0) / g.u.length), burning: g.u.filter(o => o.burn).length })) : [];
+  return V;
+})(recView);
+GC.repv = { d: 'sup', f(t, c) {
+  if (!recSim()) return gBad('off');
+  if (!Number.isFinite(c.x) || !Number.isFinite(c.z)) return gBad('shape');
+  const g = svGroups(t, c.x, c.z, SV.rpr.area, SV.rpr.done)[0]; if (!g) return gBad('nofix');
+  const w = svSend(t, g.x, g.z, c.why || '', SV.rpr.area, SV.rpr.wait); return w ? gBad(w) : gYes();
+} };
+/* Dispatch of a repair truck or an ambulance: from the reserve to the area, with its mission; it works there and waits dwait s for more */
+GC.disp = (D => ({ d: D.d, f(t, c, ...a) {
+  if (!SV.disp.includes(c.k)) return D.f(t, c, ...a);
+  if (!gpOn() || !recSim() || !ECO.unit[c.k]) return gBad('off');
+  if (c.mk !== undefined && !GPC.mis.includes(c.mk)) return gBad('kind');
+  const A = gpArea(c); if (!A) return gBad('map');
+  const n = Number.isInteger(c.n) ? clamp(c.n, 1, GPC.n) : 1, P = popOf(t), U = popUse(t); if (U.veh + n > P.veh) return gBad('pop');
+  const mk = c.mk === 'repair' || c.mk === 'medevac' || c.mk === 'support' ? c.mk : MIS.cls[c.k], why = c.why || 'despacho do general: ' + ECO.tx.u[c.k].toLowerCase();
+  let got = 0, id = 0;
+  for (let i = 0; i < n; i++) {
+    let u = null;
+    if (c.k === 'rpr') { if (!svSend(t, A.x, A.z, why, Math.max(A.r, SV.rpr.area), SV.rpr.dwait)) u = svSend.u; }
+    else {
+      const p = railOf(A.x, A.z); u = recFleet(t, 'amb', p.ri, why, A);
+      if (u) { u.mev = { st: 'go', n: 0, T: 0, at: { x: A.x, z: A.z }, m: null, g: null, wait: S.t + SV.amb.dwait }; gLog(t, 'eco', 'Ambulância a caminho ' + ecoNear(A.x, A.z) + ': ' + why, A, 'svamb'); }
+    }
+    if (!u) break;
+    got++;
+    if (u.mis) { Object.assign(u.mis, { kind: mk, area: A, why }); gpMis(u.mis.d, c); if (!id) id = u.mis.d; }
+  }
+  if (!got) return gBad('res');
+  gLog(t, 'rf', 'Despacho: ' + got + ' × ' + ECO.tx.u[c.k].toLowerCase() + ' com missão ' + mk + ' ' + gNear(A.x, A.z) + (c.why ? ': ' + c.why : ''), A, 'disp' + id);
+  return gYes(id);
+} }))(GC.disp);
+Object.assign(GEN.cn, { repv: 'reparo de veículos' });
+Object.assign(GEN.no, { nofix: 'Nenhum veículo avariado ali' });
 /* ---- campaigns and the threat board (F4) in the funnel: camp, dpol, triage, qrf; the question threats ----
    camp { H: s to its H-hour (GENC.H), why } opens a campaign (its id); { id, op, role?: main sec fnt raid } attaches an operation (an assault's H-hour becomes
    the campaign's; the role by default: the first assault main, the next sec, a feint fnt, a raid raid); { id, k: 'end' } ends it (its operations go on) (atk).
@@ -22656,7 +22973,7 @@ Net.allObjs = (g => () => { g(); const l = []; for (const b of brs()) if (S.os[b
    radio, contacts at the rung each reached) and decide (its mission, its leash and rules, the order it holds, what its mind chose, the call
    it has open). It reads what the sim already keeps (q.mis, q.belT, q.mind, q.hq) and never recomputes it, so asking changes nothing */
 const MISN = { attack: 'atacar', defend: 'defender', ambush: 'emboscar', recon: 'reconhecer', escort: 'escoltar', garrison: 'guarnecer', patrol: 'patrulhar', interdict: 'interditar',
-  support: 'apoiar', cap: 'patrulha aérea', cas: 'apoio aéreo aproximado', lift: 'transportar', build: 'construir', reserve: 'reserva' };
+  support: 'apoiar', cap: 'patrulha aérea', cas: 'apoio aéreo aproximado', lift: 'transportar', build: 'construir', reserve: 'reserva', repair: 'reparar veículos', medevac: 'evacuar feridos' };
 const MIST = { way: 'a caminho', exec: 'em execução', done: 'cumprida', inviable: 'inviável', lost: 'perdida' };
 const W13 = { lat: ['estrita', 'normal', 'livre'], roe: { hold: 'não abrir fogo', return: 'só responder ao fogo', free: 'fogo livre' },
   mind: { duty: 'cumprir a missão', fall: 'recuar', help: 'atender a um pedido de ajuda' }, link: ['cortado (bloqueador)', 'fora da rede de comando', 'na rede de comando'],
@@ -23596,7 +23913,7 @@ function hideStep() {
     if (O.hx === undefined) { const p = O.x !== undefined ? O : routeAt(S.T.routes[O.ri !== undefined ? O.ri : q.ri], clamp(O.s || 0, 0, S.T.routes[O.ri !== undefined ? O.ri : q.ri].len)); O.hx = p.x; O.hz = p.z; }
     const why = hideWhy(q, O, L), X = HIDES();
     if (why) { q.hw = { O, T: S.t + HIDE.again }; X.road[why] = (X.road[why] || 0) + 1; continue; }
-    const way = tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK);
+    const way = orgPoly(tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK));   // the grid's steps rounded (ORG)
     if (!way) { q.hw = { O, T: S.t + HIDE.retry }; X.none++; continue; }   // no budget this tick, or no way
     if (way.len > HIDE.stretch * Math.hypot(O.hx - L.x, O.hz - L.z) + 300) { q.hw = { O, T: S.t + HIDE.again }; X.long++; continue; }
     q.hw = { O, way }; q.tp = way; q.ts = 0; q.at = false; X.go++;
@@ -27367,9 +27684,11 @@ function buildTrn(u, wreck) {
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
 }
-/* the recovery vehicles and ambulances (REC): a car's body, and on it the tracks, the crane and the spade, or the box with its red crosses */
+/* the recovery vehicles, repair trucks and ambulances (REC): a car's body, and on it the tracks, the crane and the spade, the workshop with its lockers and jib,
+   or the box with its red crosses */
 Object.assign(TLOOK, { bergep: { ax: [2.5, 1.4, .3, -.8, -1.9, -2.9], hood: 0, roof: 1 }, m32: { ax: [2.2, 1.2, .1, -1, -2.1], hood: 0, roof: 1 }, m88a2: { ax: [3.2, 2, .8, -.4, -1.6, -2.8, -3.6], hood: 0, roof: 1 },
-  brem1: { ax: [2.7, 1.6, .5, -.6, -1.7, -2.8], hood: 0, roof: 1 }, kfz31: { ax: [1.7, -1.3], hood: 1.2, roof: 1 }, wc54: { ax: [1.5, -1.3], hood: 1.1, roof: 1 }, m997: { ax: [1.6, -1.6], hood: 1.4, roof: 1, slant: 1 }, uaz452: { ax: [1.4, -1.3], hood: .4, roof: 1 } });
+  brem1: { ax: [2.7, 1.6, .5, -.6, -1.7, -2.8], hood: 0, roof: 1 }, kfz31: { ax: [1.7, -1.3], hood: 1.2, roof: 1 }, wc54: { ax: [1.5, -1.3], hood: 1.1, roof: 1 }, m997: { ax: [1.6, -1.6], hood: 1.4, roof: 1, slant: 1 }, uaz452: { ax: [1.4, -1.3], hood: .4, roof: 1 },
+  opelw: { ax: [2.2, -1.6], hood: 1.5, roof: 1 }, gmcw: { ax: [2.5, -1.2, -2.3], hood: 1.6, roof: 1 }, m1089: { ax: [2.5, -1.4, -2.6], hood: 0, roof: 1 }, mtoub: { ax: [2.9, -1.3, -2.6], hood: 1.7, roof: 1 } });
 buildTrn = (f => (u, wreck) => {
   const g = f(u, wreck), d = u.def; if (!d.svc) return g;
   const L = d.l, W = d.w, H = d.hh, by = .45 + H, dark = mat(0x1c1d1e), M2 = mat(wreck ? 0x1f1f1c : u.col[1]);
@@ -27380,6 +27699,14 @@ buildTrn = (f => (u, wreck) => {
     box(.16, .16, W * .62, M2, L * .18 - .45, by + 2.15, 0); box(.1, 1.2, .06, dark, L * .18 - .5, by + 1.5, 0);   // its head and the hook
     box(.25, .8, W * .92, M2, -L * .5 - .12, .7, 0, -.35);   // the spade at the tail
     box(L * .25, .35, W * .7, M2, -L * .3, by + .1, 0);   // the winch
+  } else if (d.svc === 'rpr') {   // the repair truck: the workshop body, its lockers and the jib of its crane over the tail
+    const bl = L * .58, bx = -L * .5 + bl / 2 + .05, yel = mat(wreck ? 0x2a2820 : 0xc9a227);
+    box(bl, 1.35, W * .94, M2, bx, by + .55, 0);
+    for (const s of SIDES) for (let i = 0; i < 3; i++) box(bl * .26, .8, .03, dark, bx - bl * .33 + i * bl * .33, by + .5, s * (W * .47 + .02));   // the tool lockers
+    for (const s of SIDES) box(bl * .9, .08, .04, yel, bx, by + 1.05, s * (W * .47 + .03));   // the band that tells it from a cargo truck
+    box(.25, .9, .25, dark, -L * .5 + .3, by + 1.65, 0); box(1.9, .14, .14, dark, -L * .5 + .9, by + 2.1, 0, -.25);   // the crane's post and its jib
+    box(.05, .7, .05, dark, -L * .5 + 1.75, by + 1.9, 0);   // the hook
+    box(.18, .14, .18, mat(wreck ? 0x2a2820 : 0xd98a1a), d.cab, by + .95, 0);   // the beacon on the cab
   } else {
     const red = mat(wreck ? 0x2b1f1c : 0xb3201d), wh = mat(wreck ? 0x3a3a36 : 0xe8e6df), bl = L * .55, bx = -L * .5 + bl / 2 + .05;
     box(bl, 1.25, W * .92, wh, bx, by + .5, 0);   // the box behind the cab
@@ -27414,7 +27741,9 @@ function trnScene() {
     if (u.wet !== undefined && u.m) u.m.position.y = u.y + 1.5 - (u.wet ? .5 : 0);
   }
 }
-const NOTE = { car: 'Rápido e sem proteção: quem vai a bordo fica exposto.', truck: 'Leva um pelotão inteiro, remunicia soldados ao lado e acelera a obra de uma base de suprimento.', lav: 'Blindagem contra fuzil, metralhadora e estilhaços; canhão automático contra infantaria, veículos leves e aeronaves baixas. Fraco contra tanque.' };
+const NOTE = { amb: 'Ambulância com a cruz vermelha: a IA inimiga não a escolhe como alvo. Parada, trata os soldados do seu lado em volta (feridos leves se levantam) e embarca os feridos graves; parada numa base de suprimento ou na base principal, entrega os feridos, que voltam à reserva.',
+  rpr: 'Caminhão de reparo: parado, repara os veículos do seu lado em volta até o casco inteiro, apaga o fogo e remunicia um pouco. Com a economia ligada, cada reparo gasta metal.',
+  car: 'Rápido e sem proteção: quem vai a bordo fica exposto.', truck: 'Leva um pelotão inteiro, remunicia soldados ao lado e acelera a obra de uma base de suprimento.', lav: 'Blindagem contra fuzil, metralhadora e estilhaços; canhão automático contra infantaria, veículos leves e aeronaves baixas. Fraco contra tanque.' };
 /* the mortar kit in the hangar: its card, its keys, its mission */
 function cmdUi() {
   const card = CARD.inf, leg = LEGEND.inf, brief = BRIEF.inf, km = v => (v / 1000).toFixed(1).replace('.', ',');
@@ -27447,7 +27776,7 @@ function trnUi() {
     return { mesh: () => buildUnit({ kind: d.kind, def: d, col: [sd.col, sd.col2], x: 0, y: -4.5, z: 0, h: 0, ty: .5, tp: .08 }), L: d.kind === 'car' ? 12 : 16, role: d.role,
       meters: [['VEL', d.spd / 28], ['LUGARES', (d.lay.length - 1) / 13], ['CASCO', d.hp / 150]],
       spec: Math.round(d.spd * 3.6) + ' km/h · ' + d.lay.length + ' lugares' + (d.swim ? ' · anfíbio' : '') + (d.mat ? ' · leva material de obra' : ''),
-      arm: (arms.length ? arms.map(a => a.name).join(' · ') : 'Sem armamento') + '. ' + (d.rad ? 'Parado e com a antena no alto (O), é ponto de entrada da infantaria e reabastece quem está ao lado. Blindagem leve.' : NOTE[d.kind]) };
+      arm: (arms.length ? arms.map(a => a.name).join(' · ') : 'Sem armamento') + '. ' + (d.rad ? 'Parado e com a antena no alto (O), é ponto de entrada da infantaria e reabastece quem está ao lado. Blindagem leve.' : NOTE[d.svc] || NOTE[d.kind]) };
   };
   const inf = CARD.inf;
   CARD.inf = (id, d) => {
@@ -29714,7 +30043,7 @@ function gorProd(V) {
   const E = gorEco(), tac = gorTac(), host = !S.net || S.host, P = host ? (E ? gpView(S.me) : null) : gorQ('plan'), L = S.lg || !host ? (host ? lgView(S.me) : gorQ('logi')) : null, R = S.rec || !host ? (host ? recView(S.me) : gorQ('rec')) : null;
   const sg = JSON.stringify([!!E, E && [E.q.map(q => [q.id, q.k, q.why, Math.floor(q.p * 10)]), E.res, E.keep, Math.floor(E.stock.en / 10), Math.floor(E.stock.mt / 10), E.sites.map(s => [s.id, s.k, s.gd, Math.floor(s.prog * 10)]), E.dep.map(d => [d.i, d.own, d.foe])],
     P && P.kinds && P.kinds.map(k => [k.k, k.field, k.have, k.res, k.q, k.set]), L && L.nodes && L.nodes.map(n => [n.key, n.crates, n.pri, n.inbound, n.tied]), L && L.convoys && L.convoys.length,
-    R && R.hulks && R.hulks.map(h => [h.id, h.towed, h.coming]), R && R.wounded && R.wounded.map(w => [w.x, w.n]), R && R.reserve, GOR.bk, GOR.mode, GOR.scrap, tac, S.era]);
+    R && R.hulks && R.hulks.map(h => [h.id, h.towed, h.coming]), R && R.wounded && R.wounded.map(w => [w.x, w.n]), R && R.damaged && R.damaged.map(g => [g.x, g.n, g.hp]), R && R.reserve, GOR.bk, GOR.mode, GOR.scrap, tac, S.era]);
   if (GOR.sig.prod === sg) return; GOR.sig.prod = sg;
   const btn = gorBtn, two = gorTwo, fill = gorFill;
   for (const id of ['#gcProd', '#gcBuild', '#gcRes', '#gcSite', '#gcDep']) $(id).hidden = !E;
@@ -29751,10 +30080,11 @@ function gorProd(V) {
         btn('−', { a: 'sprio', nd: n.key, p: Math.max(0, n.pri - 1) }, 'Prioridade menor para o general logístico'), btn('+', { a: 'sprio', nd: n.key, p: Math.min(3, n.pri + 1) }, 'Prioridade maior para o general logístico')])) : gorNone('Nenhum nó além da base principal'));
   }
   if (R && R.on) {
-    $('#gcRecN').textContent = 'Na reserva: ' + R.reserve.arv + ' de recuperação, ' + R.reserve.amb + (R.reserve.amb === 1 ? ' ambulância' : ' ambulâncias') + (S.era === 'modern' ? ', ' + R.reserve.lift + ' helicóptero(s)' : '');
+    $('#gcRecN').textContent = 'Na reserva: ' + R.reserve.arv + ' de recuperação, ' + (R.reserve.rpr || 0) + ' de reparo, ' + R.reserve.amb + (R.reserve.amb === 1 ? ' ambulância' : ' ambulâncias') + (S.era === 'modern' ? ', ' + R.reserve.lift + ' helicóptero(s)' : '');
     const hk = (R.hulks || []).map(h => gorLi((h.own ? '' : 'Inimigo: ') + h.name + ' ' + h.id + ' · ' + ecoNear(h.x, h.z) + (h.towed ? ' · rebocado' : h.coming ? ' · a caminho' : ' · sucata em ' + h.left + ' s'), h.towed || h.coming ? [] : [btn('Recuperar', { a: 'recv', id: h.id }, 'O veículo de recuperação da reserva reboca até o nó mais perto')]));
     const wd = (R.wounded || []).map(w => gorLi(w.n + (w.n === 1 ? ' ferido' : ' feridos') + ' ' + ecoNear(w.x, w.z) + (w.stabilized ? ' (' + w.stabilized + ' estabilizados)' : ''), [btn('Evacuar', { a: 'medv', x: w.x, z: w.z }, 'Ambulância (ou helicóptero) leva os feridos ao nó mais perto')]));
-    fill('#gcRecL', hk.length + wd.length ? hk.concat(wd) : gorNone('Nenhum casco imobilizado nem ferido à espera'));
+    const dm = (R.damaged || []).map(g => gorLi(g.n + (g.n === 1 ? ' veículo avariado' : ' veículos avariados') + ' ' + ecoNear(g.x, g.z) + ' · casco ' + g.hp + '%' + (g.burning ? ' · ' + g.burning + ' em chamas' : ''), [btn('Reparar', { a: 'repv', x: g.x, z: g.z }, 'O caminhão de reparo da reserva vai até eles e repara parado ao lado')]));
+    fill('#gcRecL', hk.length + wd.length + dm.length ? hk.concat(wd, dm) : gorNone('Nenhum casco imobilizado, ferido à espera ou veículo avariado'));
   }
 }
 /* Missões: the mission a selection or a dispatch takes, the dispatch, the support requests, the missions in the field, the operations */
@@ -29770,7 +30100,7 @@ function gorMisP(V) {
     ...opt('Recuo', [btn('−', { a: 'brk', n: -1 }, 'Recuar com menos força'), gE('b', '', 'abaixo de ' + Math.round(W.brk * 100) + '%'), btn('+', { a: 'brk', n: 1 }, 'Recuar mais cedo')]),
     ...opt('Hora H', [btn('−', { a: 'mH', n: -1 }), gE('b', '', W.H ? 'em ' + W.H + ' s' : 'já'), btn('+', { a: 'mH', n: 1 })])]);
   fill('#gcMisB', [btn('Dar às selecionadas', { a: 'mode', m: 'mis' }, 'As esquadras selecionadas recebem esta missão: clique a área no mapa', GOR.mode === 'mis', !tac)]);
-  const ks = E ? GPC.kinds.filter(k => ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era)) : [];
+  const ks = E ? GPC.kinds.concat(SV.disp).filter(k => ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era)) : [];
   $('#gcDisp').hidden = !ks.length;
   fill('#gcDispB', ks.map(k => btn(gorTwo(ECO.tx.u[k], String(E.res[k] || 0)), { a: 'disp', k }, 'Despachar ' + ECO.tx.u[k].toLowerCase() + ' da reserva (' + (E.res[k] || 0) + ') com a missão acima: clique a área · Shift: ' + GPC.n + ' de uma vez', GOR.mode === 'disp' && W.dk === k, !tac || !(E.res[k] > 0))));
   fill('#gcMisL', M && M.sq && M.sq.length ? M.sq.slice(0, 16).map(o => { const li = gorLi('#' + o.id + ' ' + (GEN.job[o.job] || o.job || 'esquadra') + ' · ' + o.nm + ' · ' + (MIST[o.st] || o.st) + (o.why ? ' — ' + o.why : ''), [btn('Ver', { a: 'pick', id: o.id }, 'Selecionar e ver o cartão desta esquadra')], GOR.sel.has(o.id) ? 'on' : ''); return li; }) : gorNone(M ? 'Nenhuma esquadra em campo' : 'Aguardando o anfitrião…'));
@@ -29852,6 +30182,7 @@ function gorAct(d, shift) {
   else if (d.a === 'sprio') gorSend({ c: 'sprio', nd: d.nd, p: +d.p });
   else if (d.a === 'recv') gorSend({ c: 'recv', id });
   else if (d.a === 'medv') gorSend({ c: 'medv', x: +d.x, z: +d.z });
+  else if (d.a === 'repv') gorSend({ c: 'repv', x: +d.x, z: +d.z });
   else if (d.a === 'mk') { W.mk = d.k; GOR.sig = {}; }
   else if (d.a === 'lat') { W.lat = +d.n; GOR.sig = {}; }
   else if (d.a === 'roe') { W.roe = d.k; GOR.sig = {}; }

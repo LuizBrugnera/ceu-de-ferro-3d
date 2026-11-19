@@ -11090,15 +11090,17 @@ const AIB = { avg: 4, worst: 8, gen: 1, win: 300, S: null, g: 0, u: 0, n: 0, i: 
 /* SLICE: spot, the look is cut to end in SPOT.every / spot s of steps, when it has more than min pieces; plan, pieces of a commander's plan a step at 60 steps a second */
 const SLICE = { spot: 1.25, min: 60, plan: 1 };
 /* CLK: the battle's clock against the frames. A frame r s of real time apart (k: the watch's speed) owes the battle r * k s, up to catch s of
-   real time a frame (a stall, a tab put away, does not come back as a burst; only below 1 / catch frames a second does the battle slow down,
-   where before it was below 20). The debt is paid in steps of h s, as before, unless those steps would cost more than budget ms by c, the
-   measured cost of a step (an average, ema): then in fewer and longer ones, hmax s at most. Above 1 / .05 frames a second and with steps
-   that fit the budget nothing changes: the same steps of the same length as before. plan(r, k) is the frame's: { n steps of d s }; cost(ms, n) tells it what n steps took */
-const CLK = { h: .017, hmax: 1 / 30, catch: .25, budget: 40, ema: .2, c: 0,
+   real time a frame (a stall, a tab put away, does not come back as a burst). The debt is paid in steps of h s, as before, while those steps
+   fit in budget ms by c, the measured cost of a step (an average, ema); when they do not, in as many as fit (one at least), each longer, up
+   to hmax s: a step costs much the same however long it is, so the battle keeps more of the clock for the same time a frame. Only when even
+   steps of hmax do not pay the debt does the battle slow down (before: below 20 frames a second, whatever a step cost), and the frames do not
+   slow down with it. With cheap steps nothing changes: the same steps of the same length as before. plan(r, k) is the frame's: n steps of
+   d s, g s of battle in all; cost(ms, n) tells it what the n steps took */
+const CLK = { h: .017, hmax: 1 / 30, catch: .25, budget: 100, ema: .2, c: 0,
   plan(r, k) {
-    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), lo = Math.ceil(g / CLK.hmax - 1e-9), hi = Math.ceil(g / CLK.h - 1e-9);
-    const n = Math.max(1, lo, Math.min(hi, CLK.c > 0 ? Math.floor(CLK.budget / CLK.c) : hi));
-    return { n, d: g / n, g };
+    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), hi = Math.ceil(g / CLK.h - 1e-9);
+    const n = CLK.c > 0 ? Math.max(1, Math.min(hi, Math.floor(CLK.budget / CLK.c))) : hi, d = Math.min(g / n, CLK.hmax);
+    return { n, d, g: n * d };
   },
   cost(ms, n) { if (n > 0 && ms >= 0) { const c = ms / n; CLK.c = CLK.c ? CLK.c + (c - CLK.c) * CLK.ema : c; } } };
 const aiJob = (J, n) => { while (J && n-- > 0) if (J.next().done) return null; return J; };

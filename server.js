@@ -409,13 +409,15 @@ RX.grant = (c, m) => {
   };
 }
 /* civilians in the towns (welcome says civ: 1). civ: the host's word on them, to the room: k 0 rows of [id, x, z, heading, flags, colour], k 1 the militia as
-   triples [aid, colour, owner]. civhit and civrec go to the host alone: a guest's own hits on civilians, pairs of id and damage, and a request to recruit one */
+   triples [aid, colour, owner], k 2 the laws of war as [side (-1 none), civilians it killed, town (-1 none), the sides that town turned against (bits)].
+   civhit and civrec go to the host alone: a guest's own hits on civilians, pairs of id and damage, and a request to recruit one */
 {
   const row = e => vec(e, 6) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && Number.isInteger(e[4]) && e[4] >= 0 && e[4] < 32 && Number.isInteger(e[5]) && e[5] >= 0 && e[5] < 32;
   RX.civ = (c, m) => {
     if (!host(c) || !Array.isArray(m.e)) return;
     if (m.k === 0 && m.e.length <= 40 && m.e.every(row)) cast(c, { t: 'civ', k: 0, e: m.e });
     else if (m.k === 1 && m.e.length <= 90 && m.e.length % 3 === 0 && m.e.every((v, i) => (i % 3 ? Number.isInteger(v) && v >= 0 && v < 1e6 : aid(v)))) cast(c, { t: 'civ', k: 1, e: m.e });
+    else if (m.k === 2 && vec(m.e, 4) && m.e.every(Number.isInteger) && m.e[0] >= -1 && m.e[0] <= 1 && m.e[1] >= 0 && m.e[1] < 1000 && m.e[2] >= -1 && m.e[2] < 1000 && m.e[3] >= 0 && m.e[3] < 4) cast(c, { t: 'civ', k: 2, e: m.e });
   };
   RX.civhit = (c, m) => {
     const h = c.room.host;
@@ -657,7 +659,7 @@ const partidas = () => {
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
 /* a batch is a list of events, each an object of a known kind with its match time */

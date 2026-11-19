@@ -1,7 +1,9 @@
 'use strict';
 /* Civilians online, headless, through the real relay server: a host soldier (side 0), a guest of side 0 and a guest of side 1. The host's civilians
    reach both guests as copies; a guest's round kills one on the host and everyone sees it; a guest recruits one by the host (the militiaman is the
-   host's AI soldier, marked on the other guests too); a burst on the host kills the copies; the next host after the first leaves runs them.
+   host's AI soldier, marked on the other guests too); a burst on the host kills the copies; the laws of war (W14): the host charges the side whose
+   fire it was and tells the guests (civ k 2), a town that turned against a side is known to the guests and recruits nobody for it; the next host
+   after the first leaves runs them.
    With SERVER=<an older server.js> welcome has no civ: the host fields none and nobody is offered a recruit */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const all = [], dt = 1 / 60;
@@ -57,8 +59,13 @@ const put = (c, x, z, h) => { const P = c.S.my; P.x = x; P.z = z; P.y = c.$('man
   const w = h.S.civs.find(o => !o.in && !o.dead && o !== vc);
   h.$('explode')(w.x + 2, w.y, w.z, 12, 90, h.S.my, 0, false); await run(1.5);
   ok(w.dead && a.S.civs.find(o => o.id === w.id).dead, 'a burst of the host\'s kills one and the guests see it');
+  /* the laws of war online */
+  await run(CIV.say + 1);
+  ok(h.S.civD && h.S.civD.n[0] === 2 && h.S.civD.tk[0] === 2 * CIV.toll && !h.S.civD.n[1], 'the host charged side 0 ' + 2 * CIV.toll + ' tickets for its two (Ana\'s rounds, its own burst)');
+  ok(a.S.cq.tk[0] === h.S.cq.tk[0] && c.S.cq.tk[0] === h.S.cq.tk[0], 'and the guests\' tickets say the same (' + h.S.cq.tk + ')');
+  ok([a, c].every(x => x.S.feed.some(f => /civil morto|civis mortos/.test(f.text))), 'both guests are told in the feed (' + ((c.S.feed.find(f => /civ/.test(f.text)) || {}).text) + ')');
   /* recruit by a guest */
-  const r = h.S.civs.find(o => !o.in && !o.dead), ra = a.S.civs.find(o => o.id === r.id);
+  const r = h.S.civs.find(o => !o.in && !o.dead && o.mode < 3), ra = a.S.civs.find(o => o.id === r.id); r.think = 1e9; r.mode = 0; r.goal = null; r.wT = 1e9;   // it stands where it is
   put(a, ra.x + 1.2, ra.z, 0); await run(.6);
   ok(a.S.civU && a.S.civU.id === r.id && !a.S.civW, 'Ana beside a civilian is offered the recruit');
   a.S.input.recruit = true; await run(CIV.hold + .8, () => { const o = a.S.civU; if (o) put(a, o.x + 1.2, o.z); }); a.S.input.recruit = false; await run(1.5);
@@ -71,6 +78,18 @@ const put = (c, x, z, h) => { const P = c.S.my; P.x = x; P.z = z; P.y = c.$('man
   ok(!a.S.civs.some(o => o.id === r.id) && !c.S.civs.some(o => o.id === r.id), 'and the civilian it was is gone from both');
   put(a, mh.x + 40, mh.z); await run(12);
   ok(Math.hypot(mh.x - a.S.my.x, mh.z - a.S.my.z) < 15, 'it follows Ana on the host');
+  /* a town turns against side 1 */
+  const tb = h.S.T.burgs.findIndex(b => h.S.civs.filter(o => !o.dead && !o.gone && !o.in && o.g && o.g.b === b).length >= 2);
+  h.$('civTurn')(tb, 1); await run(1.5);
+  ok(a.$('civHates')(tb, 1) && c.$('civHates')(tb, 1) && !c.$('civHates')(tb, 0), 'a town turns against side 1 on the host: both guests know it (civ k 2)');
+  ok(c.S.feed.some(f => /se voltou contra/.test(f.text)), 'Caio is told: ' + ((c.S.feed.find(f => /se voltou contra/.test(f.text)) || {}).text));
+  const tv = h.S.civs.find(o => !o.dead && !o.gone && !o.in && o.g && o.g.b === h.S.T.burgs[tb]); tv.think = 1e9; tv.mode = 0; tv.goal = null; tv.wT = 1e9;
+  await run(.5); const tc = c.S.civs.find(o => o.id === tv.id);
+  put(c, tc.x + 1.2, tc.z, 0); await run(.6);
+  ok(c.S.civU && c.S.civU.id === tv.id && c.S.civO, 'Caio beside one of its people is told it turned against his side');
+  const ml = h.S.men.filter(m => m.mil && m.team === 1).length;
+  c.S.input.recruit = true; await run(CIV.hold + .8, () => { put(c, tc.x + 1.2, tc.z); }); c.S.input.recruit = false; await run(1.5);
+  ok(!tv.gone && h.S.men.filter(m => m.mil && m.team === 1).length === ml, 'and the host recruits nobody for him');
   /* the host leaves */
   const live = h.S.civs.filter(o => !o.dead).length;
   h.on = false; h.Net.close(); await run(1.5);

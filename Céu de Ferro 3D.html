@@ -2071,7 +2071,7 @@ heliGround = (g => (id, t, i, ai) => (ai ? dispatchIf(t, { why: 'transporte aér
 reqOpen = (g => (C, kind, id, ri) => dispatch(C.t, { why: 'requisição', target: { ri } }, () => g(C, kind, id, ri)))(reqOpen);
 radScan = (g => () => dispatch(-1, { kind: 'support', why: 'rádio da frente' }, g))(radScan);
 postGarr = (g => f => dispatch(f.team, { kind: 'garrison', why: 'guarnição do posto' }, () => g(f)))(postGarr);
-civTake = (g => (w, t) => dispatch(t, { kind: 'garrison', why: 'milícia da vila' }, () => g(w, t)))(civTake);
+civTake = (g => (w, t, ...a) => dispatch(t, { kind: 'garrison', why: 'milícia da vila' }, () => g(w, t, ...a)))(civTake);
 demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeepAlive);
 /* Dispatch: the opening, then with an economy the general's (gpStep), else on the classic clocks: per side the base AA, the planes and the columns,
    each by an order with its mission */
@@ -4091,7 +4091,7 @@ function lodSquad(q) {
 }
 /* the s to a soldier's next thought: the usual, or his squad's LOD's */
 const lodThink = m => (m.sq && m.sq.lod && LOD.T[m.sq.lod]) || IAI.think;
-/* what a battery shells: the spotted vehicle worth most, standing ones and clusters first */
+/* what a battery shells: the spotted vehicle worth most, standing ones and clusters first; none its side's rules of engagement hold (roeHeld: civilians in sight) */
 function pickFire(u, w) {
   const G = GAI.art, V = G.val; let best = null, bs = G.min;
   const all = [...S.units, ...S.men, ...S.sup];
@@ -4102,7 +4102,7 @@ function pickFire(u, w) {
     const d = hdist(o, u); if (d < G.near || d > w.range) continue;
     let sc = (o.man ? IAI.art : V[tk(o)] || 0) + (S.t - o.moveT > G.still ? V.still : 0) - V.near;
     for (const q of all) if (!q.dead && q.team === o.team && hdist(q, o) < G.cluster) sc += q.man ? IAI.art : V.near;
-    if (sc > bs && !(FF.ai && ffOn() && ffDanger(o.x, o.z, w.r, u.team, u))) { bs = sc; best = o; }
+    if (sc > bs && !(FF.ai && ffOn() && ffDanger(o.x, o.z, w.r, u.team, u)) && !roeHeld(u.team, o.x, o.z, w.r, o)) { bs = sc; best = o; }
   }
   return best;
 }
@@ -6881,8 +6881,8 @@ Net.hit = (o, dmg, by, h) => {
 Net.take = (o, m, by) => hurt(o)(o, m.dmg, by, true, { k: m.k, pt: o.man ? m.pt & 3 : m.pt < o.def.parts.length ? m.pt : 0, via: Array.isArray(m.v) ? m.v : null, w: m.w === 1 || m.w === 2 ? m.w : 0 });
 /* ---------- civilians (CIV) ----------
    Ambience in the towns: people of no side who walk the streets, stand, sit, go in and out of the houses, run for cover and stay inside when
-   there is shooting or a burst near, and die like soldiers do (a round, a burst, a house coming down, a hull driving over them) at no cost in
-   tickets or score. They are their own list, S.civs, and nothing the AI looks for or shoots at: a round simply stops in one that stands in its
+   there is shooting or a burst near, and die like soldiers do (a round, a burst, a house coming down, a hull driving over them); a death is
+   charged to the side whose fire it was (the laws of war, below), never scored. They are their own list, S.civs, and nothing the AI looks for or shoots at: a round simply stops in one that stands in its
    way. They are drawn with the soldier rig in clothes of their own, and are on no map and no marker. cap: alive at once; per: civilians per
    house of a town, lo and hi[kind of town] the least and most of one; hp, walk and run: m/s; wait: s standing, in: s inside a house, door: the
    share of walks that end at a door (the rest at a street corner), pin: the chance of going in at a door; hear: m at which a shot (shot), a burst
@@ -6894,19 +6894,31 @@ Net.take = (o, m, by) => hurt(o)(o, m.dmg, by, true, { k: m.k, pt: o.man ? m.pt 
    magazine, no grenades, no special, half the health), and its loss costs cost tickets. By a player (each: most at a time, ring: m round the
    player it keeps, leash: m it may go from him to fight) it follows him; by the AI (n: civilians to a squad, every: s between squads, wait: s a
    squad has held a town with no enemy within calm m, town and side: most alive of them) it is one squad that holds the town. rout: the share
-   of a militia squad left at which it breaks */
+   of a militia squad left at which it breaks.
+   The laws of war (W14). toll: tickets a civilian killed costs the side whose round, burst, hull or collapse it was (tickets are morale, D25),
+   told in the feed say s after the first of a run. rage: a town where one side has killed n of its people turns against that side for the rest of
+   the match (none of its people is recruited by that side again) and arms its militia for the other, a squad at once and every mil.every s while
+   it is so. evac: a town where its people keep hearing combat (at share of them alarmed within al s, at each look of the planner) for after s empties:
+   they walk at sp m/s to a refuge d m beyond its edge, away from the fighting (within j m of it), wait there, and come home once nothing has been
+   heard there and no two sides have stood within r m of its edge for back s. roe: the AI's rules of engagement: a battery, a mortar, a rocket
+   launcher, a fire mission or a one-way drone of side t holds a burst on a point with a civilian in the open that t has seen in the last mem s within
+   the burst's radius plus pad m, unless its target is identified (an economy site found out, a trench, a supply base, a radio, or a soldier or
+   vehicle that an AI of the side has identified on the ladder; a house held by soldiers, or a bare point, is not). A side sees a civilian out of
+   doors within see m of one of its soldiers, vehicles or aircraft with a clear line, looked at every `every` s; note: s between two lines in the
+   log for holds in one place (a cell of cell m) */
 const CIV = {
   cap: 64, per: .2, lo: 2, hi: { town: 18, village: 8, hamlet: 4 }, hp: 14, walk: 1.3, run: 4.4, wait: [4, 16], in: [12, 45], door: .3, pin: .5, think: .25,
   hear: { shot: 220, boom: 450, near: 40 }, hide: [25, 70], house: 90, away: 80, shelter: .35, dodge: [26, 2.5], reach: 3.2, hold: 2.5, plan: 4, net: .25, rows: 36, gone: 3,
   pal: [[0x8a4b3f, 0x3a3a45, 0x2f2a26], [0x4f6a8a, 0x4a3f33, 0x5b4a3a], [0xb8a15a, 0x35322d, 0x6a2f2f], [0x7a6a8f, 0x3d4047, 0x23262b], [0xa8523a, 0x5a4d3c, 0x3b3128], [0x5f8a7a, 0x3a3532, 0x8a8372],
     [0xc9b58a, 0x4b5160, 0x3a3a3a], [0x8f3f55, 0x2f3238, 0x26211e], [0xd0cfc4, 0x4a4033, 0x7a5a3a], [0x56607a, 0x6b5a45, 0x4a2f2a]],
+  toll: 2, say: 2, rage: { n: 5 }, evac: { after: 20, share: .25, al: 6, sp: 3.4, d: 200, j: 25, back: 300, r: 250 }, roe: { on: 1, see: 650, mem: 20, pad: 15, every: 1, note: 30, cell: 300 },
   mil: { n: 3, every: 150, wait: 60, calm: 400, town: 6, side: 9, each: 3, cost: 0, rout: .67, leash: 40, ring: 5,
     kit: {
       ww2: { name: 'Milícia', role: 'Civil armado', era: 'ww2', side: 0, hp: 11, parts: [], arms: [{ name: 'Fuzil velho de ferrolho', rate: 2.2, dmg: 9, spd: 620, mag: 5, mags: 1, sp: .016, rl: 3.4 }] },
       modern: { name: 'Milícia', role: 'Civil armado', era: 'modern', side: 0, hp: 11, parts: [], arms: [{ name: 'Fuzil antigo', rate: 1.9, dmg: 9, spd: 700, mag: 5, mags: 1, sp: .018, rl: 3.2 }] } } }
 };
 const CIVDEF = { name: 'Civil', era: 'ww2', side: 0, parts: [] }, CIVARMS = [{ d: {} }];
-const civBegin = () => { S.civs = []; S.civN = 0; S.civX = []; S.civI = new Map(); S.civM = new Map(); };
+const civBegin = () => { S.civs = []; S.civN = 0; S.civX = []; S.civI = new Map(); S.civM = new Map(); S.civD = null; };
 /* where the towns stand: houses by town, the streets that run through each, then the people in them */
 function civGroups() {
   const T = S.T, G = new Map(), burg = o => T.burgs.find(b => hdist(o, b) < b.ru + 30);
@@ -6948,12 +6960,14 @@ function civHurt(c, dmg, by, rx) {
 function civKill(c, by) {
   if (c.dead) return;
   c.dead = true; c.deadT = S.t; c.hp = 0; c.in = null; c.mode = 0; c.v = { x: 0, y: 0, z: 0 }; c.run = false; civAlarm(c.x, c.z, 60);
+  civToll(c, by);
 }
 /* the alarm: a shot or a burst at x z. Whoever is in earshot runs for a door, or away, and stays down for a while */
 function civHear(c, x, z, fresh) {
   if (c.dead || c.net) return;
   c.al = S.t; c.dx = x; c.dz = z;
   if (c.in) { c.wT = Math.max(c.wT, S.t + rand(CIV.hide[0], CIV.hide[1])); return; }
+  if (c.mode === 4) return;   // leaving the town: it keeps going
   if (c.mode !== 3 || (!c.goal && fresh)) civFlee(c);
 }
 function civAlarm(x, z, r) { for (const c of S.civs) if (!c.dead && !c.net && hdist(c, { x, z }) < r) civHear(c, x, z, 1); }
@@ -6979,22 +6993,16 @@ function civMove(c, gx, gz, sp, dt) {
   c.x = nx; c.z = nz; c.y = manY(nx, nz); return true;
 }
 function civEnter(c, h, s) { c.in = h.id; c.mode = 2; c.st = 0; c.goal = null; c.wT = S.t + s; c.v = { x: 0, y: 0, z: 0 }; c.run = false; }
-function civNext(c) { c.mode = 0; c.goal = null; c.st = Math.random() < .3 ? 1 : 0; c.wT = S.t + rand(CIV.wait[0], CIV.wait[1]); }
+function civNext(c) { if (c.g && c.g.ev && c.g.ref) return civLeave(c, true); c.mode = 0; c.goal = null; c.st = Math.random() < .3 ? 1 : 0; c.wT = S.t + rand(CIV.wait[0], CIV.wait[1]); }
 /* a look around, four times a second: the shots in earshot, a vehicle coming, then what it is doing */
 function civThink(c) {
-  const H = CIV.hear;
   if (c.in) {
+    civEar(c);   // the shooting is heard indoors too: it stays in while it goes on
     if (S.os[c.in] === 2) { c.in = null; civNext(c); }
     else if (S.t > c.wT && S.t - c.al > CIV.hide[0] * .5) { c.in = null; civNext(c); c.wT = S.t + rand(2, 6); }
     return;
   }
-  for (const b of S.bullets) {
-    if (b.gone) continue;
-    if (b.t0 === undefined) b.t0 = S.t;
-    if (S.t - b.t0 > .3 || b.by === c) continue;
-    const dx = b.x - c.x, dz = b.z - c.z;
-    if (dx * dx + dz * dz < H.shot * H.shot) { civHear(c, b.by ? b.by.x : b.x, b.by ? b.by.z : b.z, 1); break; }
-  }
+  civEar(c);
   for (const u of S.units) {
     const sx = u.v.x, sz = u.v.z, sp = Math.hypot(sx, sz), dx = c.x - u.x, dz = c.z - u.z;
     if (u.dead || sp < CIV.dodge[1] || Math.abs(dx) > CIV.dodge[0] || Math.abs(dz) > CIV.dodge[0] || dx * sx + dz * sz <= 0) continue;
@@ -7012,14 +7020,30 @@ function civThink(c) {
     else if (g && hdist(c, g) < 3) { c.goal = null; c.st = 2; }
     else if (g && S.t - c.pg.t > 3) { if (Math.hypot(c.x - c.pg.x, c.z - c.pg.z) < 1) { c.goal = null; c.st = 2; } c.pg = { x: c.x, z: c.z, t: S.t }; }
     if (!c.goal && S.t - c.al > CIV.hide[0]) civNext(c);
-  } else if (c.mode === 0 && S.t > c.wT) { c.goal = civGoal(c.g); c.mode = 1; c.st = 0; c.pg = { x: c.x, z: c.z, t: S.t }; }
+  } else if (c.mode === 4) {   // on its way to the refuge (a detour first, via)
+    const g = c.goal;
+    if (!g || hdist(c, g) < 4) { if (g && g.via) civLeave(c, true); else civRest(c); }
+    else if (S.t - c.pg.t > 3) { if (Math.hypot(c.x - c.pg.x, c.z - c.pg.z) < 1) civDetour(c); c.pg = { x: c.x, z: c.z, t: S.t }; }
+  } else if (c.mode === 5) { if (!c.g || !c.g.ev) civNext(c); }   // at the refuge until its town is calm
+  else if (c.mode === 0 && S.t > c.wT) { c.goal = civGoal(c.g); c.mode = 1; c.st = 0; c.pg = { x: c.x, z: c.z, t: S.t }; }
+}
+/* a shot fired within earshot in the last moment */
+function civEar(c) {
+  const H = CIV.hear;
+  for (const b of S.bullets) {
+    if (b.gone) continue;
+    if (b.t0 === undefined) b.t0 = S.t;
+    if (S.t - b.t0 > .3 || b.by === c) continue;
+    const dx = b.x - c.x, dz = b.z - c.z;
+    if (dx * dx + dz * dz < H.shot * H.shot) { civHear(c, b.by ? b.by.x : b.x, b.by ? b.by.z : b.z, 1); break; }
+  }
 }
 function stepCiv(c, dt) {
   if (c.dead) { if (S.t - c.deadT > MAN.body) c.gone = true; return; }
   if ((c.think -= dt) <= 0) { c.think = CIV.think; civThink(c); }
   const x0 = c.x, z0 = c.z, dodge = c.dodge > S.t && !c.in;
   let go = null, sp = CIV.walk;
-  if (dodge) { go = c.dg; sp = CIV.run; } else if (!c.in && c.goal && (c.mode === 1 || c.mode === 3)) { go = c.goal; if (c.mode === 3) sp = CIV.run; }
+  if (dodge) { go = c.dg; sp = CIV.run; } else if (!c.in && c.goal && (c.mode === 1 || c.mode === 3 || c.mode === 4)) { go = c.goal; if (c.mode === 3) sp = CIV.run; else if (c.mode === 4) sp = CIV.evac.sp; }
   if (go) civMove(c, go.x, go.z, sp, dt);
   c.run = !!go && sp === CIV.run; c.v = { x: (c.x - x0) / dt, y: 0, z: (c.z - z0) / dt }; c.step += Math.hypot(c.x - x0, c.z - z0);
   const u = (c.rk = (c.rk | 0) + 1) & 3 || c.in ? null : ranOver(c);   // a hull moves a fraction of its length in four steps
@@ -7073,15 +7097,16 @@ function civRecruit(c, team, own) {
   c.gone = true; S.civI.delete(c.id); S.civX.push({ id: c.id, x: +c.x.toFixed(1), z: +c.z.toFixed(1), t: S.t });
   return m;
 }
-/* the hold-to-act prompt of the player on foot: S.civU the civilian beside him, S.civK how far the key has come, S.civW that he has all he may have */
+/* the hold-to-act prompt of the player on foot: S.civU the civilian beside him, S.civK how far the key has come, S.civW that he has all he may have,
+   S.civO that the civilian's town has turned against his side (CIV.rage) */
 function civKeys() {
   const P = S.my, C = S.civH || (S.civH = { c: null, t: 0, wait: 0 }), id = P ? civOwn(P) : 0;
   let o = null, bd = CIV.reach;
-  S.civU = null; S.civK = 0; S.civW = false;
+  S.civU = null; S.civK = 0; S.civW = false; S.civO = false;
   if (P && P.man && !P.dead && !P.in && !S.demo) for (const c of S.civs) { const d = hdist(c, P); if (!c.dead && !c.gone && !c.in && d < bd) { bd = d; o = c; } }
   if (!o) { C.c = null; return; }
-  S.civU = o; S.civW = (S.net && !S.host ? civMineG() : civMine(id)) >= CIV.mil.each;
-  if (S.civW || !S.input.recruit || S.t < C.wait || C.c !== o) { C.c = o; C.t = S.t; return; }
+  S.civU = o; S.civW = (S.net && !S.host ? civMineG() : civMine(id)) >= CIV.mil.each; S.civO = civHates(civBi(o), P.team);
+  if (S.civW || S.civO || !S.input.recruit || S.t < C.wait || C.c !== o) { C.c = o; C.t = S.t; return; }
   S.civK = (S.t - C.t) / CIV.hold;
   if (S.civK < 1) return;
   C.c = null; C.wait = S.t + 1; S.civK = 0;
@@ -7110,27 +7135,40 @@ function civPlan() {
     for (const u of S.units) if (!u.dead && hdist(u, w) < M.calm) foe[u.team] = true;
     for (const t of [0, 1]) {
       k.t[t] = n[t] >= FIELD.held && !foe[1 - t] ? k.t[t] + CIV.plan : 0;
-      if (k.t[t] >= M.wait && S.t >= k.cl[t]) { k.cl[t] = S.t + M.every; civTake(w, t); }
+      if (k.t[t] >= M.wait && S.t >= k.cl[t]) { k.cl[t] = S.t + M.every; civRaise(w, t); }
     }
   });
 }
-function civTake(w, t) {
-  const M = CIV.mil, b = S.T.burgs.find(b => hdist(b, w) < 150); if (!b) return;
+/* w: the town (a point of towns(), or a burg's place), why: 'ai' (the AI general's choice), 'me' or 'mcp' (a person's or a model's order, GC.mil),
+   'sys' (the town arms itself for the side whose defence a person holds), 'turn' (it rose against the other side). The squad comes in through a
+   Dispatch order of its own (its mission holds the town once its order is given) and goes in the side's log; the squad, or null */
+function civTake(w, t, why) {
+  const M = CIV.mil, b = S.T.burgs.find(b => hdist(b, w) < 150); if (!b) return null;
+  const bi = S.T.burgs.indexOf(b); if (civHates(bi, t)) return null;
   let here = 0, side = 0;
   for (const m of S.men) if (m.mil && !m.dead && m.team === t) { side++; if (hdist(m, w) < FIELD.town) here++; }
   const room = Math.min(M.n, M.town - here, M.side - side, IAI.cap - S.men.length);
-  const L = S.civs.filter(c => !c.dead && !c.gone && !c.net && c.g.b === b).sort((p, q) => hdist(p, w) - hdist(q, w)).slice(0, room);
-  if (L.length < 1) return;
+  const L = S.civs.filter(c => !c.dead && !c.gone && !c.net && c.g.b === b && c.mode < 4).sort((p, q) => hdist(p, w) - hdist(q, w)).slice(0, room);
+  if (L.length < 1) return null;
   const hs = S.T.houses.filter(o => S.os[o.id] < 2 && hdist(o, w) < FIELD.town), a = rand(0, TAU), c0 = { x: w.x + Math.cos(a) * 130, z: w.z + Math.sin(a) * 130 }, h = hs.sort((p, q) => hdist(p, c0) - hdist(q, c0))[0] || w, p = railOf(h.x, h.z);
   const q = { team: t, men: [], n0: 0, live: 0, ri: p.ri, s: p.s, s0: p.s, ds: t ? 1 : -1, fixed: false, state: 0, think: rand(0, IAI.think), fd: 1e9, pd: 1, id: sqId(t), job: 'mil', jk: 0, mil: 1 };
-  L.forEach((c, i) => { const m = civRecruit(c, t); if (m) { m.ai.i = i; m.sq = q; q.men.push(m); } });
-  if (!q.men.length) return;
+  const nm = civName(b), turn = why === 'turn';
+  dispatch(t, { kind: 'garrison', area: { x: w.x, z: w.z, r: FIELD.town }, why: (turn ? 'Revolta em ' : 'Milícia de ') + nm }, () => {
+    L.forEach((c, i) => { const m = civRecruit(c, t); if (m) { m.ai.i = i; m.sq = q; q.men.push(m); } });
+    if (q.men.length) misSq(q);
+  });
+  if (!q.men.length) return null;
   q.n0 = q.live = q.men.length; S.squads.push(q); setOrd(q, { k: 'hold', ri: p.ri, s: p.s, x: h.x, z: h.z, tw: w });
+  civD().mil[t]++; anaCv('mil', t, { b: bi, n: q.men.length, why: why || 'ai' });
+  gLog(t, turn ? 'rep' : 'def', turn ? 'A população de ' + nm + ' se levantou contra o inimigo: milícia de ' + q.men.length + ' do nosso lado' : 'Milícia de ' + q.men.length + ' formada em ' + nm + (why === 'sys' ? ' (a vila se armou)' : ''), w);
+  return q;
 }
 /* ---- online ----
    civ (host to the room, a server that says civ: 1): k 0, rows of the civilians [id, x, z, heading, flags (1 dead, 2 walking, 4 inside, 8 running, 16 gone), colour], a
    part of them each time; k 1, the militia as triples [aid, colour, owner], whose men are AI soldiers like any other. civhit (a guest to the host): its
-   own hits on a civilian, pairs of id and damage. civrec: a guest asks to recruit one. */
+   own hits on a civilian, pairs of id and damage. civrec: a guest asks to recruit one.
+   k 2 (W14), the laws of war: [side, civilians it killed since the last word, town (index in S.T.burgs, -1 none), the sides that town has turned
+   against (bits)]; sent when it happens, and each town that turned again with the militia's list, for a guest that came in later. */
 Net.civ = false;
 Net.rx.welcome = (old => m => { Net.civ = m.civ === 1; old(m); })(Net.rx.welcome);
 Net.civHit = (c, dmg) => { (Net.ch || (Net.ch = new Map())).set(c.id, (Net.ch.get(c.id) || 0) + dmg); };
@@ -7138,6 +7176,7 @@ Net.rx.civ = m => {
   if (!S.net || S.host || !Array.isArray(m.e)) return;
   if (!S.civs) civBegin();
   if (m.k === 1) { for (let i = 0; i + 2 < m.e.length; i += 3) S.civM.set(m.e[i], [m.e[i + 1], m.e[i + 2], S.t]); return; }
+  if (m.k === 2) { if (m.e.length === 4 && m.e.every(Number.isInteger)) civHeard(m.e[0], m.e[1], m.e[2], m.e[3]); return; }
   for (const e of m.e) {
     if (!Array.isArray(e) || e.length !== 6) continue;
     const [id, x, z, h, f, pi] = e; let c = S.civI.get(id);
@@ -7155,7 +7194,7 @@ Net.rx.civhit = m => {
 };
 Net.rx.civrec = m => {
   const c = S.civI && S.civI.get(m.id), g = Net.ghosts.get(m.from);
-  if (!S.net || !S.host || !Net.civ || !c || c.net || c.dead || c.gone || c.in || !g || !g.man || g.dead || hdist(c, g) > CIV.reach * 3 || civMine(m.from) >= CIV.mil.each) return;
+  if (!S.net || !S.host || !Net.civ || !c || c.net || c.dead || c.gone || c.in || !g || !g.man || g.dead || hdist(c, g) > CIV.reach * 3 || civMine(m.from) >= CIV.mil.each || civHates(civBi(c), g.team)) return;
   civRecruit(c, g.team, m.from);
 };
 function civSend(dt) {
@@ -7169,6 +7208,7 @@ function civSend(dt) {
   if (S.civR === 0 && (S.civB = ((S.civB || 0) + 1) % 2) === 0) {
     const l = []; for (const m of S.men) if (m.mil && m.aid && !m.dead) l.push(m.aid, m.pi | 0, m.own === undefined ? 0 : m.own);
     for (let j = 0; j < l.length; j += 90) Net.send('civ', { k: 1, e: l.slice(j, j + 90) });
+    if (S.civD) for (const bi in S.civD.foe) Net.send('civ', { k: 2, e: [-1, 0, +bi, S.civD.foe[bi]] });
   }
 }
 /* a guest: what it owes the host (its own hits), and the militia it is told of, marked on the soldiers that came in the AI's snapshots */
@@ -7202,8 +7242,194 @@ function civStep(dt) {
   civKeys();
   if (guest) return civGuest(dt);
   civFollow(dt);
-  if (S.civs.length && (S.civP = (S.civP || 0) + dt) >= CIV.plan) { S.civP = 0; civPlan(); }
+  if (S.civs.length && (S.civP = (S.civP || 0) + dt) >= CIV.plan) { S.civP = 0; civPlan(); civWar(); }
+  civLook(dt); civSays();
   if (S.net && S.host && Net.civ) civSend(dt);
+}
+/* ---- the laws of war (W14): what a civilian killed costs, a town that turns, evacuation, and the AI's rules of engagement (CIV.toll, rage, evac, roe) ----
+   S.civD, the match's record of it: n civilians killed by each side, tk the tickets they cost it, dead all of them (by nobody's fire too), foe the
+   towns that turned (index in S.T.burgs: bits of the sides), hits the deaths by side in each town, say what the feed has yet to tell by side, mil the
+   militia squads raised by side, rv when a town that turned arms its next squad, cl when a person's general may arm a town again (town:side), roe the holds by side (rT: when each place was last noted),
+   evac and back the towns that emptied and came home */
+const civD = () => S.civD || (S.civD = { n: [0, 0], tk: [0, 0], dead: 0, foe: {}, hits: {}, say: [{ n: 0, T: 0 }, { n: 0, T: 0 }], mil: [0, 0], rv: {}, cl: {}, roe: [0, 0], rT: {}, evac: 0, back: 0 });
+/* the town a civilian belongs to (its index in S.T.burgs, -1 none): its group's, else (a copy of the host's) where it stands */
+function civBi(c) {
+  const B = S.T.burgs, b = (c.g && c.g.b) || B.find(b => hdist(b, c) < b.ru + 30);
+  return b ? B.indexOf(b) : -1;
+}
+const civHates = (bi, t) => bi >= 0 && !!S.civD && (t === 0 || t === 1) && !!((S.civD.foe[bi] | 0) & (1 << t));
+/* a town's name: its own, a point of the match on it, else a word */
+function civName(b) {
+  if (b.nm) return b.nm;
+  const p = S.cq && S.cq.p.find(p => hdist(p, b) < 150); if (p) return p.name;
+  return b.k === 'town' ? 'a vila' : b.k === 'village' ? 'a aldeia' : 'o povoado';
+}
+const civSide = t => S.E.sides[S.fac[t]].name;
+/* a civilian killed by by's fire, where the battle is simulated (civKill) */
+function civToll(c, by) {
+  const D = civD(), t = by && (by.team === 0 || by.team === 1) ? by.team : -1, bi = civBi(c);
+  const paid = t >= 0 && cqSim() && !S.cq.ph ? CIV.toll : 0;
+  D.dead++;
+  anaCv('kill', t, { x: Math.round(c.x), z: Math.round(c.z), b: bi, tk: paid });
+  if (t < 0) return;   // a death of no side's doing: nobody pays
+  D.n[t]++;
+  if (paid) { S.cq.tk[t] -= paid; D.tk[t] += paid; }
+  const s = D.say[t]; s.n++; if (!s.T) s.T = S.t + CIV.say;
+  if (bi < 0) return;
+  const h = D.hits[bi] || (D.hits[bi] = [0, 0]); h[t]++;
+  if (h[t] >= CIV.rage.n && !civHates(bi, t)) civTurn(bi, t);
+}
+/* the town bi turns against side t: told to all, and it arms its militia for the other side at once (unless it hates both) */
+function civTurn(bi, t) {
+  const D = civD(), b = S.T.burgs[bi], nm = civName(b);
+  D.foe[bi] = (D.foe[bi] | 0) | (1 << t);
+  civHeard(t, 0, bi, D.foe[bi]);
+  if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, 0, bi, D.foe[bi]] });
+  gLog(t, 'rep', 'A população de ' + nm + ' se voltou contra nós: ' + CIV.rage.n + ' civis mortos por fogo nosso', b, 'cvt' + bi);
+  gLog(1 - t, 'rep', 'A população de ' + nm + ' se voltou contra o inimigo', b, 'cvt' + bi);
+  anaCv('turn', t, { b: bi, nm });
+  civRevolt(bi);
+}
+/* a town that turned arms a squad for the side it does not hate, every CIV.mil.every s */
+function civRevolt(bi) {
+  const D = civD(), f = D.foe[bi] | 0, t = f === 1 ? 1 : f === 2 ? 0 : -1, b = S.T.burgs[bi];
+  if (t < 0 || !b || S.t < (D.rv[bi] || 0)) return;
+  D.rv[bi] = S.t + CIV.mil.every;
+  const w = towns().find(w => hdist(w, b) < 150) || { x: b.x, z: b.z };
+  civTake(w, t, 'turn');
+}
+/* the general of side t raises the town w's militia: its AI's choice where the AI holds the defence, else the town arms itself for the side */
+function civRaise(w, t) { genCmd(t, { c: 'mil', x: w.x, z: w.z }, genBy(t, 'def') === 'ai' ? 'ai' : 'sys'); }
+/* what this page shows of it: the feed, and the general's log where the battle is simulated. t the side, n civilians it killed, bi a town, f the sides it hates */
+function civHeard(t, n, bi, f) {
+  const D = civD(), b = bi >= 0 && S.T.burgs[bi], was = b ? D.foe[bi] | 0 : 0;
+  if (b && f >= 0 && f < 4) D.foe[bi] = was | f;
+  if ((t === 0 || t === 1) && n > 0) {
+    cqSay(civSide(t) + ': ' + (n > 1 ? n + ' civis mortos' : 'um civil morto') + (CIV.toll && S.cq ? ' · −' + n * CIV.toll + ' tíquetes' : ''), t);
+    if (!S.net || S.host) gLog(t, 'rep', (n > 1 ? n + ' civis mortos' : 'Um civil morto') + ' por fogo nosso' + (CIV.toll && S.cq ? ': −' + n * CIV.toll + ' tíquetes' : ''));
+  }
+  if (b && (t === 0 || t === 1) && f & (1 << t) && (!(was & (1 << t)) || !S.net || S.host)) cqSay(civName(b) + ' se voltou contra ' + civSide(t), t);
+}
+/* the feed's word on the deaths, CIV.say s after the first of a run */
+function civSays() {
+  const D = S.civD; if (!D || (S.net && !S.host)) return;
+  D.say.forEach((s, t) => {
+    if (!s.n || S.t < s.T) return;
+    civHeard(t, s.n, -1, 0);
+    if (S.net && S.host && Net.civ) Net.send('civ', { k: 2, e: [t, s.n, -1, 0] });
+    s.n = 0; s.T = 0;
+  });
+}
+/* evacuation, and the towns that turned arming their next squad: at each look of the planner */
+function civWar() {
+  const E = CIV.evac, G = new Set(), D = civD();
+  for (const c of S.civs) if (c.g && c.g.b && !c.net) G.add(c.g);
+  for (const g of G) {
+    let home = 0, al = 0;
+    for (const c of S.civs) if (c.g === g && !c.dead && !c.gone && c.mode < 4) { home++; if (S.t - c.al < E.al) al++; }
+    const hot = home > 0 && al >= Math.max(1, home * E.share);
+    g.hot = hot ? (g.hot || 0) + CIV.plan : Math.max(0, (g.hot || 0) - CIV.plan / 2);
+    if (hot || civFight(g.b)) g.hT = S.t;
+    if (!g.ev && g.hot >= E.after && home) civEvac(g);
+    else if (g.ev && S.t - (g.hT || 0) > E.back) civHome(g);
+  }
+  for (const bi in D.foe) civRevolt(+bi);
+}
+/* are both sides within CIV.evac.r m of the town's edge */
+function civFight(b) {
+  const R = b.ru + CIV.evac.r, f = [false, false];
+  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && !o.in && (o.team === 0 || o.team === 1) && !f[o.team] && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R) { f[o.team] = true; if (f[0] && f[1]) return true; }
+  return false;
+}
+/* the town g empties: a refuge beyond its edge away from where the fighting was heard (the first of a fan of headings that is on the map, dry,
+   and away from the bases and the other towns), and everyone of it on the way there; with nowhere to go they stay and hide as before */
+function civEvac(g) {
+  const b = g.b, E = CIV.evac, L = S.civs.filter(c => c.g === g && !c.dead && !c.gone && !c.net);
+  let ax = 0, az = 0, n = 0;
+  for (const c of L) if (S.t - c.al < 30) { ax += c.dx; az += c.dz; n++; }
+  const a0 = n ? Math.atan2(b.z - az / n, b.x - ax / n) : b.z >= 0 ? Math.PI / 2 : -Math.PI / 2, R = b.ru + E.d;
+  let ref = null;
+  for (let k = 0; k < 13 && !ref; k++) {
+    const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * .45, x = b.x + Math.cos(a) * R, z = b.z + Math.sin(a) * R;
+    if (x < 80 || x > S.W - 80 || Math.abs(z) > S.HW - 80 || hgt(x, z) <= S.T.WL + 1 || S.base.some(B => hdist(B, { x, z }) < 600) || S.T.burgs.some(o => o !== b && hdist(o, { x, z }) < o.ru + 60)) continue;
+    ref = { x, z };
+  }
+  if (!ref) return;
+  g.ev = 1; g.ref = ref; g.hT = S.t;
+  for (const c of L) civLeave(c);
+  const D = civD(); D.evac++;
+  anaCv('evac', -1, { b: S.T.burgs.indexOf(b), n: L.length, x: Math.round(ref.x), z: Math.round(ref.z), nm: civName(b) });
+  cqSay('Os civis deixam ' + civName(b) + ': combate perto');
+}
+/* on the way to its town's refuge (keep: not a fresh start, the detours it has made still count) */
+function civLeave(c, keep) {
+  const r = c.g.ref, j = CIV.evac.j;
+  if (c.in) c.in = null;
+  if (!keep) c.stk = 0;
+  c.mode = 4; c.st = 0; c.goal = { x: r.x + rand(-j, j), z: r.z + rand(-j, j), h: null }; c.pg = { x: c.x, z: c.z, t: S.t };
+}
+/* stuck on the way: a step aside, then on; after a few it waits where it is */
+function civDetour(c) {
+  if ((c.stk = (c.stk | 0) + 1) > 4) return civRest(c);
+  const a = Math.atan2(c.goal.z - c.z, c.goal.x - c.x) + (Math.random() < .5 ? -1 : 1) * rand(.7, 1.4);
+  c.goal = { x: c.x + Math.cos(a) * 30, z: c.z + Math.sin(a) * 30, h: null, via: 1 };
+}
+function civRest(c) { c.mode = 5; c.goal = null; c.st = Math.random() < .6 ? 1 : 0; c.wT = S.t + rand(20, 60); }
+/* the town is calm again: its people walk home */
+function civHome(g) {
+  g.ev = 0; g.hot = 0;
+  for (const c of S.civs) if (c.g === g && !c.dead && !c.gone && (c.mode === 4 || c.mode === 5)) { c.mode = 0; c.goal = null; c.st = 0; c.wT = S.t + rand(2, 10); }
+  const D = civD(); D.back++;
+  anaCv('back', -1, { b: S.T.burgs.indexOf(g.b) });
+}
+/* which civilians each side sees: one out of doors within CIV.roe.see m of a soldier, vehicle or aircraft of it with a clear line (c.sn[t]: when) */
+function civLook(dt) {
+  const K = CIV.roe;
+  if (!K.on || (S.civL = (S.civL || 0) - dt) > 0) return;
+  S.civL = K.every;
+  const obs = [[], []];
+  for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && (o.team === 0 || o.team === 1)) obs[o.team].push(o);
+  for (const c of S.civs) {
+    if (c.dead || c.gone || c.in || c.net) continue;
+    const sn = c.sn || (c.sn = [-1e9, -1e9]);
+    for (const t of [0, 1]) {
+      let k = 0;
+      for (const o of obs[t]) {
+        const R = o.man || o.kind ? K.see : K.see * 2;
+        if (Math.abs(o.x - c.x) > R || Math.abs(o.z - c.z) > R || hdist(o, c) > R) continue;
+        if (sees(o, c)) { sn[t] = S.t; break; }
+        if (++k >= 3) break;
+      }
+    }
+  }
+}
+/* is o a target side t has identified, for the rules of engagement */
+function roeIdf(t, o) {
+  if (!o) return false;
+  if (o.lot !== undefined && o.idf !== undefined) return !ecoHid(o, t);   // an economy site: unless it is still disguised on a lot
+  if (o.kind === 'bld' || o.cm) return false;   // a house held by soldiers, a bare point
+  if (o.kind === 'trench' || o.kind === 'rad' || o.sup) return true;   // a work, a set-down radio, a supply base
+  const k = o.kn && o.kn[t], e = k && k.by && !k.by.dead && k.by.pm && k.by.pm.get(o);
+  return !!e && e.kn && e.ic >= 1;
+}
+/* must the AI of side t hold a burst of radius r at x z on target o: a civilian it has seen there lately, and o not identified */
+function roeHeld(t, x, z, r, o) {
+  if (!CIV.roe.on || !S.civs || !S.civs.length || (t !== 0 && t !== 1)) return false;
+  const K = CIV.roe, R = (r || 0) + K.pad;
+  let near = false;
+  for (const c of S.civs) if (!c.dead && !c.gone && !c.in && c.sn && S.t - c.sn[t] < K.mem && Math.abs(c.x - x) < R && Math.abs(c.z - z) < R && Math.hypot(c.x - x, c.z - z) < R) { near = true; break; }
+  if (!near || roeIdf(t, o)) return false;
+  roeNote(t, x, z);
+  return true;
+}
+/* a hold, written down once a place every CIV.roe.note s */
+function roeNote(t, x, z) {
+  const K = CIV.roe, D = civD(), key = t + ':' + Math.round(x / K.cell) + ':' + Math.round(z / K.cell);
+  if (S.t - (D.rT[key] === undefined ? -1e9 : D.rT[key]) < K.note) return;
+  D.rT[key] = S.t; D.roe[t]++;
+  const b = S.T.burgs.find(b => hdist(b, { x, z }) < b.ru + 200);
+  gLog(t, 'fire', 'Fogo suspenso' + (b ? ' em ' + civName(b) : '') + ': civis à vista e alvo não identificado', { x, z });
+  anaCv('roe', t, { x: Math.round(x), z: Math.round(z), b: b ? S.T.burgs.indexOf(b) : -1 });
 }
 /* ---------- crew: one body, many vehicles ----------
    The player is a soldier. Entering as class trn fields the vehicle with that soldier at the wheel (S.rider, in seat 0), so that E gets
@@ -9830,12 +10056,14 @@ function cmdMission(C, k, x, z, n, life, op) {
   const M = { cm: 1, k, x, z, y: hgt(x, z), sx: x, sz: z, v: ZERO, moveT: -99, seenT: 1e9, dead: false, n, T: S.t + life, by: null, team: C.t, op: op || null, kind: 'fm' };
   C.fm.push(M); return M;
 }
-/* the mission a shooter at u with range [lo, hi] takes: smoke first, then the nearest; smk: it has smoke rounds */
+/* the mission a shooter at u with range [lo, hi] takes: smoke first, then the nearest; smk: it has smoke rounds. A burst the rules of engagement hold
+   (roeHeld on its target M.tg) waits, unless a person or a model ordered it (M.usr) */
 function cmdFire(u, lo, hi, smk) {
   const C = S.cmd && S.cmd[u.team]; let best = null, bd = 1e9;
   if (C) for (const M of C.fm) {
     const d = Math.hypot(M.x - u.x, M.z - u.z), sc = M.k === 'smk' ? d - 9000 : d;
-    if (!M.dead && M.n > 0 && S.t < M.T && (!M.by || M.by === u || M.by.dead) && M.bad !== u && d > lo && d < hi && (smk || M.k !== 'smk') && sc < bd && !(M.k !== 'smk' && FF.ai && ffOn() && ffDanger(M.x, M.z, (u.man ? u.arms[1] : u.arms[0]).d.r || 0, u.team, u))) { bd = sc; best = M; }
+    if (!M.dead && M.n > 0 && S.t < M.T && (!M.by || M.by === u || M.by.dead) && M.bad !== u && d > lo && d < hi && (smk || M.k !== 'smk') && sc < bd && !(M.k !== 'smk' && FF.ai && ffOn() && ffDanger(M.x, M.z, (u.man ? u.arms[1] : u.arms[0]).d.r || 0, u.team, u))
+      && !(M.k !== 'smk' && !M.usr && roeHeld(u.team, M.x, M.z, (u.man ? u.arms[1] : u.arms[0]).d.r || 0, M.tg))) { bd = sc; best = M; }
   }
   if (best) best.by = u;
   return best;
@@ -12343,7 +12571,7 @@ function droneBrain(t) {
   if (ecoGate()) for (const m of ops) { const st = dstock(m), k = m.def.drone.find(k => st[k] === 0); if (k && ecoUse(t, 'drone')) { st[k]++; break; } }
   if (S.t > D[t] && !mine.some(o => o.k === 'owa')) {   // the long-range one: something spotted that stands still
     let best = null, bs = 0;
-    for (const u of S.units.concat(S.sup, ecoFoe(t))) { if (u.dead || u.team === t || !spotted(u) || !(u.sup || S.t - u.moveT > DAI.owa.still) || (FF.ai && ffOn() && ffDanger(u.x, u.z, FF.dr, t))) continue; const s = (u.sup ? DAI.val.sup : DAI.val[tk(u)] || 1) + drnd(); if (s > bs) { bs = s; best = u; } }
+    for (const u of S.units.concat(S.sup, ecoFoe(t))) { if (u.dead || u.team === t || !spotted(u) || !(u.sup || S.t - u.moveT > DAI.owa.still) || (FF.ai && ffOn() && ffDanger(u.x, u.z, FF.dr, t)) || roeHeld(t, u.x, u.z, FF.dr, u)) continue; const s = (u.sup ? DAI.val.sup : DAI.val[tk(u)] || 1) + drnd(); if (s > bs) { bs = s; best = u; } }
     if (best) { const m = ops[0], r = droneRail(t), o = addDrone('owa', t, r.x, r.y + 3, r.z, r.h, m, { job: 'owa' }); o.V = 22; o.nav = { st: 'boost', x: best.sx === undefined ? best.x : best.sx, z: best.sz === undefined ? best.z : best.sz, tgt: best, pt: null, T: 0, h: r.h, p: .45, look: 0 }; D[t] = S.t + DAI.owa.every[0] + drnd() * (DAI.owa.every[1] - DAI.owa.every[0]); return; }
   }
   if (!free.length) return;
@@ -15489,6 +15717,70 @@ anaReport = (f => (ev, me) => {
   return R;
 })(anaReport);
 
+/* ---------- the laws of war (W14): the general's part, and the analytics' ----------
+   mil, the general's order { pi a point of the match on a town | x z within a town }: the town's civilians become a militia squad of the side that
+   holds it, through a Dispatch order (civTake). Refused where the town turned against the side (hate), with nobody left to arm (nociv), and, for a
+   person or a model, with fewer than FIELD.held soldiers of the side in the town (mil0) or within CIV.mil.every s of the last there (cool). The AI's
+   own choice is civPlan's (civRaise: a town held long enough with no enemy near). fire: a person's or a model's fire mission is theirs to answer for
+   (M.usr): the rules of engagement do not hold it, the toll still charges it. cmdMission: a burst on something the side knows (C.known standing
+   there, an economy site it has found) carries it as M.tg, which roeHeld weighs. The state (genState) carries civ: civilians the side killed and
+   the enemy, the tickets it paid, its holds, and each town with people: home, away (evacuated), and whom it hates (us, them, both).
+   Analytics, event cv { c, s the side or -1, b the town (S.T.burgs) }: kill (tk tickets it cost, x z), turn (nm), mil (n, why: ai, sys, me, mcp,
+   turn), evac (n, x z the refuge, nm), back, roe (x z); the snapshot's cv: [alive, away, inside]. The review's civ: by side killed, tk, mil, roe;
+   turned [{ t, s, nm }], evac, back, dead (all, by nobody's fire too); each side's tickets: civ, out of other */
+Object.assign(GEN.cn, { mil: 'milícia' });
+Object.assign(GEN.no, { hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila', mil0: 'Sem tropa nossa na vila para armar os civis' });
+GC.mil = { d: 'def', f(t, c, by) {
+  let w = null, b = null;
+  if (Number.isInteger(c.pi)) { w = gPts()[c.pi]; if (!w) return gBad('at'); b = S.T.burgs.find(o => hdist(o, w) < 150) || null; }
+  else if (gMapOk(c.x, c.z)) { const q = { x: c.x, z: c.z }; b = S.T.burgs.filter(o => hdist(o, q) < o.ru + 100).sort((p, r) => hdist(p, q) - hdist(r, q))[0] || null; w = b && (towns().find(o => hdist(o, b) < 150) || { x: b.x, z: b.z }); }
+  else return gBad('map');
+  if (!b || !w) return gBad('at');
+  const bi = S.T.burgs.indexOf(b), D = civD(), k = bi + ':' + t;
+  if (civHates(bi, t)) return gBad('hate');
+  if (!S.civs || !S.civs.some(o => !o.dead && !o.gone && !o.net && o.g && o.g.b === b && o.mode < 4)) return gBad('nociv');
+  if (by !== 'ai' && by !== 'sys') {
+    if (S.t < (D.cl[k] || 0)) return gBad('cool');
+    if (S.men.filter(m => !m.dead && !m.in && !m.mil && m.team === t && hdist(m, w) < FIELD.town).length < FIELD.held) return gBad('mil0');
+  }
+  const q = civTake(w, t, by);
+  if (!q) return gBad('nociv');
+  D.cl[k] = S.t + CIV.mil.every;
+  return gYes();
+} };
+GC.fire.f = (f => (t, c, by, R) => { const C = cmdOf(t), n = C.fm.length, r = f(t, c, by, R); if (by !== 'ai') for (const M of C.fm.slice(n)) M.usr = 1; return r; })(GC.fire.f);
+cmdMission = (f => (C, k, x, z, n, life, op) => {
+  const M = f(C, k, x, z, n, life, op);
+  if (k !== 'smk') M.tg = (C.known || []).find(o => !o.dead && o.sx === x && o.sz === z) || (S.eco ? S.eco.l.find(e => !e.dead && e.team !== C.t && !ecoHid(e, C.t) && Math.hypot(e.x - x, e.z - z) < 30) : null) || null;
+  return M;
+})(cmdMission);
+/* side t's view of the civilians, for its general (genState's civ) */
+function civState(t) {
+  const D = S.civD, towns = [];
+  S.T.burgs.forEach((b, i) => {
+    let home = 0, away = 0;
+    for (const c of S.civs || []) if (!c.dead && !c.gone && c.g && c.g.b === b) { if (c.mode >= 4) away++; else home++; }
+    const f = D ? D.foe[i] | 0 : 0;
+    if (home || away || f) towns.push({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), home, away, hate: f & (1 << t) ? (f & (1 << (1 - t)) ? 'both' : 'us') : f ? 'them' : '' });
+  });
+  return { killed: D ? D.n[t] : 0, enemyKilled: D ? D.n[1 - t] : 0, tk: D ? D.tk[t] : 0, toll: CIV.toll, roe: D ? D.roe[t] : 0, towns };
+}
+genState = (f => t => Object.assign(f(t), { civ: civState(t) }))(genState);
+/* an analytics event of the laws of war */
+function anaCv(c, s, o) { if (anaLive() && ANA.S === S) anaPush(Object.assign({ k: 'cv', t: anaR(S.t), c, s }, o)); }
+anaSnap = (f => () => {
+  f();
+  const e = ANA.ev[ANA.ev.length - 1];
+  if (e && e.k === 'sn' && S.civs) { let a = 0, away = 0, ins = 0; for (const c of S.civs) if (!c.dead && !c.gone) { a++; if (c.mode >= 4) away++; if (c.in) ins++; } e.cv = [a, away, ins]; }
+})(anaSnap);
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end'), cv = ev.filter(e => e.k === 'cv'), of = (c, s) => cv.filter(e => e.c === c && e.s === s);
+  const side = [0, 1].map(s => (hide && s !== me ? null : { killed: of('kill', s).length, tk: anaR(of('kill', s).reduce((a, e) => a + (e.tk || 0), 0)), mil: of('mil', s).length, roe: of('roe', s).length }));
+  R.civ = { side, turned: cv.filter(e => e.c === 'turn').map(e => ({ t: e.t, s: e.s, nm: e.nm || '' })), evac: cv.filter(e => e.c === 'evac').length, back: cv.filter(e => e.c === 'back').length, dead: cv.filter(e => e.c === 'kill').length };
+  R.tickets.forEach((x, s) => { if (x && side[s]) { x.civ = side[s].tk; x.other = anaR(x.other - side[s].tk); } });
+  return R;
+})(anaReport);
+
 /* ---------- day, night and weather ----------
    The match has a light clock: S.sky.h0 the hour (0 to 24) at sim time t0, running rate s of day a second; pre: the presets, [start hour, rate]
    (Dia, Entardecer, Noite, Ciclo: a whole day in an hour). The light L (0 night to 1 day) rises as the sun's height, the sine of the hour,
@@ -17900,7 +18192,7 @@ trnSight = (f => (P, u, ink, acc, disp, blink) => {
 })(trnSight);
 trnSight = (f => (P, u, ink, acc, disp, blink) => {   // beside a civilian who can be recruited
   const c = S.civU;
-  if (c && P.man && !P.in && !P.dead) { txt(S.civW ? 'MILÍCIA NO LIMITE' : 'SEGURE I: RECRUTAR CIVIL', cw / 2, ch * .62, 12 * u, acc, 'center'); if (S.civK > 0) bar(cw / 2 - 60 * u, ch * .62 + 10 * u, 120 * u, 5 * u, clamp(S.civK, 0, 1), acc); }
+  if (c && P.man && !P.in && !P.dead) { txt(S.civO ? 'ESTA VILA SE VOLTOU CONTRA O SEU LADO' : S.civW ? 'MILÍCIA NO LIMITE' : 'SEGURE I: RECRUTAR CIVIL', cw / 2, ch * .62, 12 * u, acc, 'center'); if (S.civK > 0) bar(cw / 2 - 60 * u, ch * .62 + 10 * u, 120 * u, 5 * u, clamp(S.civK, 0, 1), acc); }
   f(P, u, ink, acc, disp, blink);
 })(trnSight);
 trnSight = (f => (P, u, ink, acc, disp, blink) => {   // beside an enemy vehicle that can be taken
@@ -18287,7 +18579,7 @@ const LEGEND = {
       ['Botão esquerdo ou Espaço', a0.name + (a0.auto ? ' (rajada enquanto apertado)' : ' (um tiro por aperto)')], ['Botão direito', 'Mirar pela alça: campo mais fechado e menos dispersão'], ['R', 'Recarregar']];
     if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; fumaça corta a trava)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);
     rows.push(['F', 'Granada de mão, uns 30 m'], ['G', 'Granada de fumaça: uma cortina pequena que esconde dos dois lados'], ['N', 'Obras: mostra o contorno à sua frente, verde onde dá para construir e vermelho com o motivo onde não dá. Cada toque passa para a próxima: base de suprimento, trincheira, sacos de areia, e fecha. O clique começa a obra (a base gasta o kit) e o botão direito cancela. Fique parado junto da obra para construir (' + BLD.time + ' s sozinho, mais rápido com outros soldados ao lado); um tiro recebido interrompe. Pronta, ela remunicia e repara soldados e veículos do seu lado a até ' + BLD.r + ' m e vira ponto de entrada. Encostado em uma base inimiga, N arma a carga de demolição, que explode em ' + BLD.charge.fuse + ' s'], ['Prédios', 'Entre pelas portas, pelos buracos abertos nas paredes e pelas janelas do térreo. A escada em caracol fica no canto dos fundos: dê a volta no pilar para subir ou descer; nos prédios de teto plano ela leva ao telhado. Parede de pé para tiros e esconde; janela e buraco deixam ver e atirar, nos dois sentidos. Canhão, foguete e a carga de demolição (N, de frente para a parede, a até ' + CITY.plant + ' m) abrem buracos; sem apoio as lajes caem andar por andar, e o prédio vem abaixo quando o térreo cede'], ['C', 'Trocar a visão: por cima do ombro e primeira pessoa'], o.swap, o.esc);
-    rows.push(['I', 'Civil ao lado: segure ' + CIV.hold + ' s para recrutá-lo como miliciano do seu lado (no máximo ' + CIV.mil.each + ' de cada vez). Ele segue você e luta com uma arma velha; a IA também arma civis da vila que defende']);
+    rows.push(['I', 'Civil ao lado: segure ' + CIV.hold + ' s para recrutá-lo como miliciano do seu lado (no máximo ' + CIV.mil.each + ' de cada vez). Ele segue você e luta com uma arma velha; a IA também arma civis da vila que defende. Cada civil morto custa ' + CIV.toll + ' tíquetes a quem o matou, e uma vila onde o seu lado matou ' + CIV.rage.n + ' não arma mais ninguém para você']);
     return rows;
   },
   ground(d, o) {
@@ -18670,9 +18962,9 @@ function aarShow(R, sub) {
   b.append(aarEl('p', 'aar-res', !R.over ? 'Partida em andamento.' : R.win < 0 ? 'Empate: ' + R.whyTxt + '.' : N(R.win) + ' venceu: ' + R.whyTxt + '.'));
   b.append(aarEl('h3', '', 'Tíquetes'));
   b.append(aarChart(R));
-  const tk = [0, 1].filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.other), Math.round(x.end)], { cls: s ? 'e' : 'f' }); });
-  b.append(aarTable(tk, ['Lado', 'Início', 'Perdas', 'Sangria', 'Pontos', 'Outros', 'Fim']));
-  b.append(aarEl('p', 'aar-note', R.eco ? 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: instalações, bases de suprimento, requisições e o resto.' : 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: requisições, instalações e o resto.'));
+  const tk = [0, 1].filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.civ || 0), Math.round(x.other), Math.round(x.end)], { cls: s ? 'e' : 'f' }); });
+  b.append(aarTable(tk, ['Lado', 'Início', 'Perdas', 'Sangria', 'Pontos', 'Civis', 'Outros', 'Fim']));
+  b.append(aarEl('p', 'aar-note', R.eco ? 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: instalações, bases de suprimento, requisições e o resto.' : 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos. Pontos: perdidos menos retomados. Civis: os civis que o lado matou. Outros: requisições, instalações e o resto.'));
   b.append(aarEl('h3', '', 'Decisões que mais pesaram'));
   if (!R.dec.length) b.append(aarEl('p', 'aar-note', 'Nenhuma decisão do general registrada.'));
   else { const ol = aarEl('ol', 'aar-dec'); for (const d of R.dec) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s) + ' · ' + (AARD[d.c] || d.c) + ' · ' + (d.swing > 0 ? '+' : '') + Math.round(d.swing))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); } b.append(ol);
@@ -18681,6 +18973,14 @@ function aarShow(R, sub) {
   const ef = R.eff.filter(r => r.lost || r.kills).map(r => Object.assign([N(r.s) + ' · ' + (AARK[r.u] || r.u), r.made, r.lost, r.kills, Math.round(r.paid), Math.round(r.value), r.ratio === null ? '∞' : String(r.ratio).replace('.', ','), r.life === null ? '—' : mm(r.life)], { cls: r.s ? 'e' : 'f' }));
   b.append(ef.length ? aarTable(ef, ['Tipo', 'Entrou', 'Perdidos', 'Abates', 'Pago', 'Destruído', 'Razão', 'Vida média']) : aarEl('p', 'aar-note', 'Sem perdas nem abates.'));
   b.append(aarEl('p', 'aar-note', 'Pago e Destruído em tíquetes; a razão é destruído sobre pago.'));
+  if (R.civ) {
+    const C = R.civ, cr = [0, 1].filter(s => C.side[s]).map(s => { const x = C.side[s]; return Object.assign([N(s), x.killed, Math.round(x.tk), x.mil, x.roe], { cls: s ? 'e' : 'f' }); });
+    b.append(aarEl('h3', '', 'Civis e regras da guerra'));
+    if (cr.length) b.append(aarTable(cr, ['Lado', 'Civis mortos', 'Tíquetes', 'Milícias', 'Fogo suspenso']));
+    b.append(aarEl('p', 'aar-note', 'Cada civil morto custa ' + CIV.toll + ' tíquetes a quem o matou. Fogo suspenso: vezes em que a IA segurou um disparo de área por ter civis à vista e o alvo não identificado. '
+      + (C.evac ? C.evac + (C.evac > 1 ? ' vilas evacuadas' : ' vila evacuada') + ' (' + C.back + ' com a volta dos moradores). ' : 'Nenhuma vila evacuada. ')
+      + (C.turned.length ? 'Voltaram-se contra um lado: ' + C.turned.map(e => (e.nm || 'uma vila') + ' contra ' + N(e.s) + ' (' + mm(e.t) + ')').join(', ') + '.' : 'Nenhuma vila se voltou contra um lado.')));
+  }
   b.append(aarEl('h3', '', 'Desempenho e honestidade'));
   b.append(aarEl('p', 'aar-note', (R.perf.ms !== null ? 'Simulação: ' + String(R.perf.ms).replace('.', ',') + ' ms por quadro em média, pior ' + String(R.perf.worst).replace('.', ',') + ' ms. ' : '') + 'Pico de ' + R.perf.men + ' soldados e ' + R.perf.veh + ' veículos em campo. Honestidade (tiros sem percepção): ainda sem medida.'));
 }

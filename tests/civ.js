@@ -70,7 +70,7 @@ C.fallen(hs, null); ok(v4.dead, 'one inside a house when it falls dies with it')
 let v5 = pick(), u = C.addVehicle('tank', INF && Object.keys($('TANKS'))[0], 1, v5.x - 12, v5.z, 0); u.v.x = 8; u.v.z = 0; u.ctl.drive = 1;
 for (let i = 0; i < 120 && !v5.dead; i++) { u.x += 8 / 60; u.v.x = 8; C.run(1 / 60); }
 ok(v5.dead, 'a tank driven over one kills it');
-ok((S.cq ? S.cq.tk.every((t, i) => t === tk[i]) : true) && S.score === sc[0] && S.gndKills === sc[1] && S.floats.length === fl, 'none of it costs tickets or gives score (tickets ' + (S.cq ? S.cq.tk : '-') + ')');
+ok((S.cq ? S.cq.tk.every((t, i) => t === tk[i]) : true) && S.score === sc[0] && S.gndKills === sc[1] && S.floats.length === fl, 'none of it gives score, nor tickets in this sandbox without a match (what a death costs: civ-war.js; tickets ' + (S.cq ? S.cq.tk : '-') + ')');
 const body = S.civs.filter(c => c.dead).length; C.run(MAN.body + 5);
 ok(S.civs.filter(c => c.dead).length < body, 'the bodies are cleared after a while');
 

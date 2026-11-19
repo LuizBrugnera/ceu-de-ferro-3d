@@ -41,6 +41,7 @@ node tests/transport.js  transport-relay.js  transport-online.js   # transporte 
 node tests/forts.js  forts-relay.js  forts-online.js     # trincheiras e sacos de areia
 node tests/sappers.js  posts.js  sappers-relay.js  sappers-online.js   # sapadores e minas, sabotagem, postos guarnecidos, torre, cúpula antifoguete e lançadores de foguetes
 node tests/city.js  city-online.js  woods.js             # prédios das vilas e matas
+node tests/civ.js  civ-war.js  civ-online.js   # civis: quem anda onde, o que os fere, recrutar e a milícia; as regras da guerra (W14): o custo de cada civil morto, a vila que se volta contra um lado e arma a milícia do outro, a evacuação e a volta, as regras de engajamento da IA (civis à vista, alvo identificado), a ordem mil do general, os eventos cv e a revisão, e uma partida IA × IA por época no mapa v5 (SECS=240; SECS=0 pula); online, o custo e o aviso aos convidados (civ k 2)
 node tests/seat.js          # mapa v5: a cidade-sede junto de cada base, os lotes, as instalações neles e o disfarce até serem identificadas
 node tests/damage.js  damage-relay.js  missiles.js       # dano por peças, blindagem e o modelo dos mísseis
 node tests/drone.js  drone-relay.js  drone-online.js  pad.js   # drones (o FPV na frente e no teto de um tanque) e controles

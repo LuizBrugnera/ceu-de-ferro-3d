@@ -12473,7 +12473,7 @@ function fortStep(dt) {
   for (const f of S.forts) {
     if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && ecoSim() && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
     if (!sim || f.prog >= 1) continue;
-    let n = 0; for (const m of S.men) if (builds(m, f)) n += f.F.eng && !m.def.sap ? f.F.eng : 1;   // a pontoon: a sapper a whole builder, any other soldier eng of one (W20)
+    let n = 0; const W = f.F.eng ? brWhole(f) : null; for (const m of S.men) if (builds(m, f)) n += f.F.eng && !m.def.sap && !W(m) ? f.F.eng : 1;   // a pontoon or a rebuild: a sapper a whole builder, any other soldier eng of one, but whole with a sapper in its squad or a truck of its side near (W20, W20b)
     f.n = n = Math.min(n, f.F.max || BLD.max);
     if (n) { f.workT = S.t; fortAt(f, Math.min(1, f.prog + (1 + BLD.help * (n - 1)) / f.F.time * dt)); }
     else if (S.t - f.workT > BLD.decay[0]) { fortAt(f, f.prog - BLD.decay[1] * dt); if (f.prog <= 0) fortDrop(f); }
@@ -20914,7 +20914,7 @@ Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host
    score grows with the enemy's worth (k). Crossing (tra): a side with every crossing it needs cut (no open
    one at all, or vehicles held at a fallen bridge for wait s) sends a free squad within reach m, sappers first, to lay a pontoon at the
    fallen bridge whose bank end has no known enemy within safe m. hold: s a vehicle held at a bank waits before it looks again for a way */
-const BR = { id: 100, hp: [600, 450, 300], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 20, kill: 5000,
+const BR = { id: 100, hp: [600, 450, 300], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 8, kill: 5000,
   ai: { foe: 1500, near: 700, at: 300, min: 8, own: .5, held: 1.5, k: 12, reach: 3500, safe: 400, wait: 30, T: 600, cd: 90 } };
 OBJ.bridge = { hp: [0, 0], take: [0, .5, 1] };
 OBJ.pont = { hp: [280, 0], take: [.15, .6, 1], dug: 99, veh: () => 1 };
@@ -21463,10 +21463,43 @@ Net.rx.welcome = (old => m => { Net.gtq = m.gq === 1; old(m); })(Net.rx.welcome)
    enemy within safe m of either end, not one the side blew itself within reb.keep s, and a free squad (sappers first) on its bank. The crossing
    (tra) takes a free site when no fallen bridge will do (every crossing shut, or vehicles held at a bridge whose end has the enemy near): the
    site nearest the held vehicles (else the middle of the river between the bases) with no known enemy within safe m of either end */
-Object.assign(BR, { ps: { max: 280, steep: 7, run: 12, keep: 300, edge: 300, link: 2500, every: 100, cap: 3, z: 60, near: 400, pick: 250, at: 150 }, reb: { keep: 600, T: 1500 }, ops: ['dem', 'tra', 'reb'] });
+Object.assign(BR, { ps: { max: 280, steep: 7, run: 12, keep: 300, edge: 300, link: 2500, every: 100, cap: 3, z: 60, near: 400, pick: 250, at: 150 }, reb: { keep: 600, T: 1500, truck: 80, urg: 15, safe: 250 }, ops: ['dem', 'tra', 'reb'] });
 OBJ.rebuild = { hp: [400, 0], take: [.15, .6, 1], dug: 99, veh: () => 1 };
-FORT.rebuild = { k: 8, name: 'Ponte', obj: 'rebuild', size: [12, 8, 2.4], time: 600, cap: 2, put: [5, 9], pad: 0, road: 0, min: 1, near: 0, back: 0, conceal: 0, pitch: 99, span: 1, eng: .5, max: 4, cost: [0, 120], garr: [] };
+FORT.rebuild = { k: 8, name: 'Ponte', obj: 'rebuild', size: [12, 8, 2.4], time: 300, cap: 2, put: [5, 9], pad: 0, road: 0, min: 1, near: 0, back: 0, conceal: 0, pitch: 99, span: 1, eng: .5, max: 4, cost: [0, 40], garr: [] };   // the captain: easier to fix (5 min for one builder, 2 at best; 40 metal with the economy)
 FORT.K[8] = FORT.rebuild;
+/* who builds a pontoon or a rebuild as a whole builder besides a sapper: a soldier whose squad has a live sapper, or any of the side's soldiers with
+   one of its trucks within reb.truck m of the work (the material on wheels) */
+function brWhole(f) {
+  const tr = S.units.some(u => !u.dead && u.team === f.team && u.kind === 'truck' && hdist(u, f) < BR.reb.truck);
+  return m => tr || (!!m.sq && m.sq.men.some(x => !x.dead && x.def.sap));
+}
+/* the general never stalls at a fallen bridge (the captain: "as pontes caem o general não reconstroi e nem ataca mais"): every reb.urg s, where the match
+   is simulated, each side whose attack is the AI's looks at the fallen bridges that cut one of its axes or hold its vehicles with no work and no
+   manoeuvre at them, and at once, past the manoeuvres' cap and cooldown: rebuilds it when the near end is clear of known enemy within reb.safe m and
+   it can pay; else lays a pontoon there when that end is clear; else lays one at the nearest good stretch of the river. Its columns keep off the cut
+   axis (colAxis) and the held vehicles look again for a way round at once (brStep), so the attack goes on meanwhile */
+function brUrgent() {
+  if (!S.cmd || !S.cq || !(S.T.mv >= 4) || (S.net && !S.host) || S.cq.ph || S.t < (S.brU || 0)) return;
+  S.brU = S.t + BR.reb.urg;
+  if (!brOn() || (S.net && !Net.brb)) return;
+  for (const t of [0, 1]) {
+    const C = S.cmd[t]; if (!C || genBy(t, 'atk') !== 'ai') continue;
+    const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), X = { t, C, free: manFree(all) };
+    for (const b of brs()) {
+      if (!brDown(b) || brOpen(b) || brReb(b) || brPont(b) || C.ops.some(o => !o.over && (o.b === b.i || (o.k === 'tra' && o.pz !== undefined)))) continue;
+      const held = brHeld(t, b); if (!held && !b.rs.length) continue;
+      if (S.t - (S.brd[t + ':' + b.i] ?? -1e9) < BR.reb.keep) continue;   // its own retreat: not undone at once
+      const e = b.ends.find(e => brHome(t, e)); if (!e) continue;
+      const hot = brFoe(C, e, BR.reb.safe, true) + brFoe(C, e, BR.reb.safe, false) > 0, q = brSquad(X, e, true, true, BR.ai.reach * 2);
+      let r = null;
+      if (!hot && q && !brCost(t)) r = brOpenOp(t, C, { c: 'rebuild', x: b.x, z: b.z, why: 'a ponte caída corta o eixo' }, 'ai', { res: { b, q } }, 'reb');
+      if ((!r || !r.ok) && !hot && q) r = brOpenOp(t, C, { c: 'cross', x: b.x, z: b.z, why: 'a ponte caída corta o eixo' }, 'ai', { res: { b, q } }, 'tra');
+      if (!r || !r.ok) { const c = brSiteFor(C, X, [b], false); if (c) r = brOpenOp(t, C, Object.assign({}, c.spec, { why: 'a ponte caída corta o eixo' }), 'ai', { res: c.res }, 'tra'); }
+      if (r && r.ok) { for (const u of S.units) if (u.team === t && u.brB === b.i) u.brW = 0; gLog(t, 'atk', brName(b) + ' caída no nosso eixo: o general age já, sem parar o ataque', b, 'bru' + b.i); }
+    }
+  }
+}
+step = (g => dt => { g(dt); brUrgent(); })(step);
 /* the rebuild at a bridge, the free pontoon at a site (z), an enemy within FORT.foe m of a place, and what side t lacks to pay a rebuild */
 const brReb = b => (S.forts ? S.forts.find(f => f.k === 8 && !f.dead && f.b === b.i) || null : null);
 const brPontSite = z => (S.forts ? S.forts.find(f => f.k === 7 && !f.dead && f.ps && Math.abs(f.ps.z - z) < BR.ps.z) || null : null);

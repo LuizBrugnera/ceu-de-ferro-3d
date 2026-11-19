@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '1.0.0';
+const VERSION = '2.0.0';   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -162,7 +162,7 @@ async function takeDomains(list) {
     const r = await enqueue('cmd', n => ({ t: 'gcmd', d: 'cmd', c: { c: 'ctl', k2: d, k: 'me' }, n })); if (!r.ok) log('ctl ' + d + ' refused: ' + r.why);
   }
 }
-const ECOCMDS = ['build', 'make', 'cancel', 'prio', 'scrap', 'def', 'keep', 'scout', 'strike'];
+const ECOCMDS = ['build', 'make', 'cancel', 'prio', 'scrap', 'def', 'keep', 'scout', 'strike', 'expand'];
 /* wait: match time (the host's clock, from its streams) or a notable event, whichever first */
 async function waitFor(secs, stopOnEvent) {
   const T0 = R.T, seq0 = R.evSeq, wall0 = now(), wallMax = secs * 1500 + 4000, e0 = R.ecs && R.ecs.m, q0 = e0 ? flat(e0.q, 5).map(r => [r[0], kname(r[1])]) : [], stock0 = e0 ? e0.v.slice(0, 2) : null, log0 = R.glog.length;
@@ -193,20 +193,27 @@ const WHY = {
   ctl: 'you do not hold the general seat of your side (call the seat tool) or, for economy orders, you do not hold the economy domain (seat claim takes it by default; ctl {k2: "eco", k: "me"} takes it back)',
   rate: 'sent too fast for the relay; retry', shape: 'the relay or host rejected the command shape (unknown key, wrong type, or out-of-range value)', host: 'no host is connected to run the match',
   off: 'the host has no economy running (match not started or economy off)', over: 'the match is over', link: 'connection to the relay dropped', timeout: 'host did not answer',
-  busy: 'queue full or the squads already have an operation', unknown: 'the host does not know that command or sighting', mcp: 'the economy controller of this side is not the model (seat not held yet?)',
+  busy: 'queue full or the squads already have an operation', sq: 'no free squad for it (the ids do not exist, are dead or are already in an operation)', unknown: 'the host does not know that command or sighting', mcp: 'the economy controller of this side is not the model (seat not held yet?)',
 };
-/* the page's own texts for the codes the host answers (GEN.no and ECO.tx.why), in Brazilian Portuguese, copied so a refusal always carries a reason */
-const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 'Você não está no comando disso', shape: 'Ordem malformada', kind: 'Ordem ou tipo desconhecido', at: 'Objetivo inválido',
-  link: 'Ponto sem ligação com um ponto nosso: ainda não pode ser tomado', own: 'Esse ponto já é nosso', busy: 'Já há uma operação com essa tropa ou nessa estrada', max: 'Limite de operações simultâneas',
-  sq: 'Nenhuma esquadra livre para isso (ids inexistentes, mortas ou já em operação)', reach: 'Essas esquadras não chegam lá pela estrada delas', nores: 'Sem reserva disponível', fire: 'Nenhum morteiro ou bateria alcança esse ponto',
-  amb: 'Emboscada só junto a uma estrada', id: 'Não encontrado', cool: 'Ainda em espera: tente daqui a pouco', tk: 'Tíquetes insuficientes', stock: 'Sem estoque no depósito', res: 'Nada na reserva: produza antes',
-  rate: 'Ordens rápidas demais: aguarde um instante', host: 'A sala está sem anfitrião', bug: 'Erro ao aplicar a ordem', wait: 'Sem resposta do anfitrião',
-  map: 'Fora do mapa ou na água', water: 'Na água', steep: 'Terreno inclinado', road: 'Em cima da estrada', obj: 'Obstruído', base: 'Perto demais de outra base', foe: 'Inimigo por perto', cap: 'Limite de bases / deste tipo de instalação',
-  near: 'Perto demais de outra instalação', far: 'Fora do território', front: 'À frente da linha', dep: 'Mina só sobre jazida livre', fabroad: 'Fábrica precisa de estrada a menos de 500 m',
-  q: 'Fila cheia', era: 'Não existe nesta época', unknown: 'Instalação inimiga não localizada (ou avistada há muito tempo)', none: 'Nada na reserva', en: 'Falta energia', mt: 'Falta metal',
-  hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila', mil0: 'Sem tropa nossa na vila para armar os civis',
-  roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento',
-  rt: 'Rota inválida: até 8 pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até 9 km)', air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de obras de campanha do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra', mcap: 'Limite de minas do lado', mv: 'Ordens amplas e rotas só no mapa com rede de estradas' };
+/* the page's own texts for the codes the host answers, in Brazilian Portuguese, exactly as a person reads them on the general's view (the page's gNo: GEN.no,
+   else ECO.tx.why), copied so a refusal always carries the same reason; tests/mcp-general.js checks every page code comes back with the page's text. Extra: en */
+const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 'Você não está no comando disso', shape: 'Ordem malformada', kind: 'Ordem desconhecida', at: 'Objetivo inválido',
+  link: 'Ponto sem ligação com um ponto nosso: ainda não pode ser tomado', own: 'Esse ponto já é nosso', busy: 'Já há uma operação com essa tropa ou nessa estrada',
+  max: 'Limite de operações simultâneas', sq: 'Nenhuma esquadra livre para isso', reach: 'Essas esquadras não chegam lá pela estrada delas', nores: 'Sem reserva disponível',
+  fire: 'Nenhum morteiro ou bateria alcança esse ponto', amb: 'Emboscada só junto a uma estrada', id: 'Não encontrado', cool: 'Ainda em espera: tente daqui a pouco', tk: 'Tíquetes insuficientes',
+  stock: 'Sem estoque no depósito', res: 'Nada na reserva: produza antes', rate: 'Ordens rápidas demais: aguarde um instante', host: 'A sala está sem anfitrião', bug: 'Erro ao aplicar a ordem',
+  wait: 'Sem resposta do anfitrião', map: 'Fora do mapa ou na água', water: 'Na água', steep: 'Terreno inclinado', road: 'Em cima da estrada', obj: 'Obstruído', base: 'Perto demais de outra base',
+  foe: 'Inimigo por perto', cap: 'Limite de bases ou deste tipo de instalação', pop: 'Acima do teto de população do lado', node: 'Nó de suprimento não encontrado', full: 'O nó está cheio',
+  mt: 'Falta metal na base principal', conv: 'Comboios demais a caminho', lift: 'Sem helicóptero de transporte na reserva', cut: 'O nó está cortado da base: use a ponte aérea',
+  era: 'Não existe nesta época', tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais: fora do território ou à frente da linha', hurt: 'Nenhum ferido para evacuar ali',
+  mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até 8 pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até 9 km)',
+  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de 6 obras de campanha do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
+  mcap: 'Limite de minas do lado', mkn: 'No máximo 4 unidades novas por ordem', hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila',
+  mil0: 'Sem tropa nossa na vila para armar os civis', roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento', down: 'A ponte já caiu',
+  whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', server: 'O servidor desta sala é antigo: sem pontes destrutíveis',
+  hasmine: 'Já temos uma mina nessa jazida', foemine: 'O inimigo tem uma mina nessa jazida', sap: 'Nenhuma esquadra com sapadores livre para isso', path: 'Nenhum caminho a pé seguro até lá',
+  cd: 'Essa manobra ainda está em espera', n: 'Número de esquadras inválido', near: 'perto demais de outra instalação', lot: 'num lote da cidade-sede', front: 'à frente da linha',
+  dep: 'mina só sobre jazida livre', fabroad: 'fábrica precisa de estrada a menos de 500 m', q: 'fila cheia', unknown: 'instalação inimiga não localizada', none: 'nada na reserva', en: 'Falta energia' };
 const explain = r => (r.ok ? 'accepted' : 'refused: ' + (r.why || 'unspecified') + (PT[r.why] ? ' (' + PT[r.why] + ')' : '') + (WHY[r.why] ? ' - ' + WHY[r.why] : '') + (r.note ? ' - ' + r.note : ''));
 
 /* the host's answer to a command: text for the model */
@@ -252,7 +259,7 @@ async function runAsk(q) {
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
   mk: 'w', lat: 'i', roe: 'w', brk: 'n', nd: 'w', rt: 'P', role: 'w', qrf: 'i' };
-const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats'];   // the relay's gask kinds; it passes on k, x, z, a
+const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap'];   // the relay's gask kinds; it passes on k, x, z, a and id
 const isNum = v => typeof v === 'number' && Number.isFinite(v), isInt = v => Number.isInteger(v);
 function rawCmd(c) {   // returns an error string or null
   if (!c || typeof c !== 'object' || Array.isArray(c)) return 'command must be an object';
@@ -276,7 +283,7 @@ function rawAsk(q) {   // returns an error string or null
   if (!ASKS.includes(q.q)) return 'q must be one of ' + ASKS.join(', ');
   for (const k of Object.keys(q)) {
     if (k === 'q') continue;
-    if (k === 'k' ? !(typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) : ['x', 'z', 'a'].includes(k) ? !(isNum(q[k]) && Math.abs(q[k]) < 1e5) : true) return 'question key "' + k + '" is not allowed or has a wrong type; allowed: k (word), x, z, a (numbers)';
+    if (k === 'k' ? !(typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) : k === 'id' ? !(isInt(q.id) && Math.abs(q.id) < 1e6) : ['x', 'z', 'a'].includes(k) ? !(isNum(q[k]) && Math.abs(q[k]) < 1e5) : true) return 'question key "' + k + '" is not allowed or has a wrong type; allowed: k (word), x, z, a (numbers), id (integer)';
   }
   return null;
 }
@@ -504,7 +511,8 @@ const TOOLS = [
     + '- ord {k: atk|def|rec|esc|amb|fire, pi | x,z, ids? | n?: 1-6 squads the general picks, k2?: a unit kind to create n of, rt?}: an abstract order (order_units is easier).  fort {k: trench|sandbag|bunker|atpost|post|aapos|mineat|mineap|sup, x,z, a?, ids?, rt?}: a fortification, the general picks the builder (build_defence).  req {k: fire|recon|cas|lift, x,z, n?, ids?, rt?}: a request for support (request_support).\n'
     + '- rt: a route, a flat list [x0, z0, x1, z1, ...] of 1-8 waypoints, on move, hold (x,z), recon, assault, work, man (flank, feint), ord (atk, def, rec, esc), fort (every kind but sup) and req (recon, lift).\n'
     + '- camp {H?: s to H-hour 20-300, why?} opens a campaign (answers its id); camp {id, op: operation id, role?: main|sec|fnt|raid} attaches an operation to it (an assault takes its H-hour); camp {id, k: end} ends it.  dpol {pi | id: own site or supply base, inf?: 0-3 squads to answer, aa?: 0-1 the site\'s fixed AA, qrf?: 0 never answer, 1 by triage, 2 always}: a place\'s defence policy.  triage {id: threat id, p: -1 ignore | 0 auto | 1-3 priority}.  qrf {id: threat id, ids?}: answer a threat now (one squad fixes, the others flank at a common H-hour, fire and air focus at H).\n'
-    + 'QUESTIONS {q: spots (k) | why (k,x,z) | view | state | pool (x,z: squads that could assault there) | amb (x,z) | fire (k,x,z) | plan | logi | rec | brg | threats (the threat board: incidents with id, value, urgency, known enemy, state open|resp|ign and why; the campaigns; the side\'s fronts)}. Params allowed in a command: k, k2, mk, roe, nd, role (short lowercase words), x, z, a, s, fx, fz, x2, z2, H, r, brk (numbers), n, id, p, inf, aa, qrf, ri, op, j, pi, sd, smk, home, lat (integers), ids (list), rt (flat list of 1-8 x,z pairs), why (text up to 120 chars). Anything else is rejected. Refusal codes (Portuguese text is returned with them): ctl you lack the seat, off, over, shape, kind, at, link, own, busy, max, sq, reach, nores, fire, amb, id, cool, tk, stock, res, rate, map, water, steep, road, obj, base, foe, cap, pop, node, full, mt, conv, lift, cut, era, hate, nociv, mil0, roe, rt, way, air, mv, fcap, esc, cost, mcap.',
+    + '- expand {id: deposit i, inf?: 0-2, aa?: 0-1}: claim a deposit, a mine on it and its guard (claim_deposit).  clear {x,z, ids?}: sappers sweep a place for mines (clear_mines).  sabot {pi | x,z, ids?}: a raid with sappers and charges (sabotage).\n'
+    + 'QUESTIONS {q: spots (k) | why (k,x,z) | view | state | pool (x,z: squads that could assault there) | amb (x,z) | fire (k,x,z) | plan | logi | rec | brg | threats (the threat board: incidents with id, value, urgency, known enemy, state open|resp|ign and why; the campaigns; the side\'s fronts) | missions | unit (id: a squad\'s card) | lots | mines}. Params allowed in a command: k, k2, mk, roe, nd, role (short lowercase words), x, z, a, s, fx, fz, x2, z2, H, r, brk (numbers), n, id, p, inf, aa, qrf, ri, op, j, pi, sd, smk, home, lat (integers), ids (list), rt (flat list of 1-8 x,z pairs), why (text up to 120 chars). Anything else is rejected. Refusal codes (Portuguese text is returned with them; ctl: you lack the seat): ' + Object.keys(PT).join(', ') + '.',
     inputSchema: { type: 'object', properties: { d: { type: 'string', enum: ['eco', 'cmd'], description: 'which dispatcher (default eco)' }, command: { type: 'object', description: 'the command: {"c": "name", ...params}', properties: { c: { type: 'string', pattern: '^[a-z]{2,8}$' } }, required: ['c'] }, question: { type: 'object', description: 'a question instead of a command: {"q": kind, k?, x?, z?, a?}', properties: { q: { type: 'string', enum: ASKS } }, required: ['q'] } }, additionalProperties: false },
     run: async a => {
       if (!a || (a.command === undefined) === (a.question === undefined)) throw new Error('give exactly one of command or question');
@@ -542,6 +550,68 @@ const TOOLS = [
       if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
       return runCmd(withRt(Object.assign({ c: 'fort', k: a.kind }, pick(a, ['x', 'z', 'facing', 'ids', 'why'], { facing: 'a' })), a), 'cmd');
     } },
+  /* ---- MCP v2 (W13): the rest of the general's tools, the same commands the general's view gives a person ---- */
+  { name: 'get_threats', description: 'Ask the host for your side\'s threat board now: every incident (id, kind point/site/air, name, value, urgency, the enemy known there, your own force there, score, state open|resp|ign, the priority you gave it, why, the squads answering and their H-hour), the campaigns (id, state, seconds to H, operations with their roles) and the defence policies you set (pol, by key p<point index>, s<site id>, b<supply base id>), and how many fronts your doctrine allows. Use the ids with triage_threat, send_qrf and attach_operation. One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'threats' }) },
+  { name: 'get_missions', description: 'Ask the host for every mission of your side now: squads by id (job, men, mission kind and its Portuguese name, state way|exec|done|inviable|lost, the general\'s words, operation id, area x z r, latitude 0-2, roe, break-off, seconds to H-hour, where the squad is), vehicles and aircraft by kind with the same mission fields. One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'missions' }) },
+  { name: 'get_unit', description: 'The unit card of one of your squads (id from get_state general.squads or get_missions): what it sees (men standing, wounded, suppressed, its radio link, its contacts and the most dangerous one with its distance and how well it is made out) and what it decides (its mission, latitude, rules of engagement and break-off, the order it holds or that is on its way by radio, its operation and post, what its own mind chose now: carry out the mission, fall back or answer a call for help, the call for help it has open), as data and as two lists of Portuguese sentences, see and decide (the same card a person sees on the general\'s view). Refused id when no such live squad. One host question a second.',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer', description: 'squad id' } }, required: ['id'], additionalProperties: false }, annotations: { readOnlyHint: true },
+    run: async a => { const e = need(a, { id: ['i', true, 0, 999999] }); if (e) throw new Error(e); return runAsk({ q: 'unit', id: a.id }); } },
+  { name: 'get_lots', description: 'Ask the host for the lots of your seat town (map version 5): kind (pow, mine, fab, dep: a supply base), x, z, facing a, size w d, free or the site id on it. build_site on a free lot of its kind snaps to the lot. One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'lots' }) },
+  { name: 'get_mines', description: 'Ask the host for the mines your side knows: its own (kind 0 anti-tank, 1 anti-personnel, x, z), the enemy mines it has found, its suspect fields (where a mine went off or was seen) and the side\'s mine limit. One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'mines' }) },
+  { name: 'create_campaign', description: 'Open a campaign: a common H-hour for several operations, so assaults, feints and raids strike together (the attack domain). h_hour: seconds to H, 20-300 (default 60). Accepted with the campaign id (use it with attach_operation and end_campaign) or refused (off, max: the side already has its most campaigns).',
+    inputSchema: { type: 'object', properties: { h_hour: { type: 'number', minimum: 20, maximum: 300 }, why: WHYP }, additionalProperties: false },
+    run: async a => { const e = need(a || {}, { h_hour: ['n', false], why: ['s', false] }); if (e) throw new Error(e); return runCmd(Object.assign({ c: 'camp' }, pick(a || {}, ['h_hour', 'why'], { h_hour: 'H' })), 'cmd'); } },
+  { name: 'attach_operation', description: 'Attach one of your operations (id from get_state general.operations or get_threats) to a campaign: an assault takes the campaign\'s H-hour. role: main (the main effort, one a campaign), sec (secondary), fnt (a feint) or raid; default: the first assault main, the next sec, a feint fnt, a raid raid. Refused id (no such campaign or operation), busy (it is in another campaign, or the campaign has its main effort), kind (that role does not fit the operation).',
+    inputSchema: { type: 'object', properties: { campaign: { type: 'integer' }, operation: { type: 'integer' }, role: { type: 'string', enum: ['main', 'sec', 'fnt', 'raid'] } }, required: ['campaign', 'operation'], additionalProperties: false },
+    run: async a => { const e = need(a, { campaign: ['i', true, 0, 999999], operation: ['i', true, 0, 999999], role: ['w', false, ['main', 'sec', 'fnt', 'raid']] }); if (e) throw new Error(e); return runCmd(Object.assign({ c: 'camp' }, pick(a, ['campaign', 'operation', 'role'], { campaign: 'id', operation: 'op' })), 'cmd'); } },
+  { name: 'end_campaign', description: 'End a campaign (its operations go on by themselves).',
+    inputSchema: { type: 'object', properties: { campaign: { type: 'integer' } }, required: ['campaign'], additionalProperties: false },
+    run: async a => { const e = need(a, { campaign: ['i', true, 0, 999999] }); if (e) throw new Error(e); return runCmd({ c: 'camp', id: a.campaign, k: 'end' }, 'cmd'); } },
+  { name: 'set_defence_policy', description: 'The defence policy of a place (the defence domain): a point (index) or one of your sites or supply bases (site id). infantry: at most 0-3 squads the threat board sends to answer there (a site: also its own guard, 0-2); anti_air: 0-1 the site\'s fixed AA; reaction: 0 never answer a threat there, 1 by the board\'s triage (default), 2 always. Refused at (no such point), id (no such site of yours), shape.',
+    inputSchema: { type: 'object', properties: { point: { type: 'integer' }, site: { type: 'integer' }, infantry: { type: 'integer', minimum: 0, maximum: 3 }, anti_air: { type: 'integer', minimum: 0, maximum: 1 }, reaction: { type: 'integer', minimum: 0, maximum: 2 }, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { point: ['i', false, 0, 999], site: ['i', false, 0, 999999], infantry: ['i', false, 0, 3], anti_air: ['i', false, 0, 1], reaction: ['i', false, 0, 2], why: ['s', false] }); if (e) throw new Error(e);
+      if ((a.point === undefined) === (a.site === undefined)) throw new Error('give exactly one of point or site');
+      return runCmd(Object.assign({ c: 'dpol' }, pick(a, ['point', 'site', 'infantry', 'anti_air', 'reaction', 'why'], { point: 'pi', site: 'id', infantry: 'inf', anti_air: 'aa', reaction: 'qrf' })), 'cmd');
+    } },
+  { name: 'triage_threat', description: 'Set the priority of an incident on the threat board (id from get_threats): -1 ignore it (its answer is called off), 0 the board\'s own judgement, 1-3 a priority (3 the highest).',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer' }, priority: { type: 'integer', minimum: -1, maximum: 3 } }, required: ['id', 'priority'], additionalProperties: false },
+    run: async a => { const e = need(a, { id: ['i', true, 0, 999999], priority: ['i', true, -1, 3] }); if (e) throw new Error(e); return runCmd({ c: 'triage', id: a.id, p: a.priority }, 'cmd'); } },
+  { name: 'send_qrf', description: 'Answer an incident of the threat board now with the quick reaction force (id from get_threats): one squad fixes it, the others flank at a common H-hour, with fire and the air focus at H. ids: the squads to send (default: the board picks the nearest free ones, as many as the place\'s policy allows). Refused id, busy (already answered, or the squads you named are in operations), kind (an air incident: that is the AA\'s), max (too many answers at once), sq (no free squad).',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer' }, ids: IDS }, required: ['id'], additionalProperties: false },
+    run: async a => { const e = need(a, { id: ['i', true, 0, 999999] }); if (e) throw new Error(e); if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids'); return runCmd(Object.assign({ c: 'qrf' }, pick(a, ['id', 'ids'])), 'cmd'); } },
+  { name: 'claim_deposit', description: 'Claim a resource deposit (its i from ask_view economy.dep): a metal mine is built on it (on the deposit or the nearest place round it the economy takes) and its guard is set (infantry 0-2 squads, default 1; anti_air 0-1, default 0) (the economy domain). Accepted with the new site id, or refused id (no such deposit), hasmine (yours is there), foemine (an enemy mine is known there), or a build reason (far: out of your territory, front: ahead of the line, steep, obj, q: queue full, cap, en/mt).',
+    inputSchema: { type: 'object', properties: { deposit: { type: 'integer', minimum: 0 }, infantry: { type: 'integer', minimum: 0, maximum: 2 }, anti_air: { type: 'integer', minimum: 0, maximum: 1 }, why: WHYP }, required: ['deposit'], additionalProperties: false },
+    run: async a => { const e = need(a, { deposit: ['i', true, 0, 999], infantry: ['i', false, 0, 2], anti_air: ['i', false, 0, 1], why: ['s', false] }); if (e) throw new Error(e); return runCmd(Object.assign({ c: 'expand' }, pick(a, ['deposit', 'infantry', 'anti_air', 'why'], { deposit: 'id', infantry: 'inf', anti_air: 'aa' }))); } },
+  { name: 'lay_minefield', description: 'Lay a minefield at a place: kind at (anti-tank) or ap (anti-personnel), 5 mines across the way to the enemy; the general picks the layers (sappers, engineers first) unless you name ids (the same order as build_defence mineat/mineap). Optional facing (radians) and route. Refused like build_defence (mcap: the side\'s mine limit, way, sq, map, rt, fcap).',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['at', 'ap'] }, ...xz, facing: { type: 'number' }, ids: IDS, route: ROUTE, why: WHYP }, required: ['kind', 'x', 'z'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { kind: ['w', true, ['at', 'ap']], x: ['n', true], z: ['n', true], facing: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(withRt(Object.assign({ c: 'fort', k: 'mine' + a.kind }, pick(a, ['x', 'z', 'facing', 'ids', 'why'], { facing: 'a' })), a), 'cmd');
+    } },
+  { name: 'clear_mines', description: 'A squad with sappers (the first of ids that has them, else the nearest free one) sweeps a place for mines: the suspect field and the enemy mines your side knows there (get_mines), lifting what the detector finds. Accepted with the squad id, or refused sap (no squad with sappers free), busy, way (no way there on foot), map, off.',
+    inputSchema: { type: 'object', properties: { ...xz, ids: IDS, why: WHYP }, required: ['x', 'z'], additionalProperties: false },
+    run: async a => { const e = need(a, { x: ['n', true], z: ['n', true], why: ['s', false] }); if (e) throw new Error(e); if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids'); return runCmd(Object.assign({ c: 'clear' }, pick(a, ['x', 'z', 'ids', 'why'])), 'cmd'); } },
+  { name: 'sabotage', description: 'A raid on foot behind the enemy line with sappers and their demolition charges, against what stands at a point or x, z (an enemy battery, radio vehicle, supply base or site you have seen): the raid manoeuvre picks its squads and a squad with sappers goes along (the first of ids that has them, else the nearest free one); at the target a sapper sets a charge against a vehicle that stands still. Accepted with the operation id, or refused sap (no squad with sappers and charges), at (nothing known to raid there), path (no safe way on foot), sq, max, cd, off (map version 4 or later only).',
+    inputSchema: { type: 'object', properties: { point: { type: 'integer' }, ...xz, ids: IDS, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give point or both x and z');
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(Object.assign({ c: 'sabot' }, pick(a, ['point', 'x', 'z', 'ids', 'why'], { point: 'pi' })), 'cmd');
+    } },
+  { name: 'arm_militia', description: 'Arm a town\'s civilians as a militia squad that holds it (a point index, or x, z inside the town): needs 3 of your soldiers in the town, once every 150 s a town. Refused hate (the town turned against you after your fire killed its people), nociv (nobody left to arm), mil0 (not 3 of your soldiers there), cool.',
+    inputSchema: { type: 'object', properties: { point: { type: 'integer' }, ...xz, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give point or both x and z');
+      return runCmd(Object.assign({ c: 'mil' }, pick(a, ['point', 'x', 'z', 'why'], { point: 'pi' })), 'cmd');
+    } },
   { name: 'ask_placement', description: 'Ask the host for the best places to build a kind of site (the economy AI\'s own placement scorer): up to 5 candidates {x, z, a, score, why}. Call this before build_site when unsure where to build. Limited to one question per second.',
     inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['pow', 'mine', 'fab'], description: 'site kind' } }, required: ['kind'], additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async a => { const e = need(a, { kind: ['w', true, ['pow', 'mine', 'fab']] }); if (e) throw new Error(e); return runAsk({ q: 'spots', k: a.kind }); } },
@@ -570,7 +640,7 @@ const TOOL = new Map(TOOLS.map(t => [t.name, t]));
 const listing = () => TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, ...(t.annotations ? { annotations: t.annotations } : {}) }));
 
 /* ---------------------------------------------------------------- MCP over stdio */
-const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. The same tools a person has on the general\'s view: campaigns (create_campaign, attach_operation), the threat board (get_threats, triage_threat, send_qrf, set_defence_policy), deposits and mines (claim_deposit, lay_minefield, clear_mines, sabotage), and a squad\'s card (get_missions, get_unit: what it sees and what it decides). You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
 const out = o => process.stdout.write(JSON.stringify(o) + '\n');
 const ok = (id, result) => out({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message, data) => out({ jsonrpc: '2.0', id, error: Object.assign({ code, message }, data !== undefined ? { data } : {}) });

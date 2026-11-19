@@ -9132,7 +9132,7 @@ function fortPlan(t, sq) {
     const k = O.dig ? O.dig.k : O.tw || O.b ? 2 : 1, a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
     if (S.forts.some(f => f.k === k && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;
     q.digT = S.t + A.again;
-    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * R + ux * s * 9, z = O.z - Math.sin(a) * R + uz * s * 9; if (fortStart(k, t, x, z, a)) { n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : 'trincheira'), { x, z }, 'fort'); break; } }
+    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * R + ux * s * 9, z = O.z - Math.sin(a) * R + uz * s * 9; if (fortStart(k, t, x, z, a)) { n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
   }
 }
 /* a battery's list: each trench with enemy soldiers in it that have been spotted */
@@ -11232,10 +11232,10 @@ MANO.flk = (t, C, spec, by, R) => {
   const host = at.p ? C.ops.find(o => o.k === 'atk' && !o.over && o.O.tw === at.p && o.st !== 'back' && o.st !== 'cons') : null;
   const n = clamp(Number.isInteger(spec.n) ? spec.n : (C.dk || CMD.use[t]) === 'aggressive' && host && host.sq.length >= 4 ? K.n[1] : K.n[0], 1, K.n[1]);
   const pl = mbFlkPlan(t, C, at, host ? host.ri : at.ri, free, Math.min(n, free.length), host ? mbApproach(host.ri, host.fs - host.sd * MBF.back, host.O.s) : null, mbTm('flk', spec)); if (!pl) return gBad('path');
-  const wps = pl.wps, rt = gRtIn(spec.rt); if (rt === null) return gBad('rt');
-  const own = !!rt && !(by === 'ai' && R && R.spec === spec);   // W21: a person's (or the model's) route is walked; the AI's is its plan's own way, named
+  const wps = pl.wps, rt = by === 'ai' && R && R.spec === spec ? undefined : gRtIn(spec.rt); if (rt === null) return gBad('rt');   // W21: a person's (or the model's) route is walked; the AI's is its plan's own way, named
+  const own = rt ? pl.sqs.map(q => gWay(q, rt, pl.pos.x, pl.pos.z)) : null; if (own && !own.every(Boolean)) return gBad('way');
   const op = manOpen(C, 'flk', spec, by, { host: host ? host.id : 0, P: at.p, nm: at.nm, tx: at.x, tz: at.z, ri: at.ri, s: at.s, pos: pl.pos, path: pl.poly, st: 'go', in: 0 });
-  pl.sqs.forEach((q, i) => { opTake(op, q, { k: 'flank', ri: at.ri, s: at.s, x: pl.pos.x, z: pl.pos.z, R: 12, wp: (own && gWay(q, rt, pl.pos.x, pl.pos.z)) || wps[i], rt: own ? rt : gRtOf(wps[i]) }); q.late = false; op.n0 += q.live; });
+  pl.sqs.forEach((q, i) => { opTake(op, q, { k: 'flank', ri: at.ri, s: at.s, x: pl.pos.x, z: pl.pos.z, R: 12, wp: own ? own[i] : wps[i], rt: own ? rt : gRtOf(wps[i]) }); q.late = false; op.n0 += q.live; });
   const ri = host ? host.ri : at.ri, o = C.own[ri] || 0, e = C.enemy[ri] || 0;
   gLog(t, 'atk', 'Flanqueio por estrada secundária rumo a ' + at.nm + ': ' + mbSqs(pl.sqs.length) + ' (no eixo principal o inimigo tem ' + gN(e) + ' contra ' + gN(o) + ')', pl.pos, 'mflk' + op.id);
   return gYes(op.id);
@@ -11651,8 +11651,9 @@ MANO.fnt = (t, C, spec, by, R) => {
   const pos = fntPos(C, t, P2); if (!pos) return gBad('at');
   const sw = fntSquad(t, C, pos), fire = gFireSrc(t, 'he', P2.x, P2.z);   // with no squad near enough, a feint by fire alone (a demonstration of the guns and mortars)
   if (!sw && !fire) return gBad(manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)).length ? 'path' : 'sq');
-  const q = sw && sw.q, p = railOf(pos.x, pos.z), op = manOpen(C, 'fnt', spec, by, { main: M, P1: M.O.tw, P2, pos, ri: p.ri, kz: { x: P2.x, z: P2.z }, d0: cmdKnown(C, P2.x, P2.z, FNTX.near), n0: q ? q.live : 0, fired: 0 });
-  const rt = gRtIn(spec.rt), own = !!rt && !(by === 'ai' && R && R.spec === spec), way = q ? (own && gWay(q, rt, pos.x, pos.z)) || sw.way : null;   // W21: a route of the person's is walked; the AI's own way is named on the order
+  const q = sw && sw.q, rt = by === 'ai' && R && R.spec === spec ? undefined : gRtIn(spec.rt); if (rt === null) return gBad('rt');   // W21: a route of the person's is walked; the AI's own way is named on the order
+  const own = !!rt, way = own ? q && gWay(q, rt, pos.x, pos.z) : q ? sw.way : null; if (own && !way) return gBad('way');
+  const p = railOf(pos.x, pos.z), op = manOpen(C, 'fnt', spec, by, { main: M, P1: M.O.tw, P2, pos, ri: p.ri, kz: { x: P2.x, z: P2.z }, d0: cmdKnown(C, P2.x, P2.z, FNTX.near), n0: q ? q.live : 0, fired: 0 });
   if (q) opTake(op, q, { k: 'overwatch', ri: p.ri, s: p.s, x: pos.x, z: pos.z, R: 12, ax: P2.x, az: P2.z, wp: way, fast: 1, rt: own ? rt : gRtOf(way) });
   gLog(t, 'atk', 'Finta ' + (q ? '' : 'pelo fogo ') + 'sobre ' + gName(P2) + ' para atrair a reserva antes da hora H em ' + gName(M.O.tw) + (spec.why && by !== 'ai' ? ' (' + spec.why + ')' : ''), P2);
   return gYes(op.id);
@@ -15596,7 +15597,7 @@ const W21 = { wp: 8, max: 9000, nmax: 6, live: 2, ring: 230, off: [0, .95, -.95]
   jobs: { push: 1, held: 1, road: 1, line: 1, wood: 1, rec: 1, lp: 1, eng: 1 } };
 Object.assign(GEN.no, { mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até ' + W21.wp + ' pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até ' + W21.max / 1000 + ' km)',
   air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de ' + FORT.ai.cap + ' obras de campanha do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
-  mcap: 'Limite de minas do lado' });   // (SAP comes after this block)
+  mcap: 'Limite de minas do lado', mkn: 'No máximo ' + GPC.n + ' unidades novas por ordem' });   // (SAP comes after this block)
 Object.assign(GEN.cn, { ord: 'ordem ampla', fort: 'fortificar' });
 Net.rx.welcome = (old => m => { Net.rte = m.rte === 1; old(m); })(Net.rx.welcome);   // the relay passes rt (welcome rte: 1)
 /* a command's name for the log and the toast: an abstract one by its verb or kind */
@@ -15624,7 +15625,7 @@ function gRtOf(w) {
   const out = [], a0 = w[0], a1 = w[w.length - 1];
   for (let i = 1; i < w.length - 1; i++) {
     const a = w[i - 1], b = w[i], c = w[i + 1], d = wrap(Math.atan2(c.z - b.z, c.x - b.x) - Math.atan2(b.z - a.z, b.x - a.x));
-    if (Math.abs(d) > W21.turn && hdist(b, a0) > W21.gap && hdist(b, a1) > W21.gap && (!out.length || hdist(b, out[out.length - 1]) > W21.gap)) out.push({ x: Math.round(b.x), z: Math.round(b.z) });
+    if (Math.abs(d) > W21.turn && hdist(b, a0) > W21.gap && hdist(b, a1) > W21.gap && (!out.length || hdist(b, out[out.length - 1]) > W21.gap) && gMapOk(Math.round(b.x), Math.round(b.z))) out.push({ x: Math.round(b.x), z: Math.round(b.z) });
   }
   if (out.length > W21.wp) { const k = out.length / W21.wp; return [...Array(W21.wp).keys()].map(i => out[Math.floor(i * k)]); }
   return out.length ? out : undefined;
@@ -15731,6 +15732,7 @@ GC.ord = { d: 'atk', f(t, c, by) {
 /* create n new units of kind k2 for an abstract order: the General's dispatch, then a pending op that hands the new squads the verb, or opens the new batteries' fire */
 function gMake(t, c, by, v, rt) {
   if (Array.isArray(c.ids) && c.ids.length) return gBad('shape');
+  if (Number.isInteger(c.n) && c.n > GPC.n) return gBad('mkn');
   const T = gTgt(c, v === 'atk' || v === 'def', t, v === 'def'); if (!T) return gBad(c.pi !== undefined ? 'at' : 'map');
   if (v === 'atk' && T.p && T.p.hold === t) return gBad('own');
   if (v === 'esc' && !gEscU(t, T.x, T.z)) return gBad('esc');
@@ -15742,7 +15744,7 @@ function gMake(t, c, by, v, rt) {
 }
 OPS.w21p = (C, op) => {
   const t = C.t, c = op.c;
-  if (S.t - op.T0 > W21.pT) return opEnd(C, op);
+  if (S.t - op.T0 > W21.pT || (op.by === 'ai' ? genBy(t, GC.ord.d) !== 'ai' : genSeat(t) !== op.by)) return opEnd(C, op);
   if (op.v === 'fire') {   // the new guns open fire as soon as one of them reaches
     if (S.units.some(u => u.team === t && !u.dead && u.mis && u.mis.d === op.d) && gFireSrc(t, 'he', c.x, c.z)) { cmdMission(C, 'he', c.x, c.z, 4, GENC.life); gLog(t, 'atk', 'Baterias novas em posição: fogo ' + gNear(c.x, c.z), { x: c.x, z: c.z }, null); opEnd(C, op); }
     return;
@@ -15802,7 +15804,8 @@ GC.fort = { d: 'def', f(t, c, by) {
   if (F) {
     if (F.era && F.era !== S.era) return gBad('kind');
     if (K >= 3 && S.net && !Net.sap) return gBad('off');
-    if (S.forts.reduce((n, f) => n + (f.team === t && !f.pre ? 1 : 0), 0) >= FORT.ai.cap) return gBad('fcap');   // the planner starts no more (fortPlan): said now, not left undone
+    const go = cmdOf(t).ops.filter(o => o.k === 'usr' && !o.over && o.v === 'fort' && opLive(o).some(q => q.ord && q.ord.dig && !S.forts.some(f => f.k === q.ord.dig.k && Math.abs(f.x - q.ord.x) < FORT.ai.post && Math.abs(f.z - q.ord.z) < FORT.ai.post))).length;
+    if (S.forts.reduce((n, f) => n + (f.team === t && !f.pre ? 1 : 0), go) >= FORT.ai.cap) return gBad('fcap');   // the planner starts no more (fortPlan): said now, not left undone
     if (F.cost && ecoSim() && S.eco.d[t] && (S.eco.d[t].en < F.cost[0] || S.eco.d[t].mt < F.cost[1])) return gBad('cost');
   } else if (k === 'aapos') {
     if (ecoSim() ? ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length : S.units.filter(u => u.w21 && u.team === t && !u.dead).length + cmdOf(t).ops.filter(o => !o.over && o.bk === 'aapos').length >= W21.aaCap) return gBad(ecoSim() ? 'res' : 'max');   // those on their way count
@@ -21205,7 +21208,7 @@ function gorOpt() {
   const kids = [];
   if (m === 'ord') {
     kids.push(gE('span', '', 'Verbo:'), ...GORV.map(v => chip(W21.v[v][0].toUpperCase() + W21.v[v].slice(1), { ov: v }, GOR.ov === v)));
-    if ((GOR.ov !== 'fire' || GOR.mk2) && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', GOR.mk2 ? 'Quantos:' : 'Quem:'), ...GORN.map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n, GOR.mk2 ? (n || 1) + ' novos da reserva' : n ? 'O general escolhe ' + n + (n > 1 ? ' esquadras livres' : ' esquadra livre') + ' com caminho até lá' : 'O general escolhe quantas (ataque 3, defesa 2, reconhecimento 1, escolta 2)')));
+    if ((GOR.ov !== 'fire' || GOR.mk2) && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', GOR.mk2 ? 'Quantos:' : 'Quem:'), ...GORN.filter(n => !GOR.mk2 || n <= GPC.n).map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n, GOR.mk2 ? (n || 1) + ' novos da reserva' : n ? 'O general escolhe ' + n + (n > 1 ? ' esquadras livres' : ' esquadra livre') + ' com caminho até lá' : 'O general escolhe quantas (ataque 3, defesa 2, reconhecimento 1, escolta 2)')));
     if (mks.length && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', 'Criar:'), ...mks.map(k => chip(ECO.tx.u[k], { mk2: k }, GOR.mk2 === k, 'Criar unidades novas deste tipo, da reserva, com esta missão (clique de novo: usar as que já estão em campo)')));
   } else if (m === 'fort') kids.push(gE('span', '', 'Obra:'), ...GORF.map(k => chip(W21.fort[k][0].toUpperCase() + W21.fort[k].slice(1), { fk: k }, GOR.fk === k)));
   else if (m === 'rq' && GORRQ[GOR.rk] && !gorIds().length) kids.push(gE('span', '', 'Quem:'), ...GORN.map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n)));

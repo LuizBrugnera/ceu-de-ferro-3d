@@ -106,6 +106,8 @@ function bridge(env) {
   ok(!o2.isError && JSON.stringify(seenCmd[seenCmd.length - 3].c) === '{"c":"ord","k":"fire","x":5,"z":6,"n":4}' && JSON.stringify(seenCmd[seenCmd.length - 2].c) === '{"c":"ord","k":"esc","x":5,"z":6,"n":2}' && lastC() === '{"c":"ord","k":"def","pi":2,"k2":"squad","n":2}', 'order_units: fire takes rounds, escort takes count, create sends k2 with count');
   const o5 = [await b.call('request_support', { kind: 'lift', x: 1, z: 1, rounds: 5 }), await b.call('request_support', { kind: 'fire', x: 1, z: 1, count: 4 }), await b.call('request_support', { kind: 'smoke', x: 1, z: 1 }), await b.call('order_units', { verb: 'fire', x: 1, z: 1, count: 3 })];
   ok(o5.every(r => r.isError), 'rounds on a lift, count on fire, the smoke request, count on a fire order: refused, never mixed into n');
+  const m0 = seenCmd.length, o6 = await b.call('order_units', { verb: 'attack', x: 1, z: 1, create: 'tank', count: 5 }), o7 = await b.call('order_units', { verb: 'attack', x: 1, z: 1, count: 5 });
+  ok(o6.isError && !o7.isError && seenCmd.length === m0 + 1 && lastC() === '{"c":"ord","k":"atk","x":1,"z":1,"n":5}', 'create more than the 4 the dispatch fields: refused; 5 squads the general picks: sent');
   const bk = await b.call('build_defence', { kind: 'mineat', x: 1, z: 2 }); ok(!bk.isError && lastC() === '{"c":"fort","k":"mineat","x":1,"z":2}', 'build_defence offers the minefield (and bunker, atpost, post, aapos)');
   const t0 = Date.now(); const [r1, r2, r3] = await Promise.all([b.call('scout', { x: 1, z: 2 }), b.call('strike', { id: 5 }), b.call('cancel_order', { id: 4 })]);
   ok(!r1.isError && !r2.isError && !r3.isError && Date.now() - t0 >= 550, 'three commands at once all get through, spaced out (rate limit)');

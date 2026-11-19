@@ -163,6 +163,12 @@ console.log('-- create N: the general dispatches new units and hands them the or
   const r2 = cmd({ c: 'ord', k: 'atk', x: S.base[1].x - 400, z: S.base[1].z, k2: 'tank', n: 1 });
   ok(r2.ok && S.units.some(u => u.mis && u.mis.d === r2.id && u.mis.kind === 'attack'), 'k2 tank: a new tank comes with an attack mission there (' + (r2.why || r2.id) + ')');
   ok(cmd({ c: 'ord', k: 'def', pi, k2: 'castle', n: 1 }).why === 'kind' && cmd({ c: 'ord', k: 'def', pi, k2: 'squad', ids: [1] }).why === 'shape', 'an unknown kind: kind; named squads and create together: shape');
+  ok(cmd({ c: 'ord', k: 'atk', x: S.base[1].x - 400, z: S.base[1].z, k2: 'tank', n: 5 }).why === 'mkn', 'more new units than the dispatch fields at once (4): refused mkn, not cut short in silence');
+  const r3 = cmd({ c: 'ord', k: 'def', pi, k2: 'squad', n: 1 }), op3 = S.cmd[0].ops.find(o => o.k === 'w21p' && o.d === r3.id);
+  C.genCtl(0, 'ai');
+  const B3 = spot(C, S), q3 = sq(C, 0, B3.x + 40, B3.z + 40); q3.mis.d = r3.id;
+  $('OPS').w21p(S.cmd[0], op3);
+  ok(r3.ok && op3 && op3.over && !(q3.op && q3.op.k === 'usr'), 'the chair given back: the pending order ends and a new squad that arrives stays the AI\'s (' + (r3.why || r3.id) + ')');
   const C2 = fresh('modern').C; C2.genCtl(0, 'me');
   ok(C2.genCmd(0, { c: 'ord', k: 'def', x: 3000, z: 0, k2: 'squad', n: 1 }, 'me').why === 'off', 'with the economy off there is nothing to create: off');
 }
@@ -188,6 +194,21 @@ console.log('-- fortify: every kind, the general picks the builder --');
   const C2 = fresh('modern', true), S2 = C2.S; C2.C.genCtl(0, 'me'); const d = S2.eco.d[0]; d.res.aaf = [];
   ok(C2.C.genCmd(0, { c: 'fort', k: 'aapos', x: AA.x, z: AA.z }, 'me').why === 'res', 'with the economy on and no fixed AA in the reserve: res');
 }
+{
+  const { C, S } = fresh('modern'), A = spot(C, S);
+  C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
+  sq(C, 0, A.x - 60, A.z - 40, 'eng'); const r = C.genCmd(0, { c: 'fort', k: 'bunker', x: A.x, z: A.z }, 'me');
+  tick(C, S, 150);
+  const ls = S.glog.l[0].map(e => e.s).filter(s => s.startsWith('Obra de campanha iniciada'));
+  ok(r.ok && S.forts.some(f => f.team === 0 && f.k === 4) && ls.length && ls.every(s => s === 'Obra de campanha iniciada: ninho de metralhadora'), 'a bunker by order: the log names the machine-gun nest it started, not a trench (' + ls + ')');
+}
+{
+  const { C, S, $ } = fresh('modern'), cmd = c => C.genCmd(0, c, 'me'), cap = $('FORT').ai.cap;
+  C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
+  const A = spot(C, S), rs = [];
+  for (let i = 0; i <= cap; i++) { const B = { x: A.x + 90 * i, z: A.z + 200 }; sq(C, 0, B.x, B.z - 120, 'eng'); rs.push(cmd({ c: 'fort', k: 'trench', x: B.x, z: B.z })); }
+  ok(rs.slice(0, cap).every(r => r.ok) && rs[cap].why === 'fcap', cap + ' trenches ordered while their builders still walk are accepted; one more is refused fcap (' + rs.map(r => r.why || 'ok') + ')');
+}
 
 console.log('-- the AI general\'s flank walks a composite route; a person\'s flank walks his own --');
 {
@@ -204,11 +225,19 @@ console.log('-- the AI general\'s flank walks a composite route; a person\'s fla
   ok(r.ok && op && op.sq.every(q => q.ord.k === 'flank' && Array.isArray(q.ord.rt) && q.ord.rt.length >= 1 && q.mis.route && q.mis.route.length === q.ord.rt.length && q.ord.rt.every(p => via(q.ord.wp, p, 1))), 'its squads walk that composite way, and their orders and missions carry its turning points as the route');
   ok(S.gj.some(e => e.by === 'ai' && e.c.c === 'man' && Array.isArray(e.c.rt) && e.c.rt.length >= 2), 'the AI\'s command in the journal carries the route (rt)');
   $('opEnd')(Cm, op); Cm.mcd = {};
+  const edge = { x: 20, z: 0 };   // 20 m from the map's edge: no route point (gMapOk keeps 50 m)
+  ok(!$('gMapOk')(edge.x, edge.z) && $('gRtOf')([{ x: 420, z: -300 }, edge, { x: 420, z: 300 }]) === undefined, 'a turning point off the map is not named as a route point');
+  const sp = Object.assign({}, g.spec, { rt: g.spec.rt.concat([edge]) }), r3 = C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: sp.n, rt: $('gRtFlat')(sp.rt) }, 'ai', { spec: sp, res: g.res });
+  ok(r3.ok, 'the AI\'s own flank is not refused by its descriptive route (' + (r3.why || r3.id) + ')');
+  const op3 = Cm.ops.find(o => o.id === r3.id); if (op3) $('opEnd')(Cm, op3); Cm.mcd = {};
   C.genCtl(0, 'me');
   const w = { x: W.x + 300, z: W.z - 400 }, r2 = C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: 1, rt: [w.x, w.z] }, 'me'), op2 = Cm.ops.find(o => o.id === r2.id);
   ok(r2.ok && op2 && op2.sq.length === 1 && via(op2.sq[0].ord.wp, w, 1) && op2.sq[0].mis.route[0].x === w.x, 'a person\'s flank with a route: the squad walks through his point (' + (r2.why || r2.id) + ')');
   if (op2) $('opEnd')(Cm, op2); Cm.mcd = {};
   ok(C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: 1, rt: [1, 2, 3] }, 'me').why === 'rt', 'and a malformed route there: rt');
+  let far = null; for (const x of [200, S.W / 2, S.W - 200]) for (const z of [-S.HW + 200, 0, S.HW - 200]) if ($('gMapOk')(x, z) && (!far || near(W, { x, z }) > near(W, far))) far = { x, z };
+  if (far && near(W, far) + near(far, F) > $('W21').max) ok(C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: 1, rt: [far.x, far.z] }, 'me').why === 'way', 'a route with no way on foot (longer than ' + $('W21').max / 1000 + ' km): way, not the AI\'s way in silence');
+  else console.log('  skip  no point far enough for the way check');
 }
 
 console.log('-- nothing changes a battle no one commands --');

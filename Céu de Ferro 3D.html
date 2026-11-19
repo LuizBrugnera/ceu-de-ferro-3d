@@ -28843,8 +28843,11 @@ tripTo = (g => (u, x, z, o) => {
 /* the seconds a trip takes the vehicle at full drive */
 const m5Eta = (u, T) => (T && T.p ? T.p.len / Math.max(1, u.def.spd * GSPD) : 0);
 /* send u toward (x, z) by the tactical trip to the road nearest it: true when it went (or is already near) */
+/* the road network trips need (map version 4 on): without it nothing of M5 moves (the old map: a test's, or a room's of an older map) */
+const m5Net = () => !!(S.T && S.T.net) && S.T.mv >= 4;
 function m5Go(u, x, z, why) {
   if (hdist(u, { x, z }) < M5.near) return true;
+  if (!m5Net()) return false;
   const n = netNear(x, z), gx = n.d > M5.onRoad ? n.x : x, gz = n.d > M5.onRoad ? n.z : z;
   return !!tripTac(u, gx, gz, { why, max: M5.reach * 2 });
 }
@@ -28889,7 +28892,7 @@ function m5Spot(C, op, taken) {
   for (let k = 0; k < 16; k++) for (const r of R.r) {
     const a = k * Math.PI / 8, x = O.x + Math.cos(a) * r, z = O.z + Math.sin(a) * r;
     if (!ok(x, z) || !far({ x, z })) continue;
-    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = netNear(x, z);
+    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = S.T.net ? netNear(x, z) : { d: 0 };
     let sc = ang < R.front ? 1 : ang > R.rear ? .6 : 0;   // off the front, not behind the enemy
     if (q >= 0) { const f = M.f[q] || 0, p = M.p[q] || 0; sc += M5.kV * (M.v[q] || 0) + M5.kF * f / (1 + f) + M5.kP * p / (1 + p) - (M.o[q] || 0); }
     if (!los({ x, z }, hgt(x, z) + 2.5, O, oy)) sc += 1;
@@ -28900,7 +28903,7 @@ function m5Spot(C, op, taken) {
 }
 /* the assault's armour: the tanks that go the back roads to fire on the objective from off its front */
 function m5Atk(C, op) {
-  if (!M5.on || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
+  if (!M5.on || !m5Net() || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
   op.m5T = S.t + M5.atk.retry; op.m5 = op.m5 || [];
   const t = C.t, O = op.O, want = (op.sq.length >= 3 ? M5.atk.n[1] : M5.atk.n[0]) - op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op).length;
   for (let i = 0; i < want; i++) {

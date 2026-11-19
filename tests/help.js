@@ -115,7 +115,7 @@ console.log('-- repair and ammo, indirect fire, a lift --');
   const u = tank(0, mid), tr = truck(0, mid - 400); u.hp = u.max * .3; u.hitT = -99;
   const R = $('helpAsk')(u, 'repair', u, null);
   ok(R.resp === tr, 'a hurt tank calls for a repair: the empty truck on its road answers');
-  C.run(40, () => { u.hitT = -99; u.ai.tgt = null; });
+  C.run(40, () => { u.hitT = -99; u.ai.tgt = null; return R.st !== 'done'; });   // until it is mended: the ammo call below finds the truck still beside it
   ok(R.st === 'done' && u.hp >= u.max * .9 && !tr.help, 'the truck comes and mends it as a supply base does (hp ' + Math.round(u.hp / u.max * 100) + '%), then is free');
   const a = u.arms[0]; a.ammo = 1; const R2 = $('helpAsk')(u, 'ammo', u, null);
   C.run(15, () => { u.ai.tgt = null; });

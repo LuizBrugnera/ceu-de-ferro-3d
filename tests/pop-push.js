@@ -2,7 +2,8 @@
 /* A side at its population budget still mans its assault post (issue #35). With the budget cut (S.popK) below what the side already has out,
    no new squad may enter, so before pushFrom the assault post stayed empty for good: the commander asked for squads it could never field
    ("Acumulando forças"), attacked nothing, lost nothing and stayed over its budget the whole match. Now a squad of a post it may spare
-   (FIELD.spare) takes the assault post, and no new squad enters. With room in the budget a missing post is still filled by a new squad */
+   (FIELD.spare) near it takes the assault post, and no new squad enters; with none near, a new squad still comes for it while the commander asks
+   for force, never over the cap (IAI.cap). With room in the budget a missing post is still filled by a new squad */
 const H = require('./harness'), ok = H.ok;
 
 /* a 1944 watch match on today's map with the economy, past the opening deployment; the budget meter held still */
@@ -39,6 +40,22 @@ console.log('-- at the budget: a spared post takes the assault post --');
   ok(S.glog.l[t].some(e => /Sem população para reforçar/.test(e.s)), 'the general\'s log says why');
   S.fld[t].next = 0; C.plan(t);
   ok(of(S, t, 'push').length >= 1 && S.squads.length === n0, 'the next turn still no new squad enters');
+}
+
+console.log('-- at the budget with no spared squad near: a new one still comes for the assault, never over the cap --');
+for (const capped of [false, true]) {
+  const { C, S, $ } = match(7), t = 1;
+  emptyPush(S, t);
+  S.popK = .3; $('FIELD').spareR = 0;   // over the budget, and no spared squad near enough to walk to the assault post
+  C.$('cmdAttack = C => { C.want = { ri: 0, n: 3 }; C.gate = ""; }');   // the commander asks for force, as a side short of it does
+  if (capped) $('IAI').cap = S.men.length;   // the cap is reached: nothing more may enter at all
+  const n0 = S.squads.length, tr0 = S.units.filter(u => u.team === t && u.cargo).length;
+  S.fld[t].next = 0; C.plan(t);
+  const came = S.squads.length - n0 + S.units.filter(u => u.team === t && u.cargo).length - tr0;
+  if (!capped) {
+    ok(came === 1, 'one new squad comes for the assault post, on foot or by truck (' + came + ')');
+    ok(S.glog.l[t].some(e => /sem esquadra livre por perto/.test(e.s)), 'the general\'s log says why');
+  } else ok(came === 0, 'at the cap (IAI.cap) none comes (' + came + ')');
 }
 
 console.log('-- with room: a new squad, as before --');

@@ -18115,6 +18115,7 @@ const LG = { on: 1, cap: { b: 120, p: 60 }, start: { b: 20, p: 30 }, min: 13,
   tx: { b: 'Base de suprimento', p: 'Ponto', main: 'Base principal', why: { node: 'nó não encontrado', full: 'o nó está cheio', mt: 'falta metal na base principal', conv: 'comboios demais a caminho', lift: 'sem helicóptero de transporte na reserva', era: 'não existe nesta época', dry: 'sem caixas' } } };
 const lgSim = () => !!S.lg && ecoSim();
 Net.lg = false; Net.lgCar = new Map();   // welcome lg: 1; the host's count of what each guest's truck or helicopter carries
+Net.lgRq = new Map();   // the host's record of each guest's requisition paid in crates: { c the crates, x z hp where and how whole it was left }
 /* a supply base gets its starting stock when it is finished */
 const lgFix = b => { if (b.lc === undefined && b.prog >= 1 && !b.dead) b.lc = LG.start.b; return b; };
 const lgKey = o => (o.sup && !o.eco ? 'b' + o.id : 'p' + o.i);
@@ -18162,7 +18163,7 @@ function lgTake(o, n) { if (!o || o.lc === undefined) return; o.lc = Math.max(0,
 function lgGive(o, n) { if (!o || o.lc === undefined) return 0; const k = Math.max(0, Math.min(n, lgCap(o) - o.lc)); o.lc += k; if (o.sup) Net.bq = true; return k; }
 /* the match begins: logistics exist where the economy does, the held points with their starting stock */
 ecoInit = (f => () => {
-  f(); S.lg = null; Net.lgCar.clear();
+  f(); S.lg = null; Net.lgCar.clear(); Net.lgRq.clear();
   if (!LG.on || !S.eco || (S.net && !Net.lg)) return;
   S.lg = { cv: [], pri: [{}, {}], dry: [{}, {}], cmd: [0, 0], wk: ['', ''], T: 0 };
   if (S.cq) for (const p of S.cq.p) p.lc = p.base < 0 && p.hold >= 0 ? LG.start.p : 0;
@@ -18249,7 +18250,7 @@ rqWhy = (f => (o, cls, model, who) => {
 rqGrant = (f => (o, cls, model, who) => {
   if (!lgSim()) return f(o, cls, model, who);
   const Q = S.cq, k = Q ? Q.tk[o.team] : 0, n = lgDepot(o), why = f(o, cls, model, who);
-  if (!why) { Q.tk[o.team] = k; lgTake(n, lgCostP(cls, model)); }
+  if (!why) { Q.tk[o.team] = k; lgTake(n, lgCostP(cls, model)); if (S.net && S.host && who !== Net.id) Net.lgRq.set(who, { c: n ? lgCostP(cls, model) : 0 }); }
   return why;
 })(rqGrant);
 rqDo = (f => (cls, model) => {
@@ -18508,8 +18509,30 @@ Net.rx.lsp = m => {
   if (!S || !S.net || !S.host || !S.lg || !Number.isInteger(m.k) || !Number.isInteger(m.id) || !Number.isInteger(m.n) || m.n < 1 || m.n > 20) return;
   const g = Net.ghosts.get(m.from), t = g ? g.team : -1; if (t < 0) return;
   const o = m.k % 2 ? (S.cq && S.cq.p[m.id] && S.cq.p[m.id].hold === t && S.cq.p[m.id].base < 0 ? S.cq.p[m.id] : null) : lgOf(t, 'b' + m.id);
-  if (o) { if (m.k < 2) lgTake(o, m.n); else lgGive(o, m.n); }
+  if (!o) return;
+  if (m.k < 2) return lgTake(o, m.n);
+  if (lgBack(m.from, g, o, m.n)) lgGive(o, m.n);
 };
+/* a guest's give-back (lsp k 2, 3) is the refund of a requisitioned transport left whole at a depot (alight): the host accepts it only
+   once a requisition it granted and paid in crates (Net.lgRq), for floor(c * RQ.refund) crates, after the guest got out (crew to inf,
+   which records where the hull was left and its hp) of a hull whole enough, standing in that very node o; anything else is refused */
+function lgBack(pid, g, o, n) {
+  const r = Net.lgRq.get(pid); Net.lgRq.delete(pid);
+  if (!r || !r.c || !r.out || n !== Math.floor(r.c * RQ.refund)) return false;
+  return lgDepot({ x: r.x, z: r.z, team: g.team }) === o;
+}
+/* the host notes where and how whole a guest's requisitioned transport was left: its crew row (crew to inf) carries the hull's state */
+Net.rx.crew = (f => m => {
+  const r = S && S.net && S.host && m && Net.lgRq.get(m.id), g = r && Net.ghosts.get(m.id);
+  if (r && m.cls === 'inf') {
+    const st = Array.isArray(m.st) ? m.st : null, max = g && g.occ && g.max > 0 ? g.max : 0;
+    if (!m.x && g && g.occ && !g.dead && st && Number.isFinite(st[0]) && Number.isFinite(st[2]) && Number.isFinite(st[6]) && hdist({ x: st[0], z: st[2] }, g) < 30 && (!max || st[6] >= max * RQ.hp)) Object.assign(r, { out: 1, x: st[0], z: st[2] });
+    else Net.lgRq.delete(m.id);
+  }
+  f(m);
+})(Net.rx.crew);
+/* a guest that takes another body other than by requisition leaves its requisition behind */
+Net.rx.swap = (f => m => { if (S && S.net && S.host && m && !m.rq) Net.lgRq.delete(m.id); f(m); })(Net.rx.swap);
 Net.rx.lgx = m => {
   if (!S || !S.net || !S.lg) return;
   if (!S.host) { if (Number.isInteger(m.n) && S.my && (S.my.kind || S.my.heli)) { const P = S.my, was = P.lgc || 0; P.lgc = m.n; lgSay(P, m.n > was ? 'Carregado: ' + m.n + ' caixas' : m.n < was ? 'Entregue: ' + (was - m.n) + ' caixas' : m.k ? 'O nó está cheio' : 'Falta metal na base principal para a carga'); } return; }

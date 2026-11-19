@@ -56,6 +56,7 @@ Tudo em `Céu de Ferro 3D.html`, quase tudo num bloco novo `BMR` (fim da simula�
 - Online: o convidado recebendo `wk`, o servidor novo repassando e o antigo descartando. O `get_state` do MCP com `construction`.
 - O custo por quadro (as varreduras novas de `afpPlaces`, `bmrKitSup`, `bmrView`, que roda a cada quadro no HUD e na Visão de General).
 - O harness não roda com logística (`lg: 1`): `m5Lg` (M5) está depois do marcador da cena 3D. Isso já existia e não vem desta mudança.
+- **Depois do merge com o `origin/main` (bd3ad49)** o harness não carrega mais nenhuma partida, nem a página do próprio `main`. O wrapper `aarShow` do M8 (#60) e o `mmMan` do M6 (#64) estão antes/depois do marcador `/* ---------- 3D scene`: `aarShow is not defined` ao carregar e `mmMan is not defined` no plano. Não vem desta mudança, mas impede rodar as suítes até ser corrigido. Depois do merge, a fumaça foi só no navegador: "Assistir" por 30 s, sem erro de script, com as linhas de obras dos dois lados (bases 1/6, trincheiras e parapeitos 8/18 e 5/18, caixas 140).
 
 ## Riscos
 

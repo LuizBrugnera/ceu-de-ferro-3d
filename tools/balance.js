@@ -8,7 +8,9 @@
    went (losses, bleed, points, the rest), cost-effectiveness and life by kind, and the general's manoeuvre (the review's mano, M0): how its
    assaults arrive (the flank rate: samples 70° or more off the axis; off the axis route), assaults with a manoeuvre, ambushes armed, fired
    and good, the traffic off the axes and off the roads, vehicles on the rail, "no strength to attack", the entropy of the arrivals and
-   repeated approaches, each beside the proposal's target (MANO.goal). --ref <json> adds a column with the same numbers from an earlier
+   repeated approaches, and the general's own cost per frame (from tournament matches played without --nobudget: the frame meter's AIB.stat()
+   every 5 s of match time, kept in the header's tour.aib; wall-clock time on the machine that ran the match, so a loaded machine reads higher),
+   each beside the proposal's target (MANO.goal). --ref <json> adds a column with the same numbers from an earlier
    --json (tools/ref/manobra-base.json is today's general, the reference every manoeuvre package compares against).
      node tools/balance.js [folder...] [--era ww2|modern] [--json file] [--ref file]
 
@@ -20,7 +22,8 @@
        [--pers ret,blz,gue,art,log] [--dif normal | facil,dificil]
    --pers pairs the AI general's personalities (W17) instead of the doctrines; --dif the difficulty of both sides, or of side 0 and side 1.
    --lg and --rec turn the physical logistics and the recovery on (with --eco and --mapv 6, the game as it is played); --nobudget stops the AI
-   frame meter (AIB) from cutting the population cap by how busy this machine is, so the same seed plays the same match anywhere.
+   frame meter (AIB) from cutting the population cap by how busy this machine is, so the same seed plays the same match anywhere; without it each
+   match keeps the general's cost per frame (tour.aib), so measure the cost in a separate short run without --nobudget.
    A Curta match (30 min) takes some 6 minutes of one core; --min shortens the clock for a quick look. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), crypto = require('crypto'), { fork } = require('child_process'), os = require('os');
 const H = require(path.join(__dirname, '..', 'tests', 'harness.js'));
@@ -81,10 +84,15 @@ function playOne(m) {
   const C = H.load({ seed: m.seed, eco: !!m.eco, lg: !!m.lg, rec: !!m.rec, mapv: m.mapv || 4, ana: true });
   if (m.nobudget) C.$('AIB').now = () => 0;
   const S = C.watch(m.era, { doc: m.doc, per: m.per, dif: m.dif, len: m.len || 0, min: m.min });
-  const lim = S.cq.T0 + 120, t0 = Date.now();
-  C.run(lim, () => !S.over);
-  const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr');
-  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null }, m.nobudget && { nobudget: 1 });
+  const lim = S.cq.T0 + 120, t0 = Date.now(), AIB = C.$('AIB'), K = { n: 0, gen: 0, genWorst: 0, avg: 0, worst: 0 };
+  let next = 5;
+  C.run(lim, () => {   // the frame meter's last 300 frames, every 5 s of match time (not with --nobudget: its clock reads 0)
+    if (!m.nobudget && S.t >= next) { next = S.t + 5; const a = AIB.stat(); if (a.n) { K.n++; K.gen += a.gen; K.avg += a.avg; K.genWorst = Math.max(K.genWorst, a.genWorst); K.worst = Math.max(K.worst, a.worst); } }
+    return !S.over;
+  });
+  const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr'), r2 = v => Math.round(v * 100) / 100;
+  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null }, m.nobudget && { nobudget: 1 },
+    K.n && { aib: { gen: r2(K.gen / K.n), genWorst: r2(K.genWorst), avg: r2(K.avg / K.n), worst: r2(K.worst), n: K.n } });
   return { file: save(m.save, m.era, ev, 'tourney'), over: S.over, t: Math.round(S.t), wall: Math.round((Date.now() - t0) / 1000) };
 }
 function plan(o) {
@@ -132,7 +140,7 @@ function aggregate(reps) {
 }
 /* the general's manoeuvre over many reviews (M0): shares pooled from each side's raw counts (the review's mano), counts per match (both sides).
    MANO.goal: the targets of the manoeuvre proposal (cf-manobra-visao §14, decision D10 A) */
-const MANO = { goal: { flank: .35, withMv: .5, off: .4, amb: 2, ambOk: .4, offAxis: .2, ent: 1 } };
+const MANO = { goal: { flank: .35, withMv: .5, off: .4, amb: 2, ambOk: .4, offAxis: .2, ent: 1, gen: 1 } };
 function mano(reps) {
   const R = reps.filter(r => Array.isArray(r.mano)), M = R.flatMap(r => r.mano.filter(Boolean)), n = R.length;
   if (!M.length) return null;
@@ -140,15 +148,17 @@ function mano(reps) {
   const A = [0, 0, 0, 0, 0, 0], Aa = [0, 0, 0, 0, 0, 0], V = [0, 0, 0, 0], mv = {}, no = {};
   for (const m of M) { m.raw.a.forEach((v, i) => { A[i] += v; }); m.raw.aAtk.forEach((v, i) => { Aa[i] += v; }); m.raw.v.forEach((v, i) => { V[i] += v; }); for (const k in m.mv) add(mv, k, m.mv[k]); for (const k in m.flkNo) add(no, k, m.flkNo[k]); }
   const smp = A.reduce((a, b) => a + b, 0), smpAtk = Aa.reduce((a, b) => a + b, 0), atk = sum(m => m.atk), fire = sum(m => m.amb.fire), road = sum(m => m.raw.road), off = sum(m => m.raw.o), mov = V[0] + V[1] + V[2];
-  const ent = M.filter(m => m.raw.dom), trd = M.some(m => m.tr);
+  const ent = M.filter(m => m.raw.dom), trd = M.some(m => m.tr), K = R.map(r => r.tour && r.tour.aib).filter(Boolean);
+  const cost = K.length ? { n: K.length, gen: K.reduce((a, k) => a + k.gen, 0) / K.length, genWorst: Math.max(...K.map(k => k.genWorst)), avg: K.reduce((a, k) => a + k.avg, 0) / K.length } : null;
   return { n, sides: M.length, atk: per(atk), occ: per(sum(m => m.occ)), go: per(sum(m => m.go)), took: per(sum(m => m.took)), back: per(sum(m => m.back)), occTook: per(sum(m => m.occTook)),
     smp, smpAtk, flank: sh(A[3] + A[4] + A[5], smp), flankAtk: sh(Aa[3] + Aa[4] + Aa[5], smpAtk), front: sh(A[0], smp), obl: sh(A[1] + A[2], smp), off: sh(sum(m => m.raw.off), smp),
     withMv: sh(sum(m => m.withMvN), atk), mvN: per(sum(m => m.mvN)), mv, flkNo: no, flkEval: Object.values(no).reduce((a, b) => a + b, 0) + (mv.flk || 0),
     amb: { arm: per(sum(m => m.amb.arm)), fire: per(fire), ok: sh(sum(m => m.amb.ok), fire), nv: per(sum(m => m.amb.nv)), kv: per(sum(m => m.amb.kv)) },
     offAxis: trd ? sh(road - sum(m => m.raw.axis), road) : null, offRoad: trd ? sh(off, road + off) : null,
     rail: sh(V[0], mov), trip: sh(V[1], mov), offRail: sh(V[2], mov), want: per(sum(m => m.want)),
-    ent: ent.length ? ent.reduce((a, m) => a + m.ent, 0) / ent.length : null, rep: sh(sum(m => m.rep), sum(m => m.again)) };
+    ent: ent.length ? ent.reduce((a, m) => a + m.ent, 0) / ent.length : null, rep: sh(sum(m => m.rep), sum(m => m.again)), cost };
 }
+const f2 = v => (Math.round(v * 100) / 100).toString().replace('.', ',');
 const pc = v => (v === null || v === undefined ? '—' : Math.round(v * 100) + '%'), f1 = v => (v === null || v === undefined ? '—' : (Math.round(v * 10) / 10).toString().replace('.', ','));
 /* the manoeuvre's rows [what, its value, the target], from mano() */
 function manoRows(M) {
@@ -168,6 +178,7 @@ function manoRows(M) {
     ['Entropia das chegadas (bits)', f1(M.ent), '+' + G.ent + ' bit sobre a referência'],
     ['Repetição: mesmo objetivo, eixo e lado de chegada do assalto anterior', pc(M.rep), 'metade da referência'],
     ['Manobras abertas por partida (por tipo)', f1(M.mvN) + ' (' + kinds(M.mv) + ')', '—'],
+    ['Custo do general por quadro (média; pior), em ms' + (M.cost ? ' em ' + M.cost.n + ' partidas com o medidor ligado' : ''), M.cost ? f2(M.cost.gen) + '; ' + f2(M.cost.genWorst) : '—', '≤ ' + G.gen + ' ms'],
     ['Flanco por estrada: avaliado, aberto, recusado por motivo', M.flkEval + ', ' + (M.mv.flk || 0) + ', ' + (Object.entries(M.flkNo).map(([k, v]) => k + ' ' + v).join(', ') || '—'), '—']];
 }
 /* the manoeuvre's section; ref: the mano of an earlier --json (the reference), as a last column */
@@ -203,7 +214,7 @@ async function main() {
   if (o.n > 0) { list = await tourney(o); title = 'Torneio IA × IA'; }
   else { list = files(o.dirs.length ? o.dirs : [DIR], o.era); title = 'Balanceamento: ' + (o.dirs.length ? o.dirs.join(', ') : DIR); }
   const C = H.load({ ana: true }), reps = [];
-  for (const f of list) { try { const ev = readMatch(f); if (ev.some(e => e.k === 'hdr')) reps.push(Object.assign(C.anaReport(ev), { file: f })); } catch (e) { console.error('skip ' + f + ': ' + e.message); } }
+  for (const f of list) { try { const ev = readMatch(f), h = ev.find(e => e.k === 'hdr'); if (h) reps.push(Object.assign(C.anaReport(ev), { file: f, tour: h.tour || null })); } catch (e) { console.error('skip ' + f + ': ' + e.message); } }
   if (!reps.length) { console.log('Nenhuma partida em ' + (o.dirs.length ? o.dirs.join(', ') : DIR) + '.'); return; }
   const loc = reps.filter(r => srcOf(r.file) === 'local'), real = reps.filter(r => !loc.includes(r)), A = aggregate(real), AL = loc.length ? aggregate(loc) : null;
   const ref = o.ref ? JSON.parse(fs.readFileSync(o.ref, 'utf8')) : null;

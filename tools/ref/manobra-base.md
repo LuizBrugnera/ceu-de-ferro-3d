@@ -5,6 +5,18 @@
 O critério de entrada (decisão D10 A da proposta de manobra) é um torneio A/B com 40 partidas decididas ou mais, flanco de 35% ou mais,
 entropia das chegadas maior que a desta referência, vitória do general novo em 55% ou mais e o general dentro do orçamento.
 
+## Atenção: referência a refazer
+
+Esta referência foi jogada em `6002d18`, antes de dois PRs que mudam o general (#36, procedimentos de combate da infantaria, e #38, mapa
+tático M1) e antes de uma correção desta medição: um veículo parado havia 5 s ou mais com `u.rail` ou `u.trip` ainda marcados contava como
+"no trilho" e como tráfego na estrada. Isso inflava "no trilho" (84%) e a parte dos eixos no tráfego. A decisão foi refazer as 12 partidas
+na base atual, mas a regra nova do capitão (implementar sem testes) suspendeu as partidas. Até refazer, use estes números só como ordem de
+grandeza. Como refazer está em `docs/nao-testado/cf-m0-medicao.md`.
+
+O custo do general por quadro (linha "Custo do general" do `balance.js`) não está aqui: ele só é medido sem `--nobudget`, numa rodada
+curta à parte. A ferramenta de A/B (dois generais diferentes no mesmo torneio) fica para o primeiro pacote de manobra que tiver um general
+novo para comparar.
+
 ## Como foi jogado
 
 Em 2026-11-19, sobre o `main` em `6002d18` com a medição deste pacote (que não muda a batalha), no Node:

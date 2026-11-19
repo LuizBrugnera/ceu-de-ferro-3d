@@ -336,11 +336,13 @@ async function askState() {
     return r;
   } finally { R.picBusy = false; }
 }
+/* a squad's radio link in the host's picture (genState sq.link): 0 cut by a jammer, 1 out of the command net, 2 in it; orders reach it later the worse it is */
+const LINK = ['cut', 'out of net', 'in net'];
 const pos = (x, z) => (typeof x === 'number' && typeof z === 'number' ? { x: Math.round(x), z: Math.round(z) } : null);
 function stateView(logN) {
   const e = R.ecs && R.ecs.m, g = R.gen && R.gen.m, v = e && e.v, pd = R.pic && R.pic.d;
   const sqPic = new Map(((pd && pd.sq) || []).map(q => [q.id, q]));
-  const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null }; })
+  const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null, radio: LINK[p.link], orderArrivesInS: p.eta }; })
     : ((pd && pd.sq) || []).map(p => ({ id: p.id, job: p.job, at: pos(p.x, p.z), men: p.n }));
   const out = {
     link: { connected: R.up, room: ROOM, side: SIDE, playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
@@ -367,6 +369,7 @@ function stateView(logN) {
     points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? (p.base === SIDE ? 'ours' : 'enemy') : undefined })),
     roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
+    commandNet: pd.cn || undefined,
   };
   if (!e || !g) out.hint = 'parts that are null have not arrived yet: the host streams ecs about once a second and gen every two seconds';
   return out;

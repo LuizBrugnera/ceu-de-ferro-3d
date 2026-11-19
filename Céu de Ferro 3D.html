@@ -420,7 +420,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
   </header>
   <aside class="gen-panel gen-r" id="genR">
     <div class="seg gen-side gen-tabs" id="genTabs" role="tablist" aria-label="Painel do general" hidden><button class="tab" role="tab" type="button" data-gt="sit" aria-selected="true"><b>Situação</b></button><button class="tab" role="tab" type="button" data-gt="cmd" aria-selected="false"><b>Comando</b></button></div>
-    <section><h3>Postura</h3><p class="gen-post" id="genPost"></p><p class="gen-why" id="genWhy"></p><p class="gen-doc" id="genDoc"></p><ul class="gen-roads" id="genRoads"></ul></section>
+    <section><h3>Postura</h3><p class="gen-post" id="genPost"></p><p class="gen-why" id="genWhy"></p><p class="gen-doc" id="genDoc"></p><p class="gen-doc" id="genNet" hidden></p><ul class="gen-roads" id="genRoads"></ul></section>
     <section><h3>Forças</h3><table class="gen-forces" id="genForces"></table><p class="gen-lost" id="genLost"></p><canvas id="genTk" width="280" height="56" aria-hidden="true"></canvas></section>
     <section><h3>Avaliação dos objetivos</h3><p class="gen-gate" id="genGate"></p><ol class="gen-eval" id="genEval"></ol></section>
     <section><h3>Operações</h3><ol class="gen-ops" id="genOps"></ol><details class="gen-leg"><summary>Legenda das manobras</summary><ul id="genLeg"></ul></details></section>
@@ -4056,10 +4056,12 @@ function* spotRun() {
   for (const u of all) {
     if (u.dead) continue;
     let seen = false;
-    for (const o of S.units) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { seen = true; break; }
-    if (!seen) for (const o of S.men) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { seen = true; break; }
+    let late = null;   // one out of its side's net that saw it: the sighting goes on its way (cnLate) unless one in the net sees it too
+    for (const o of S.units) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
+    if (!seen) for (const o of S.men) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
     if (!seen) for (const p of S.planes) if (!p.dead && p.team !== u.team && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
     if (seen) { const own = S.my && !S.my.dead && S.my.team !== u.team && sees(S.my, u); u.seenT = S.t; u.sx = u.x + (own ? 0 : qr(-SHARE.err, SHARE.err)); u.sz = u.z + (own ? 0 : qr(-SHARE.err, SHARE.err)); }   // what the others report is a little off
+    else if (late) cnLate(u, late);
     yield;
   }
   for (const q of S.squads.slice()) { lodSquad(q); yield; }
@@ -10383,7 +10385,7 @@ function cmdColumns(C, sq) {
     const Sc = CMD.scout, sc = C.sc[ri], u = lead[ri];
     if (sc) {   // a squad is out in front: the column waits for it
       const q = sc.q;
-      if (q.live <= 0 || q.ord !== sc.O || q.at || q.fd < 150 || S.t > sc.T) { if (q.live > 0 && q.ord === sc.O) setOrd(q, sc.back); C.sc[ri] = null; return; }
+      if (q.live <= 0 || cnOrd(q) !== sc.O || q.at || q.fd < 150 || S.t > sc.T) { if (q.live > 0 && cnOrd(q) === sc.O) setOrd(q, sc.back); C.sc[ri] = null; return; }
       for (const o of S.units) if (o.ai && !o.net && !o.dead && o.team === t && o.rail && o.ri === ri && !o.fld && (sc.s - o.s) * ds > 0 && (sc.s - o.s) * ds < 900) o.ai.rest = hold;
       return;
     }
@@ -14223,6 +14225,222 @@ function genState(t) {
   return JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
 }
 
+/* ---------- the command network (CN): orders and reports go by radio, the HQ, the jammer and direction finding ----------
+   A side's net is its nodes: the HQ (the control tower of its main base while it stands; when it falls, a reserve HQ at the base hq.alt s
+   later, of a shorter reach), its radio vehicles (car, deployed; mob of that on the move), its radio operators and the radios they set down
+   (man). Reaches are shares of the map's width. A node inside an enemy jammer's cut ring serves nobody. Every CN.every s each ground unit of
+   the AI (a squad by its first live man, a vehicle) gets its link o.cnL: 2 in the net (within a node's reach, clear of jammers), 1 out of it
+   (beyond every reach, or inside an enemy jammer's outer ring), 0 cut (inside jam.cut of the ring, toward its middle).
+   Orders: a squad's order from its side's commander (given inside plan or genCmd, whoever holds the chair) travels: in[0..1] s in the net,
+   out[0..1] s out of it, never while cut. Meanwhile the squad keeps its last order and mission (q.cnP: the order in transit; q.at is held
+   false, so no operation takes the squad as arrived where it was). A newer order replaces the one in transit and keeps its arrival; one not
+   delivered in lose s is lost. A squad's first order, its own drills, the calls for help and a person's hand on a soldier stay instant.
+   Reports (rep) wait their delay before the commander reads them (misRead). Sightings: what only units out of the net see reaches the
+   side's map after the out delay, with the time and place of the sighting (the map ages); what only cut units see, never. The general's
+   view shows its squads where their last word put them (q.cnx, cnz, cnT). HQ: without one, a side's commander plans every hq.plan s.
+   Jammer: the vehicles of DJAM, jam.r m. Direction finding: every transmission (a report or a sighting sent, an order taken, and the nearest
+   node that relays it) adds 1 to the sender's count, which halves every df.half s; from df.n on, an enemy node within df.r of it fixes it: it is
+   seen (seenT) df.err m off, at most once every df.cool s. Delays and errors come from a hash, never from the battle's random numbers.
+   S.cn: { hq, nodes, jam, ctx (the side whose commander is giving orders, -1 none), st (counts a side), sw (sightings on their way), rw
+   (reports of cut units) }. CN.on 0, a sandbox (no director) or a guest: nothing is delayed. A guest gets the view's part in gen (cn) */
+const CN = { on: 1, every: 1, in: [2, 5], out: [20, 60], lose: 90,
+  hq: { r: .5, alt: 120, altR: .35, plan: 9 }, car: { r: .25, mob: .5 }, man: { r: .12 },
+  jam: { r: 650, cut: .5 }, df: { n: 4, half: 30, r: .3, err: 120, cool: 30 },
+  st: { up: 'QG no ar', down: 'QG destruído', alt: 'QG reserva' }, k: ['Operador de rádio', 'Rádio pousado', 'Veículo-rádio', 'QG'] };
+const cnHash = (a, b) => { let h = Math.imul(a | 0, 374761393) ^ Math.imul(b | 0, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; };
+const cnId = o => (o.mis ? o.mis.id : o.id || 0);
+const cnAt = o => (o.men ? o.men.find(m => !m.dead) || null : o);
+const cnOn = () => !!(CN.on && S && S.cn && (!S.net || S.host));
+/* how long a word of o takes, by its link st; n: the count that makes it this one */
+const cnLag = (o, st, n) => { const R = st === 2 ? CN.in : st === 1 ? CN.out : null; return R ? R[0] + cnHash(cnId(o), n) * (R[1] - R[0]) : Infinity; };
+/* how much of an enemy jammer side t is under at x z: 1 in the middle, 0 at its edge or beyond */
+function cnJam(t, x, z) {
+  let j = 0;
+  for (const u of S.cn.jam[1 - t]) { const d = Math.hypot(u.x - x, u.z - z); if (d < CN.jam.r) j = Math.max(j, 1 - d / CN.jam.r); }
+  return j;
+}
+/* the link of o (o.cnL), and the node it goes through (o.cnN) */
+function cnLink(o) {
+  const at = cnAt(o); o.cnN = null;
+  if (!at) return (o.cnL = 0);
+  const j = cnJam(o.team, at.x, at.z); if (j >= CN.jam.cut) return (o.cnL = 0);
+  let b = null, bd = Infinity;   // the nearest node that reaches it relays its words
+  for (const n of S.cn.nodes[o.team]) { const d = Math.hypot(n.x - at.x, n.z - at.z); if (d < n.r && d < bd) { bd = d; b = n; } }
+  o.cnN = b;
+  return (o.cnL = b && !j ? 2 : 1);
+}
+const cnSt = t => S.cn.st[t];
+/* the look: the HQs, the nodes, the jammers, every unit's link */
+function cnLook() {
+  const N = S.cn, W = S.W;
+  for (let t = 0; t < 2; t++) {
+    const H = N.hq[t];
+    if (H.st === 'up' && H.id >= 0 && S.os[H.id] >= 2) { H.st = 'down'; H.T = S.t; gLog(t, 'radio', CN.st.down + ': o comando planeja a cada ' + CN.hq.plan + ' s até montar o QG reserva', H, 'hq'); }
+    if (H.st === 'down' && S.t - H.T >= CN.hq.alt) { H.st = 'alt'; gLog(t, 'radio', CN.st.alt + ' montado na base: o comando volta ao seu ritmo', H, 'hqa'); }
+    N.jam[t] = S.units.filter(u => !u.dead && u.team === t && u.id !== 'k' && DJAM[u.id] > 0);
+  }
+  for (let t = 0; t < 2; t++) {
+    const L = [], H = N.hq[t];
+    if (H.st !== 'down') L.push({ k: 3, x: H.x, z: H.z, r: W * (H.st === 'alt' ? CN.hq.altR : CN.hq.r), o: null });
+    for (const u of S.units) if (u.team === t && !u.dead && !u.man && u.def && u.def.rad) L.push({ k: 2, x: u.x, z: u.z, r: W * CN.car.r * (u.dep === 1 ? 1 : CN.car.mob), o: u });
+    for (const m of S.men) if (m.team === t && !m.dead && m.def.rad && !m.rb) L.push({ k: 0, x: m.x, z: m.z, r: W * CN.man.r, o: m });
+    for (const b of S.rad || []) if (b.team === t && !b.dead) L.push({ k: 1, x: b.x, z: b.z, r: W * CN.man.r, o: b });
+    N.nodes[t] = L.filter(n => cnJam(t, n.x, n.z) < CN.jam.cut);
+  }
+  const c = [[0, 0, 0], [0, 0, 0]];
+  for (const q of S.squads) {
+    if (q.net || !(q.live > 0) || (q.team !== 0 && q.team !== 1)) continue;
+    const st = cnLink(q); c[q.team][st]++;
+    const L = cnAt(q); if (L && (st === 2 || q.cnT === undefined || (st === 1 && S.t - q.cnT >= CN.out[0]))) { q.cnx = L.x; q.cnz = L.z; q.cnT = S.t; }
+  }
+  for (const u of S.units) if (u.ai && !u.net && !u.dead && (u.team === 0 || u.team === 1)) cnLink(u);
+  for (let t = 0; t < 2; t++) { const s = cnSt(t); s.inN = c[t][2]; s.outN = c[t][1]; s.cutN = c[t][0]; }
+}
+/* how busy a sender is now: its count, halved every df.half s since its last word */
+const cnCount = x => (x.cnX ? x.cnX * Math.pow(.5, (S.t - x.cnXT) / CN.df.half) : 0);
+/* o sends (or takes) a word: its count, and the node's that relays it */
+function cnTx(o) {
+  if (!o || !S.cn) return;
+  const one = x => { x.cnX = cnCount(x) + 1; x.cnXT = S.t; S.cn.tx.add(x); };
+  one(o); const n = o.cnN; if (n && n.o && n.o !== o) one(n.o);
+}
+/* direction finding: the busy senders an enemy node hears are fixed on its side's map */
+function cnDF() {
+  const N = S.cn, R = S.W * CN.df.r;
+  for (const o of N.tx) {
+    const v = cnCount(o);
+    if (o.dead || o.gone || !(o.live === undefined || o.live > 0) || v < .5) { N.tx.delete(o); continue; }
+    if (v < CN.df.n || S.t < (o.cnDF || 0)) continue;
+    const a = cnAt(o), t = o.team; if (!a || (t !== 0 && t !== 1)) continue;
+    if (!N.nodes[1 - t].some(n => Math.hypot(n.x - a.x, n.z - a.z) < R)) continue;
+    o.cnDF = S.t + CN.df.cool; cnSt(1 - t).df++;
+    const k = ++N.n, e = CN.df.err, x = a.x + (cnHash(cnId(o), k) * 2 - 1) * e, z = a.z + (cnHash(k, cnId(o)) * 2 - 1) * e;
+    a.seenT = S.t; a.sx = x; a.sz = z;
+    gLog(1 - t, 'radio', 'Radiogoniometria: transmissor inimigo localizado ' + gNear(x, z), { x, z }, 'df' + (o.men ? 'q' + o.id : cnId(o)));
+  }
+}
+/* where the battle is simulated, after the director's own step */
+function cnStep(dt) {
+  if (!CN.on || (S.net && !S.host)) return;
+  if (!S.cn) {
+    const tw = t => { const o = S.T.objs.find(o => o.k === 'ctl' && o.base === t); return o ? o.id : -1; };
+    S.cn = { n: 0, ctx: -1, acc: 0, pn: [0, 0], tx: new Set(), sw: new Map(), rw: new Map(), nodes: [[], []], jam: [[], []],
+      hq: [0, 1].map(t => ({ st: 'up', T: 0, id: tw(t), x: S.base[t].x, z: S.base[t].z })),
+      st: [0, 1].map(() => ({ sent: 0, del: 0, late: 0, lost: 0, lat: 0, rep: 0, df: 0, inN: 0, outN: 0, cutN: 0 })) };
+  }
+  const N = S.cn;
+  if ((N.acc -= dt) > 0) return;
+  N.acc = CN.every;
+  cnLook();
+  for (const q of S.squads) {   // the orders on their way
+    const P = q.cnP; if (!P) continue;
+    if (!(q.live > 0) || q.net) { q.cnP = null; continue; }
+    if (P.at === Infinity && q.cnL > 0) P.at = S.t + cnLag(q, q.cnL, ++N.n);   // the link is back
+    if (S.t >= P.at && q.cnL > 0) {
+      q.cnP = null; const s = cnSt(q.team); s.del++; s.lat += S.t - P.T0; if (P.st !== 2) s.late++;
+      const was = N.ctx; N.ctx = -1; try { setOrd(q, P.O); } finally { N.ctx = was; }
+      cnTx(q);
+    } else if (S.t - P.T0 > CN.lose) {
+      q.cnP = null; cnSt(q.team).lost++;
+      gLog(q.team, 'radio', 'Ordem perdida: ' + (GEN.job[q.job] || 'esquadra') + ' sem ligação ' + gNear(q.cnx, q.cnz), { x: q.cnx, z: q.cnz }, 'cl' + q.id);
+    } else q.at = false;
+  }
+  for (const [r, o] of N.rw) {   // the reports of cut units
+    if (r.cnA !== Infinity) { N.rw.delete(r); continue; }
+    const st = o.dead || o.gone || !(o.live === undefined || o.live > 0) ? 0 : o.men || o.ai ? cnLink(o) : 2;
+    if (st) { r.cnA = S.t + cnLag(o, st, ++N.n); N.rw.delete(r); cnTx(o); }
+    else if (S.t - r.t > CN.lose) { N.rw.delete(r); const L = S.rep && S.rep[o.team], i = L ? L.indexOf(r) : -1; if (i >= 0) L.splice(i, 1); cnSt(o.team).lost++; }
+  }
+  for (const [u, e] of N.sw) if (S.t >= e.at) {   // the sightings on their way
+    N.sw.delete(u);
+    if (!u.dead && !(e.T <= u.seenT)) { u.seenT = e.T; u.sx = e.x; u.sz = e.z; }
+    cnTx(e.by);
+  }
+  cnDF();
+}
+/* a sighting of u by o: at once (true) unless o is out of the net or cut; out of it, on its way */
+function cnSaw(o) {
+  if (!cnOn()) return true;
+  const st = o.sq ? o.sq.cnL : o.cnL;
+  return st === undefined || st === 2;
+}
+function cnLate(u, o) {
+  const N = S.cn, st = o.sq ? o.sq.cnL : o.cnL; if (!cnOn() || st !== 1 || N.sw.has(u)) return;
+  const k = ++N.n, e = SHARE.err;
+  N.sw.set(u, { T: S.t, x: u.x + (cnHash(cnId(u), k) * 2 - 1) * e, z: u.z + (cnHash(k, cnId(u)) * 2 - 1) * e, at: S.t + cnLag(o, 1, k), by: o.sq || o });
+}
+/* the commander's orders go by radio (above); the squad's own think holds q.at false while one is on its way */
+setOrd = (g => (q, O) => {
+  const N = S.cn;
+  if (!N || !CN.on || N.ctx < 0 || N.ctx !== q.team || q.net || !O || !q.ord || q.cnL === undefined || (S.net && !S.host)) return g(q, O);
+  const P = q.cnP;
+  if (P) { P.O = O; return; }
+  q.cnP = { O, T0: S.t, at: S.t + cnLag(q, q.cnL, ++N.n), st: q.cnL }; q.at = false; cnSt(q.team).sent++;
+})(setOrd);
+squadThink = (g => q => { g(q); if (q.cnP) q.at = false; })(squadThink);
+/* what the commander believes a squad is doing: the order on its way, else the one it has */
+const cnOrd = q => (q.cnP ? q.cnP.O : q.ord);
+/* the side whose commander speaks: inside its plan and its commands */
+plan = (g => (t, J, n) => {
+  const N = S.cn;
+  if (!N || !CN.on) return g(t, J, n);
+  if (J === true && N.hq[t].st === 'down') { if (S.t < N.pn[t]) return null; N.pn[t] = S.t + CN.hq.plan; }
+  const was = N.ctx; N.ctx = t;
+  try { return g(t, J, n); } finally { N.ctx = was; }
+})(plan);
+genCmd = (g => (t, c, by, R) => {
+  const N = S.cn; if (!N || !CN.on || (t !== 0 && t !== 1)) return g(t, c, by, R);
+  const was = N.ctx; N.ctx = t;
+  try { return g(t, c, by, R); } finally { N.ctx = was; }
+})(genCmd);
+/* reports up wait their delay; misRead takes only those that have arrived */
+rep = (g => (o, k, data) => {
+  const L0 = o && S.rep ? S.rep[o.team] : null, last = L0 && L0.length ? L0[L0.length - 1] : null;
+  g(o, k, data);
+  if (!cnOn() || !o || (o.team !== 0 && o.team !== 1)) return;
+  const L = S.rep && S.rep[o.team], r = L && L.length ? L[L.length - 1] : null; if (!r || r === last) return;
+  const st = o.cnL === undefined ? 2 : o.cnL, N = S.cn;
+  r.cnA = st ? S.t + cnLag(o, st, ++N.n) : Infinity; cnSt(o.team).rep++;
+  if (st) cnTx(o); else N.rw.set(r, o);
+})(rep);
+misRead = (g => t => {
+  const L = S.rep && S.rep[t];
+  if (!S.cn || !L || !L.some(r => r.cnA > S.t)) return g(t);
+  const wait = L.filter(r => r.cnA > S.t), now = L.filter(r => !(r.cnA > S.t));
+  L.length = 0; L.push(...now); g(t); L.length = 0; L.push(...wait);
+})(misRead);
+director = (g => dt => { g(dt); cnStep(dt); })(director);
+/* the view: the side's net (nodes, its jammers and the enemy's it has seen, the HQ) and its squads' links; the squads where their last word put them */
+function cnVM(t) {
+  const N = S.cn; if (!N || !CN.on) return null;
+  const H = N.hq[t], s = cnSt(t), r = Math.round, sq = [];
+  for (const q of S.squads) if (q.team === t && q.live > 0 && !q.net && q.cnL !== undefined && (q.cnL < 2 || q.cnP) && sq.length < 24) {
+    const P = q.cnP, O = P && P.O, R = S.T.routes, d = O ? (O.x !== undefined ? O : O.ri !== undefined && O.s !== undefined && R[O.ri] ? routeAt(R[O.ri], clamp(O.s, 0, R[O.ri].len)) : null) : null;
+    sq.push([q.id, q.cnL, P ? (P.at === Infinity ? -1 : r(Math.max(0, P.at - S.t))) : -2, d ? r(d.x) : 0, d ? r(d.z) : 0]);
+  }
+  const jam = N.jam[t].map(u => [r(u.x), r(u.z), CN.jam.r, 1]).concat(N.jam[1 - t].filter(u => S.t - u.seenT < CMD.mem && u.sx !== undefined).map(u => [r(u.sx), r(u.sz), CN.jam.r, 0]));
+  return { hq: H.st, left: H.st === 'down' ? r(Math.max(0, CN.hq.alt - (S.t - H.T))) : 0, every: H.st === 'down' ? CN.hq.plan : FIELD.every,
+    nodes: N.nodes[t].map(n => [r(n.x), r(n.z), r(n.r), n.k]), jam, sq, n: [s.inN, s.outN, s.cutN], sent: s.sent, lost: s.lost, df: s.df };
+}
+genVM = (g => (t, all) => {
+  const V = g(t, all);
+  if (cnOn() && (t === 0 || t === 1)) {
+    V.cn = cnVM(t);
+    const by = new Map(); for (const q of S.squads) if (q.team === t && !q.net && q.cnT !== undefined) by.set(q.id, q);
+    for (const e of V.u) { const q = e.t === t && e.sqd ? by.get(e.id) : null; if (q && S.t - q.cnT > CN.every * 2) { e.x = q.cnx; e.z = q.cnz; e.age = S.t - q.cnT; } }
+  }
+  return V;
+})(genVM);
+GENK.push('cn');
+/* the side's whole picture: its net, and each squad's link and the order on its way */
+genState = (g => t => {
+  const o = g(t), V = cnOn() && (t === 0 || t === 1) ? cnVM(t) : null; if (!V || !o) return o;
+  const L = new Map(V.sq.map(e => [e[0], e]));
+  for (const q of o.sq) { const e = L.get(q.id); q.link = e ? e[1] : 2; if (e && e[2] !== -2) q.eta = e[2]; }
+  o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df };
+  return o;
+})(genState);
+
 /* ---------- sappers (SAP): the kit, its mines, and its charges against what stands parked ----------
    The content of the sappers; what the AI general does with them is not here. A sapper (a kit with sap) carries chg charges instead of
    one, and mines [anti-tank, anti-personnel] (mines); the charges and the mines come back at a depot as the charge does.
@@ -14796,6 +15014,29 @@ Net.ana = false;
 Net.rx.welcome = (old => m => { Net.ana = m.ana === 1; old(m); })(Net.rx.welcome);
 ANA.post = null;
 ANA.sink = (e, last) => { if (S.net) { if (S.host && Net.ana && !Net.isSpec) Net.send('ana', Object.assign({ n: Net.cqn, e }, last && { end: 1 })); } else if (ANA.post) ANA.post(e, last); };
+
+/* the command network in the analytics (CN): each snapshot carries cn, a side [orders sent, delivered, delivered from out of the net, lost,
+   s of delay summed, reports up, fixes by direction finding, HQ (0 up, 1 down, 2 the reserve), squads in the net, out of it, cut]; the review
+   adds comms, a side { sent, del, late, lost, lag (mean s), rep, df, hqDown (s without an HQ), out (the mean share of squads out of the net or
+   cut) }, the enemy's left out as the rest of the review leaves it out */
+anaSnap = (f => () => {
+  f();
+  const N = S.cn, e = ANA.ev[ANA.ev.length - 1]; if (!N || !e || e.k !== 'sn') return;
+  e.cn = [0, 1].map(t => { const s = N.st[t]; return [s.sent, s.del, s.late, s.lost, Math.round(s.lat), s.rep, s.df, ['up', 'down', 'alt'].indexOf(N.hq[t].st), s.inN, s.outN, s.cutN]; });
+})(anaSnap);
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), sn = ev.filter(e => e.k === 'sn' && Array.isArray(e.cn)).sort((a, b) => a.t - b.t);
+  if (!sn.length) { R.comms = null; return R; }
+  const hide = (me === 0 || me === 1) && !R.over, last = sn[sn.length - 1];
+  R.comms = [0, 1].map(s => {
+    if (hide && s !== me) return null;
+    const c = last.cn[s]; if (!Array.isArray(c)) return null;
+    let down = 0, sh = 0, n = 0;
+    sn.forEach((e, i) => { const x = e.cn[s]; if (!Array.isArray(x)) return; if (x[7] === 1 && i) down += e.t - sn[i - 1].t; const all = x[8] + x[9] + x[10]; if (all) { sh += (x[9] + x[10]) / all; n++; } });
+    return { sent: c[0], del: c[1], late: c[2], lost: c[3], lag: c[1] ? anaR(c[4] / c[1]) : 0, rep: c[5], df: c[6], hqDown: Math.round(down), out: n ? anaR(sh / n * 100) / 100 : 0 };
+  });
+  return R;
+})(anaReport);
 
 /* ---------- day, night and weather ----------
    The match has a light clock: S.sky.h0 the hour (0 to 24) at sim time t0, running rate s of day a second; pre: the presets, [start hour, rate]
@@ -18008,6 +18249,17 @@ $('#aarBack').addEventListener('click', aarPast);
 $('#aar').addEventListener('keydown', e => { if (e.key === 'Escape') { e.stopPropagation(); aarClose(); } });
 function setPause(v) { if (playMode !== 'play' || S.over || S.net) return; paused = v; $('#btnPause').textContent = v ? 'Continuar' : 'Pausar'; if (!v) lockPtr(); }
 
+/* the command network in the review (CN): each side's orders by radio, how late they came, what was lost, the time without an HQ and the fixes */
+aarShow = (f => (R, sub) => {
+  f(R, sub);
+  const c = R && Array.isArray(R.comms) ? R.comms : null; if (!c || !c.some(Boolean)) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), d = v => String(v).replace('.', ',');
+  b.append(aarEl('h3', '', 'Rede de comando'));
+  b.append(aarTable([0, 1].filter(s => c[s]).map(s => { const x = c[s]; return Object.assign([N(s), x.sent, x.late, x.lost, d(x.lag) + ' s', Math.round(x.out * 100) + '%', x.hqDown ? Math.round(x.hqDown) + ' s' : '—', x.df], { cls: s ? 'e' : 'f' }); }),
+    ['Lado', 'Ordens', 'Fora da rede', 'Perdidas', 'Demora média', 'Esquadras fora', 'Sem QG', 'Localizados']));
+  b.append(aarEl('p', 'aar-note', 'Ordens do comando pelo rádio: as que chegaram de fora da rede demoraram de 20 a 60 s, as perdidas não chegaram. Esquadras fora: a média das que estavam fora da rede ou cortadas pelo bloqueador. Localizados: transmissores do outro lado achados por radiogoniometria.'));
+})(aarShow);
+
 /* ---------- conquest: the strip, the capture bar, the marks, the result and the requisition ---------- */
 const cqCol = t => (t < 0 ? '#aeb6b3' : t === S.me ? FRIEND : FOE), mmss = s => { s = Math.max(0, Math.ceil(s)); return (s / 60 | 0) + ':' + String(s % 60).padStart(2, '0'); };
 const cqDist = d => (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km');
@@ -18744,7 +18996,7 @@ function genLog(V) {
   if (GV.sig.log === sg) return; GV.sig.log = sg;
   const prev = GV.seen; GV.seen = last ? last.t : 0; ol.replaceChildren();
   if (!L.length) { ol.appendChild(gE('li', '', V.cmd || !V.net ? 'Nenhuma ordem ainda.' : 'Ordens do comandante: só no anfitrião da sala.')); return; }
-  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG', help: 'AJUDA' };
+  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG', help: 'AJUDA', radio: 'RÁDIO' };
   for (let i = L.length - 1; i >= 0; i--) {
     const e = L[i], li = gE('li', 'k-' + e.k + (e.t > prev && prev ? ' fresh' : '')), row = e.x !== undefined ? gE('button') : gE('div');
     if (e.x !== undefined) { row.type = 'button'; row.addEventListener('click', () => { GV.cx = e.x; GV.cz = e.z; GV.ping = { x: e.x, z: e.z, T: performance.now() }; GV.drawT = 0; }); }
@@ -19359,6 +19611,53 @@ Net.ui.refused = (f => code => { GOR.want = ''; f(code); })(Net.ui.refused);
 Net.ui.lost = (f => joined => { GOR.want = ''; f(joined); })(Net.ui.lost);
 $('#btnGen').addEventListener('click', joinGen);
 if (coarse) { $('#btnGen').disabled = true; $('#btnGen').title = 'General: precisa de mouse e teclado'; }
+
+/* ---------- the command network on the general's view (CN): the reach of its nodes, the jammers, the HQ and the squads without a link ----------
+   V.cn is genVM's (the host's, by gen online). Each node's reach is a faint disc (the HQ's solid edge, a radio's dashed), a jammer a hatched
+   ring (ours green, the enemy's as last seen red), a squad out of the net a dashed ring and SEM REDE, a cut one an X and CORTADA, and an
+   order on its way a dotted line to where it sends the squad with the s it still needs. The panel says how the net stands */
+function gNet(g, V, P, now) {
+  const N = V.cn; if (!N || typeof N !== 'object') return;
+  const k = P.k, fin = (...a) => a.every(Number.isFinite);
+  for (const n of Array.isArray(N.nodes) ? N.nodes : []) {
+    if (!Array.isArray(n) || !fin(n[0], n[1], n[2])) continue;
+    const x = P.X(n[0]), y = P.Y(n[1]), R = n[2] * P.s;
+    if (x + R < 0 || x - R > GV.w || y + R < 0 || y - R > GV.h) continue;
+    g.globalAlpha = .06; g.beginPath(); g.arc(x, y, R, 0, TAU); g.fillStyle = FRIEND; g.fill();
+    g.globalAlpha = .4; g.setLineDash(n[3] === 3 ? [] : [6, 6]); gRing(g, x, y, R, FRIEND, 1); g.setLineDash([]); g.globalAlpha = 1;
+  }
+  for (const j of Array.isArray(N.jam) ? N.jam : []) {
+    if (!Array.isArray(j) || !fin(j[0], j[1], j[2]) || !gOn(P, j[0], j[1], j[2] * P.s + 20)) continue;
+    const c = j[3] ? FRIEND : FOE, x = P.X(j[0]), y = P.Y(j[1]); gHatch(g, x, y, Math.max(6, j[2] * P.s), c, .35);
+    if (GV.lab) gTxt(g, 'BLOQUEADOR', x, y - Math.max(6, j[2] * P.s) - 4, 9.5 * k, c, 'center');
+  }
+  const b = (V.base || []).find(o => o.t === V.t);
+  if (b && N.hq && GV.lab && gOn(P, b.x, b.z, 60)) {
+    const x = P.X(b.x), y = P.Y(b.z) - 18 * k, down = N.hq === 'down';
+    if (down) { const s = 7 * k; gLine(g, x - s, y - s, x + s, y + s, FOE, 2); gLine(g, x - s, y + s, x + s, y - s, FOE, 2); }
+    gTxt(g, down ? 'QG DESTRUÍDO · RESERVA EM ' + (N.left | 0) + ' s' : N.hq === 'alt' ? 'QG RESERVA' : 'QG', x, y - 10 * k, 10 * k, down ? FOE : FRIEND, 'center');
+  }
+  const by = new Map(); for (const u of V.u) if (u.t === V.t && u.sqd) by.set(u.id, u);
+  const pul = .5 + .5 * Math.sin(now / 300);
+  for (const e of Array.isArray(N.sq) ? N.sq : []) {
+    const u = Array.isArray(e) ? by.get(e[0]) : null; if (!u || !gOn(P, u.x, u.z, 300)) continue;
+    const x = P.X(u.x), y = P.Y(u.z), c = '#ffb347';
+    if (e[1] === 0) { const s = 6 * k; gLine(g, x - s, y - s, x + s, y + s, c, 1.8); gLine(g, x - s, y + s, x + s, y - s, c, 1.8); if (GV.lab) gTxt(g, 'CORTADA', x, y - 12 * k, 9.5 * k, c, 'center'); }
+    else if (e[1] === 1) { g.setLineDash([3, 4]); gRing(g, x, y, 13 * k, c, 1.2); g.setLineDash([]); if (GV.lab) gTxt(g, 'SEM REDE', x, y - 16 * k, 9.5 * k, c, 'center'); }
+    if (e[2] >= -1) {
+      if (e[3] || e[4]) { g.globalAlpha = .55 + .45 * pul; g.setLineDash([2, 5]); gLine(g, x, y, P.X(e[3]), P.Y(e[4]), c, 1.3); g.setLineDash([]); g.globalAlpha = 1; }
+      if (GV.lab) gTxt(g, e[2] < 0 ? 'ORDEM PRESA' : 'ORDEM EM ' + e[2] + ' s', x, y + 30 * k, 9.5 * k, c, 'center');
+    }
+  }
+}
+GLAY.splice(GLAY.findIndex(L => L.id === 'ops'), 0, { id: 'net', nm: 'Rede de comando', on: 1, draw: gNet });
+genPanels = (f => V => {
+  f(V);
+  const N = V.cn, e = $('#genNet'), ok = !!N && typeof N === 'object' && Array.isArray(N.n);
+  const s = !ok ? '' : 'Rede de comando: ' + (N.hq === 'down' ? 'QG destruído, reserva em ' + (N.left | 0) + ' s; o comando planeja a cada ' + N.every + ' s' : N.hq === 'alt' ? 'QG reserva' : 'QG no ar')
+    + ' · ' + N.n[0] + ' esquadras na rede, ' + N.n[1] + ' fora' + (N.n[2] ? ', ' + N.n[2] + ' cortadas' : '') + (N.lost ? ' · ' + N.lost + (N.lost === 1 ? ' ordem perdida' : ' ordens perdidas') : '') + (N.df ? ' · ' + N.df + ' localizados por radiogoniometria' : '');
+  if (e.textContent !== s) e.textContent = s; e.hidden = !s;
+})(genPanels);
 
 /* ---------- helicopters: model, view, instruments, sound and the hangar's data ----------
    Everything here hangs on the tables: HELIS (the model from mdl), SEAT.heli and CK.heli (the cockpit), CARD.heli, CLS.heli, HLEGEND and

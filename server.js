@@ -440,7 +440,8 @@ RX.gen = (c, m) => {
     road: lst(v.road, 8) ? v.road : null, ops: lst(v.ops, 16) ? v.ops : [], fm: lst(v.fm, 40) ? v.fm : [], sc: lst(v.sc, 8) ? v.sc : [],
     hit: rec(v.hit) ? v.hit : null, focus: rec(v.focus) ? v.focus : null, thr: rec(v.thr) ? v.thr : null, want: rec(v.want) ? v.want : null,
     gate: txt(v.gate, 8) ? v.gate : '', atkT: num(v.atkT) ? v.atkT : 0, ev: lst(v.ev, 8) ? v.ev : [], evT: num(v.evT) ? v.evT : -1,
-    fb: lst(v.fb, 8) ? v.fb : null, res: rec(v.res) ? v.res : null, mev: lst(v.mev, 9) ? v.mev : [], gue: rec(v.gue) ? v.gue : null, kz: rec(v.kz) || lst(v.kz, 96) ? v.kz : null };
+    fb: lst(v.fb, 8) ? v.fb : null, res: rec(v.res) ? v.res : null, mev: lst(v.mev, 9) ? v.mev : [], gue: rec(v.gue) ? v.gue : null, kz: rec(v.kz) || lst(v.kz, 96) ? v.kz : null,
+    cn: rec(v.cn) && v.cn !== null ? v.cn : null };   // the command network as the side's general sees it (nodes, jammers, the HQ, squads without a link)
   castSide(c, { t: 'gen', s: m.s, T: m.T, v: o, q: m.q }, m.s);
 };
 RX.glog = (c, m) => {

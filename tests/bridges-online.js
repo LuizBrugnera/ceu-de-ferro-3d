@@ -97,6 +97,25 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   ok(C4.every(c => !sf(c) && !c.S.pe[0].op && c.hgt(site.x, site.z) <= c.S.T.WL + .3), 'destroyed on the host: on every client it is gone and the river shut there');
   const g4 = await client('Mais', 'inf', 'blueRifle'); await run(1); await until(() => g4.S.forts.length >= host.S.forts.length);
   ok(g4.S.os[id] === 0 && !pf(g4) && !rf(g4) && !sf(g4) && g4.$('brOpen')(L(g4)[b.i]), 'a player who joins later is given the bridge standing and no pontoon');
+
+  console.log('-- a new bridge (kind 10, W20c) --');
+  const C5 = [host, g1, g2, g3, g4];
+  ok(C5.every(c => c.Net.bnb), 'the server says bnb: 1');
+  const site2 = host.$('brSites()').filter(s => Math.abs(s.z - site.z) > 600 && s.ends[0].x < host.S.T.rx(s.z)).reduce((a, s) => (Math.abs(s.z) < Math.abs(a.z) ? s : a)), se2 = site2.ends[0];
+  await near(se2.x, se2.z);
+  g1.Net.fbuild({ k: 10, x: se2.x + 2, z: se2.z, a: 0 });
+  const nf = c => c.S.forts.find(f => f.k === 10 && f.ps && f.ps.z === site2.z && !f.dead);
+  await until(() => C5.every(c => nf(c)));
+  ok(C5.every(c => nf(c) && nf(c).id === nf(host).id), 'the guest\'s request: the host starts a new bridge at the stretch, and every client has it under one id (fort, kind 10, z ' + site2.z + ')');
+  host.$('fortAt')(nf(host), .995); host.$('Net').fq = true;
+  await until(() => C5.every(c => nf(c) && nf(c).prog >= 1), 8000); await run(.3);
+  const pe = c => c.S.pe.find(p => p.f === nf(c));
+  ok(C5.every(c => pe(c) && pe(c).op && c.S.bre[pe(c).E] === 1 && c.hgt(site2.x, site2.z) > c.S.T.WL + .3), 'finished: on every client the new bridge carries as a road (span cost 1) and its deck is ground');
+  const g5 = await client('Tarde', 'inf', 'redRifle'); await run(1); await until(() => !!nf(g5) && nf(g5).prog >= 1);
+  ok(nf(g5) && nf(g5).prog >= 1 && pe(g5) && pe(g5).op && g5.S.bre[pe(g5).E] === 1, 'a player who joins later is given the finished new bridge');
+  host.$('hitObj')(nf(host).o, 1e5, null);
+  await until(() => C5.concat(g5).every(c => !nf(c)), 8000); await run(.3);
+  ok(C5.concat(g5).every(c => !nf(c) && c.hgt(site2.x, site2.z) <= c.S.T.WL + .3), 'destroyed on the host: gone on every client and the river shut there');
   for (const c of all) c.Net.ws && c.Net.ws.close();
   N.stop(); done();
 })().catch(e => { console.error(e); N.stop(); process.exitCode = 1; });

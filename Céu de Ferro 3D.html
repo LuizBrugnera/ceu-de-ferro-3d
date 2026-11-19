@@ -3832,8 +3832,9 @@ let S = null;
 /* ---------- terrain: a height grid generated once per era, with valleys cut along the roads ---------- */
 /* MAPV: the map's version. 1 is the first map, two roads; 2 adds the road network (RN, T.net), 3 the new places and points, 4 the centre axis and the manoeuvres,
    5 the seat towns beside the bases, with their lots (CITY.plan.seat), 6 the rocks and bushes on open ground (COVERS), 7 more of them and the
-   bush corridors (COV7: hedgerows, river banks, wood margins). A room's version is its first player's, told in welcome (Net.mv) */
-let MAPV = 7;
+   bush corridors (COV7: hedgerows, river banks, wood margins), 8 the dirt roads (RN.d8, class 3: parallels, links between the axes, farm and
+   forest tracks). A room's version is its first player's, told in welcome (Net.mv) */
+let MAPV = 8;
 const TERRAIN = {};
 function hash2(i, j, s) { const n = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); }
 function vnoise(x, z, s) {
@@ -3843,14 +3844,16 @@ function vnoise(x, z, s) {
 }
 const fbm = (x, z, s) => (vnoise(x, z, s) + .5 * vnoise(x * 2.03, z * 2.03, s + 1) + .25 * vnoise(x * 4.1, z * 4.1, s + 2)) / 1.75;
 const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
-/* the road network (map version 2): the class of a road (0 main, 1 secondary, 2 track) sets its width, bed, colour and cost. Nodes are the
+/* the road network (map version 2): the class of a road (0 main, 1 secondary, 2 track, 3 dirt road of map version 8) sets its width, bed, colour and cost. Nodes are the
    places the roads join, in fractions of the map as the two main roads' points are: 'b' a base, 't' a town, 'ax' [axis, a, b] a point on a
    main road at the projection of the fraction point, 'f' [a, b] a free point. The main roads are cut at their nodes (class 0, built at load);
-   edges lists the class 1 and 2 roads, whose bends are RN.way (baked offline by tests/roads-gen.js, so no path search runs at load). */
+   edges lists the class 1 and 2 roads, whose bends are RN.way (baked offline by tests/roads-gen.js, so no path search runs at load).
+   cls: an edge's cost per metre by mode and class (veh: wheels, and any vehicle where nobody says which; trk: a tracked hull's trip on map
+   version 8, which a dirt road or a track slows less; foot). dash: the dash of a class on the 2D maps, in line widths */
 const RN = {
-  w: [8, 6, 3.5], bed: [null, [40, 160], [18, 80]], kind: [70, 40, 0],
-  pal: { ww2: [0, 0x9a8f78, 0x8a7a5a], modern: [0, 0x6f6f6a, 0x8a7d62] }, draw: { a: [.95, .8, .55], lw: [1.4, 1.1, .8] }, off: [-2, -1.6, -1.2],
-  cell: 512, fld: 256, sw: 120, onAx: 250, tripMax: 4500, cls: { veh: [1, 1.25, 1.8], foot: [1.3, 1.1, .9] },
+  w: [8, 6, 3.5, 3], bed: [null, [40, 160], [18, 80], [14, 60]], kind: [70, 40, 0, 0],
+  pal: { ww2: [0, 0x9a8f78, 0x8a7a5a, 0x96805e], modern: [0, 0x6f6f6a, 0x8a7d62, 0x98835f] }, draw: { a: [.95, .8, .55, .6], lw: [1.4, 1.1, .8, .75], dash: [null, null, null, [3, 2]] }, off: [-2, -1.6, -1.2, -1],
+  cell: 512, fld: 256, sw: 120, onAx: 250, tripMax: 4500, cls: { veh: [1, 1.25, 1.8, 1.45], trk: [1, 1.2, 1.4, 1.1], foot: [1.3, 1.1, .9, .95] },
   nodes: {
     B0: ['b', 0], B1: ['b', 1], T0: ['t', 0], T1: ['t', 1],
     S1: ['ax', 0, .78, .10], JSE: ['ax', 0, .70, -.10], S3: ['ax', 0, .36, -.20], S4: ['ax', 0, .22, -.38],
@@ -3871,7 +3874,8 @@ const RN = {
     modern: [['base', 'B0', 0, 2], ['b', null, 0, 0], ['c', 'N3', 0, 0], ['w', 'W', 0, 1], ['t1', 'T1', 0, 1], ['n', null, -1, 0], ['x', 'X', -1, 1], ['t0', 'T0', 1, 1], ['e', 'E', 1, 1], ['f', 'S1', 1, 0], ['g', 'N1', 1, 0], ['base', 'B1', 1, 2]] },
   links: { ww2: '0-b 0-t1 b-n n-t0 t0-end t1-g g-end b-w w-t1 w-x x-e e-g e-t0 x-t0 x-t1'.split(' '),
     modern: '0-b b-n n-t0 t0-f f-end 0-c c-t1 t1-g g-end b-w w-c w-x x-t0 x-t1 x-e e-f e-g'.split(' ') },
-  names: { w: 'Poço Fundo', x: 'Cruzeiro', e: 'Três Pinheiros', HS1: 'Sítio do Brejo', HS2: 'Aldeia do Açude', HN1: 'Sítio da Serra', HN2: 'Aldeia da Capela', AS: 'Aldeia da Várzea', AN: 'Aldeia do Alto' },
+  names: { w: 'Poço Fundo', x: 'Cruzeiro', e: 'Três Pinheiros', HS1: 'Sítio do Brejo', HS2: 'Aldeia do Açude', HN1: 'Sítio da Serra', HN2: 'Aldeia da Capela', AS: 'Aldeia da Várzea', AN: 'Aldeia do Alto',
+    D1: 'Encruzilhada do Capão', D2: 'Porteira Velha', D3: 'Encruzilhada da Olaria', D4: 'Clareira do Carvoeiro' },   // the free points of the dirt roads (map version 8)
   ax: { ww2: 'B1 S1 E X W S3 S4 B0'.split(' '), modern: 'B1 S1 E X W S3 S4 B0'.split(' ') }, tk: { ww2: 1.25, modern: 1.35 }, postN: { line: 1, road: 1 }, colW: [1, .6],
   way: { ww2: [
       [0,4900,-1100,4700,-1100,4600,-1000,4500,-1000,4200,-700,3900,-400,3900,-100],
@@ -3904,7 +3908,46 @@ const RN = {
       [12,13200,-6600,13200,-6300,13200,-6100,13200,-5800,13400,-5600,13700,-5300,13700,-5200,13900,-5000,14100,-4800,14100,-4700,14400,-4400,14700,-4100,14700,-4000,14800,-3900,14800,-3500,15100,-3200,15100,-3100,15200,-3000,15200,-2700,15200,-2400,15200,-2100,15200,-1700,15400,-1500,15400,-1200],
       [13,15700,6600,15500,6800,15200,7100,14900,7400,14600,7700,14600,7900,14400,8100],
       [14,14000,8100,13800,7900,13600,7700,13400,7500,13100,7500,12700,7500,12400,7500,12000,7500,11700,7500,11300,7500,11000,7500,10600,7500,10500,7400,10200,7400,9900,7400,9600,7400,9200,7400],
-      [15,8900,7400,8900,7100,8900,6800,8900,6400,8900,6100,8900,5700,8900,5400,8900,5000,8600,4700,8300,4400,8300,4000]] } };   // the bends of the class 1 and 2 roads: [edge index, x1, z1, x2, z2, ...] in metres
+      [15,8900,7400,8900,7100,8900,6800,8900,6400,8900,6100,8900,5700,8900,5400,8900,5000,8600,4700,8300,4400,8300,4000]] },   // the bends of the class 1 and 2 roads: [edge index, x1, z1, x2, z2, ...] in metres
+  /* map version 8: the dirt roads (class 3), so that every objective has more than one way in: a parallel to each main road, lateral links
+     between the axes, farm tracks between the villages and forest tracks. nodes: the free points they add, per era (as RN.nodes 'f'); edges
+     [3, from, to], after RN.edges[era] (their index in the network is RN.edges[era].length on); way: their bends, as RN.way (baked offline by
+     tests/roads8-gen.js). No new node lies on a main road: the main roads' pieces and the centre axis stay as they were */
+  d8: {
+    nodes: {
+      ww2: { D1: ['f', .707, .133], D2: ['f', .83, -.30], D3: ['f', .55, -.52], D4: ['f', .19, .45] },
+      modern: { D1: ['f', .46, -.47], D2: ['f', .67, .06], D3: ['f', .25, .52], D4: ['f', .57, .47] } },
+    edges: {
+      ww2: [[3, 'N4', 'S4'], [3, 'JSE', 'D1'], [3, 'D1', 'E'], [3, 'S3', 'D3'], [3, 'D3', 'T0'], [3, 'D3', 'HS2'], [3, 'HS2', 'D2'], [3, 'D2', 'S1'],
+        [3, 'N3', 'D4'], [3, 'D4', 'HN2'], [3, 'T1', 'HN2']],
+      modern: [[3, 'N4', 'S4'], [3, 'S3', 'D1'], [3, 'D1', 'T0'], [3, 'D1', 'HS2'], [3, 'AS', 'D2'], [3, 'D2', 'S1'], [3, 'JSE', 'D2'], [3, 'N3', 'D3'], [3, 'D3', 'HN2'],
+        [3, 'HN2', 'T1'], [3, 'AN', 'D4'], [3, 'D4', 'E'], [3, 'T1', 'D4']] },
+    way: { ww2: [
+      [0,2500,-1000,2600,-1000,2700,-1100,2700,-1400,2700,-1700,2900,-1900,3100,-2100],
+      [1,9800,-400,9500,-100,9800,200,9800,300,9900,400],
+      [2,9900,900,9800,1000,9800,1100,9600,1300,9600,1600,9700,1700,9700,1800,9900,2000,9900,2200],
+      [3,5000,-1300,5100,-1400,5100,-1500,5300,-1700,5500,-1900,5700,-1900,5800,-2000,6000,-2000,6100,-2100,6300,-2100,6400,-2200,6600,-2200,6700,-2300,6900,-2300,7100,-2500,7300,-2700,7500,-2900],
+      [4,7900,-2900,8100,-2700,8100,-2600,8400,-2300,8300,-2200,8300,-2000],
+      [5,7900,-3300,7900,-3500,8000,-3600,8000,-3900,7900,-4000,7900,-4300,8000,-4400,8200,-4400],
+      [6,8600,-4600,8700,-4700,8800,-4700,8900,-4800,9000,-4800,9300,-4500,9600,-4200,9900,-3900,10100,-3700,10300,-3500,10300,-3300,10400,-3200,10400,-3000,10700,-2700,11000,-2400,11300,-2100],
+      [7,11400,-1600,11200,-1400,11200,-1100,11200,-800,11300,-700,11300,-300,11300,-100,11300,200,11100,400],
+      [8,4000,1500,3700,1800,3600,1800,3400,2000,3200,2200,3000,2400,2900,2500],
+      [9,2700,2800,2700,3000,3000,3300,3300,3600,3600,3900,3900,4200,4200,4500,4500,4800,4800,5100,5100,5400,5200,5400,5300,5300,5400,5300,5500,5200,5600,5200],
+      [10,6400,3800,6700,4100,6700,4200,6400,4500,6300,4500,6300,4900,6200,4900,6100,5000,6000,5000,5900,5100]],
+    modern: [
+      [0,3700,-1100,3900,-1300,4100,-1500,4300,-1700,4600,-2000,4600,-2400,4600,-2600,4600,-2900,4700,-3000,4700,-3300],
+      [1,7900,-1900,8000,-2000,8000,-2100,8200,-2300,8500,-2600,8700,-2800,9000,-3100,9200,-3300,9500,-3600,9800,-3900,9900,-4000],
+      [2,10300,-4000,10500,-4000,10600,-3900,10700,-3900,10800,-3800,11100,-3800,11400,-3800,11700,-3500,12000,-3500,12100,-3400,12400,-3400,12800,-3400,13000,-3200,12900,-3100,12900,-2800],
+      [3,10200,-4200,10300,-4300,10400,-4300,10600,-4500,10800,-4700,11000,-4900,11300,-5200,11500,-5400,11800,-5700,12000,-5900,12300,-6200,12600,-6200,12600,-6600,12700,-6600,12800,-6700,13100,-6700],
+      [4,12800,-600,12900,-600,13100,-400,13400,-400,13800,-400,14000,-200,14200,0,14400,200,14500,300],
+      [5,14800,400,14900,300,15100,300,15200,200,15400,200,15700,200,16000,500,16300,800,16400,800,16600,600,16800,400,16900,400,17000,500,17000,700],
+      [6,15200,-700,15200,-500,15100,-400,15100,-200,15100,100,14800,400],
+      [7,6400,2200,6200,2400,6500,2700,6500,3000,6500,3300,6500,3600,6500,3900,6400,4000,6400,4100,6100,4400,5800,4700],
+      [8,5600,4800,5600,5200,5900,5500,6100,5700,6300,5900,6400,5900,6600,6100,6700,6100,6900,6300,7200,6600,7500,6900,7800,7200,7900,7200,8100,7400,8400,7400,8500,7500,8700,7500],
+      [9,9100,7500,9300,7500,9500,7300,9500,7000,9500,6700,9500,6400,9500,6100,9700,5900,9700,5800,9900,5600],
+      [10,10500,3200,10700,3200,10800,3100,11200,3100,11400,3300,11600,3300,11800,3500,12000,3700,12000,3900,12200,4100,12300,4000],
+      [11,12700,4200,13000,3900,13200,3900,13500,3900,13700,4100,14000,4100,14400,4100,14700,4100,15100,4100,15100,3700,15300,3500],
+      [12,10300,5200,10300,5000,10400,4900,10600,4900,10700,5000,10800,5000,10900,5100,11300,5100,11500,5100,11800,5100,12100,4800,12300,4600,12500,4400]] } } };
 function makeRoute(pts) {
   const out = [], cr = (a, b, c, d, t) => .5 * (2 * b + (c - a) * t + (2 * a - 5 * b + 4 * c - d) * t * t + (3 * b - a - 3 * c + d) * t * t * t);
   for (let i = 0; i < pts.length - 1; i++) {
@@ -3939,16 +3982,19 @@ function polyOf(pts) {
   out[0].s = 0; for (let i = 1; i < out.length; i++) out[i].s = out[i - 1].s + hdist(out[i], out[i - 1]);
   out.len = out[out.length - 1].s; return out;
 }
+/* the nodes and the class 1-3 edges of a terrain's network: map version 8 adds the dirt roads (RN.d8) after the others, so no older index moves */
+const rnNodes = (era, mv) => (mv >= 8 ? Object.assign({}, RN.nodes, RN.d8.nodes[era]) : RN.nodes);
+const rnEdges = (era, mv) => (mv >= 8 ? RN.edges[era].concat(RN.d8.edges[era]) : RN.edges[era]);
 function roadNet(T, era) {
-  const W = T.W, HW = T.HW, n = [], e = [], at = {}, used = new Set();
-  for (const [, a, b] of RN.edges[era]) { used.add(a); used.add(b); }
+  const W = T.W, HW = T.HW, n = [], e = [], at = {}, used = new Set(), ND = rnNodes(era, T.mv), ED = rnEdges(era, T.mv), k8 = RN.edges[era].length;
+  for (const [, a, b] of ED) { used.add(a); used.add(b); }
   const riv = z => .5 * W + .07 * W * Math.sin(z / (HW * .33) + 1);
   const proj = (r, x, z) => { let b = { d: 1e9, s: 0 }; for (let i = 1; i < r.length; i++) { const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), d = Math.hypot(x - a.x - ex * t, z - a.z - ez * t); if (d < b.d) b = { d, s: a.s + L * t }; } return b.s; };
   const fords = p => { const f = []; for (let i = 1; i < p.length; i++) { const u = p[i - 1].x - riv(p[i - 1].z), v = p[i].x - riv(p[i].z); if (u * v < 0) f.push(p[i - 1].s + (p[i].s - p[i - 1].s) * u / (u - v)); } return f; };
   const smp = p => { const k = Math.max(1, Math.round(p.len / 200)), o = []; for (let i = 0; i < k; i++) { const q = routeAt(p, p.len * (i + .5) / k); o.push({ x: q.x, z: q.z }); } return o; };   // the edge's samples, one every 200 m (map version 4: the threat on it, C.et)
   const edge = (c, A, B, p, ax) => { const E = { i: e.length, a: A.i, b: B.i, c, p, len: p.len, ax: ax || null, ford: fords(p), smp: smp(p) }; e.push(E); A.e.push(E.i); B.e.push(E.i); };
-  for (const id in RN.nodes) {
-    const d = RN.nodes[id]; if (d[0] === 'f' && !used.has(id)) continue;
+  for (const id in ND) {
+    const d = ND[id]; if (d[0] === 'f' && !used.has(id)) continue;
     let x, z, ax = [];
     if (d[0] === 'b') { const b = T.bases[d[1]]; x = b.x; z = b.z; ax = T.routes.map((r, ri) => [ri, d[1] ? 0 : r.len]); }
     else if (d[0] === 't') { const w = T.towns[d[1]], r = T.routes[d[1]], s = proj(r, w.x, w.z), q = routeAt(r, s); x = q.x; z = q.z; ax = [[d[1], s]]; }
@@ -3964,9 +4010,9 @@ function roadNet(T, era) {
       pts.push(routeAt(r, B.s)); edge(0, A.q, B.q, polyOf(pts), [ri, A.s, B.s]);
     }
   });
-  const wr = RN.way[era] || [];
-  RN.edges[era].forEach(([c, a, b], k) => {
-    const row = wr.find(q => q[0] === k) || [k], mid = [];
+  const wr = RN.way[era] || [], w8 = RN.d8.way[era] || [];
+  ED.forEach(([c, a, b], k) => {
+    const row = (k < k8 ? wr.find(q => q[0] === k) : w8.find(q => q[0] === k - k8)) || [k], mid = [];
     for (let j = 1; j + 1 < row.length; j += 2) mid.push({ x: row[j], z: row[j + 1] });
     edge(c, at[a], at[b], makeRoute([at[a], ...mid, at[b]]));
   });
@@ -4018,13 +4064,14 @@ function roadDist(T, x, z, m) {
 const roadsOf = T => T.net ? T.net.e : T.routes.map(p => ({ p, c: 0 }));
 /* strokes the roads on a 2D map with the context's colour: alpha and line width by class (RN.draw), relative to a main road's */
 function drawRoads(g, T, tx, tz, lw) {
-  const a0 = g.globalAlpha, D = RN.draw;
+  const a0 = g.globalAlpha, D = RN.draw, d0 = g.setLineDash ? g.getLineDash() : null;
   for (const E of roadsOf(T)) {
     if (E.xt) continue;   // a free pontoon's edges (W20b): the bridges' layer draws the pontoon
     g.globalAlpha = a0 * D.a[E.c] / D.a[0]; g.lineWidth = lw * D.lw[E.c] / D.lw[0];
+    if (d0) g.setLineDash(D.dash[E.c] ? D.dash[E.c].map(v => v * g.lineWidth) : d0);   // a dirt road (map version 8) is dashed
     g.beginPath(); E.p.forEach((p, n) => (n ? g.lineTo(tx(p.x), tz(p.z)) : g.moveTo(tx(p.x), tz(p.z)))); g.stroke();
   }
-  g.globalAlpha = a0; g.lineWidth = lw;
+  g.globalAlpha = a0; g.lineWidth = lw; if (d0) g.setLineDash(d0);
 }
 /* the centre axis of map version 4 (T.routes[2]): the nodes of RN.ax[era] in order, base 1 to base 0, joined by the edges that connect them
    (the two main roads' pieces where it shares them, the class 1 edges elsewhere), as one polyline in the shape of a route. Added after every
@@ -4467,6 +4514,33 @@ function netPath(a, b, cost, mode, T) {
 /* map version 4, o.team: the way is the one that side's commander finds the safest (edgeCostOf: an edge costs its length times its class, times 1 + the threat C.et it knows on it);
    such a way is kept for 10 s (T.pt) when both ends are nodes. edgeCostOf(C, mode): the cost of an edge for the commander C (no C, or none with edge threats yet: the plain one) */
 const edgeCostOf = (C, mode) => { const cls = RN.cls[mode], et = C && C.et; return et ? e => e.len * cls[e.c] * (1 + (et[e.i] || 0)) : e => e.len * cls[e.c]; };
+/* map version 8, the unpaved roads (a track, class 2, and a dirt road, class 3): a hull on tracks keeps its pace on them, wheels keep DIRT.wh of
+   it (dry, in the heaviest rain: S.wx.r), tracks DIRT.tr. A trip of tripOf carries its unpaved runs (dr: [s0, s1, s0, s1...] along it); a
+   vehicle that rides one on tracks asks for the way by RN.cls.trk (vehMode), which a dirt road costs less to */
+const DIRT = { wh: [.7, .5], tr: [1, .9] };
+const hullTracked = u => !!(u && u.def && u.def.parts && u.def.parts.ix && u.def.parts.ix.trackL !== undefined);
+const vehMode = u => (S.T.mv >= 8 && hullTracked(u) ? 'trk' : 'veh');
+function dirtRuns(pts, cs) {
+  const out = []; let s = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const s1 = s + hdist(pts[i], pts[i - 1]);
+    if (cs[i] >= 2 && s1 > s) { if (out.length && Math.abs(out[out.length - 1] - s) < 1e-6) out[out.length - 1] = s1; else out.push(s, s1); }
+    s = s1;
+  }
+  return out.length ? out : null;
+}
+/* what a vehicle keeps of its pace at s along a way p (1 off its unpaved runs, and on every way of an older map) */
+function dirtK(u, p, s) {
+  const r = p && p.dr; if (!r) return 1;
+  for (let i = 0; i < r.length; i += 2) if (s >= r[i] && s < r[i + 1]) { const K = hullTracked(u) ? DIRT.tr : DIRT.wh, w = S.wx ? clamp(S.wx.r || 0, 0, 1) : 0; return K[0] + (K[1] - K[0]) * w; }
+  return 1;
+}
+/* the length a trip's time allows for: its length, with the unpaved runs counted at the slowest wheels' pace */
+function tripLen(p) {
+  let L = p.len; const r = p.dr;
+  if (r) for (let i = 0; i < r.length; i += 2) L += (r[i + 1] - r[i]) * (1 / DIRT.wh[1] - 1);
+  return L;
+}
 function tripOf(x0, z0, x1, z1, o) {
   o = o || {}; const T = S.T, N = T.net, mode = o.mode || 'veh', Cm = o.team !== undefined && !o.cost && T.mv >= 4 && S.cmd ? S.cmd[o.team] : null, cost = o.cost || (Cm && Cm.et ? edgeCostOf(Cm, mode) : null), bm = S.bre || null, f0 = cost || (e => e.len * RN.cls[mode][e.c]);
   const na0 = N.n.findIndex(q => Math.hypot(q.x - x0, q.z - z0) < 1), na1 = N.n.findIndex(q => Math.hypot(q.x - x1, q.z - z1) < 1), bk = S.t / 10 | 0, key = (!o.cost && na0 >= 0 && na1 >= 0) ? 't' + na0 + ',' + na1 + ',' + mode + (cost ? ',' + Cm.t : '') + (bm ? S.brk : '') : null;
@@ -4483,17 +4557,18 @@ function tripOf(x0, z0, x1, z1, o) {
   }
   if (!best) return null;
   const inner = (E, s0, s1) => { const lo = Math.min(s0, s1), hi = Math.max(s0, s1), m = E.p.filter(q => q.s > lo + 1e-6 && q.s < hi - 1e-6); return s1 >= s0 ? m : m.reverse(); };
-  const pts = [{ x: x0, z: z0 }, { x: n0.x, z: n0.z }];
-  if (!best.p) pts.push(...inner(E0, n0.s, n1.s));
+  const pts = [{ x: x0, z: z0 }, { x: n0.x, z: n0.z }], cs = [-1, -1], put = (c, l) => { for (const p of l) { pts.push(p); cs.push(c); } };   // cs: the class of the road each point is reached by (-1 off the roads)
+  if (!best.p) put(E0.c, inner(E0, n0.s, n1.s));
   else {
-    const A = N.n[best.A], B = N.n[best.B];
-    pts.push(...inner(E0, n0.s, best.A === E0.a ? 0 : E0.len), A);
+    const A = N.n[best.A];
+    put(E0.c, inner(E0, n0.s, best.A === E0.a ? 0 : E0.len)); put(E0.c, [A]);
     let cur = best.A;
-    for (const ei of best.p.e) { const E = N.e[ei], fw = E.a === cur, m = E.p.slice(1, -1); cur = fw ? E.b : E.a; pts.push(...(fw ? m : m.slice().reverse()), N.n[cur]); }
-    pts.push(...inner(E1, best.B === E1.a ? 0 : E1.len, n1.s));
+    for (const ei of best.p.e) { const E = N.e[ei], fw = E.a === cur, m = E.p.slice(1, -1); cur = fw ? E.b : E.a; put(E.c, fw ? m : m.slice().reverse()); put(E.c, [N.n[cur]]); }
+    put(E1.c, inner(E1, best.B === E1.a ? 0 : E1.len, n1.s));
   }
-  pts.push({ x: n1.x, z: n1.z }, { x: x1, z: z1 });
+  put(best.p ? E1.c : E0.c, [{ x: n1.x, z: n1.z }]); put(-1, [{ x: x1, z: z1 }]);
   const out = polyOf(pts);
+  if (T.mv >= 8) out.dr = dirtRuns(pts, cs);   // map version 8: where the way is unpaved, for the pace of wheels on it (tripMove)
   if (E1.c === 0 && n1.d < RN.onAx) { out.ri = E1.ax[0]; out.s1 = E1.ax[1] + n1.s; }
   else if (E1.a2 && n1.d < RN.onAx) { out.ri = E1.a2[0]; out.s1 = E1.a2[1] + E1.a2[2] * n1.s; }   // a class 1 edge of the centre axis (map version 4)
   if (key) (pm || T.pc).set(key, out);
@@ -6294,15 +6369,15 @@ function scan(u) {
    a tank or an armoured car is then off its road for its brain to bring home, any other vehicle joins the nearest axis */
 function tripTo(u, x, z, o) {
   if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
-  o = o || {}; const p = tripOf(u.x, u.z, x, z, { mode: 'veh', team: u.team }); if (!p) return null;
-  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '' });
+  o = o || {}; const p = tripOf(u.x, u.z, x, z, { mode: vehMode(u), team: u.team }); if (!p) return null;
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * tripLen(p) / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '' });
 }
 function placeOn(u, p, s) {
   const q = routeAt(p, s); u.h = Math.atan2(-q.dz, q.dx); u.x = q.x; u.z = q.z; u.y = hgt(u.x, u.z);
 }
 /* T.ev (a manoeuvre squad's ride, MAN.ride): places along the way where the trip does something (k pick: the squad boards; drop: it gets out), in order; the vehicle stops there for a step */
 function tripMove(u, dt) {
-  const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt);
+  const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt * dirtK(u, T.p, T.s));   // slower on a dirt road on wheels (map version 8)
   if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
   placeOn(u, T.p, T.s);
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
@@ -22057,7 +22132,7 @@ Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host
    score grows with the enemy's worth (k). Crossing (tra): a side with every crossing it needs cut (no open
    one at all, or vehicles held at a fallen bridge for wait s) sends a free squad within reach m, sappers first, to lay a pontoon at the
    fallen bridge whose bank end has no known enemy within safe m. hold: s a vehicle held at a bank waits before it looks again for a way */
-const BR = { id: 100, hp: [600, 450, 300], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 8, kill: 5000,
+const BR = { id: 100, hp: [600, 450, 300, 250], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 8, kill: 5000,
   ai: { foe: 1500, near: 700, at: 300, min: 8, own: .5, held: 1.5, k: 12, reach: 3500, safe: 400, wait: 30, T: 600, cd: 90 } };
 OBJ.bridge = { hp: [0, 0], take: [0, .5, 1] };
 OBJ.pont = { hp: [280, 0], take: [.15, .6, 1], dug: 99, veh: () => 1 };
@@ -22262,7 +22337,7 @@ fortAt = (g => (f, prog) => {
 fortDrop = (g => f => { g(f); if (f.k === 7 || f.k === 9 || f.k === 10) brSync(); })(fortDrop);
 fortSlots = (g => f => (f.k === 7 || f.k === 9 || f.k === 10 ? (f.pts = []) : g(f)))(fortSlots);
 /* a bridge's name in the log and the view: by the road and the place nearest it */
-const BRC = ['da estrada principal', 'da estrada secundária', 'do caminho'];
+const BRC = ['da estrada principal', 'da estrada secundária', 'do caminho', 'da estrada de chão'];
 const brName = b => 'Ponte ' + (b.i + 1) + ' ' + BRC[b.c] + ' (' + gNear(b.x, b.z) + ')';
 /* the columns keep off an axis cut by a fallen bridge while another is open */
 const brAxisCut = ri => brs().some(b => !brOpen(b) && b.rs.some(r => r[0] === ri));
@@ -25225,9 +25300,9 @@ function buildWorld() {
   const wg = new THREE.PlaneGeometry(lx, lz); wg.rotateX(-Math.PI / 2);
   const water = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({ color: P.water, shininess: 90, transparent: true, opacity: .9 }));
   water.position.set(T.x0 + lx / 2, T.WL, T.z0 + lz / 2); scene.add(water);
-  /* roads follow the routes through the valleys: one ribbon mesh per class (a main road, a secondary road, a track); the first map has only the two routes */
+  /* roads follow the routes through the valleys: one ribbon mesh per class (a main road, a secondary road, a track, a dirt road of map version 8); the first map has only the two routes */
   let rtri = 0;
-  for (let c = 0; c < 3; c++) {
+  for (let c = 0; c < RN.w.length; c++) {
     const es = roadsOf(T).filter(e => e.c === c); if (!es.length) continue;
     const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], hw = RN.w[c];
     for (const E of es) {
@@ -31301,9 +31376,9 @@ function m5Cost(t, mode, jit) {
 /* tripTo by the tactical cost; o.max: no trip longer than that */
 function tripTac(u, x, z, o) {
   if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
-  o = o || {}; const cost = m5Cost(u.team, 'veh', o.jit); if (!cost) return null;
-  const p = tripOf(u.x, u.z, x, z, { mode: 'veh', cost }); if (!p || (o.max && p.len > o.max)) return null;
-  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
+  o = o || {}; const md = vehMode(u), cost = m5Cost(u.team, md, o.jit); if (!cost) return null;
+  const p = tripOf(u.x, u.z, x, z, { mode: md, cost }); if (!p || (o.max && p.len > o.max)) return null;
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * tripLen(p) / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
 }
 tripTo = (g => (u, x, z, o) => {
   if (!M5.on || !u || u.net || !u.ai || !S.cmd || !S.cmd[u.team] || !S.cmd[u.team].tm) return g(u, x, z, o);

@@ -20102,6 +20102,215 @@ anaReport = (f => (ev, me) => {
   return R;
 })(anaReport);
 
+/* ---------- the general's manoeuvre in the analytics (M0): how its assaults arrive, what it opens, its ambushes, the traffic of each road ----------
+   Measurement only, for every later package of the manoeuvre work to prove it changed the general: it reads the ops, squads and vehicles
+   every MVA.dt s of match time and draws no random number nor writes anything the battle reads (tests/ana-man.js checks the battle is the same).
+   Events (short keys as the rest of ANA; s the side, id the op's id within its side):
+   mv a manoeuvre op (C.man: flk inf raid blk cut fnt dep mres gue): opened { m kind, by ai|me|mcp|sys, x z its target, h the assault it serves
+     (0 none), why }; ended { m, end 1, dur s, ok 1 the point it went for is ours, 0 not, null no point }; the road flank weighed and refused
+     (mbFlkPlan) { m 'flk', no the reason: node long share thr short sq far path }.
+   ap an assault or occupation (atk op) when it ends: { L the point, nm, ri the axis, by, walk 1 an occupation of an empty point, n squads at the
+     start, a2 1 two axes, st the furthest stage (form prep screen go fight cons), bk 1 suspended back to the forming-up place, ok 1 the point ours
+     at the end, a [front, oblique left, oblique right, flank left, flank right, rear]: samples of the leaders of its squads between MVA.near and
+     MVA.min m of the objective in screen, go or fight, by the angle to the axis (from the objective toward the forming-up place: under 35°, 70°,
+     120°, beyond), off: samples more than MVA.off m from the axis route, mv the manoeuvre kinds that served it, dur s }.
+   ab an ambush (amb) or a road block (blk): { f amb|blk, e arm|fire|end, x z the killing ground, ri; fire: nv vehicles of the enemy in the zone;
+     end: kv enemy vehicles lost within MVA.kz m of it since it fired, lm men its squads lost, sq the men of its largest squad, ok 1 it fired, took a
+     vehicle at least and lost a squad at most }.
+   tr the traffic, every MVA.tr s: e [side][edge] samples (one every MVA.dt s) of its AI vehicles and moving squads within MVA.road m of that edge of
+     the road network, o [side] samples off every road, v [side] [rail, trip, off, parked] samples of its AI vehicles (on a route's rail, on a trip
+     by the network, off both, standing for 5 s). The header's net lists the edges [class, 1 an axis (a route rides it), len m, a, b].
+   The review's mano (anaReport), by side: assaults and occupations, what came of them, the arrival shares (flank rate: 70° or more), off the
+   axis, assaults with a manoeuvre, the manoeuvres by kind and the flank's refusals, ambushes armed, fired and good, the traffic off the axes
+   and off the roads, vehicles on the rail, "no strength to attack" (lg rf), the entropy of the arrivals (bits) and repeated approaches, and raw: the
+   counts behind the shares */
+const MVA = { dt: 2, tr: 60, near: 60, min: 1200, off: 120, road: 60, cell: 120, why: 120, kz: 300, park: 5,
+  st: ['form', 'prep', 'screen', 'go', 'fight', 'cons'], veh: { inf: 0, mil: 0, fighter: 0, cas: 0, heli: 0, '': 0 },
+  T: 0, trT: 0, live: new Map(), X: null, g: null };
+/* the arrival bin of a point dx dz off the objective, the axis ax az a unit vector from the objective toward where the assault formed up */
+function anaArc(ax, az, dx, dz) {
+  const d = Math.hypot(dx, dz) || 1, a = Math.acos(clamp((dx * ax + dz * az) / d, -1, 1)) * 180 / Math.PI, l = ax * dz - az * dx > 0 ? 0 : 1;
+  return a < 35 ? 0 : a < 70 ? 1 + l : a < 120 ? 3 + l : 5;
+}
+/* the edge of the road network within MVA.road m of x z (-1 none): a grid of MVA.cell m over the edges' segments, made once a terrain */
+function anaEdge(x, z) {
+  const T = S.T, N = T && T.net; if (!N) return -1;
+  if (!MVA.g || MVA.g.T !== T) {
+    const c = MVA.cell, m = new Map(), R = MVA.road;
+    for (const E of N.e) for (let i = 1; i < E.p.length; i++) {
+      const a = E.p[i - 1], b = E.p[i], q = [a.x, a.z, b.x, b.z, E.i];
+      for (let j = Math.floor((Math.min(a.z, b.z) - R) / c); j <= Math.floor((Math.max(a.z, b.z) + R) / c); j++)
+        for (let k = Math.floor((Math.min(a.x, b.x) - R) / c); k <= Math.floor((Math.max(a.x, b.x) + R) / c); k++) { const key = k * 65536 + j, l = m.get(key); if (l) l.push(q); else m.set(key, [q]); }
+    }
+    MVA.g = { T, m };
+  }
+  const l = MVA.g.m.get(Math.floor(x / MVA.cell) * 65536 + Math.floor(z / MVA.cell)); let b = -1, bd = MVA.road;
+  if (l) for (const q of l) { const d = segDist(q[0], q[1], q[2], q[3], x, z); if (d < bd) { bd = d; b = q[4]; } }
+  return b;
+}
+/* how far x z is from route ri */
+function anaRouteD(ri, x, z) {
+  const r = S.T.routes[ri]; let b = 1e9; if (!r) return b;
+  for (let i = 1; i < r.length; i++) { const d = segDist(r[i - 1].x, r[i - 1].z, r[i].x, r[i].z, x, z); if (d < b) b = d; }
+  return b;
+}
+const anaLead = q => q.men && q.men.find(m => !m.dead && !m.gone);
+const anaPt = P => (P && P.hold !== undefined ? P : null);
+/* an op seen for the first time: its opening event; R the record kept while it lives */
+function anaMvOpen(C, op) {
+  const t = C.t, R = { op, t, T0: S.t, k: op.k };
+  if (op.k === 'atk') Object.assign(R, { a: [0, 0, 0, 0, 0, 0], off: 0, st: 0, bk: 0, mv: new Set(), n: op.sq.length, walk0: !!op.walk });
+  else if (op.k === 'amb' || op.k === 'blk') {
+    const s = op.site; Object.assign(R, { f: op.k, x: Math.round(s.x), z: Math.round(s.z), fire: 0, men: new Map() });
+    anaPush({ k: 'ab', t: anaR(S.t), s: t, id: op.id, f: op.k, e: 'arm', x: R.x, z: R.z, ri: s.ri });
+  }
+  if (op.man) {
+    const x = op.tx !== undefined ? op.tx : op.kz ? op.kz.x : op.pos ? op.pos.x : null, z = op.tz !== undefined ? op.tz : op.kz ? op.kz.z : op.pos ? op.pos.z : null;
+    R.P = anaPt(op.P) || anaPt(op.Q) || anaPt(op.P2) || null;
+    anaPush(Object.assign({ k: 'mv', t: anaR(S.t), s: t, id: op.id, m: op.k, by: op.by || 'ai', h: op.host || (op.main && op.main.id) || 0, why: String(op.why || '').slice(0, MVA.why) },
+      x !== null && { x: Math.round(x), z: Math.round(z) }));
+  }
+  MVA.live.set(op, R);
+  return R;
+}
+/* the openings, as they happen (the look also takes up an op it has not seen, as a host's that adopted the match) */
+const anaMvAt = (C, op) => { if (op && anaLive() && ANA.S === S && !S.cq.ph && !MVA.live.has(op)) anaMvOpen(C, op); return op; };
+atkOpen = (g => (C, ...a) => anaMvAt(C, g(C, ...a)))(atkOpen);
+manOpen = (g => (C, ...a) => anaMvAt(C, g(C, ...a)))(manOpen);
+ambOpen = (g => (C, ...a) => anaMvAt(C, g(C, ...a)))(ambOpen);
+/* an op that ended (or the match did) */
+function anaMvEnd(R) {
+  const op = R.op, t = R.t, dur = Math.round(S.t - R.T0);
+  MVA.live.delete(op);
+  if (op.man) anaPush({ k: 'mv', t: anaR(S.t), s: t, id: op.id, m: op.k, end: 1, dur, ok: R.P ? (R.P.hold === t ? 1 : 0) : null });
+  if (op.k === 'atk') {
+    const O = op.O, P = O.tw;
+    anaPush({ k: 'ap', t: anaR(S.t), s: t, id: op.id, L: P ? P.L : '', nm: gName(O), ri: op.ri, by: op.by || 'ai', walk: R.walk0 ? 1 : 0, n: R.n,
+      a2: op.a2 ? 1 : 0, st: MVA.st[R.st], bk: R.bk, ok: P ? (P.hold === t ? 1 : 0) : null, a: R.a, off: R.off, mv: [...R.mv], dur });
+  }
+  if (R.f) {
+    let kv = 0, lm = 0, sq = 0;
+    if (R.fire) for (let i = ANA.ev.length - 1; i >= 0; i--) { const e = ANA.ev[i]; if (e.t < R.fire) break; if (e.k === 'ls' && e.s !== t && !(e.u in MVA.veh) && Math.hypot(e.x - R.x, e.z - R.z) < MVA.kz) kv++; }
+    for (const [q, n] of R.men) { lm += Math.max(0, n - (q.live > 0 ? q.live : 0)); sq = Math.max(sq, n); }
+    anaPush({ k: 'ab', t: anaR(S.t), s: t, id: op.id, f: R.f, e: 'end', x: R.x, z: R.z, kv, lm, sq, ok: R.fire && kv >= 1 && lm <= sq ? 1 : 0 });
+  }
+}
+/* the look every MVA.dt s: new and ended ops, the arrival of each assault's squads, the men of each ambush, the traffic */
+function anaMvLook() {
+  const seen = new Set(), tr = MVA.X;
+  for (const C of S.cmd || []) {
+    if (!C) continue;
+    const t = C.t;
+    for (const op of C.ops.concat(C.amb || [])) {
+      if (!op || seen.has(op) || op.over) continue; seen.add(op);
+      if (op.k !== 'atk' && op.k !== 'amb' && !op.man) continue;
+      const R = MVA.live.get(op) || anaMvOpen(C, op);
+      if (op.k === 'atk') {
+        const i = MVA.st.indexOf(op.st); if (i > R.st) R.st = i; if (op.st === 'back') R.bk = 1;
+        for (const o of C.man) if (!o.over && (o.host === op.id || (o.main === op))) R.mv.add(o.k);
+        if (op.st !== 'go' && op.st !== 'fight' && op.st !== 'screen') continue;
+        const O = op.O;
+        for (const q of op.sq) {
+          const L = anaLead(q); if (!L) continue;
+          const dx = L.x - O.x, dz = L.z - O.z, d = Math.hypot(dx, dz); if (d < MVA.near || d > MVA.min) continue;
+          R.a[anaArc(op.ax, op.az, dx, dz)]++;
+          if (anaRouteD(op.ri, L.x, L.z) > MVA.off) R.off++;
+        }
+      } else if (R.f) for (const q of op.sq) if (q.live > (R.men.get(q) || 0)) R.men.set(q, q.live);
+    }
+    if (!tr) continue;
+    const e = tr.e[t], o = tr.o, v = tr.v[t];
+    for (const u of S.units) {
+      if (u.team !== t || u.dead || u.gone || !u.ai || u.fixed || u.net) continue;
+      const k = u.trip ? 1 : u.rail ? 0 : S.t - u.moveT > MVA.park ? 3 : 2; v[k]++;
+      if (k === 3) continue;
+      const j = anaEdge(u.x, u.z); if (j >= 0) e[j]++; else o[t]++;
+    }
+    for (const q of S.squads) {
+      if (q.team !== t || q.net || !(q.live > 0) || (q.ord && q.ord.k === 'hold' && q.at)) continue;
+      const L = anaLead(q); if (!L || L.in) continue;
+      const j = anaEdge(L.x, L.z); if (j >= 0) e[j]++; else o[t]++;
+    }
+  }
+  for (const [op, R] of MVA.live) if (!seen.has(op)) anaMvEnd(R);
+}
+const anaTrNew = () => { const n = S.T.net ? S.T.net.e.length : 0; return { T0: S.t, e: [new Array(n).fill(0), new Array(n).fill(0)], o: [0, 0], v: [[0, 0, 0, 0], [0, 0, 0, 0]] }; };
+function anaTrOut() {
+  const X = MVA.X; if (!X) return;
+  anaPush({ k: 'tr', t: anaR(S.t), d: Math.round(S.t - X.T0), e: S.T.net ? X.e : null, o: X.o, v: X.v });
+  MVA.X = anaTrNew();
+}
+anaBegin = (g => () => {
+  g();
+  const h = ANA.ev.find(e => e.k === 'hdr'), N = S.T && S.T.net;
+  if (h) h.net = N ? N.e.map(e => [e.c, e.ax || e.a2 ? 1 : 0, Math.round(e.len), N.n[e.a].id, N.n[e.b].id]) : null;
+  MVA.live = new Map(); MVA.T = 0; MVA.trT = S.t + MVA.tr; MVA.X = anaTrNew();
+})(anaBegin);
+anaStep = (g => dt => {
+  g(dt);
+  if (!anaLive() || ANA.S !== S || S.cq.ph) return;
+  if (S.t >= MVA.T) { MVA.T = S.t + MVA.dt; anaMvLook(); }
+  if (S.t >= MVA.trT) { MVA.trT = S.t + MVA.tr; anaTrOut(); }
+})(anaStep);
+/* the ambush fires: the vehicles of the enemy in its zone, as cmdSpring and blkSpring count them */
+cmdSpring = (g => op => {
+  const r = g(op);
+  if (anaLive() && ANA.S === S && !S.cq.ph) {
+    const C = cmdOf(op.team), R = MVA.live.get(op) || anaMvOpen(C, op), s = op.site, A = CMD.amb;
+    if (!R.fire) { R.fire = anaR(S.t); for (const q of op.sq) if (q.live > (R.men.get(q) || 0)) R.men.set(q, q.live); }
+    anaPush({ k: 'ab', t: anaR(S.t), s: op.team, id: op.id, f: R.f, e: 'fire', x: R.x, z: R.z, ri: s.ri, nv: S.units.filter(u => !u.dead && u.team !== op.team && Math.abs(u.x - s.x) < A.kz * 2.5 && Math.abs(u.z - s.z) < A.kz * 2.5).length });
+  }
+  return r;
+})(cmdSpring);
+/* the road flank weighed and refused, with the reason */
+mbFlkPlan = (g => (t, ...a) => {
+  const r = g(t, ...a);
+  if (!r && MBF.why && anaLive() && ANA.S === S && !S.cq.ph) anaPush({ k: 'mv', t: anaR(S.t), s: t, m: 'flk', no: MBF.why });
+  return r;
+})(mbFlkPlan);
+/* the match ends: the ops still open and the traffic since the last tr go out before the end event */
+cqEnd = (g => (win, why) => {
+  if (anaLive() && ANA.S === S && !S.cq.ph) { anaMvLook(); for (const R of [...MVA.live.values()]) anaMvEnd(R); if (S.t - MVA.X.T0 >= 1) anaTrOut(); }
+  g(win, why);
+})(cqEnd);
+/* the review's manoeuvre part from the events: a pure function of them, as the rest of anaReport */
+function anaMano(ev, s) {
+  const H = ev.find(e => e.k === 'hdr') || {}, ap = ev.filter(e => e.k === 'ap' && e.s === s), mv = ev.filter(e => e.k === 'mv' && e.s === s), ab = ev.filter(e => e.k === 'ab' && e.s === s), tr = ev.filter(e => e.k === 'tr');
+  const sum = a => a.reduce((x, y) => x + y, 0), sh = (a, b) => (b ? Math.round(a / b * 1000) / 1000 : null), atk = ap.filter(e => !e.walk), occ = ap.filter(e => e.walk);
+  const A = [0, 0, 0, 0, 0, 0]; let off = 0; for (const e of ap) { e.a.forEach((v, i) => { A[i] += v; }); off += e.off; }
+  const n = sum(A), Aa = [0, 0, 0, 0, 0, 0]; for (const e of atk) e.a.forEach((v, i) => { Aa[i] += v; }); const na = sum(Aa);
+  const opened = mv.filter(e => !e.end && !e.no), byK = {}, byBy = {}, no = {};
+  for (const e of opened) { byK[e.m] = (byK[e.m] || 0) + 1; byBy[e.by] = (byBy[e.by] || 0) + 1; }
+  for (const e of mv) if (e.no) no[e.no] = (no[e.no] || 0) + 1;
+  const MV = { flk: 1, cut: 1, fnt: 1 }, withMv = atk.filter(e => e.mv.some(k => MV[k])).length;
+  /* the arrivals' bins: each assault or occupation by where most of its samples came from; entropy in bits, and the same objective taken again from the same axis and bin */
+  const dom = ap.filter(e => sum(e.a)).map(e => ({ L: e.L || e.nm, ri: e.ri, b: e.a.indexOf(Math.max(...e.a)) })), cnt = {}; for (const d of dom) cnt[d.b] = (cnt[d.b] || 0) + 1;
+  let H2 = 0; for (const k in cnt) { const p = cnt[k] / dom.length; H2 -= p * Math.log2(p); }
+  const prev = {}; let again = 0, rep = 0; for (const d of dom) { const p = prev[d.L]; if (p) { again++; if (p.ri === d.ri && p.b === d.b) rep++; } prev[d.L] = d; }
+  const arm = ab.filter(e => e.e === 'arm'), fire = ab.filter(e => e.e === 'fire'), end = ab.filter(e => e.e === 'end');
+  const net = H.net || null, E = net ? net.map(() => 0) : null; let o = 0; const v = [0, 0, 0, 0];
+  for (const e of tr) { o += e.o[s]; e.v[s].forEach((x, i) => { v[i] += x; }); if (E && e.e) e.e[s].forEach((x, i) => { E[i] += x; }); }
+  const road = E ? sum(E) : 0, axis = E ? sum(E.filter((x, i) => net[i][1])) : 0, mov = v[0] + v[1] + v[2], mins = tr.reduce((a, e) => a + e.d, 0) / 60 || 1;
+  const top = E ? E.map((x, i) => ({ e: net[i][3] + '–' + net[i][4], axis: net[i][1], n: anaR(x * MVA.dt / 60 / mins) })).sort((a, b) => b.n - a.n).slice(0, 3) : [];
+  return {
+    atk: atk.length, occ: occ.length, go: atk.filter(e => MVA.st.indexOf(e.st) >= 3).length, took: atk.filter(e => e.ok).length, occTook: occ.filter(e => e.ok).length, back: atk.filter(e => e.bk).length,
+    smp: n, smpAtk: na, arr: { front: sh(A[0], n), obl: sh(A[1] + A[2], n), flank: sh(A[3] + A[4], n), rear: sh(A[5], n) },
+    flank: sh(A[3] + A[4] + A[5], n), flankAtk: sh(Aa[3] + Aa[4] + Aa[5], na), off: sh(off, n), withMv: sh(withMv, atk.length), withMvN: withMv,
+    mv: byK, mvN: opened.length, mvBy: byBy, flkNo: no,
+    amb: { arm: arm.length, fire: fire.length, ok: end.filter(e => e.ok).length, okShare: sh(end.filter(e => e.ok).length, fire.length), nv: sum(fire.map(e => e.nv)), kv: sum(end.map(e => e.kv)), byF: { amb: arm.filter(e => e.f === 'amb').length, blk: arm.filter(e => e.f === 'blk').length } },
+    tr: E ? { axis: sh(axis, road), offAxis: sh(road - axis, road), offRoad: sh(o, road + o), top } : null,
+    veh: { rail: sh(v[0], mov), trip: sh(v[1], mov), off: sh(v[2], mov), parked: sh(v[3], mov + v[3]) },
+    want: ev.filter(e => e.k === 'lg' && e.s === s && e.c === 'rf' && /^Sem força para atacar/.test(e.x)).length,
+    ent: Math.round(H2 * 1000) / 1000, rep, again, repShare: sh(rep, again),
+    raw: { a: A, aAtk: Aa, off, road, axis, o, v, dom: dom.length }   // the counts behind the shares, for tools/balance.js to pool many matches
+  };
+}
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end');
+  R.mano = ev.some(e => e.k === 'tr' || e.k === 'ap' || e.k === 'mv' || e.k === 'ab') ? [0, 1].map(s => (hide && s !== me ? null : anaMano(ev, s))) : null;
+  return R;
+})(anaReport);
+
 /* ---------- day, night and weather ----------
    The match has a light clock: S.sky.h0 the hour (0 to 24) at sim time t0, running rate s of day a second; pre: the presets, [start hour, rate]
    (Dia, Entardecer, Noite, Ciclo: a whole day in an hour). The light L (0 night to 1 day) rises as the sun's height, the sine of the hour,

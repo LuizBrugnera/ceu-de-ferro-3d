@@ -189,6 +189,10 @@ console.log('-- the economy\'s guard and the quick reaction force --');
   q.at = true; for (let i = 0; i < 20; i++) { const m = C.addMan($('INF').modern[1][0], 1, w.x + 200, w.z + 5 * i, 0); m.ai = null; m.sx = m.x; m.sz = m.z; m.seenT = S.t; C0.known.push(m); }
   $('aidQrf')(C0, A, [q]);
   ok(!q.qrf && logs(S, 0, /forte demais/).length === 1, 'a force it cannot stop is left alone, and the journal says why');
+  { const on = $('aidQrfOn')(0);
+    S.demo = true; S.watch = false; const dem = $('aidQrfOn')(0); S.demo = false;
+    S.gctl = [{ seat: 'ai', def: 'human' }, { seat: 'ai', def: 'ai' }]; const hum = $('aidQrfOn')(0); S.gctl = null;
+    ok(on && !dem && !hum, 'the reserve moves to the seat town only for an AI-led side outside the hangar demo (ai ' + on + ', demo ' + dem + ', human ' + hum + ')'); }
 }
 
 if (SECS) {

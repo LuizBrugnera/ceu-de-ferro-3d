@@ -163,7 +163,12 @@ console.log('-- the threat board: incidents, triage, the response --');
   ok(Is && Is.k === 'site' && Is.val === $('ECO').site[e.k].tk && Is.ex && Is.urg >= 1, 'a ' + e.name + ' hit: an incident of value ' + (Is && Is.val) + ' (its tickets), ' + (Is && Is.st) + (Is && Is.why ? ': ' + Is.why : ''));
   const e2 = S.eco.l.find(o => o.team === t && !o.dead && o !== e) || e, pl = S.planes.find(o => o.team !== t && !o.dead);
   if (pl) {
-    e2.gd.aa = 0; pl.x = e2.x + 100; pl.z = e2.z; look();
+    e2.gd.aa = 0; pl.x = e2.x + 100; pl.z = e2.z; pl.y = $('hgt')(pl.x, pl.z) + 300;
+    const eyes = [...S.units, ...S.men].filter(o => !o.dead && o.team === t && $('dist')(o, pl) < $('SPOT').air);
+    eyes.forEach(o => { o.dead = true; }); look(); eyes.forEach(o => { o.dead = false; });
+    ok(!Cm.thb.some(I => I.key === 'a' + e2.id), 'an enemy aircraft over the site that none of the side\'s own units sees: no air incident (the fog)');
+    const seer = S.men.find(o => !o.dead && !o.in && o.team === t) || S.units.find(o => !o.dead && o.team === t);
+    seer.x = e2.x; seer.z = e2.z + 40; seer.y = $('hgt')(seer.x, seer.z); look();
     const Ia = Cm.thb.find(I => I.key === 'a' + e2.id);
     ok(Ia && Ia.k === 'air' && (Ia.st === 'ign' || e2.gd.aa === 1), 'an enemy aircraft over the ' + e2.name.toLowerCase() + ': an air incident; ' + (Ia ? Ia.st === 'ign' ? 'ignored: ' + Ia.why : 'the site asks for its fixed AA (' + Ia.why + ')' : ''));
     if (Ia && Ia.st === 'ign') { cmd({ c: 'triage', id: Ia.id, p: 3 }); look(); ok(e2.gd.aa === 1, 'with priority 3: the site asks for its fixed AA'); }

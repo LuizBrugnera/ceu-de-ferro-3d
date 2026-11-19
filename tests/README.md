@@ -3,6 +3,7 @@
 Rodam no Node, sem navegador. `harness.js` carrega a parte da página que não usa DOM (tabelas, simulação e rede) num contexto isolado.
 
 ```
+node tests/sim-split.js     # a parte da simulação não chama nada declarado só na parte da cena (o harness não a carrega: o M5, o M6 e o AAR do M8 quebravam as suítes), nenhum arquivo com marcadores de conflito de merge, e o M5 e o M6 rodam sem navegador
 node tests/smoke-sight.js   # a IA e a fumaça: tiros no alvo escondido, memória, retomada (TRIALS=12)
 node tests/perception.js    # percepção da IA: campo de visão, tempo para notar, partilha, mira; a escada (detectado, reconhecido, identificado), tempo de reação, primeiro tiro e acertos por distância, e a suíte de honestidade: uma batalha só de IA nas duas épocas em que nenhum tiro vai a alvo não percebido e nenhum míssil guiado a alvo não identificado (SECS=90)
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento
@@ -61,6 +62,7 @@ node tests/civ.js  civ-war.js  civ-online.js   # civis: quem anda onde, o que os
 node tests/seat.js          # mapa v5: a cidade-sede junto de cada base, os lotes, as instalações neles e o disfarce até serem identificadas
 node tests/cover.js  cover-online.js   # mapa v6: pedras e moitas (onde ficam, os mesmos ids em todo cliente, o mapa v5 igual), a visão que a pedra e a moita cortam, igual para o jogador e a IA, a moita vista de perto e do ar, tiros na pedra e na moita, tanque e caminhão, a IA atrás da pedra e na moita; as árvores maiores e folhosas, e a mata que esconde do chão e do ar; pelo servidor de verdade, a sala do mapa 6 recusa a página do 5, anfitrião e convidado com as mesmas pedras, moitas e árvores, e a moita que o convidado derruba (id acima dos mapas antigos) derrubada para todos e para quem entra depois
 node tests/damage.js  damage-relay.js  missiles.js       # dano por peças, blindagem e o modelo dos mísseis
+node tests/shell-hits.js     # o canhão do tanque contra tudo no chão: perfurante e explosivo no meio de um soldado (em pé, agachado, deitado), carro, caminhão, blindado sobre rodas, antiaérea, autopropulsado, tanque e helicóptero pousado, a 150, 600 e 1500 m, nas duas épocas, a 60 e 20 quadros por segundo, em chão plano e sem objetos; o soldado na frente de um caminhão leva o tiro
 node tests/missile-los.js   # mísseis guiados só com linha de visada (seekLine): sem trava, sem lançamento guiado e sem guiagem atrás de morro, prédio, linha de árvores ou fumaça, para o jogador (SEM LINHA DE VISADA no HUD) e para a IA (soldado com Javelin, helicóptero, antiaérea); o míssil de calor que perde o helicóptero que desce atrás do morro
 node tests/drone.js  drone-relay.js  drone-online.js  pad.js   # drones (o FPV na frente e no teto de um tanque) e controles
 node tests/ana.js          # analytics e revisão pós-batalha: a batalha igual com a coleta ligada, os eventos de uma partida IA × IA (MIN=2), tíquetes, sangria, a revisão de um lado, tools/balance.js

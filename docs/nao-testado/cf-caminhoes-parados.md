@@ -14,23 +14,21 @@ A checagem do pool também não olhava a estrada (`u.ri`), só a distância `s`.
 
 Achado junto: o veículo da carona esperava a esquadra no ponto de encontro até o fim da viagem inteira (`R.T`, que numa viagem de 23 km passa de 20 min). Na sonda, um caminhão de coluna ficou parado com o acelerador no máximo a 7,7 km da base esperando passageiros.
 
-Achado de testabilidade: a seção do M5 (`m5Lg` e o resto) estava depois de `/* ---------- 3D scene`, fora da parte que o `tests/harness.js` carrega. Toda partida do harness com logística (`load({ lg: 1 })`) quebrava com `ReferenceError: m5Lg is not defined`, e o M5 nunca rodava nos testes.
+Achado de testabilidade: a seção do M5 (`m5Lg` e o resto) estava depois de `/* ---------- 3D scene`, fora da parte que o `tests/harness.js` carrega. Toda partida do harness com logística (`load({ lg: 1 })`) quebrava com `ReferenceError: m5Lg is not defined`, e o M5 nunca rodava nos testes. Enquanto esta tarefa rodava, o #75 (`601200b`) já levou o M5 para dentro da parte da simulação; esta tarefa não mexe mais nisso.
 
 ## O que mudou
 
 Tudo no `Céu de Ferro 3D.html`, mais o script `tests/trucks-base.js` e uma linha no `tests/README.md`.
 
-- **`poolTrim(t, k, at)`**, chamado pelo `trnPlan` a cada vez, por tipo (carro e caminhão). Fica um só veículo do pool de cada tipo no lugar atual (estrada da frente, até `POOL.near` = 120 m de onde os soldados entram). Qualquer outro do pool estacionado, vazio, fora de viagem e sem ninguém nosso a menos de `BODY.keep.near` (300 m) volta para a reserva (`ecoBack`): o segundo no mesmo lugar, o da estrada que era a frente e o largado longe quando uma carona desistiu.
+- **`poolTrim(t, k, at)`**, chamado pelo `trnPlan` a cada vez, por tipo (carro e caminhão). Fica um só veículo do pool de cada tipo no lugar atual (estrada da frente, até `POOL.near` = 120 m de onde os soldados entram). Qualquer outro do pool estacionado, vazio, fora de viagem e sem jogador (ou convidado) a menos de `BODY.keep.near` (300 m) volta para a reserva (`ecoBack`): o segundo no mesmo lugar, o da estrada que era a frente e o largado longe quando uma carona desistiu.
 - O veículo do pool agora tem `u.pool = 1`. Enquanto um deles está fora numa viagem (carona), o planejador não põe outro: ele volta para o lugar.
 - A checagem de "já tem um no lugar" olha também a estrada (`u.ri === ri`).
 - **Carona com espera limitada.** `rideGo` guarda `R.eta`, a hora em que o veículo e a esquadra deviam se encontrar. No ponto de encontro (`rideEv`, `pick`), o veículo espera até `MAN.ride.wait` (120 s) depois disso. Passou disso, a carona acaba (`manRideEnd`): a esquadra segue a pé e o veículo volta para casa. O motivo conta em `mrd().why.late`.
-- **A seção do M5 mudou de lugar**, sem mudar uma linha: agora fica logo antes de `/* ---------- 3D scene`, dentro da parte da simulação. No navegador o efeito é o mesmo: tudo o que ela embrulha (`tripTo`, `tankAmb`, `atkOpen`, `OPS.atk`, `AI.tank`) é definido antes, e nada entre o lugar novo e o velho embrulha essas funções de novo.
-
 - `tests/README.md`: a linha do script novo, e os marcadores de conflito (`<<<<<<<`, `=======`, `>>>>>>>`) que tinham ficado no main em volta das linhas do `ambush.js` e do `approaches.js` saíram, com as duas linhas mantidas.
 
 ## O que rodou
 
-- `node tests/trucks-base.js`: tudo passa (17 checagens). Com a página de antes (`PAGE=<página do main com só o M5 movido>`), 10 falham: três caminhões do pool empilhados na estrada velha, o segundo nunca volta para a reserva e a carona espera para sempre.
+- `node tests/trucks-base.js`, antes do merge do main novo: tudo passa (17 checagens). Com a página de antes (`PAGE=<página do main com só o M5 movido>`), 10 falham: três caminhões do pool empilhados na estrada velha, o segundo nunca volta para a reserva e a carona espera para sempre.
 - Smoke: o servidor sobe em 127.0.0.1 e a página carrega no Chrome. A demonstração roda sem erro no console (só o 404 de sempre).
 
 ## O que NÃO foi testado
@@ -39,11 +37,11 @@ Tudo no `Céu de Ferro 3D.html`, mais o script `tests/trucks-base.js` e uma linh
 - Se a reserva fica certa: o veículo do pool aposentado volta com `ecoBack` só com o portão da economia ligado e fora da abertura (`E.open`), como o resto do código faz.
 - Se a carona desiste cedo demais: 120 s depois do encontro previsto pode ser pouco para uma esquadra que atravessa mato. Se as caronas caírem muito, aumente `MAN.ride.wait` ou use outro limite.
 - O jogador que anda até um veículo do pool que está numa estrada velha: com ele a menos de 300 m, o veículo fica. Longe disso, some (volta para a reserva).
-- As suítes que usam a logística no harness (`logistics.js`, `rec.js`, `eco*.js` e outras) agora carregam o M5 também. Elas podem mudar de resultado porque o M5 passa a rodar nelas.
+- O merge com o main novo (3 lados, P2 a P9, mapas v7 e v8, #59 a #86) foi feito sem rodar nada além do smoke. O pool, a carona e o `trnPlan` não mudaram no main, mas o `trucks-base.js` não foi rodado de novo depois do merge.
+- Com 3 lados: o `poolTrim` vale por lado (`t`), e o `trnPlan` ainda usa `ds = t ? 1 : -1`, como antes. Não foi visto se o lado 3 (Insurgentes) tem pool.
 
 ## Riscos
 
-- A seção do M5 movida pode entrar em conflito com outra tarefa que mexa no fim do arquivo. Em conflito, mantenha os dois lados e confira se a seção ficou uma vez só, antes do `3D scene`.
 - O pool aposentado some de vista (como os veículos largados de hoje). Quem estiver olhando de longe pela câmera do general pode ver o par sumir quando a frente muda.
 
 ## Como testar depois

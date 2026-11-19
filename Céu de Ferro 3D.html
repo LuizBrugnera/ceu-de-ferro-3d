@@ -24956,13 +24956,355 @@ anaReport = (g => (ev, me) => {
   R.stg = ev.filter(e => e.k === 'lg' && e.c === 'stg' && (sides.length ? sides.includes(e.s) : true)).slice(-40).map(e => ({ t: e.t, s: e.s, x: String(e.x).slice(0, 200) }));
   return R;
 })(anaReport);
-aarShow = (g => (R, sub) => {
-  g(R, sub);
-  if (!R || !R.stg || !R.stg.length) return;
-  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
-  for (const d of R.stg) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
-  b.append(aarEl('h3', '', 'Estratégias do general'), ol);
-})(aarShow);
+/* ---------- vehicles off the rail (M5 of the general's manoeuvre; not tested, see docs/nao-testado/cf-m5-veiculos-trilho.md) ----------
+   The AI's vehicles rode their axis most of the time (the scout measured ~86%). Here:
+   - the cost of a road edge for side t (m5Cost) is today's (length times class, times 1 + C.et) times 1 + what the tactical map (M1, C.tm)
+     says along it, the mean of its samples: kV the enemy's sight (v), kF its strength (f, f / (1 + f)), kP our losses (p, the same), kT its
+     traffic (t). Kept per side until the map's next refresh (C.m5e, C.m5n). jit: a draw of 1 to 1 + M5.jit an edge, so ways that cost about
+     the same take turns (the logistics: no habit for the enemy to lie in wait on);
+   - tripTac: a trip (tripTo's record) by that cost. Every AI vehicle's trip by tripTo takes it while the side has a map (tripTo is wrapped);
+     trucks and cars draw the jitter;
+   - the assault's armour (m5Atk): when the AI opens an assault that is not a walk, up to M5.atk.n[0] tanks (n[1] with 3 squads or more)
+     riding an axis within M5.reach m of the objective, idle and whole, go by the tactical trip to the road nearest a firing place off the
+     front of the objective (m5Spot: the assault position of an approach of the planner's (M2, op.pl.A), one the squads do not take first, else
+     theirs, M5.atk.front to M5.atk.rear degrees off the axis; else the best cell of a ring of M5.atk.r m:
+     little sight, strength and losses, cover, the objective in view, near a road, off the assault's line, op.ax, by M5.atk.front degrees or more), then
+     hold there (u.ai.m5) firing at what they see, until the op ends or falls back, the tank is hurt below M5.atk.hp, or M5.atk.hold s pass;
+     then they go back to the nearest axis by a trip (m5Home);
+   - the ambush and the roadblock: the tank that lies in wait may come from any axis within M5.amb.reach m (it was its own axis within 1500 m,
+     or 900 m for the roadblock), and goes there by the tactical trip to the road nearest its place, its wait made longer by the ride;
+     afterwards it goes home by a trip when it is off its road (m5Home);
+   - the convoys (m5Lg): among the axes a node lies on (rs[j]), the ones within M5.lg.k of the cheapest (length times 1 + lgThr) are drawn,
+     the one the last convoy to that node took left out when there is another.
+   M5.on 0 leaves all of it out. Only the host (or solo) runs any of it: it moves AI vehicles (no u.net) */
+const M5 = { on: 1, kV: 3, kF: 1.5, kP: .6, kT: .3, jit: .15, reach: 4000, near: 300, road: 250, onRoad: 60, back: 200,
+  atk: { n: [1, 2], r: [380, 520], front: 35, rear: 120, hold: 480, hp: .5, retry: 20, apart: 250, much: 3 },
+  amb: { reach: 3500 }, lg: { k: .15 } };
+/* the tactical multiplier of each edge for commander C (null without a map) */
+function m5Edge(C) {
+  const M = C && C.tm, N = S.T && S.T.net;
+  if (!M || !N || !M.v) return null;
+  if (C.m5e && C.m5n === M.n && C.m5e.length === N.e.length) return C.m5e;
+  const a = new Float32Array(N.e.length), cl = (x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
+  for (const e of N.e) {
+    let v = 0, f = 0, p = 0, tr = 0; const sm = e.smp || [], n = sm.length || 1;
+    for (const s of sm) { const q = cl(s.x, s.z), ff = M.f[q] || 0, pp = M.p[q] || 0; v += M.v[q] || 0; f += ff / (1 + ff); p += pp / (1 + pp); tr += M.t[q] || 0; }
+    a[e.i] = 1 + (M5.kV * v + M5.kF * f + M5.kP * p + M5.kT * tr) / n;
+  }
+  C.m5n = M.n; return (C.m5e = a);
+}
+const m5Jit = () => { const N = S.T.net, a = new Float32Array(N.e.length); for (let i = 0; i < a.length; i++) a[i] = 1 + Math.random() * M5.jit; return a; };
+/* the cost of an edge for side t: today's, times the map's, times the jitter */
+function m5Cost(t, mode, jit) {
+  const C = S.cmd && S.cmd[t], base = edgeCostOf(C, mode || 'veh'), m = m5Edge(C);
+  if (!m && !jit) return null;
+  return e => base(e) * (m ? m[e.i] : 1) * (jit ? jit[e.i] : 1);
+}
+/* tripTo by the tactical cost; o.max: no trip longer than that */
+function tripTac(u, x, z, o) {
+  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
+  o = o || {}; const cost = m5Cost(u.team, 'veh', o.jit); if (!cost) return null;
+  const p = tripOf(u.x, u.z, x, z, { mode: 'veh', cost }); if (!p || (o.max && p.len > o.max)) return null;
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
+}
+tripTo = (g => (u, x, z, o) => {
+  if (!M5.on || !u || u.net || !u.ai || !S.cmd || !S.cmd[u.team] || !S.cmd[u.team].tm) return g(u, x, z, o);
+  return tripTac(u, x, z, Object.assign({}, o, { jit: u.kind === 'truck' || u.kind === 'car' ? m5Jit() : null })) || g(u, x, z, o);
+})(tripTo);
+/* the seconds a trip takes the vehicle at full drive */
+const m5Eta = (u, T) => (T && T.p ? T.p.len / Math.max(1, u.def.spd * GSPD) : 0);
+/* send u toward (x, z) by the tactical trip to the road nearest it: true when it went (or is already near) */
+function m5Go(u, x, z, why) {
+  if (hdist(u, { x, z }) < M5.near) return true;
+  const n = netNear(x, z), gx = n.d > M5.onRoad ? n.x : x, gz = n.d > M5.onRoad ? n.z : z;
+  return !!tripTac(u, gx, gz, { why, max: M5.reach * 2 });
+}
+/* a tank that can be taken for the general's manoeuvre: an AI tank riding an axis, idle and whole */
+const m5Free = (u, t) => u.kind === 'tank' && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.tgt && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && u.hp >= u.max * .6 && S.t - u.hitT > 20;
+/* the nearest such tank of side t to (x, z) within r m (or on axis ri within 1500 m along it when ri is given: today's choice), or null */
+function m5Tank(t, x, z, r, ri, s) {
+  let b = null, bd = 1e9;
+  for (const u of S.units) {
+    if (!m5Free(u, t)) continue;
+    const d = hdist(u, { x, z }), ok = (ri !== undefined && u.ri === ri && Math.abs(u.s - s) < 1500) || (M5.on && d < r);
+    if (ok && d < bd) { b = u; bd = d; }
+  }
+  return b;
+}
+/* a tank sent to wait at an ambush or a roadblock rides there by road; its wait is made longer by the ride */
+function m5Amb(u) {
+  const P = u.ai.amb; if (!M5.on || !P) return;
+  if (m5Go(u, P.x, P.z, 'amb')) P.T += m5Eta(u, u.trip);
+}
+/* back to the nearest axis by a trip when far off it, else to its brain's way home */
+function m5Home(u) {
+  const A = u.ai, p = railOf(u.x, u.z);
+  u.ri = p.ri; u.s = p.s; A.off = clamp(p.off, -150, 150); A.back = 0;
+  if (!M5.on || u.trip || u.dead || (A.tgt && !A.tgt.dead) || S.t - u.hitT < 5 || p.d < M5.back) return;
+  const r = S.T.routes[p.ri], q = routeAt(r, clamp(p.s, 0, r.len)), was = u.rail; u.rail = true;
+  if (!tripTo(u, q.x, q.z, { why: 'home' })) u.rail = was;
+}
+tankAmb = (g => (u, A) => { const P = A.amb, r = g(u, A); if (!r && P && !A.amb) m5Home(u); return r; })(tankAmb);
+/* the firing place for a tank of op (an assault), away from those taken: { x, z } or null */
+function m5Spot(C, op, taken) {
+  const O = op.O, M = C.tm, R = M5.atk, far = p => taken.every(q => Math.hypot(q.x - p.x, q.z - p.z) >= R.apart);
+  const ok = (x, z) => x > 100 && x < S.W - 100 && Math.abs(z) < S.HW - 100 && hgt(x, z) > S.T.WL + 1;
+  const used = Array.isArray(op.ap) ? op.ap : [], all = op.pl && Array.isArray(op.pl.A) ? op.pl.A : [];
+  for (const a of all.filter(a => !used.includes(a)).concat(used)) {   // the planner's approaches (M2): one the squads do not take first (fire from another side), then theirs
+    const x = a && a.pos && a.pos.x, z = a && a.pos && a.pos.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z) || a.ang < R.front || a.ang > R.rear) continue;
+    if (ok(x, z) && far({ x, z })) return { x, z };
+  }
+  const cl = (x, z) => (M ? clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1) : -1), oy = hgt(O.x, O.z) + 2;
+  let b = null, bs = 1e9;
+  for (let k = 0; k < 16; k++) for (const r of R.r) {
+    const a = k * Math.PI / 8, x = O.x + Math.cos(a) * r, z = O.z + Math.sin(a) * r;
+    if (!ok(x, z) || !far({ x, z })) continue;
+    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = netNear(x, z);
+    let sc = ang < R.front ? 1 : ang > R.rear ? .6 : 0;   // off the front, not behind the enemy
+    if (q >= 0) { const f = M.f[q] || 0, p = M.p[q] || 0; sc += M5.kV * (M.v[q] || 0) + M5.kF * f / (1 + f) + M5.kP * p / (1 + p) - (M.o[q] || 0); }
+    if (!los({ x, z }, hgt(x, z) + 2.5, O, oy)) sc += 1;
+    sc += Math.max(0, n.d - M5.road) / 1000;
+    if (sc < bs) { bs = sc; b = { x, z }; }
+  }
+  return b;
+}
+/* the assault's armour: the tanks that go the back roads to fire on the objective from off its front */
+function m5Atk(C, op) {
+  if (!M5.on || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
+  op.m5T = S.t + M5.atk.retry; op.m5 = op.m5 || [];
+  const t = C.t, O = op.O, want = (op.sq.length >= 3 ? M5.atk.n[1] : M5.atk.n[0]) - op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op).length;
+  for (let i = 0; i < want; i++) {
+    const u = m5Tank(t, O.x, O.z, M5.reach); if (!u) return;
+    if (C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) return;   // the last tank of a road held with difficulty stays
+    const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) return;
+    if (!m5Go(u, sp.x, sp.z, 'atk')) { op.m5T = S.t + M5.atk.retry; return; }
+    const eta = m5Eta(u, u.trip);
+    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + eta + M5.atk.hold, k: 'atk' }; op.m5.push(u);
+    gLog(t, 'atk', 'Carro de combate vai por estradas secundárias apoiar o assalto a ' + gName(O) + ' pelo flanco' + (eta ? ' (' + Math.round(eta / 60 * 10) / 10 + ' min)' : ''), sp, 'm5a' + op.id + '.' + i);
+  }
+}
+atkOpen = (g => (...a) => { const op = g(...a); if (op && a[0]) m5Atk(a[0], op); return op; })(atkOpen);
+OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && (op.st === 'form' || op.st === 'prep' || op.st === 'screen')) m5Atk(C, op); })(OPS.atk);
+/* a tank holding its firing place: its brain fights as ever from off its road; the drive is the place's */
+AI.tank = (old => (u, dt) => {
+  const A = u.ai, H = A && A.m5;
+  if (!H) return old(u, dt);
+  const op = H.op;
+  if (!M5.on || op.over || op.st === 'back' || op.st === 'cons' || S.t > H.T || u.hp < u.max * M5.atk.hp) { A.m5 = null; m5Home(u); return old(u, dt); }
+  u.rail = false; old(u, dt); u.rail = false;
+  if (A.amb) return;
+  driveTo(u, H.x, H.z);
+  if (!(A.tgt && !A.tgt.dead) && !A.inf && !A.low) u.ctl.aim = vnorm({ x: op.O.x - u.x, y: 0, z: op.O.z - u.z });
+})(AI.tank);
+/* a convoy's axis: one of those a node lies on that cost about the least, not the last one taken to it when there is another */
+function m5Lg(t, o) {
+  const b = lgS(o);
+  if (!M5.on || o.sup || !Array.isArray(o.rs)) return b;
+  const c = [];
+  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri]) return; c.push({ ri, s, c: Math.abs(s - endS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) * mmLgK(t, lgKey(o), ri) }); });   // M6: mmLgK, the convoys lost on it
+  if (c.length < 2) return b;
+  const lo = Math.min(...c.map(q => q.c)), M = S.m5lg || (S.m5lg = {}), key = t + ':' + lgKey(o);
+  let ok = c.filter(q => q.c <= lo * (1 + M5.lg.k));
+  if (ok.length > 1 && M[key] !== undefined) ok = ok.filter(q => q.ri !== M[key]) || ok;
+  const p = ok[Math.floor(Math.random() * ok.length)] || b;
+  M[key] = p.ri; return { ri: p.ri, s: p.s };
+}
+/* ---------- memory and unpredictability (M6 of the general's manoeuvre): what failed and where, and a draw that does not always take the same street ----------
+   Each side keeps, in S.gmem[t] (the AI general's, never the other side's; carried in the host's backup, ecoPack):
+   a: the memory of the approaches, by objective (its place, mmObj) and sector of the ring (the approach's s, AP.sec of them): a value that a failed
+      assault by it moves MM.fail and a taken objective MM.ok, fading by half every MM.half s (v), the uses (u), successes (ok), failures (f) and the men lost (l).
+      prPick (M3) multiplies each procedure's score by 1 + that value (the mean over the approaches it sends its assault by), within MM.lo to MM.hi.
+      A recon (p12) that found an approach defended moves it MM.rec. A fix and flank given up (prFail) counts a failure of its flank at once.
+   h: by objective, the last MM.hn approaches its assaults went by (the main sector, and whether it worked: 1, 0, -1 under way). The same approach does not go a
+      third time in a row unless one of the last two worked (mmBan): its procedures score 0, a frontal (p6) goes by the cheapest other approach (mmP6), unless
+      nothing else is left.
+   m: the manoeuvres of cmdManJob (flank, infiltrate, encircle...) by kind and place (within MM.man.r m): a kind that failed to take its point there weighs
+      1 + its value (MM.man.fail, MM.man.ok) for a while (mmMan).
+   lg, le: the convoys lost (lgLost) by node and axis (lg: m5Lg's cost of that axis times 1 + MM.lg.k x it) and by edge of the road network (le: the
+      tactical cost of the edge, m5Edge, times 1 + MM.lg.edge x it), fading by half every MM.lg.half s.
+   The draws (prPick and cmdManJob) weigh each candidate by its score to the power 2 / tau (mmW): tau by the personality (MM.tau: Blitz and the Guerrilla vary
+   more, the Defender and the Gunner less; 1 is the square of before). The difficulty sets how many approaches prPick weighs (MM.apN: Easy 1, Hard all of
+   them); what the side knows is the same at every difficulty (D9). mmView(t): the memory as a plain object (for the strategy layer, the tests and gask ap's
+   mm field). MM.on 0: no memory and the square as before */
+const MM = { on: 1, fail: -.3, ok: .15, rec: -.15, half: 600, lo: .25, hi: 1.4, lim: 1, hn: 4, keep: 24,
+  tau: { blz: 1.6, gue: 1.7, ret: .6, art: .7, log: 1 }, apN: { facil: 1, moderado: 2, normal: 3, dificil: 3 },
+  man: { fail: -.25, ok: .1, r: 350, keep: 16 }, lg: { k: .6, edge: 1.5, half: 900, keep: 16 }, pack: 15000 };
+const mmS = t => { const L = S.gmem || (S.gmem = [null, null]); return L[t] || (L[t] = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }); };
+const mmDecay = (e, half) => (e ? e.v * Math.pow(.5, Math.max(0, S.t - e.T) / (half || MM.half)) : 0);
+const mmObj = o => Math.round(o.x) + ',' + Math.round(o.z);
+/* a value of map M at key k: moved by dv, faded first */
+function mmMove(M, k, dv, half, lim) {
+  const e = M.get(k) || { v: 0, T: S.t, u: 0, ok: 0, f: 0, l: 0 }; e.v = clamp(mmDecay(e, half) + dv, -(lim || MM.lim), lim || MM.lim); e.T = S.t; M.set(k, e); return e;
+}
+/* the most recent n of a map (the backup and the size of the memory) */
+function mmTrim(M, n) { if (M.size <= n) return; const l = [...M.entries()].sort((a, b) => b[1].T - a[1].T); M.clear(); for (const [k, e] of l.slice(0, n)) M.set(k, e); }
+const mmAp = (t, o, s) => mmDecay(mmS(t).a.get(o + '|' + s));
+/* the draw's weight of a score v for side t */
+const mmTau = t => { const k = S && S.per && S.per[t]; return MM.on && k && MM.tau[k] ? MM.tau[k] : 1; };
+const mmW = (t, v) => Math.pow(Math.max(0, v), 2 / mmTau(t));
+/* the approaches prPick weighs: the difficulty's number of the cheapest */
+const mmApN = (t, A) => { if (!MM.on) return A; const k = S && S.dif && S.dif[t], n = MM.apN[k] || A.length; return n < A.length ? A.slice(0, Math.max(1, n)) : A; };
+/* may side t go by sector s at objective o again: not a third time in a row unless one of the last two worked */
+function mmBan(t, o, s) {
+  const h = mmS(t).h.get(o); if (!MM.on || !h || h.length < 2) return false;
+  const a = h[h.length - 1], b = h[h.length - 2]; return a.s === s && b.s === s && a.ok !== 1 && b.ok !== 1;
+}
+/* the approaches a candidate of prPick sends its assault by */
+const mmAps = x => (x.k === 'p1' ? [x.f] : x.k === 'p2' ? [x.f, x.f2] : x.k === 'p12' ? [x.o] : [x.a]).filter(Boolean);
+/* p6 by the cheapest approach not banned, when the axis approach is */
+function mmP6(C, pl, A, axA, c, sc) {
+  if (!MM.on || !c.some(x => x.k === 'p6') || !mmBan(C.t, mmObj(pl.o), axA.s)) return;
+  const o = mmObj(pl.o), a = A.filter(x => x !== axA && !mmBan(C.t, o, x.s)).sort((p, q) => p.cost - q.cost)[0]; if (!a) return;
+  c.push({ k: 'p6', a, sc: sc(a), why: 'frontal pela abordagem a ' + a.ang + '° (o eixo já falhou duas vezes seguidas)' });
+}
+/* the memory into prPick's candidates (their v), and the bans; all banned: as they were */
+function mmPr(C, pl, c) {
+  if (!MM.on || !c.length) return;
+  const t = C.t, o = mmObj(pl.o), v0 = c.map(x => x.v);
+  for (const x of c) {
+    const A = mmAps(x); if (!A.length) continue;
+    if (A.some(a => mmBan(t, o, a.s))) { x.v = 0; x.ban = 1; x.why += ' · memória: abordagem já tentada duas vezes seguidas sem sucesso'; continue; }
+    const f = A.reduce((m, a) => m + clamp(1 + mmAp(t, o, a.s), MM.lo, MM.hi), 0) / A.length;
+    if (Math.abs(f - 1) > .02) { x.v *= f; x.why += ' · memória: ' + (f < 1 ? 'falhou' : 'deu certo') + ' por ali (×' + gN(f) + ')'; }
+  }
+  if (c.every(x => x.ban)) c.forEach((x, i) => { x.v = v0[i]; x.ban = 0; });
+}
+/* the procedure drawn: its use in the history of the objective (the main approach) */
+function mmPicked(C, pl, pick, axA) {
+  if (!MM.on) return;
+  const o = mmObj(pl.o), A = mmAps(pick), h = mmS(C.t).h, l = h.get(o) || []; if (!A.length) return;
+  const e = { s: A[0].s, ok: -1, T: S.t }; l.push(e); while (l.length > MM.hn) l.shift(); h.set(o, l);
+  if (h.size > MM.keep) { const old = [...h.entries()].sort((a, b) => b[1][b[1].length - 1].T - a[1][a[1].length - 1].T).slice(MM.keep); for (const [k] of old) h.delete(k); }
+  for (const a of A) { const m = mmMove(mmS(C.t).a, o + '|' + a.s, 0); m.u++; }
+  C.mmPk = { o, nm: pl.nm, s: A.map(a => a.s), ang: A.map(a => a.ang), e, ax: axA ? axA.s : -1 };
+}
+prPick = (g => (C, ...a) => { C.mmPk = null; const r = g(C, ...a); if (r && C.mmPk) r.mm = C.mmPk; C.mmPk = null; return r; })(prPick);
+prOpen = (g => (op, pr) => { g(op, pr); if (pr.mm) op.mm = Object.assign({}, pr.mm, { n0: op.n0 }); })(prOpen);
+/* an assault's outcome into the memory: each approach it went by */
+function mmOut(C, op, ok, why) {
+  const M = op.mm, t = C.t, A = mmS(t).a; if (!M || M.done) return; M.done = 1;
+  const live = opLive(op).reduce((a, q) => a + q.live, 0), lost = Math.max(0, (M.n0 || 0) - live);
+  for (const s of M.s) { const e = mmMove(A, M.o + '|' + s, ok ? MM.ok : MM.fail); if (ok) e.ok++; else e.f++; e.l += lost; }
+  M.e.ok = ok ? 1 : 0; mmTrim(A, MM.keep * 2);
+  gLog(t, 'atk', 'Memória: o assalto a ' + M.nm + ' pela abordagem a ' + M.ang.join('° e ') + '° ' + (ok ? 'deu certo' : 'falhou' + (why ? ' (' + why + ')' : '')) + (lost ? ', ' + lost + ' baixas' : '') + '; ' + (ok ? 'pode repetir' : 'na próxima vez pesa menos'), op.O);
+}
+/* p12 resolved: what the recon found, and the approach the assault now goes by */
+prRec = (g => (C, op, l) => {
+  const pr = op.pr, r = g(C, op, l);
+  if (MM.on && op.mm && pr === 'p12' && op.rec && !op.mmR && op.rec.every(R => R.res !== undefined)) {
+    op.mmR = 1; const A = mmS(C.t).a;
+    for (const R of op.rec) if (R.res === 1 && R.a) mmMove(A, op.mm.o + '|' + R.a.s, MM.rec);
+    if (op.pr === 'p1' && op.ap[1]) { op.mm.s = [op.ap[1].s]; op.mm.ang = [op.ap[1].ang]; op.mm.e.s = op.ap[1].s; }
+    else if (op.pr === 'p6' && op.ap[0]) { op.mm.s = [op.ap[0].s]; op.mm.ang = [op.ap[0].ang]; op.mm.e.s = op.ap[0].s; }
+    else op.mm.done = 1;   // put off: the recon's word is the memory
+  }
+  return r;
+})(prRec);
+/* a manoeuvre given up: its flank failed now; a frontal that follows is the axis' */
+prFail = (g => (C, op, l, why) => {
+  const M = MM.on && op.mm && !op.mm.done ? op.mm : null; if (M) mmOut(C, op, false, why);
+  const r = g(C, op, l, why);
+  if (M && r && op.pr === 'p6' && op.ap && op.ap[0] && !M.s.includes(op.ap[0].s)) op.mm = Object.assign({}, M, { s: [op.ap[0].s], ang: [op.ap[0].ang], done: 0, e: { s: op.ap[0].s, ok: -1, T: S.t } });   // the frontal that follows: the axis'
+  return r;
+})(prFail);
+/* the manoeuvres' memory: by kind and place */
+function mmManAt(t, k, x, z) { let b = null, bd = MM.man.r; for (const e of mmS(t).m) if (e.k === k) { const d = Math.hypot(e.x - x, e.z - z); if (d < bd) { bd = d; b = e; } } return b; }
+function mmMan(C, all) {
+  if (!MM.on) return;
+  for (const c of all) {
+    const p = c.at; if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
+    const e = mmManAt(C.t, c.k, p.x, p.z), v = mmDecay(e); if (Math.abs(v) < .02) continue;
+    const f = clamp(1 + v, MM.lo, MM.hi); c.v *= f; c.why += ' · memória: ' + (v < 0 ? 'falhou' : 'deu certo') + ' aqui há ' + Math.max(1, Math.round((S.t - e.T) / 60)) + ' min';
+  }
+}
+/* an op's end: an assault's outcome (its objective ours, or consolidating) and a manoeuvre's (the point it went for ours) */
+opEnd = (g => (C, op) => {
+  if (MM.on && C && (C.t === 0 || C.t === 1) && op && !op.over && (!S.net || S.host)) {
+    const t = C.t;
+    if (op.k === 'atk' && op.mm && !op.mm.done && !(op.pr === 'p12' && op.st === 'rec')) mmOut(C, op, !!((op.O.tw && op.O.tw.hold === t) || op.st === 'cons'), op.why);
+    else if (op.man) {
+      const P = [op.P, op.Q, op.P2].find(p => p && p.hold !== undefined && Number.isFinite(p.x));
+      if (P) {
+        const ok = P.hold === t, L = mmS(t).m; let e = mmManAt(t, op.k, P.x, P.z);
+        if (!e) { e = { k: op.k, x: P.x, z: P.z, v: 0, T: S.t }; L.push(e); if (L.length > MM.man.keep) L.shift(); }
+        e.v = clamp(mmDecay(e) + (ok ? MM.man.ok : MM.man.fail), -MM.lim, MM.lim); e.T = S.t;
+      }
+    }
+  }
+  return g(C, op);
+})(opEnd);
+/* the convoys: each one keeps the axis it went by; one lost makes that axis (to that node) and the edge where it fell cost more */
+const mmLgK = (t, key, ri) => (MM.on ? 1 + MM.lg.k * Math.max(0, mmDecay(mmS(t).lg.get(key + ':' + ri), MM.lg.half)) : 1);
+lgConvoy = (g => (t, o, why) => {
+  const r = g(t, o, why);
+  if (r === '' && S.lg) { const key = lgKey(o), c = S.lg.cv.filter(c => c.t === t && c.n === key && !c.air).pop(); if (c && c.mmRi === undefined && c.u) c.mmRi = c.u.ri; }
+  return r;
+})(lgConvoy);
+lgLost = (g => (o, c, n0) => {
+  if (MM.on && o && !o.heli && (o.team === 0 || o.team === 1) && (!S.net || S.host)) {
+    const M = mmS(o.team);
+    if (c && c.mmRi !== undefined) { mmMove(M.lg, c.n + ':' + c.mmRi, 1, MM.lg.half, 3); mmTrim(M.lg, MM.lg.keep); }
+    const e = S.T.mv >= 4 && S.T.net ? habEdge(o.x, o.z) : -1;
+    if (e >= 0) { mmMove(M.le, e, 1, MM.lg.half, 3); mmTrim(M.le, MM.lg.keep); }
+  }
+  return g(o, c, n0);
+})(lgLost);
+/* the tactical cost of an edge: times the convoys lost on it (once a refresh of the map: the multiplier is cached until the next) */
+const MMED = new WeakSet();
+m5Edge = (g => C => {
+  const a = g(C); if (!a || !MM.on || MMED.has(a) || !C) return a;
+  MMED.add(a); const le = mmS(C.t).le;
+  for (const [e, x] of le) { const v = mmDecay(x, MM.lg.half); if (v > .02 && e < a.length) a[e] *= 1 + MM.lg.edge * v; }
+  return a;
+})(m5Edge);
+/* the memory as a plain object, values faded to now (the strategy layer, the tests, gask ap) */
+function mmView(t) {
+  const M = mmS(t), r = v => Math.round(v * 100) / 100, out = { a: [], h: [], m: [], lg: [], le: [], tau: mmTau(t) };
+  for (const [k, e] of M.a) { const [o, s] = k.split('|'); out.a.push({ o, s: +s, v: r(mmDecay(e)), u: e.u, ok: e.ok, f: e.f, l: e.l, age: Math.round(S.t - e.T) }); }
+  for (const [o, l] of M.h) out.h.push({ o, l: l.map(e => ({ s: e.s, ok: e.ok, age: Math.round(S.t - e.T) })) });
+  for (const e of M.m) out.m.push({ k: e.k, x: Math.round(e.x), z: Math.round(e.z), v: r(mmDecay(e)) });
+  for (const [k, e] of M.lg) out.lg.push({ k, v: r(mmDecay(e, MM.lg.half)) });
+  for (const [k, e] of M.le) out.le.push({ e: k, v: r(mmDecay(e, MM.lg.half)) });
+  return out;
+}
+/* gask ap: each approach with what the side remembers of it (mm: the value, rep: 1 when it may not go a third time) */
+apAnswer = (g => (t, q) => {
+  const R = g(t, q);
+  if (MM.on && R && Array.isArray(R.a) && Number.isFinite(R.x)) {
+    const C = cmdOf(t), o = R.x + ',' + R.z, pl = C && C.apc ? [...C.apc.values()].find(p => mmObj(p.o) === o && p.sd === R.sd) : null;
+    if (pl) R.a.forEach((a, i) => { const s = pl.A[i] && pl.A[i].s; if (s !== undefined) { a.mm = Math.round(mmAp(t, o, s) * 100) / 100; if (mmBan(t, o, s)) a.rep = 1; } });
+  }
+  return R;
+})(apAnswer);
+/* the host's backup carries the memory (ages, not times); too big for the relay's keep, it goes without it */
+function mmPack(t) {
+  const M = S.gmem && S.gmem[t]; if (!M) return null;
+  const age = T => Math.round(S.t - T), r3 = v => Math.round(v * 1000) / 1000;
+  return { a: [...M.a].slice(-MM.keep).map(([k, e]) => [k, r3(e.v), age(e.T), e.u, e.ok, e.f, e.l]), h: [...M.h].slice(-MM.keep).map(([o, l]) => [o, l.map(e => [e.s, e.ok, age(e.T)])]),
+    m: M.m.map(e => [e.k, Math.round(e.x), Math.round(e.z), r3(e.v), age(e.T)]), lg: [...M.lg].map(([k, e]) => [k, r3(e.v), age(e.T)]), le: [...M.le].map(([k, e]) => [k, r3(e.v), age(e.T)]) };
+}
+function mmUnpack(t, B) {
+  const n = v => { if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error('mm'); return v; }, A = v => { if (!Array.isArray(v)) throw new Error('mm'); return v; }, str = v => String(v).slice(0, 64);
+  const M = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }, ent = (v, ag) => ({ v: clamp(n(v), -3, 3), T: S.t - n(ag), u: 0, ok: 0, f: 0, l: 0 });
+  for (const r of A(B.a)) M.a.set(str(r[0]), Object.assign(ent(r[1], r[2]), { u: n(r[3]), ok: n(r[4]), f: n(r[5]), l: n(r[6]) }));
+  for (const r of A(B.h)) M.h.set(str(r[0]), A(r[1]).slice(-MM.hn).map(e => ({ s: n(e[0]), ok: n(e[1]), T: S.t - n(e[2]) })));
+  for (const r of A(B.m)) M.m.push({ k: str(r[0]), x: n(r[1]), z: n(r[2]), v: clamp(n(r[3]), -1, 1), T: S.t - n(r[4]) });
+  for (const r of A(B.lg)) M.lg.set(str(r[0]), ent(r[1], r[2]));
+  for (const r of A(B.le)) M.le.set(n(r[0]), ent(r[1], r[2]));
+  return M;
+}
+ecoPack = (g => () => {
+  const K = g(); if (!MM.on || !S.gmem) return K;
+  K.mm = [0, 1].map(mmPack);
+  if (JSON.stringify(K).length > MM.pack) delete K.mm;   // the relay's keep has a size; the economy first
+  return K;
+})(ecoPack);
+ecoUnpack = (g => K => {
+  g(K);
+  if (!K || !Array.isArray(K.mm)) return;
+  try { const L = [0, 1].map(t => (K.mm[t] ? mmUnpack(t, K.mm[t]) : null)); S.gmem = L; } catch (e) { /* a broken memory: the general starts without one */ }
+})(ecoUnpack);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -28182,6 +28524,14 @@ function aarShow(R, sub) {
   b.append(aarEl('h3', '', 'Desempenho e honestidade'));
   b.append(aarEl('p', 'aar-note', (R.perf.ms !== null ? 'Simulação: ' + String(R.perf.ms).replace('.', ',') + ' ms por quadro em média, pior ' + String(R.perf.worst).replace('.', ',') + ' ms. ' : '') + 'Pico de ' + R.perf.men + ' soldados e ' + R.perf.veh + ' veículos em campo. Honestidade (tiros sem percepção): ainda sem medida.'));
 }
+/* the general's strategies (M8) in the after-action review: the section after the rest (the wrapper lives here, with the DOM, so the sim section loads headless) */
+aarShow = (g => (R, sub) => {
+  g(R, sub);
+  if (!R || !R.stg || !R.stg.length) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
+  for (const d of R.stg) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
+  b.append(aarEl('h3', '', 'Estratégias do general'), ol);
+})(aarShow);
 async function aarPast() {
   const L = $('#aarList'); L.textContent = ''; L.hidden = false; $('#aarBody').hidden = true; $('#aarBack').hidden = true; aarOpen();
   const item = (title, sub, go) => { const b = aarEl('button', 'ghost aar-i'); b.type = 'button'; b.append(aarEl('b', '', title), aarEl('span', '', sub)); b.addEventListener('click', go); L.append(b); };
@@ -31258,355 +31608,6 @@ function frame(now) {
   }
   updateCamera(dt); syncScene(dt); if (!GV.on) render3d(); drawHud(); audioTick(dt); genSample(); if (GV.on) genFrame(now);
 }
-/* ---------- vehicles off the rail (M5 of the general's manoeuvre; not tested, see docs/nao-testado/cf-m5-veiculos-trilho.md) ----------
-   The AI's vehicles rode their axis most of the time (the scout measured ~86%). Here:
-   - the cost of a road edge for side t (m5Cost) is today's (length times class, times 1 + C.et) times 1 + what the tactical map (M1, C.tm)
-     says along it, the mean of its samples: kV the enemy's sight (v), kF its strength (f, f / (1 + f)), kP our losses (p, the same), kT its
-     traffic (t). Kept per side until the map's next refresh (C.m5e, C.m5n). jit: a draw of 1 to 1 + M5.jit an edge, so ways that cost about
-     the same take turns (the logistics: no habit for the enemy to lie in wait on);
-   - tripTac: a trip (tripTo's record) by that cost. Every AI vehicle's trip by tripTo takes it while the side has a map (tripTo is wrapped);
-     trucks and cars draw the jitter;
-   - the assault's armour (m5Atk): when the AI opens an assault that is not a walk, up to M5.atk.n[0] tanks (n[1] with 3 squads or more)
-     riding an axis within M5.reach m of the objective, idle and whole, go by the tactical trip to the road nearest a firing place off the
-     front of the objective (m5Spot: the assault position of an approach of the planner's (M2, op.pl.A), one the squads do not take first, else
-     theirs, M5.atk.front to M5.atk.rear degrees off the axis; else the best cell of a ring of M5.atk.r m:
-     little sight, strength and losses, cover, the objective in view, near a road, off the assault's line, op.ax, by M5.atk.front degrees or more), then
-     hold there (u.ai.m5) firing at what they see, until the op ends or falls back, the tank is hurt below M5.atk.hp, or M5.atk.hold s pass;
-     then they go back to the nearest axis by a trip (m5Home);
-   - the ambush and the roadblock: the tank that lies in wait may come from any axis within M5.amb.reach m (it was its own axis within 1500 m,
-     or 900 m for the roadblock), and goes there by the tactical trip to the road nearest its place, its wait made longer by the ride;
-     afterwards it goes home by a trip when it is off its road (m5Home);
-   - the convoys (m5Lg): among the axes a node lies on (rs[j]), the ones within M5.lg.k of the cheapest (length times 1 + lgThr) are drawn,
-     the one the last convoy to that node took left out when there is another.
-   M5.on 0 leaves all of it out. Only the host (or solo) runs any of it: it moves AI vehicles (no u.net) */
-const M5 = { on: 1, kV: 3, kF: 1.5, kP: .6, kT: .3, jit: .15, reach: 4000, near: 300, road: 250, onRoad: 60, back: 200,
-  atk: { n: [1, 2], r: [380, 520], front: 35, rear: 120, hold: 480, hp: .5, retry: 20, apart: 250, much: 3 },
-  amb: { reach: 3500 }, lg: { k: .15 } };
-/* the tactical multiplier of each edge for commander C (null without a map) */
-function m5Edge(C) {
-  const M = C && C.tm, N = S.T && S.T.net;
-  if (!M || !N || !M.v) return null;
-  if (C.m5e && C.m5n === M.n && C.m5e.length === N.e.length) return C.m5e;
-  const a = new Float32Array(N.e.length), cl = (x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
-  for (const e of N.e) {
-    let v = 0, f = 0, p = 0, tr = 0; const sm = e.smp || [], n = sm.length || 1;
-    for (const s of sm) { const q = cl(s.x, s.z), ff = M.f[q] || 0, pp = M.p[q] || 0; v += M.v[q] || 0; f += ff / (1 + ff); p += pp / (1 + pp); tr += M.t[q] || 0; }
-    a[e.i] = 1 + (M5.kV * v + M5.kF * f + M5.kP * p + M5.kT * tr) / n;
-  }
-  C.m5n = M.n; return (C.m5e = a);
-}
-const m5Jit = () => { const N = S.T.net, a = new Float32Array(N.e.length); for (let i = 0; i < a.length; i++) a[i] = 1 + Math.random() * M5.jit; return a; };
-/* the cost of an edge for side t: today's, times the map's, times the jitter */
-function m5Cost(t, mode, jit) {
-  const C = S.cmd && S.cmd[t], base = edgeCostOf(C, mode || 'veh'), m = m5Edge(C);
-  if (!m && !jit) return null;
-  return e => base(e) * (m ? m[e.i] : 1) * (jit ? jit[e.i] : 1);
-}
-/* tripTo by the tactical cost; o.max: no trip longer than that */
-function tripTac(u, x, z, o) {
-  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
-  o = o || {}; const cost = m5Cost(u.team, 'veh', o.jit); if (!cost) return null;
-  const p = tripOf(u.x, u.z, x, z, { mode: 'veh', cost }); if (!p || (o.max && p.len > o.max)) return null;
-  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
-}
-tripTo = (g => (u, x, z, o) => {
-  if (!M5.on || !u || u.net || !u.ai || !S.cmd || !S.cmd[u.team] || !S.cmd[u.team].tm) return g(u, x, z, o);
-  return tripTac(u, x, z, Object.assign({}, o, { jit: u.kind === 'truck' || u.kind === 'car' ? m5Jit() : null })) || g(u, x, z, o);
-})(tripTo);
-/* the seconds a trip takes the vehicle at full drive */
-const m5Eta = (u, T) => (T && T.p ? T.p.len / Math.max(1, u.def.spd * GSPD) : 0);
-/* send u toward (x, z) by the tactical trip to the road nearest it: true when it went (or is already near) */
-function m5Go(u, x, z, why) {
-  if (hdist(u, { x, z }) < M5.near) return true;
-  const n = netNear(x, z), gx = n.d > M5.onRoad ? n.x : x, gz = n.d > M5.onRoad ? n.z : z;
-  return !!tripTac(u, gx, gz, { why, max: M5.reach * 2 });
-}
-/* a tank that can be taken for the general's manoeuvre: an AI tank riding an axis, idle and whole */
-const m5Free = (u, t) => u.kind === 'tank' && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.tgt && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && u.hp >= u.max * .6 && S.t - u.hitT > 20;
-/* the nearest such tank of side t to (x, z) within r m (or on axis ri within 1500 m along it when ri is given: today's choice), or null */
-function m5Tank(t, x, z, r, ri, s) {
-  let b = null, bd = 1e9;
-  for (const u of S.units) {
-    if (!m5Free(u, t)) continue;
-    const d = hdist(u, { x, z }), ok = (ri !== undefined && u.ri === ri && Math.abs(u.s - s) < 1500) || (M5.on && d < r);
-    if (ok && d < bd) { b = u; bd = d; }
-  }
-  return b;
-}
-/* a tank sent to wait at an ambush or a roadblock rides there by road; its wait is made longer by the ride */
-function m5Amb(u) {
-  const P = u.ai.amb; if (!M5.on || !P) return;
-  if (m5Go(u, P.x, P.z, 'amb')) P.T += m5Eta(u, u.trip);
-}
-/* back to the nearest axis by a trip when far off it, else to its brain's way home */
-function m5Home(u) {
-  const A = u.ai, p = railOf(u.x, u.z);
-  u.ri = p.ri; u.s = p.s; A.off = clamp(p.off, -150, 150); A.back = 0;
-  if (!M5.on || u.trip || u.dead || (A.tgt && !A.tgt.dead) || S.t - u.hitT < 5 || p.d < M5.back) return;
-  const r = S.T.routes[p.ri], q = routeAt(r, clamp(p.s, 0, r.len)), was = u.rail; u.rail = true;
-  if (!tripTo(u, q.x, q.z, { why: 'home' })) u.rail = was;
-}
-tankAmb = (g => (u, A) => { const P = A.amb, r = g(u, A); if (!r && P && !A.amb) m5Home(u); return r; })(tankAmb);
-/* the firing place for a tank of op (an assault), away from those taken: { x, z } or null */
-function m5Spot(C, op, taken) {
-  const O = op.O, M = C.tm, R = M5.atk, far = p => taken.every(q => Math.hypot(q.x - p.x, q.z - p.z) >= R.apart);
-  const ok = (x, z) => x > 100 && x < S.W - 100 && Math.abs(z) < S.HW - 100 && hgt(x, z) > S.T.WL + 1;
-  const used = Array.isArray(op.ap) ? op.ap : [], all = op.pl && Array.isArray(op.pl.A) ? op.pl.A : [];
-  for (const a of all.filter(a => !used.includes(a)).concat(used)) {   // the planner's approaches (M2): one the squads do not take first (fire from another side), then theirs
-    const x = a && a.pos && a.pos.x, z = a && a.pos && a.pos.z;
-    if (!Number.isFinite(x) || !Number.isFinite(z) || a.ang < R.front || a.ang > R.rear) continue;
-    if (ok(x, z) && far({ x, z })) return { x, z };
-  }
-  const cl = (x, z) => (M ? clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1) : -1), oy = hgt(O.x, O.z) + 2;
-  let b = null, bs = 1e9;
-  for (let k = 0; k < 16; k++) for (const r of R.r) {
-    const a = k * Math.PI / 8, x = O.x + Math.cos(a) * r, z = O.z + Math.sin(a) * r;
-    if (!ok(x, z) || !far({ x, z })) continue;
-    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = netNear(x, z);
-    let sc = ang < R.front ? 1 : ang > R.rear ? .6 : 0;   // off the front, not behind the enemy
-    if (q >= 0) { const f = M.f[q] || 0, p = M.p[q] || 0; sc += M5.kV * (M.v[q] || 0) + M5.kF * f / (1 + f) + M5.kP * p / (1 + p) - (M.o[q] || 0); }
-    if (!los({ x, z }, hgt(x, z) + 2.5, O, oy)) sc += 1;
-    sc += Math.max(0, n.d - M5.road) / 1000;
-    if (sc < bs) { bs = sc; b = { x, z }; }
-  }
-  return b;
-}
-/* the assault's armour: the tanks that go the back roads to fire on the objective from off its front */
-function m5Atk(C, op) {
-  if (!M5.on || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
-  op.m5T = S.t + M5.atk.retry; op.m5 = op.m5 || [];
-  const t = C.t, O = op.O, want = (op.sq.length >= 3 ? M5.atk.n[1] : M5.atk.n[0]) - op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op).length;
-  for (let i = 0; i < want; i++) {
-    const u = m5Tank(t, O.x, O.z, M5.reach); if (!u) return;
-    if (C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) return;   // the last tank of a road held with difficulty stays
-    const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) return;
-    if (!m5Go(u, sp.x, sp.z, 'atk')) { op.m5T = S.t + M5.atk.retry; return; }
-    const eta = m5Eta(u, u.trip);
-    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + eta + M5.atk.hold, k: 'atk' }; op.m5.push(u);
-    gLog(t, 'atk', 'Carro de combate vai por estradas secundárias apoiar o assalto a ' + gName(O) + ' pelo flanco' + (eta ? ' (' + Math.round(eta / 60 * 10) / 10 + ' min)' : ''), sp, 'm5a' + op.id + '.' + i);
-  }
-}
-atkOpen = (g => (...a) => { const op = g(...a); if (op && a[0]) m5Atk(a[0], op); return op; })(atkOpen);
-OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && (op.st === 'form' || op.st === 'prep' || op.st === 'screen')) m5Atk(C, op); })(OPS.atk);
-/* a tank holding its firing place: its brain fights as ever from off its road; the drive is the place's */
-AI.tank = (old => (u, dt) => {
-  const A = u.ai, H = A && A.m5;
-  if (!H) return old(u, dt);
-  const op = H.op;
-  if (!M5.on || op.over || op.st === 'back' || op.st === 'cons' || S.t > H.T || u.hp < u.max * M5.atk.hp) { A.m5 = null; m5Home(u); return old(u, dt); }
-  u.rail = false; old(u, dt); u.rail = false;
-  if (A.amb) return;
-  driveTo(u, H.x, H.z);
-  if (!(A.tgt && !A.tgt.dead) && !A.inf && !A.low) u.ctl.aim = vnorm({ x: op.O.x - u.x, y: 0, z: op.O.z - u.z });
-})(AI.tank);
-/* a convoy's axis: one of those a node lies on that cost about the least, not the last one taken to it when there is another */
-function m5Lg(t, o) {
-  const b = lgS(o);
-  if (!M5.on || o.sup || !Array.isArray(o.rs)) return b;
-  const c = [];
-  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri]) return; c.push({ ri, s, c: Math.abs(s - endS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) * mmLgK(t, lgKey(o), ri) }); });   // M6: mmLgK, the convoys lost on it
-  if (c.length < 2) return b;
-  const lo = Math.min(...c.map(q => q.c)), M = S.m5lg || (S.m5lg = {}), key = t + ':' + lgKey(o);
-  let ok = c.filter(q => q.c <= lo * (1 + M5.lg.k));
-  if (ok.length > 1 && M[key] !== undefined) ok = ok.filter(q => q.ri !== M[key]) || ok;
-  const p = ok[Math.floor(Math.random() * ok.length)] || b;
-  M[key] = p.ri; return { ri: p.ri, s: p.s };
-}
-/* ---------- memory and unpredictability (M6 of the general's manoeuvre): what failed and where, and a draw that does not always take the same street ----------
-   Each side keeps, in S.gmem[t] (the AI general's, never the other side's; carried in the host's backup, ecoPack):
-   a: the memory of the approaches, by objective (its place, mmObj) and sector of the ring (the approach's s, AP.sec of them): a value that a failed
-      assault by it moves MM.fail and a taken objective MM.ok, fading by half every MM.half s (v), the uses (u), successes (ok), failures (f) and the men lost (l).
-      prPick (M3) multiplies each procedure's score by 1 + that value (the mean over the approaches it sends its assault by), within MM.lo to MM.hi.
-      A recon (p12) that found an approach defended moves it MM.rec. A fix and flank given up (prFail) counts a failure of its flank at once.
-   h: by objective, the last MM.hn approaches its assaults went by (the main sector, and whether it worked: 1, 0, -1 under way). The same approach does not go a
-      third time in a row unless one of the last two worked (mmBan): its procedures score 0, a frontal (p6) goes by the cheapest other approach (mmP6), unless
-      nothing else is left.
-   m: the manoeuvres of cmdManJob (flank, infiltrate, encircle...) by kind and place (within MM.man.r m): a kind that failed to take its point there weighs
-      1 + its value (MM.man.fail, MM.man.ok) for a while (mmMan).
-   lg, le: the convoys lost (lgLost) by node and axis (lg: m5Lg's cost of that axis times 1 + MM.lg.k x it) and by edge of the road network (le: the
-      tactical cost of the edge, m5Edge, times 1 + MM.lg.edge x it), fading by half every MM.lg.half s.
-   The draws (prPick and cmdManJob) weigh each candidate by its score to the power 2 / tau (mmW): tau by the personality (MM.tau: Blitz and the Guerrilla vary
-   more, the Defender and the Gunner less; 1 is the square of before). The difficulty sets how many approaches prPick weighs (MM.apN: Easy 1, Hard all of
-   them); what the side knows is the same at every difficulty (D9). mmView(t): the memory as a plain object (for the strategy layer, the tests and gask ap's
-   mm field). MM.on 0: no memory and the square as before */
-const MM = { on: 1, fail: -.3, ok: .15, rec: -.15, half: 600, lo: .25, hi: 1.4, lim: 1, hn: 4, keep: 24,
-  tau: { blz: 1.6, gue: 1.7, ret: .6, art: .7, log: 1 }, apN: { facil: 1, moderado: 2, normal: 3, dificil: 3 },
-  man: { fail: -.25, ok: .1, r: 350, keep: 16 }, lg: { k: .6, edge: 1.5, half: 900, keep: 16 }, pack: 15000 };
-const mmS = t => { const L = S.gmem || (S.gmem = [null, null]); return L[t] || (L[t] = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }); };
-const mmDecay = (e, half) => (e ? e.v * Math.pow(.5, Math.max(0, S.t - e.T) / (half || MM.half)) : 0);
-const mmObj = o => Math.round(o.x) + ',' + Math.round(o.z);
-/* a value of map M at key k: moved by dv, faded first */
-function mmMove(M, k, dv, half, lim) {
-  const e = M.get(k) || { v: 0, T: S.t, u: 0, ok: 0, f: 0, l: 0 }; e.v = clamp(mmDecay(e, half) + dv, -(lim || MM.lim), lim || MM.lim); e.T = S.t; M.set(k, e); return e;
-}
-/* the most recent n of a map (the backup and the size of the memory) */
-function mmTrim(M, n) { if (M.size <= n) return; const l = [...M.entries()].sort((a, b) => b[1].T - a[1].T); M.clear(); for (const [k, e] of l.slice(0, n)) M.set(k, e); }
-const mmAp = (t, o, s) => mmDecay(mmS(t).a.get(o + '|' + s));
-/* the draw's weight of a score v for side t */
-const mmTau = t => { const k = S && S.per && S.per[t]; return MM.on && k && MM.tau[k] ? MM.tau[k] : 1; };
-const mmW = (t, v) => Math.pow(Math.max(0, v), 2 / mmTau(t));
-/* the approaches prPick weighs: the difficulty's number of the cheapest */
-const mmApN = (t, A) => { if (!MM.on) return A; const k = S && S.dif && S.dif[t], n = MM.apN[k] || A.length; return n < A.length ? A.slice(0, Math.max(1, n)) : A; };
-/* may side t go by sector s at objective o again: not a third time in a row unless one of the last two worked */
-function mmBan(t, o, s) {
-  const h = mmS(t).h.get(o); if (!MM.on || !h || h.length < 2) return false;
-  const a = h[h.length - 1], b = h[h.length - 2]; return a.s === s && b.s === s && a.ok !== 1 && b.ok !== 1;
-}
-/* the approaches a candidate of prPick sends its assault by */
-const mmAps = x => (x.k === 'p1' ? [x.f] : x.k === 'p2' ? [x.f, x.f2] : x.k === 'p12' ? [x.o] : [x.a]).filter(Boolean);
-/* p6 by the cheapest approach not banned, when the axis approach is */
-function mmP6(C, pl, A, axA, c, sc) {
-  if (!MM.on || !c.some(x => x.k === 'p6') || !mmBan(C.t, mmObj(pl.o), axA.s)) return;
-  const o = mmObj(pl.o), a = A.filter(x => x !== axA && !mmBan(C.t, o, x.s)).sort((p, q) => p.cost - q.cost)[0]; if (!a) return;
-  c.push({ k: 'p6', a, sc: sc(a), why: 'frontal pela abordagem a ' + a.ang + '° (o eixo já falhou duas vezes seguidas)' });
-}
-/* the memory into prPick's candidates (their v), and the bans; all banned: as they were */
-function mmPr(C, pl, c) {
-  if (!MM.on || !c.length) return;
-  const t = C.t, o = mmObj(pl.o), v0 = c.map(x => x.v);
-  for (const x of c) {
-    const A = mmAps(x); if (!A.length) continue;
-    if (A.some(a => mmBan(t, o, a.s))) { x.v = 0; x.ban = 1; x.why += ' · memória: abordagem já tentada duas vezes seguidas sem sucesso'; continue; }
-    const f = A.reduce((m, a) => m + clamp(1 + mmAp(t, o, a.s), MM.lo, MM.hi), 0) / A.length;
-    if (Math.abs(f - 1) > .02) { x.v *= f; x.why += ' · memória: ' + (f < 1 ? 'falhou' : 'deu certo') + ' por ali (×' + gN(f) + ')'; }
-  }
-  if (c.every(x => x.ban)) c.forEach((x, i) => { x.v = v0[i]; x.ban = 0; });
-}
-/* the procedure drawn: its use in the history of the objective (the main approach) */
-function mmPicked(C, pl, pick, axA) {
-  if (!MM.on) return;
-  const o = mmObj(pl.o), A = mmAps(pick), h = mmS(C.t).h, l = h.get(o) || []; if (!A.length) return;
-  const e = { s: A[0].s, ok: -1, T: S.t }; l.push(e); while (l.length > MM.hn) l.shift(); h.set(o, l);
-  if (h.size > MM.keep) { const old = [...h.entries()].sort((a, b) => b[1][b[1].length - 1].T - a[1][a[1].length - 1].T).slice(MM.keep); for (const [k] of old) h.delete(k); }
-  for (const a of A) { const m = mmMove(mmS(C.t).a, o + '|' + a.s, 0); m.u++; }
-  C.mmPk = { o, nm: pl.nm, s: A.map(a => a.s), ang: A.map(a => a.ang), e, ax: axA ? axA.s : -1 };
-}
-prPick = (g => (C, ...a) => { C.mmPk = null; const r = g(C, ...a); if (r && C.mmPk) r.mm = C.mmPk; C.mmPk = null; return r; })(prPick);
-prOpen = (g => (op, pr) => { g(op, pr); if (pr.mm) op.mm = Object.assign({}, pr.mm, { n0: op.n0 }); })(prOpen);
-/* an assault's outcome into the memory: each approach it went by */
-function mmOut(C, op, ok, why) {
-  const M = op.mm, t = C.t, A = mmS(t).a; if (!M || M.done) return; M.done = 1;
-  const live = opLive(op).reduce((a, q) => a + q.live, 0), lost = Math.max(0, (M.n0 || 0) - live);
-  for (const s of M.s) { const e = mmMove(A, M.o + '|' + s, ok ? MM.ok : MM.fail); if (ok) e.ok++; else e.f++; e.l += lost; }
-  M.e.ok = ok ? 1 : 0; mmTrim(A, MM.keep * 2);
-  gLog(t, 'atk', 'Memória: o assalto a ' + M.nm + ' pela abordagem a ' + M.ang.join('° e ') + '° ' + (ok ? 'deu certo' : 'falhou' + (why ? ' (' + why + ')' : '')) + (lost ? ', ' + lost + ' baixas' : '') + '; ' + (ok ? 'pode repetir' : 'na próxima vez pesa menos'), op.O);
-}
-/* p12 resolved: what the recon found, and the approach the assault now goes by */
-prRec = (g => (C, op, l) => {
-  const pr = op.pr, r = g(C, op, l);
-  if (MM.on && op.mm && pr === 'p12' && op.rec && !op.mmR && op.rec.every(R => R.res !== undefined)) {
-    op.mmR = 1; const A = mmS(C.t).a;
-    for (const R of op.rec) if (R.res === 1 && R.a) mmMove(A, op.mm.o + '|' + R.a.s, MM.rec);
-    if (op.pr === 'p1' && op.ap[1]) { op.mm.s = [op.ap[1].s]; op.mm.ang = [op.ap[1].ang]; op.mm.e.s = op.ap[1].s; }
-    else if (op.pr === 'p6' && op.ap[0]) { op.mm.s = [op.ap[0].s]; op.mm.ang = [op.ap[0].ang]; op.mm.e.s = op.ap[0].s; }
-    else op.mm.done = 1;   // put off: the recon's word is the memory
-  }
-  return r;
-})(prRec);
-/* a manoeuvre given up: its flank failed now; a frontal that follows is the axis' */
-prFail = (g => (C, op, l, why) => {
-  const M = MM.on && op.mm && !op.mm.done ? op.mm : null; if (M) mmOut(C, op, false, why);
-  const r = g(C, op, l, why);
-  if (M && r && op.pr === 'p6' && op.ap && op.ap[0] && !M.s.includes(op.ap[0].s)) op.mm = Object.assign({}, M, { s: [op.ap[0].s], ang: [op.ap[0].ang], done: 0, e: { s: op.ap[0].s, ok: -1, T: S.t } });   // the frontal that follows: the axis'
-  return r;
-})(prFail);
-/* the manoeuvres' memory: by kind and place */
-function mmManAt(t, k, x, z) { let b = null, bd = MM.man.r; for (const e of mmS(t).m) if (e.k === k) { const d = Math.hypot(e.x - x, e.z - z); if (d < bd) { bd = d; b = e; } } return b; }
-function mmMan(C, all) {
-  if (!MM.on) return;
-  for (const c of all) {
-    const p = c.at; if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.z)) continue;
-    const e = mmManAt(C.t, c.k, p.x, p.z), v = mmDecay(e); if (Math.abs(v) < .02) continue;
-    const f = clamp(1 + v, MM.lo, MM.hi); c.v *= f; c.why += ' · memória: ' + (v < 0 ? 'falhou' : 'deu certo') + ' aqui há ' + Math.max(1, Math.round((S.t - e.T) / 60)) + ' min';
-  }
-}
-/* an op's end: an assault's outcome (its objective ours, or consolidating) and a manoeuvre's (the point it went for ours) */
-opEnd = (g => (C, op) => {
-  if (MM.on && C && (C.t === 0 || C.t === 1) && op && !op.over && (!S.net || S.host)) {
-    const t = C.t;
-    if (op.k === 'atk' && op.mm && !op.mm.done && !(op.pr === 'p12' && op.st === 'rec')) mmOut(C, op, !!((op.O.tw && op.O.tw.hold === t) || op.st === 'cons'), op.why);
-    else if (op.man) {
-      const P = [op.P, op.Q, op.P2].find(p => p && p.hold !== undefined && Number.isFinite(p.x));
-      if (P) {
-        const ok = P.hold === t, L = mmS(t).m; let e = mmManAt(t, op.k, P.x, P.z);
-        if (!e) { e = { k: op.k, x: P.x, z: P.z, v: 0, T: S.t }; L.push(e); if (L.length > MM.man.keep) L.shift(); }
-        e.v = clamp(mmDecay(e) + (ok ? MM.man.ok : MM.man.fail), -MM.lim, MM.lim); e.T = S.t;
-      }
-    }
-  }
-  return g(C, op);
-})(opEnd);
-/* the convoys: each one keeps the axis it went by; one lost makes that axis (to that node) and the edge where it fell cost more */
-const mmLgK = (t, key, ri) => (MM.on ? 1 + MM.lg.k * Math.max(0, mmDecay(mmS(t).lg.get(key + ':' + ri), MM.lg.half)) : 1);
-lgConvoy = (g => (t, o, why) => {
-  const r = g(t, o, why);
-  if (r === '' && S.lg) { const key = lgKey(o), c = S.lg.cv.filter(c => c.t === t && c.n === key && !c.air).pop(); if (c && c.mmRi === undefined && c.u) c.mmRi = c.u.ri; }
-  return r;
-})(lgConvoy);
-lgLost = (g => (o, c, n0) => {
-  if (MM.on && o && !o.heli && (o.team === 0 || o.team === 1) && (!S.net || S.host)) {
-    const M = mmS(o.team);
-    if (c && c.mmRi !== undefined) { mmMove(M.lg, c.n + ':' + c.mmRi, 1, MM.lg.half, 3); mmTrim(M.lg, MM.lg.keep); }
-    const e = S.T.mv >= 4 && S.T.net ? habEdge(o.x, o.z) : -1;
-    if (e >= 0) { mmMove(M.le, e, 1, MM.lg.half, 3); mmTrim(M.le, MM.lg.keep); }
-  }
-  return g(o, c, n0);
-})(lgLost);
-/* the tactical cost of an edge: times the convoys lost on it (once a refresh of the map: the multiplier is cached until the next) */
-const MMED = new WeakSet();
-m5Edge = (g => C => {
-  const a = g(C); if (!a || !MM.on || MMED.has(a) || !C) return a;
-  MMED.add(a); const le = mmS(C.t).le;
-  for (const [e, x] of le) { const v = mmDecay(x, MM.lg.half); if (v > .02 && e < a.length) a[e] *= 1 + MM.lg.edge * v; }
-  return a;
-})(m5Edge);
-/* the memory as a plain object, values faded to now (the strategy layer, the tests, gask ap) */
-function mmView(t) {
-  const M = mmS(t), r = v => Math.round(v * 100) / 100, out = { a: [], h: [], m: [], lg: [], le: [], tau: mmTau(t) };
-  for (const [k, e] of M.a) { const [o, s] = k.split('|'); out.a.push({ o, s: +s, v: r(mmDecay(e)), u: e.u, ok: e.ok, f: e.f, l: e.l, age: Math.round(S.t - e.T) }); }
-  for (const [o, l] of M.h) out.h.push({ o, l: l.map(e => ({ s: e.s, ok: e.ok, age: Math.round(S.t - e.T) })) });
-  for (const e of M.m) out.m.push({ k: e.k, x: Math.round(e.x), z: Math.round(e.z), v: r(mmDecay(e)) });
-  for (const [k, e] of M.lg) out.lg.push({ k, v: r(mmDecay(e, MM.lg.half)) });
-  for (const [k, e] of M.le) out.le.push({ e: k, v: r(mmDecay(e, MM.lg.half)) });
-  return out;
-}
-/* gask ap: each approach with what the side remembers of it (mm: the value, rep: 1 when it may not go a third time) */
-apAnswer = (g => (t, q) => {
-  const R = g(t, q);
-  if (MM.on && R && Array.isArray(R.a) && Number.isFinite(R.x)) {
-    const C = cmdOf(t), o = R.x + ',' + R.z, pl = C && C.apc ? [...C.apc.values()].find(p => mmObj(p.o) === o && p.sd === R.sd) : null;
-    if (pl) R.a.forEach((a, i) => { const s = pl.A[i] && pl.A[i].s; if (s !== undefined) { a.mm = Math.round(mmAp(t, o, s) * 100) / 100; if (mmBan(t, o, s)) a.rep = 1; } });
-  }
-  return R;
-})(apAnswer);
-/* the host's backup carries the memory (ages, not times); too big for the relay's keep, it goes without it */
-function mmPack(t) {
-  const M = S.gmem && S.gmem[t]; if (!M) return null;
-  const age = T => Math.round(S.t - T), r3 = v => Math.round(v * 1000) / 1000;
-  return { a: [...M.a].slice(-MM.keep).map(([k, e]) => [k, r3(e.v), age(e.T), e.u, e.ok, e.f, e.l]), h: [...M.h].slice(-MM.keep).map(([o, l]) => [o, l.map(e => [e.s, e.ok, age(e.T)])]),
-    m: M.m.map(e => [e.k, Math.round(e.x), Math.round(e.z), r3(e.v), age(e.T)]), lg: [...M.lg].map(([k, e]) => [k, r3(e.v), age(e.T)]), le: [...M.le].map(([k, e]) => [k, r3(e.v), age(e.T)]) };
-}
-function mmUnpack(t, B) {
-  const n = v => { if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error('mm'); return v; }, A = v => { if (!Array.isArray(v)) throw new Error('mm'); return v; }, str = v => String(v).slice(0, 64);
-  const M = { a: new Map(), h: new Map(), m: [], lg: new Map(), le: new Map() }, ent = (v, ag) => ({ v: clamp(n(v), -3, 3), T: S.t - n(ag), u: 0, ok: 0, f: 0, l: 0 });
-  for (const r of A(B.a)) M.a.set(str(r[0]), Object.assign(ent(r[1], r[2]), { u: n(r[3]), ok: n(r[4]), f: n(r[5]), l: n(r[6]) }));
-  for (const r of A(B.h)) M.h.set(str(r[0]), A(r[1]).slice(-MM.hn).map(e => ({ s: n(e[0]), ok: n(e[1]), T: S.t - n(e[2]) })));
-  for (const r of A(B.m)) M.m.push({ k: str(r[0]), x: n(r[1]), z: n(r[2]), v: clamp(n(r[3]), -1, 1), T: S.t - n(r[4]) });
-  for (const r of A(B.lg)) M.lg.set(str(r[0]), ent(r[1], r[2]));
-  for (const r of A(B.le)) M.le.set(n(r[0]), ent(r[1], r[2]));
-  return M;
-}
-ecoPack = (g => () => {
-  const K = g(); if (!MM.on || !S.gmem) return K;
-  K.mm = [0, 1].map(mmPack);
-  if (JSON.stringify(K).length > MM.pack) delete K.mm;   // the relay's keep has a size; the economy first
-  return K;
-})(ecoPack);
-ecoUnpack = (g => K => {
-  g(K);
-  if (!K || !Array.isArray(K.mm)) return;
-  try { const L = [0, 1].map(t => (K.mm[t] ? mmUnpack(t, K.mm[t]) : null)); S.gmem = L; } catch (e) { /* a broken memory: the general starts without one */ }
-})(ecoUnpack);
 function boot() {
   try {
     if (typeof THREE === 'undefined') throw new Error('three');

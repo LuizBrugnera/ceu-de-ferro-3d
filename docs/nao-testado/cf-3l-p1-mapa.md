@@ -27,12 +27,12 @@ Pacote P1 do plano `cf-3-lados-plano` (seção 7): o mapa da Frente atual com o 
 - `fortTerrain`, `coverTerrain`, `coverV7` e `cityPlan` olham todas as bases para afastar matas, moitas e prédios.
 
 - **Integração com o P4 (já na main):** o P4 liga 3 lados na Frente atual quando o mapa tem a 3ª base (`sidesOf`, `map3`). `newState` agora pede `genTerrain(era, mv, 3)` quando a partida é de 3 lados (solo: `o.N !== 2`; online: `Net.ns === 3`) e `map3` olha `genTerrain('modern', MAPV, 3)`. **Com isto, a Frente atual passa a abrir com 3 lados por padrão** (decisão D1).
-- **Reservas do P0 (que ainda não chegou):** `foes(t)` e `foeBase(t, x, z)` como propriedades de `globalThis` (um `const` do P0 depois as sombreia, sem conflito), `eBase(t, x, z)` (hoje `S.base[1 - t]`), `cmdOf` cria um comandante por lado (`sdsOf()`), e 5 lugares que usavam `S.base[1 - t]` (`ptThreat`, abrigo de infantaria, prédio de drone, `crewMove`, `droneRail`) usam `eBase`. Com 2 lados dá o mesmo de antes. Quando o P0 entrar, apagar as reservas.
+- **Depois do P0:** as reservas que eu tinha posto (`foes`, `foeBase`) saíram; fica `eBase(t, x, z)` (com 2 lados `S.base[1 - t]`, com 3 o `foeBase` do P0), usado em 5 lugares que liam `S.base[1 - t]` (`ptThreat`, abrigo de infantaria, prédio de drone, `crewMove`, `droneRail`).
 
 ## O que NÃO foi testado
 
 - Nada da suíte de testes rodou (regra do capitão). O harness de testes (`tests/harness.js`) já falha ao carregar na main de hoje (`aarShow`, `m5Lg`, `mmMan` ficam depois do marcador `3D scene`), sem relação com esta mudança.
-- Só rodei, fora do repositório: `genTerrain('modern', 9, 3)` gera 3 bases, 5 estradas (`ends` certos), sede em HS2 e 17 pontos; `newState(..., { N: 3 })` monta pontos, obras e jazidas. Depois dos merges (P2, P4, P6a…) e das reservas acima, uma partida solo de 3 lados roda 60 s com a economia ligada sem exceção nem NaN (`node /home/luiz/firstmate/data/cf-3l-p1-mapa/smoke3.js <repo> modern FF 60`); a de 1944 roda 30 s. Não olhei se a partida faz sentido.
+- Só rodei, fora do repositório: `genTerrain('modern', 9, 3)` gera 3 bases, 5 estradas (`ends` certos), sede em HS2 e 17 pontos; `newState(..., { N: 3 })` monta pontos, obras e jazidas. Depois dos merges (P0, P2, P4, P6a…), uma partida solo de 3 lados roda 60 s com a economia ligada sem exceção nem NaN (`node /home/luiz/firstmate/data/cf-3l-p1-mapa/smoke3.js <repo> modern FF 60`); a de 1944 roda 30 s. Não olhei se a partida faz sentido.
 - Não vi o mapa na tela (o navegador headless não abriu a página). Não sei como ficam B2, as estradas retas e a sede HS2 no 3D e no mapa 2D.
 - Regressão de 2 lados (Frente de 1944 e Frente atual) não foi medida: pela leitura, os mesmos números (mesma ordem de obras, mesmos `rs`, mesmo `T.mid`), só o `MAPV` sobe para 9.
 

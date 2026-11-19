@@ -7,6 +7,8 @@
    reasons. With BEFORE=<commit|page>, the same seeded AI battle is compared with the page before W21 (SECS, default 90); without it that part is not run */
 const fs = require('fs'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 90;
+/* the radio's delay on the commander's orders (W15, tests/comms.js) is off here, so an order is in force as it is answered; one check below runs with it on */
+const load = o => { const C = H.load(o); C.$('CN').on = 0; return C; };
 const solo = (C, era) => C.newState(era, C.$('ERAS')[era].sides[0].fighter, { cls: 'plane' });
 const park = S => { const P = S.my; if (P) { P.inv = 9; P.dead = false; P.y = 3000; P.v.y = 0; P.hp = P.def.hp; } S.lives = 9; };
 const lead = q => q.men.find(m => !m.dead && !m.gone);
@@ -14,14 +16,14 @@ const near = (o, p) => Math.hypot(o.x - p.x, o.z - p.z);
 /* the way passes within d m of p */
 const via = (w, p, d) => { for (let i = 1; i < w.length; i++) { const a = w[i - 1], b = w[i], ex = b.x - a.x, ez = b.z - a.z, L = ex * ex + ez * ez || 1, t = Math.max(0, Math.min(1, ((p.x - a.x) * ex + (p.z - a.z) * ez) / L)); if (Math.hypot(p.x - a.x - ex * t, p.z - a.z - ez * t) < d) return true; } return false; };
 const world = () => {
-  const C = H.load({ seed: 7, mapv: 5 }), S = solo(C, 'modern');
+  const C = load({ seed: 7, mapv: 5 }), S = solo(C, 'modern');
   C.run(60, () => park(S));
   return { C, S, $: C.$, cmd: (c, by, t) => C.genCmd(t || 0, c, by || 'me') };
 };
 const free = (S, t) => S.squads.filter(q => q.team === (t || 0) && !q.net && q.live >= 2 && !q.state && !q.op && !q.lift && !q.rd && lead(q));
 /* an empty battlefield with the points (map v5): nothing spawns, no manoeuvre or assault of the AI's; squads put down by hand; the planner each second */
 const fresh = (era, eco) => {
-  const C = H.load({ seed: 5, mapv: 5, eco }), $ = C.$; C.seed(7);
+  const C = load({ seed: 5, mapv: 5, eco }), $ = C.$; C.seed(7);
   const S = C.newState(era, $('ERAS')[era].sides[0].fighter, { cls: 'plane' }); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; for (const f of S.fld) f.next = 1e9;
   for (const t of [0, 1]) { const Cm = $('cmdOf')(t); Cm.mnT = 1e9; Cm.atkT = 1e9; }
   return { C, S, $ };
@@ -51,7 +53,7 @@ console.log('-- refusals --');
   ok(cmd({ c: 'ord', k: 'amb', x, z, rt: [x, z] }).why === 'rt' && cmd({ c: 'req', k: 'cas', x, z, rt: [x, z] }).why === 'rt' && cmd({ c: 'fort', k: 'sup', x, z, rt: [x, z] }).why === 'rt', 'a route where it has no meaning (ambush, air support, supply base): rt');
   ok(cmd({ c: 'req', k: 'smoke', x, z }).why !== '' && !cmd({ c: 'req', k: 'smoke', x, z }).ok, 'there is no smoke request (smoke is the fire mission\'s own)');
   ok(cmd({ c: 'ord', k: 'esc', x: 60, z: S.HW - 60 }).why === 'esc', 'an escort with no own vehicle near: esc');
-  const C2 = H.load({ seed: 7, mapv: 3 }), S2 = solo(C2, 'modern'); C2.run(30); C2.genCtl(0, 'me', { eco: 1, atk: 0, def: 1, sup: 1 });
+  const C2 = load({ seed: 7, mapv: 3 }), S2 = solo(C2, 'modern'); C2.run(30); C2.genCtl(0, 'me', { eco: 1, atk: 0, def: 1, sup: 1 });
   const q2 = S2.squads.find(q => q.team === 0 && q.live > 0 && lead(q)), L2 = q2 && lead(q2);
   ok(!!L2 && C2.genCmd(0, { c: 'ord', k: 'def', x: L2.x + 50, z: L2.z }, 'me').why === 'mv' && C2.genCmd(0, { c: 'move', x: L2.x + 50, z: L2.z, ids: [q2.id], rt: [L2.x + 20, L2.z] }, 'me').why === 'mv', 'before the road network (map v3): mv');
   ok(!!L2 && C2.genCmd(0, { c: 'move', x: L2.x + 50, z: L2.z, ids: [q2.id] }, 'me').ok, 'and the orders without a route are as they were there');
@@ -212,7 +214,7 @@ console.log('-- fortify: every kind, the general picks the builder --');
 
 console.log('-- the AI general\'s flank walks a composite route; a person\'s flank walks his own --');
 {
-  const C = H.load({ seed: 5, mapv: 4 }), $ = C.$, S = (() => { C.seed(7); const S = C.newState('ww2', $('ERAS').ww2.sides[0].fighter, { cls: 'plane' }); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; for (const f of S.fld) f.next = 1e9; return S; })();
+  const C = load({ seed: 5, mapv: 4 }), $ = C.$, S = (() => { C.seed(7); const S = C.newState('ww2', $('ERAS').ww2.sides[0].fighter, { cls: 'plane' }); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; for (const f of S.fld) f.next = 1e9; return S; })();
   const P = S.cq.p, F = P.find(p => p.k === 'x'), W = S.T.net.n.find(n => n.id === 'W'), Cm = $('cmdOf')(0);
   const pool = [sq(C, 0, W.x - 40, W.z + 60, 'push'), sq(C, 0, W.x + 20, W.z + 90, 'push')], fr = [sq(C, 0, W.x - 80, W.z - 40), sq(C, 0, W.x - 60, W.z + 20), sq(C, 0, W.x - 30, W.z - 30), sq(C, 0, W.x + 30, W.z - 60)];
   const ax = $('routeAt')(S.T.routes[0], 6253), foe = [0, 1, 2].map(i => sq(C, 1, ax.x + i * 40, ax.z));
@@ -244,7 +246,7 @@ console.log('-- a fire request among civilians in sight: the rules of engagement
 {
   /* the oracle is the fire mission's own contract (tests/civ-war.js): a model's strike there is refused roe, a person's is accepted as theirs
      (M.usr) with a warning, the AI's own is not weighed by roeHeld at the order */
-  const C = H.load({ seed: 37 }), $ = C.$, S = $('sandbox')('modern'); $('cqInit')(1); $('civBegin')(); $('civInit')(); C.run(2);
+  const C = load({ seed: 37 }), $ = C.$, S = $('sandbox')('modern'); $('cqInit')(1); $('civBegin')(); $('civInit')(); C.run(2);
   const n = new Map(); for (const c of S.civs) if (c.g && c.g.b) n.set(c.g, (n.get(c.g) || 0) + 1);
   const g = [...n.keys()].sort((a, b) => n.get(b) - n.get(a))[0], b = g.b, Cm = $('cmdOf')(0);
   const L = S.civs.filter(c => c.g === g && !c.dead && !c.gone && !c.in).slice(0, 6), p = { x: L[0].x, z: L[0].z };
@@ -266,6 +268,16 @@ console.log('-- a fire request among civilians in sight: the rules of engagement
   clear(); C.genCtl(0, 'me'); pin();
   r = C.genCmd(0, { c: 'req', k: 'fire', x: p.x, z: p.z, n: 3 }, 'ai');
   ok(r.ok && live().length === 1 && !live()[0].usr, 'the AI\'s own fire request: queued, its battery\'s rules weigh it when it fires (' + (r.why || 'accepted') + ')');
+}
+
+console.log('-- with the radio on (W15): the order is on its way, then in force with its route and words --');
+{
+  /* oracle: CN.in, the published radio delay inside the HQ's reach (2 to 5 s); before it the squad keeps its old order, after it the attack */
+  const C = H.load({ seed: 7, mapv: 5 }), S = solo(C, 'modern'), $ = C.$; C.run(60, () => park(S)); C.genCtl(0, 'me', { eco: 1, atk: 0, def: 1, sup: 1 });
+  const pi = S.cq.p.findIndex(p => p.hold === 1), P = S.cq.p[pi], r = C.genCmd(0, { c: 'ord', k: 'atk', pi, n: 2, why: 'tomar a vila' }, 'me'), op = S.cmd[0].ops.find(o => o.id === r.id), qs = op ? op.sq.slice() : [];
+  ok(r.ok && qs.length === 2 && qs.every(q => q.cnP && q.cnP.O.k === 'assault' && q.ord.k !== 'assault'), 'answered ok at once, the attack on its way by radio (' + (r.why || r.id) + ')');
+  C.run($('CN').in[1] + 1, () => park(S));
+  ok(qs.every(q => !q.cnP && q.ord.k === 'assault' && q.ord.wp && near(q.ord.wp[q.ord.wp.length - 1], P) < 1 && q.mis.kind === 'attack' && q.mis.why === 'tomar a vila'), 'within ' + ($('CN').in[1] + 1) + ' s each squad assaults along its own way, its mission attack with the general\'s words');
 }
 
 console.log('-- nothing changes a battle no one commands --');

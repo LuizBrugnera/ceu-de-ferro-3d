@@ -41,6 +41,7 @@ async function send(c, cmd, wait) {
   if (!q) { ok(false, 'no free squad of the host'); } else {
     const T = { x: Math.round(L.x + 300), z: Math.round(L.z + 80) }, w = { x: Math.round(L.x + 120), z: Math.round(L.z - 150) };
     const r = await send(g1, { c: 'ord', k: 'def', x: T.x, z: T.z, ids: [q.id], rt: [w.x, w.z], why: 'segurar a ponte' });
+    await run(6, () => (q.op && !q.cnP && q.ord.k === 'hold' ? false : undefined));   // the host's radio (W15) brings the order in 2 to 5 s
     ok(r.ok && q.op && q.op.v === 'def' && q.ord.k === 'hold', 'the guest\'s ord def with a route: answered ok, the host\'s squad holds in an abstract operation (' + (r.why || r.id) + ')');
     ok(q.mis && q.mis.route && q.mis.route.length === 1 && q.mis.route[0].x === w.x && q.mis.why === 'segurar a ponte', 'the squad\'s mission carries the route and the general\'s words');
     let seen = null; await run(4, () => { const o = g1.genVM(0, false).ops.find(o => o.k === 'usr' && o.id === r.id); if (o) { seen = o; return false; } });

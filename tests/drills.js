@@ -271,9 +271,16 @@ console.log('-- the review and the cost --');
   ok(R.drills[1] === null || $('anaReport')(ev, 0).drills[1] === null, 'a side\'s view of a match on keeps the other side\'s drills out');
 }
 if (SECS) {
-  const cost = on => { const C = H.load({ seed: 5, mapv: 4 }); C.performance = require('perf_hooks').performance; C.$('DRILL').on = on; C.newState('ww2', null, { watch: 1 }); C.run(Math.min(SECS, 90)); return C.$('AIB').stat(); };
-  const a = cost(0), b = cost(1);
+  /* the drills' own time: the pick (every drill's when) and every act, ctl, man and end, timed inside one battle, against the AI's frame
+     in that battle. Two battles, drills off and on, are printed too, but they play out differently, so their means differ by more than the drills cost */
+  const cost = on => {
+    const C = H.load({ seed: 5, mapv: 4 }), P = require('perf_hooks').performance; C.performance = P; C.$('DRILL').on = on; const T = C.T = { t: 0 }; C.P = P;
+    if (on) { for (const D of C.$('DRILLS')) for (const k of ['act', 'ctl', 'man', 'end']) if (D[k]) { const f = D[k]; D[k] = function () { const a = P.now(); try { return f.apply(this, arguments); } finally { T.t += P.now() - a; } }; }
+      C.$('drPick = (f => (o, b) => { const a = P.now(); const r = f(o, b); T.t += P.now() - a; return r; })(drPick)'); }
+    C.newState('ww2', null, { watch: 1 }); let fr = 0; C.run(Math.min(SECS, 90), () => { fr++; }); return Object.assign({ dr: T.t / fr }, C.$('AIB').stat());
+  };
+  const a = cost(0), b = cost(1), own = b.dr;
   console.log('  AI ms a frame, without the drills: mean ' + a.avg + ', worst ' + a.worst + '; with them: mean ' + b.avg + ', worst ' + b.worst);
-  ok(b.avg <= a.avg * 1.25 + .1, 'the drills cost little of the AI\'s frame (mean ' + a.avg + ' -> ' + b.avg + ' ms)');
+  ok(own <= b.avg * .05 + .02, 'the drills cost little of the AI\'s frame (' + own.toFixed(3) + ' ms of its ' + b.avg + ' ms mean in the drills themselves)');
 }
 H.done();

@@ -25,10 +25,11 @@ console.log('-- the kinds and where they may stand --');
 fresh('ww2');
 {
   const p = flat();
-  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length === 10 && FORT.K[7].span && FORT.K[9].span, 'four more kinds of work (and after them the pontoon, 7, and the radio relay, 8, and a bridge\'s rebuild, 9): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
+  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length === 11 && FORT.K[7].span && FORT.K[9].span && FORT.K[10].span, 'four more kinds of work (and after them the pontoon, 7, the radio relay, 8, a bridge\'s rebuild, 9, and a new bridge, 10): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
   ok(C.fortWhy(6, 0, p.x, p.z, 0) === 'era' && C.fortWhy(3, 0, p.x, p.z, 0) === '', 'the anti-rocket dome only in the modern era; the anti-tank post in both');
-  for (const k of [3, 4, 5]) for (let i = 0; i < FORT.K[k].cap; i++) build(k, 0, p.x + 30 * i, p.z + 40 * k);
-  ok([3, 4, 5].every(k => C.fortWhy(k, 0, p.x - 60, p.z + 40 * k, 0) === 'bcap'), 'a side has at most ' + [3, 4, 5].map(k => FORT.K[k].cap).join(', ') + ' of them');
+  const cap = k => $('fortCap')(0, k);   // the base cap grown by the side's economy tier and points held (cf-construir-mais)
+  for (const k of [3, 4, 5]) for (let i = 0; i < cap(k); i++) build(k, 0, p.x + 30 * (i % 4), p.z + 40 * k + 12 * Math.floor(i / 4));
+  ok([3, 4, 5].every(k => cap(k) >= FORT.K[k].cap && C.fortWhy(k, 0, p.x - 60, p.z + 40 * k, 0) === 'bcap'), 'a side has at most ' + [3, 4, 5].map(cap).join(', ') + ' of them (base ' + [3, 4, 5].map(k => FORT.K[k].cap).join(', ') + ')');
 }
 {
   const E = H.load({ seed: 5, eco: true }); S = ecoState(E, 'modern'); T = S.T;

@@ -26454,18 +26454,22 @@ gorTarget = (g => (px, py, shift) => {
 })(gorTarget);
 /* the economy at a glance (W13), on every tab: the general makes every unit (the factories, from energy and metal) and sends each out with a
    mission (Dispatch). Stock and cap of each resource with what comes in and goes out a minute, the queue and what it still costs, the last
-   dispatches (the host's Dispatch log; a guest's, the log lines of its general's dispatches) */
+   dispatches (the host's Dispatch log; a guest's, the log lines of its general's dispatches). Whose: the side on the view (GV.t) when this page
+   may see its economy (gorEconSide): a player its own side only (fog of war: never the enemy's), a watch or a spectator either side */
+const gorEconSide = () => (!S || !S.eco ? -1 : GV.t === S.me || S.watch || S.spec ? GV.t : -1);
 function gorEcon(V) {
-  const el = $('#genEcon'), E = S.eco && GV.t === S.me ? gorEco() : null;
+  const t = gorEconSide(), el = $('#genEcon');
+  let E = null; if (t >= 0) try { E = ecoView(t); } catch (x) { E = null; }
   if (el.hidden !== !E) el.hidden = !E;
   if (!E) return;
-  const host = !S.net || S.host, D = host && S.dsp && S.dsp.log ? S.dsp.log[S.me] || [] : null, n = v => Math.round(v);
+  const host = !S.net || S.host, D = host && S.dsp && S.dsp.log ? S.dsp.log[t] || [] : null, n = v => Math.round(v);
   const dl = D ? D.slice(-3).reverse().map(d => 'Despacho ' + (d.n || 1) + (d.n > 1 ? ' unidades' : ' unidade') + ' · missão ' + (MISN[d.kind] || 'da classe') + (d.why ? ' — ' + d.why : '') + ' · há ' + n(S.t - d.t) + ' s')
-    : ((S.glog && S.glog.l[S.me]) || []).filter(e => /^Despacho/.test(e.s)).slice(-3).reverse().map(e => e.s + ' · há ' + n(S.t - e.t) + ' s');
+    : ((S.glog && S.glog.l[t]) || []).filter(e => /^Despacho/.test(e.s)).slice(-3).reverse().map(e => e.s + ' · há ' + n(S.t - e.t) + ' s');
   const left = { en: 0, mt: 0 }; for (const q of E.q) { const c = E.costs[q.k]; if (c) { left.en += c[0] * (1 - q.p); left.mt += c[1] * (1 - q.p); } }
   const cur = E.q.find(q => !q.why), nm = k => (ECO.site[k] ? ECO.tx.nm[k] : ECO.tx.u[k]) || k;
-  const sg = JSON.stringify([n(E.stock.en / 5), n(E.stock.mt / 5), n(E.inc.en), n(E.inc.mt), n(E.use.en), n(E.use.mt), E.q.length, n(left.en / 10), n(left.mt / 10), cur && [cur.k, n(cur.p * 10)], dl.map(s => s.replace(/há \d+ s$/, '')), D && D.length && n((S.t - D[D.length - 1].t) / 10)]);
+  const sg = JSON.stringify([t, n(E.stock.en / 5), n(E.stock.mt / 5), n(E.inc.en), n(E.inc.mt), n(E.use.en), n(E.use.mt), E.q.length, n(left.en / 10), n(left.mt / 10), cur && [cur.k, n(cur.p * 10)], dl.map(s => s.replace(/há \d+ s$/, '')), D && D.length && n((S.t - D[D.length - 1].t) / 10)]);
   if (GOR.sig.econ === sg) return; GOR.sig.econ = sg;
+  $('#genEcon h3').textContent = 'Economia do general' + (t !== S.me || S.watch || S.spec ? ' · ' + S.E.sides[S.fac[t]].name : '');   // whose, when it can be either side's
   const row = (lbl, k, cls) => { const st = E.stock[k], cap = E.cap[k], inc = E.inc[k], use = E.use[k], net = inc - use, bar = gE('i', cls), u = gE('u'); u.style.width = Math.round(100 * clamp(st / cap, 0, 1)) + '%'; bar.appendChild(u);
     const a = gE('span', '', lbl + ' ' + n(st)), b = gE('small'); b.append(gE('span', 'up', '+' + n(inc)), ' −' + n(use) + '/min = ', gE('span', net >= 0 ? 'up' : 'dn', (net >= 0 ? '+' : '−') + n(Math.abs(net))));
     a.title = lbl + ': ' + n(st) + ' de ' + cap + '; entra ' + n(inc) + ' e sai ' + n(use) + ' por minuto'; return [a, bar, b]; };

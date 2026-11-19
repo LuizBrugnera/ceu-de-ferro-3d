@@ -30,6 +30,7 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
   - Elas seguram o gargalo, e o ponto passa a ser o primeiro do `cmdAttack` (`C.pref`).
   - Acaba quando o ponto é tomado ou muda de mãos, ou quando o inimigo no gargalo é mais que o dobro.
 - **P4 Infiltração pelas abordagens**: o `MANG.inf` usa a abordagem menos vista do ponto (≤ 30%) quando o plano já existe. Na primeira vez ele só pede o plano; sem plano, usa o `footPath` de antes.
+- O evento `ap` da medição (M0) ganhou o campo `pr`, com o procedimento escolhido.
 - `PR.on = 0` volta ao assalto do M2, para o A/B.
 
 ## O que NÃO foi testado
@@ -48,6 +49,7 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 - **P12**: a esquadra de reconhecimento que achou resistência fica como fixação onde está, possivelmente sob fogo.
 - **P5**: a esquadra da exploração sai da operação e fica parada no gargalo até ser chamada de novo.
 - **P3**: o `netPath` a pé e o gargalo usam só o mapa do lado. As duas esquadras saem dos postos (`manFree`), e a linha afina.
+- **M5 (blindados fora do trilho)**: o `m5Atk` só chama blindados nos estados `form`, `prep` e `screen`. Nos estados novos (`mv`, `rec`) não chama, e o apoio pode chegar tarde. O M4 e o M5 entraram no `main` junto com este pacote, e a combinação não foi vista em partida.
 - **Sorteio**: `Math.random`, como o `cmdManJob`. Repetição e memória são do M6.
 
 ## Como testar depois

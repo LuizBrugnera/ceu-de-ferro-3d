@@ -127,7 +127,7 @@ for (const era of ['modern', 'ww2']) {
   const g2 = H.load({ mapv: 5, seed: 11 }), $2 = g2.$, S = g2.watch(era, {}), L = $2('brs()');
   $2('MAN').max = { cautious: 9, balanced: 9, aggressive: 9 };   // the AI's own manoeuvres leave the general room for these
   g2.run(90);
-  ok(L.every(b => S.os[b.id] === 0) && !S.cmd.some(C => C.ops.some(o => o.k === 'dem')), era + ': the race for the crossing at the start of a match is no retreat: no bridge goes down in the first 90 s');
+  ok(!S.cmd.some(C => C.ops.some(o => o.k === 'dem')) && ![0, 1].some(t => S.glog.l[t].some(e => /Demolição/.test(e.s))), era + ': the race for the crossing at the start of a match is no retreat: the general blows no bridge in the first 90 s (' + L.filter(b => S.os[b.id] > 1).length + ' down by the fighting)');
   if (era === 'modern') { ok(H.nan(S) === null, 'no NaN'); continue; }   // the whole of both manoeuvres once (1944): an AI battle of a quarter of an hour
   const t = 0, C = $2('cmdOf')(t); C.mcd = {};
   const sq = $2('manFree')(S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state));
@@ -145,8 +145,8 @@ for (const era of ['modern', 'ww2']) {
   ok(lg.some(s => /Demolição: esquadra a caminho/.test(s)) && lg.some(s => /carga\(s\) armada/.test(s)) && lg.some(s => /destruída/.test(s)), 'the log tells it: on its way, charges set, the bridge down');
   const q = $2('genQuery')(t, { q: 'brg' });
   ok(q.ok && q.br.length === 6 && q.br[b.i].st === 'down' && q.br[b.i].open === 0 && q.br.filter(x => x.st === 'ok').length === 5, 'the question brg: six bridges, that one down and shut');
-  const r2 = $2('genCmd')(t, { c: 'man', k: 'demolish', x: b.x, z: b.z }, 'sys');
-  ok(!r2.ok && r2.why === 'down', 'demolish again: refused (down)');
+  C.mcd = {}; const r2 = $2('genCmd')(t, { c: 'man', k: 'demolish', x: b.x, z: b.z }, 'sys');   // past the manoeuvre's cooldown, so the refusal is the bridge's
+  ok(!r2.ok && r2.why === 'down', 'demolish again: refused (' + (r2.why || 'ok') + ')');
   const c2 = $2('genCmd')(1 - t, { c: 'man', k: 'cross', x: L[0].x, z: L[0].z }, 'sys');
   ok(!c2.ok && c2.why === 'whole', 'cross at a bridge that stands: refused (whole)');
   C.mcd = {};

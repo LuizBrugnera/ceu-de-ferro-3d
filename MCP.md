@@ -70,6 +70,7 @@ Foi provado contra o jogo de verdade (anfitrião rodando a página, economia lig
 - Um assalto só é aceito em ponto ligado a um ponto seu (recusa `link`) e há no máximo 3 operações ao mesmo tempo.
 - Eventos de "ponto trocou de dono", "instalação perdida" e "assalto terminou" do `wait` estão implementados mas não os vi disparar nas rodadas de teste de 2 minutos; os de operação iniciada, reforço e instalação pronta, sim.
 - O `get_state` completo tem de 5 a 8 KB; peça `log_lines: 0` para economizar.
+- As ordens vão pelo rádio, como as de um general jogador: `send_command` volta aceito na hora, mas a esquadra só recebe a ordem de 2 a 5 s depois dentro da rede de comando, de 20 a 60 s fora dela e nunca enquanto um bloqueador a corta (perdida em 90 s). No mapa do `get_state`, cada esquadra traz `radio` (`in net`, `out of net`, `cut`) e `orderArrivesInS` quando há ordem a caminho (-1: esperando a ligação voltar), e `commandNet` diz o estado do QG (`up`, `down`, `alt`), o ritmo do plano e os nós da rede. Sem o QG o comando da IA do seu lado planeja a cada 9 s.
 - A chave `CEU_KEY` fica no `.mcp.json` em texto simples; use uma chave de uso local. O servidor aceita uma ponte por lado.
 - Se o anfitrião sair, o servidor passa a partida ao próximo jogador (testado só sem a ponte); sem nenhum jogador na sala as ordens voltam recusadas.
 - Testado só com partidas curtas (cerca de 7 minutos de jogo) e sem humano no outro lado; uma partida longa, com o modelo jogando de verdade, ainda não foi vista.

@@ -108,9 +108,10 @@ console.log('-- the threat board: incidents, triage, the response --');
   for (const op of Cm.ops.slice()) if (op.k === 'qrf') $('opEnd')(Cm, op);
   Cm.thb = []; S.gj = [];
   const pi = P.findIndex(p => p.hold === t && p.base < 0 && !p.tw), p = P[pi], dx = S.base[0].x < p.x ? -1 : 1;
-  foeAt(p.x + dx * 150, p.z, 20); keep.push(...Cm.known.slice(-20)); look();
+  const nf = Math.max(20, Math.ceil($('thbOwn')(t, p.x, p.z, THB.r) * 1.6));   // worth an answer whatever the match put there before (the urgency is foe over own)
+  foeAt(p.x + dx * 150, p.z, nf); keep.push(...Cm.known.slice(-nf)); look();
   const I = Cm.thb.find(I => I.key === 'p' + pi);
-  ok(I && I.k === 'pt' && I.foe === 20 && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + 9.5)) < 1, 'twenty known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
+  ok(I && I.k === 'pt' && I.foe === nf && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + (nf - 1) / 2)) < 1, nf + ' known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
   const op = I && I.op;
   ok(I && I.st === 'resp' && op && op.k === 'qrf' && !op.over, 'triage answers it: a response operation (qrf)');
   if (op) {

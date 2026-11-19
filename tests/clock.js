@@ -29,7 +29,7 @@ console.log('-- CLK: the battle keeps to the clock as the frames slow down --');
   r = run(4, 10, 30);
   ok(Math.abs(r.ratio - 4 * Math.floor(K.budget / 30) * K.hmax) < .03 && r.ratio > .2 * 1.9, 'at 4 frames a second with steps of 30 ms: ' + r.ratio.toFixed(2) + 'x (before .2x, and three steps a frame then too): the budget spent on longer steps');
   r = run(4, 10, 2 * K.budget);
-  ok(r.n <= 40 + Math.ceil(K.catch / K.h) && r.dmax <= K.hmax + 1e-9, 'a step dearer than the whole budget: one a frame, of 1/30 s (' + r.ratio.toFixed(2) + 'x), the frames are not held up more');
+  ok(r.n <= 40 * 2 + Math.ceil(K.catch / K.h) && r.dmax <= K.hmax + 1e-9 && r.ratio >= 4 * K.least - 1e-6, 'a step dearer than the whole budget: two a frame of 1/30 s, never less battle a frame than the .05 s of before (' + r.ratio.toFixed(2) + 'x, before .2x)');
   r = run(2, 10, 2);
   ok(Math.abs(r.ratio - K.catch * 2) < 1e-6, 'below ' + 1 / K.catch + ' frames a second it slows down, no more than catch a frame (' + r.ratio.toFixed(2) + 'x at 2 frames a second)');
   const p = K.plan(30, 1);

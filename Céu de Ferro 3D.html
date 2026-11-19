@@ -8436,11 +8436,13 @@ function mindThink(o) {
   const M = o.mis, bt = belief(o), W = MIND.w, sc = { duty: W.duty + W.thr * Math.min(bt.thr, 6) }, s = mStr(o);
   if (M && s < M.brk && bt.thr > .3 && !o.men && !o.fixed) sc.fall = W.fall + (M.brk - s) + .05 * bt.thr;
   const R = o.help; if (R && R.resp === o && (R.st === 'on')) sc.help = R.u + MIND.stick;
+  const dp = drPick(o, bt); if (dp) sc.drill = dp.u;   // a procedure its perception has set off, by its urgency (DRILLS)
   const was = o.mind && o.mind.k; let k = 'duty';
   for (const j in sc) if (sc[j] > sc[k]) k = j;
   if (was && was !== k && sc[was] !== undefined && sc[was] + MIND.hyst >= sc[k]) k = was;
-  o.mind = { k, sc, thr: +bt.thr.toFixed(2), n: bt.n, T: S.t };
-  if (R && R.resp === o && k !== 'help') helpRefuse(R, o);
+  o.mind = { k, sc, thr: +bt.thr.toFixed(2), n: bt.n, T: S.t, dr: k === 'drill' ? dp.D.id : null };
+  if (k === 'drill') drRun(o, dp); else if (o.dr) drEnd(o, 'mind');
+  if (R && R.resp === o && k !== 'help' && k !== 'drill') helpRefuse(R, o);   // a drill is a moment's: the call it answers waits for it
   if (k === 'fall' && was !== 'fall') mindFall(o);
   if (!o.hq || o.hq.st === 'done' || o.hq.st === 'gone') mindAsk(o, bt);
 }
@@ -8675,9 +8677,9 @@ function mindStep(dt) {
 let mindWrapped = false;
 function mindWrap() {   // the gate goes round the controllers last, after every other layer has had its say
   if (mindWrapped) return; mindWrapped = true;
-  for (const k in AI) AI[k] = (g => (u, dt) => { g(u, dt); mindGate(u); })(AI[k]);
+  for (const k in AI) AI[k] = (g => (u, dt) => { g(u, dt); drStep(u, dt); mindGate(u); })(AI[k]);
   aiMan = (g => (m, dt) => { g(m, dt); if (!m.down) mindGate(m); })(aiMan);
-  aiPlane = (g => (p, dt) => { g(p, dt); mindGate(p); })(aiPlane);
+  aiPlane = (g => (p, dt) => { g(p, dt); drStep(p, dt); mindGate(p); })(aiPlane);   // a helicopter's too (aiPlane hands it to aiHeli)
 }
 step = (g => dt => { mindWrap(); g(dt); mindStep(dt); })(step);
 /* a player's calls and answers: 9 calls for what he needs where he is (in a vehicle, a repair when hurt, else clearing round it; on foot, fire on where he aims,
@@ -8717,6 +8719,517 @@ Net.rx.hask = m => {
   const R = helpAsk(g, NEEDK[m.k], g, { x: m.q[0], z: m.q[1] }); if (R) R.pid = m.from;
 };
 Net.rx.hacc = m => { const g = Net.ghosts.get(m.from), R = S && S.help && S.help.l.find(R => R.id === m.id); if (S && S.net && S.host && g && !g.dead && R) helpTake(R, g); };
+/* ---------- procedures (drills): the trained reactions of a unit, part of its mind ----------
+   A drill is a standing procedure a unit follows when its own perception sets it off, as soldiers are drilled to: a tank in sight and no
+   anti-tank weapon, shells falling round it, an ambush. DRILLS is the one table, for every class (drCls: inf a squad, tank, lav, car, truck,
+   aa, art, rad, plane, heli). An entry:
+     id: its name (what the unit, its history and the review record); cls: the class it is for; s: what it is, in Portuguese;
+     when(o, bt, d, K): its urgency now, or 0. It reads only what o has perceived: its beliefs (o.bel, belief's bt), the bursts and the mines it
+       saw go off (o.drB, o.drM), what has hit it and its own state; never the world. A number, or { u, ... } whose other fields go into the
+       record (the contact it answers: of, x, z). d: the record when this drill is the one under way; K: drInfo, a squad's men and kit;
+     act(o, d): once, when o takes it up, and again when the drill asks (d.re); end(o, d): when it is over;
+     man(q, d, m, A, best): a squad's, for each of its soldiers after his own thinking (sqMan): where he goes and how;
+     ctl(o, d, dt): a vehicle's or an aircraft's, each step after its controller and before the gate (drStep): what it does to its controls;
+     lat: it takes the unit toward the enemy, which a mission with latitude 0 does not allow; fire: it fires of its own accord, which roe hold
+     does not allow (the gate, mindGate, binds every shot after it all the same); min: s it lasts once taken (DRILL.min); max: s at most
+     (DRILL.max); cool: s before the same one again (DRILL.cool).
+   Each think of the mind (mindThink, every MIND.every s) scores the best drill set off (drPick) beside duty, fall and help: when its urgency
+   wins (with MIND.hyst, and DRILL.stick for the one under way) the mind's choice is 'drill', o.dr the record (id, s, T0, u, what set it off),
+   drRun starts it and drEnd closes it into o.drH (the last hist: [id, from, to]) once it is not the best any more, has run max s or its when
+   is 0. A call o answers waits while it drills; the mission's leash bounds where a drill takes it (drLeash). How many times each side took
+   each drill goes into the analytics' snapshots (sn dr) and the after-action review (drills). Only where the battle is simulated */
+const DRILL = { on: 1, stick: .3, min: 3, max: 90, cool: 20, hist: 8 };
+const DRILLS = [];
+const drCls = o => (o.men ? 'inf' : o.heli ? 'heli' : o.def && o.def.vmax ? 'plane' : o.kind || '');
+const drOf = id => DRILLS.find(D => D.id === id);
+const drCount = () => S.drN || (S.drN = { all: [{}, {}], sn: [{}, {}] });
+/* what a squad is and has, once a think, for its drills: null when it cannot drill (broken, aboard, gone) */
+function drInfo(q) {
+  if (q.state || (q.rd && q.rd.st === 'ride') || q.lift) return null;
+  const live = q.men.filter(m => !m.dead && !m.down && m.ai), L = live[0]; if (!L) return null;
+  const O = q.ord || {}, K = { live, L, O, at: false, sam: false, hitT: -99, sup: 0, mv: !q.at && !['hold', 'observe', 'mortar', 'ambush', 'overwatch', 'supply', 'build'].includes(O.k) };
+  let am = 0, af = 0;
+  for (const m of live) {
+    const s = m.arms[1], a = m.arms[0]; if (s && s.mag + s.res > 0) { if (s.d.k === 'heat' || s.d.k === 'atgm') K.at = true; if (s.d.k === 'sam') K.sam = true; }
+    if (m.hitT > K.hitT) K.hitT = m.hitT; if (m.sup > S.t) K.sup++;
+    if (a && a.d.mags) { am += a.res + a.mag / a.d.mag; af += a.d.mags + 1; }
+  }
+  K.ammo = af ? am / af : 1; K.str = mStr(q);
+  K.near = belTop(q, b => b.d < IAI.see && S.t - b.t < 3 && b.c !== 'plane' && b.c !== 'heli');   // the nearest ground threat it has fresh
+  const c = !!K.near || S.t - K.hitT < 2.5; K.first = c && S.t - (q.drCt || -1e9) > DRILL.inf.con.calm; if (c) q.drCt = S.t;
+  return K;
+}
+/* the drill o would take now (the best one set off, with its urgency), or null */
+function drPick(o, bt) {
+  if (!DRILL.on || !DRILLS.length) return null;
+  const c = drCls(o), M = o.mis, cur = o.dr, K = o.men ? drInfo(o) : null; let best = null;
+  if (o.men && !K) return null;
+  for (const D of DRILLS) {
+    if (D.cls !== c) continue;
+    const on = !!cur && cur.id === D.id;
+    if (on ? S.t > cur.T : (M && M.lat === 0 && D.lat) || (M && M.roe === 'hold' && D.fire) || S.t < ((o.drC && o.drC[D.id]) || 0)) continue;
+    let f = D.when(o, bt, on ? cur : null, K);
+    if (!f) { if (on && S.t - cur.T0 < (D.min || DRILL.min)) f = cur.u - DRILL.stick; else continue; }
+    const u = (typeof f === 'number' ? f : f.u) + (on ? DRILL.stick : 0);
+    if (!best || u > best.u) best = { D, u, f };
+  }
+  return best;
+}
+/* o takes up the drill p (drPick's), or keeps on with it */
+function drRun(o, p) {
+  const D = p.D, d = o.dr, f = typeof p.f === 'object' ? p.f : null;
+  if (d && d.id === D.id) { if (f) Object.assign(d, f); d.u = p.u; if (d.re && D.act) { d.re = 0; D.act(o, d); } return; }
+  if (d) drEnd(o, 'next');
+  const n = (o.dr = Object.assign({ id: D.id, s: D.s, T0: S.t, T: S.t + (D.max || DRILL.max), n: 0 }, f, { u: p.u })), C = drCount(), t = o.team;
+  if (t === 0 || t === 1) { C.all[t][D.id] = (C.all[t][D.id] || 0) + 1; C.sn[t][D.id] = (C.sn[t][D.id] || 0) + 1; }
+  if (D.act) D.act(o, n);
+}
+/* o's drill is over: into its history, the same one only after cool s, and its men back to their order */
+function drEnd(o) {
+  const d = o.dr; if (!d) return;
+  o.dr = null;
+  const D = drOf(d.id); if (D && D.end) D.end(o, d);
+  (o.drC || (o.drC = {}))[d.id] = S.t + ((D && D.cool) || DRILL.cool);
+  const H = o.drH || (o.drH = []); H.push([d.id, Math.round(d.T0 * 10) / 10, Math.round(S.t * 10) / 10]); if (H.length > DRILL.hist) H.shift();
+  if (o.men) { const live = o.men.filter(m => !m.dead && m.ai); for (const m of live) { const A = m.ai; A.dx = null; if (A.drb && A.brk <= A.drb) A.brk = 0; A.drb = 0; } if (!o.state) sqSync(o, live); }
+}
+/* a vehicle's or an aircraft's drill, each step after its controller (AI, aiPlane) and before the gate: its ctl */
+function drStep(o, dt) { const d = o.dr; if (!d || !DRILL.on) return; const D = drOf(d.id); if (D && D.ctl) D.ctl(o, d, dt); }
+/* p, or the point toward it at the edge of o's mission leash (never farther out than from is now, with a little room) */
+function drLeash(o, p, from) {
+  const M = o.mis; if (!M || !M.area || !p) return p;
+  const ax = M.area.x, az = M.area.z, d = Math.hypot(p.x - ax, p.z - az), lim = Math.max(leash(o), from ? Math.hypot(from.x - ax, from.z - az) + 20 : 0);
+  return d <= lim ? p : Object.assign({}, p, { x: ax + (p.x - ax) / d * lim, z: az + (p.z - az) / d * lim, b: undefined });
+}
+/* the analytics: each snapshot carries the drills each side took since the last one (dr: [{id: n}, {id: n}]); the review adds them up */
+anaSnap = (g => () => {
+  g();
+  const e = ANA.ev[ANA.ev.length - 1], C = S.drN;
+  if (e && e.k === 'sn' && C && (Object.keys(C.sn[0]).length || Object.keys(C.sn[1]).length)) { e.dr = C.sn; C.sn = [{}, {}]; }
+})(anaSnap);
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), hide = (me === 0 || me === 1) && !ev.some(e => e.k === 'end'), dr = [{}, {}];
+  for (const e of ev) if (e.k === 'sn' && Array.isArray(e.dr)) for (const s of [0, 1]) for (const k in e.dr[s] || {}) dr[s][k] = (dr[s][k] || 0) + e.dr[s][k];
+  R.drills = dr.map((x, s) => (hide && s !== me ? null : x));
+  return R;
+})(anaReport);
+/* what a drill asks of a soldier's controls for a moment (A.dx, until T): hold his fire, spare his rounds, face a place and fire into it */
+aiMan = (g => (m, dt) => {
+  g(m, dt);
+  const A = m.ai, X = A && A.dx; if (!X || m.down || A.rsc) return;
+  if (S.t > X.T) { A.dx = null; return; }
+  const c = m.ctl;
+  if (X.face && !A.tgt) {
+    const e = manEye(m), P = X.face, dx = P.x - e.x, dz = P.z - e.z, dy = P.y - e.y, l = Math.hypot(dx, dy, dz) || 1, w = m.arms[0];
+    c.aim = { x: dx / l, y: dy / l, z: dz / l };
+    if (X.fire && !m.run && !w.d.k && l < (w.d.lmg ? IAI.lmg : IAI.fire) && (S.t + A.seed) % 3 < .9 && dot(m.f, c.aim) > .995 && !ffHeld(m, P)) { c.w = 0; c.fire = true; }
+  }
+  if (X.cons && c.fire && (S.t * 2 + A.seed) % 3 > 1) c.fire = false;   // single rounds, not bursts
+  if (X.hold) c.fire = false;
+})(aiMan);
+/* a drill's soldier: to p, running or not, in stance st, whatever pins him (A.brk, the break a soldier takes to save himself: the drill's own);
+   a bay of a building (p.b) is the building's way in (A.cbp, bldPose) */
+function drGo(m, A, p, run, st) { A.gx = A.bx = p.x; A.gz = A.bz = p.z; A.brk = A.drb = S.t + .7; A.run = !!run; A.st = st; A.mv = false; if (p.b && S.os[p.b.id] < 2) { A.cbp = p; A.cbpT = S.t + 1; } }
+const drCtl = (A, X, s) => { A.dx = Object.assign(A.dx && S.t < A.dx.T ? A.dx : {}, X, { T: S.t + (s || 1.5) }); };
+/* after his own thinking, a soldier of a squad that drills does what the drill has for him; his own escape (a grenade, a drone) comes first.
+   He also keeps where he has been (A.trl, every 2 s, the last 12): the track a drill may take him back along */
+sqMan = (g => (m, A, q, best) => {
+  g(m, A, q, best);
+  if (!q) return;
+  if (S.t > (A.trT || 0)) { A.trT = S.t + 2; const l = A.trl || (A.trl = []), p = l[l.length - 1]; if (!p || Math.abs(p.x - m.x) + Math.abs(p.z - m.z) > 1) { l.push({ x: m.x, z: m.z }); if (l.length > 12) l.shift(); } }
+  const d = q.dr; if (!d || !DRILL.on || (A.brk > S.t && !(A.drb >= A.brk))) return;
+  const D = drOf(d.id); if (D && D.man) D.man(q, d, m, A, best);
+})(sqMan);
+/* a squad that drills thinks at the usual pace, wherever it is (LOD) */
+lodTier = (g => q => (q.dr ? 0 : g(q)))(lodTier);
+/* a smoke grenade from m toward x z (he turns to throw it); false when he has none or has just thrown */
+function drSmoke(m, x, z) {
+  if (!(m.smk > 0) || S.t < m.ncool) return false;
+  m.h = headTo(m.x, m.z, x, z); m.ap = .2; manDir(m);
+  return !!toss(m, 2);
+}
+/* the best place within r m of m out of sight of e (a place the enemy sees from, believed): a building's bay, behind a wall or a fold, in a wood;
+   away from e, not far, not on a mate's place (used), and with shift not where he is now */
+function drHide(m, e, r, used, shift) {
+  const ey = hgt(e.x, e.z) + 2.5, ex = m.x - e.x, ez = m.z - e.z, el = Math.hypot(ex, ez) || 1; let best = null, bs = -1e9;
+  const tryAt = (x, z, bay) => {
+    if (hgt(x, z) < S.T.WL + .5) return;
+    for (const u of used) if (Math.abs(u.x - x) < 3 && Math.abs(u.z - z) < 3) return;
+    const dm = Math.hypot(x - m.x, z - m.z), cut = !los(e, ey, { x, z }, hgt(x, z) + 1); coverAt(x, z, CV);
+    const sc = (cut ? 2 : 0) + (bay ? 1 : 0) + (kindAt(x, z) === 1 ? .6 : 0) + CV.p + ((x - e.x) * ex + (z - e.z) * ez) / el / r * .5 - dm / r * .8 - (shift && dm < 8 ? 2 : 0);
+    if (sc > bs) { bs = sc; best = bay || { x, z }; }
+  };
+  for (const o of near(m.x, m.z, r)) if (o.B && S.os[o.id] < 2 && !o.B.K.open) for (const b of bldBays(o, m.x, m.z).slice(0, 3)) tryAt(b.x, b.z, b);
+  for (let k = 0; k < 16; k++) { const a = k * TAU / 8 + (k > 7 ? .4 : 0), R = k > 7 ? r : r * .5; tryAt(m.x + Math.cos(a) * R, m.z + Math.sin(a) * R, null); }
+  if (!best) return { x: m.x, z: m.z };
+  if (!best.b) { const c = clearOf(best.x, best.z, 1, {}); best = { x: c.x, z: c.z }; }
+  used.push(best); return best;
+}
+/* shelter within r m of m from what falls round c (or from above, with no c): a place in a work of his side, a building's bay, under trees;
+   none nearer c than far m; the nearest, not a mate's (used). Null with none */
+function drCover(m, r, c, far, used, woods) {
+  let best = null, bd = 1e9;
+  const tryAt = (p, k) => {
+    if (c && Math.hypot(p.x - c.x, p.z - c.z) < far) return;
+    for (const u of used) if (Math.abs(u.x - p.x) < 2 && Math.abs(u.z - p.z) < 2) return;
+    const d = Math.hypot(p.x - m.x, p.z - m.z) + k; if (d < r && d < bd) { bd = d; best = p; }
+  };
+  for (const f of S.forts) if (f.prog >= 1 && f.team === m.team && (f.k === 1 || f.k === 2) && Math.abs(f.x - m.x) < r && Math.abs(f.z - m.z) < r) for (const p of fortSlots(f)) if (!p.by || p.by === m || p.by.dead) tryAt(p, f.k === 1 ? 0 : 6);
+  for (const o of near(m.x, m.z, r)) if (o.B && S.os[o.id] < 2 && !o.B.K.open && !(o.B.doom && o.B.doom.length)) for (const b of bldBays(o, m.x, m.z).slice(0, 4)) tryAt(b, 3);
+  if (woods && !best) for (let k = 0; k < 12; k++) { const a = k * TAU / 6, R = k < 6 ? r * .4 : r * .8, x = m.x + Math.cos(a) * R, z = m.z + Math.sin(a) * R; if (kindAt(x, z) === 1 && hgt(x, z) > S.T.WL + .5) tryAt({ x, z }, 8); }
+  if (best) used.push(best);
+  return best;
+}
+/* ---- what a squad perceives for its drills, beside its beliefs: the heavy bursts round its men (a shell, a bomb, a mine: anything that sends
+   men to ground, shelled), the hits on the building its men are in, a mine that goes off by them, and a hit from its own side ---- */
+shelled = (g => (x, z, team) => {
+  g(x, z, team);
+  const R = DRILL.inf.art.hear;
+  for (const q of S.squads) {
+    if (q.net || !(q.live > 0)) continue;
+    for (const m of q.men) if (!m.dead && Math.abs(m.x - x) < R && Math.abs(m.z - z) < R && Math.hypot(m.x - x, m.z - z) < R) { const l = q.drB || (q.drB = []); l.push({ x, z, t: S.t }); if (l.length > 12) l.shift(); break; }
+  }
+})(shelled);
+bBurst = (g => (o, x, y, z, r, dmg, by) => {
+  g(o, x, y, z, r, dmg, by);
+  if (r >= DRILL.inf.bld.r * CITY.dmg.r) { const h = o.B.hh || (o.B.hh = []); if (!h.length || S.t - h[h.length - 1] > .2) { h.push(S.t); if (h.length > 8) h.shift(); } }
+})(bBurst);
+mineBoom = (g => (o, v, here) => {
+  const was = o.gone; g(o, v, here);
+  if (was || (S.net && !S.host)) return;
+  const R = DRILL.inf.mine.r;
+  for (const q of S.squads) if (!q.net && q.live > 0 && q.men.some(m => !m.dead && Math.abs(m.x - o.x) < R && Math.abs(m.z - o.z) < R)) q.drM = { x: o.x, z: o.z, t: S.t };
+})(mineBoom);
+impact = (g => (...a) => {
+  const o = a[0], by = a[3];
+  if (o && o.man && o.sq && by && by !== o && by.team === o.team && a[2] > 0 && !(S.net && !S.host)) o.sq.drF = { t: S.t, by };
+  return g(...a);
+})(impact);
+/* the one a friend's call to hold fire reached (DRILL.inf.ff) holds it as the gate goes round its controller */
+mindGate = (g => o => { g(o); if (!(o.ffQ > S.t)) return; const c = o.ctl; if (o.man) { if (c) c.fire = false; } else if (o.def && o.def.vmax) o.fire = false; else if (c && c.fire) c.fire[0] = c.fire[1] = false; })(mindGate);
+/* ---- the infantry's drills (a squad: cls inf). DRILL.inf, by drill:
+   tank: an enemy tank or armoured car made out within r m and no anti-tank weapon with rounds in the squad: smoke toward it, each man to a place
+     out of its sight within hide m (a building first), the squad calls for fire on it, and every again s it changes places (up to twice) while
+     the vehicle is still believed (gone s after it was last made out it is over);
+   at: the same with an anti-tank weapon: the gunner works round it as he does (stalk) and, each time he has fired, moves scoot [lo, hi] m aside;
+   art: a burst heard within hear m of a man (kept life s; over after quiet s with none): each man to shelter within shel m and no nearer the
+     bursts than far m (a trench, a building, trees), else away from them by away [lo, hi] m, and down;
+   bld: men in a building that has taken n heavy bursts (r m or more, before the city's scale) in win s, or is already damaged and hit: out to
+     another building within out m, else to cover away from it;
+   con: the first contact after calm s of none (a hit or a fresh threat): everyone down where he is for down s, then to cover as he does; a report;
+   amb: hit on the move with the nearest believed enemy within near m: through the ambush, past it by past m (lat, fire); within far m: one fire
+     team holds and fires from cover while the other goes round by flank m and then in (lat); with the odds against it (romper), neither;
+   snp: a sniper made out within r m, or hit with nothing believed within 300 m and the shot heard: down, out of its sight within hide m, smoke
+     to cross, indirect fire on where it is believed;
+   air: an aircraft made out within r m (more urgent within near): the men without a SAM to a building, a work or trees within hide m, else
+     apart by gap m and down; gone s after the last sight it is over;
+   mine: a mine gone off within r m of a man, or an enemy mine its side knows within ahead m of a man on the move: still for still s, then each
+     back back m along his own track, the place marked suspect for the sappers and reported;
+   open: on the move in the open (the leader's cover under c) with an enemy believed between r[0] and r[1] m: by bounds of len m, one fire team
+     moving while the other covers, smoke over a bound with the enemy within smk m;
+   ammo: under low of its rounds in contact: single rounds, and a report that it needs ammunition;
+   wd: under str of its men in contact (above the rout's IAI.rout): back back m by bounds of len m, behind smoke, and holds there;
+   sup: the threat believed within r m k times what the squad is worth or more (a man .5, an anti-tank weapon 1): the same withdrawal;
+   smk: a fresh smoke screen (under age s) between r[0] and r[1] m off, nearer the enemy it believes than to it: weapons on the smoke, fire
+     into it (fire), and indirect fire called on it;
+   esc: on the move with a tank or armoured car of its side moving its way within r m: behind it, back [lo, hi] m, side m off its line, and an
+     anti-tank soldier believed near is shot first;
+   per: halted on the way with no threat: a ring of r m round the leader, each man facing out;
+   ff: hit by its own side within t s: cease fire for hold s, a smoke at its own place as the signal, the shooter told to hold, a report;
+   fix: an assault with an enemy made out in a building or a work between r[0] and r[1] m: one fire team holds it with fire from cover, the
+     other flanks by flank m and goes in (lat).
+   Already done elsewhere, and so not here: a drone over the squad (dHide), a grenade (sqMan), clearing a building (bAtk, sqBound), a mate down
+   (WND, rescue, and the ambulance of the evacuation), the leader lost (the first living man leads), staying down under fire (the pin),
+   flares at night (skyAI), windows and sectors of a building held (ptPts), civilians by a target (the rules of engagement, roeHeld) */
+DRILL.inf = { tank: { r: 600, hide: 45, again: 14, gone: 8 }, at: { r: 500, scoot: [15, 25] }, art: { hear: 110, life: 6, quiet: 14, shel: 70, far: 25, away: [55, 80] },
+  bld: { r: 13, n: 2, win: 10, out: 60 }, con: { calm: 30, down: 1.5 }, amb: { near: 50, far: 350, hit: 3, past: 25, flank: 70, odds: 1.4 },
+  snp: { r: 900, hide: 30 }, air: { r: 1500, near: 800, hide: 50, gap: 12, gone: 10 }, mine: { r: 40, ahead: 12, still: 2, back: 25 },
+  open: { r: [250, 700], len: 40, c: .3, smk: 450 }, ammo: { low: .25 }, wd: { str: .5, back: 150, len: 35 }, sup: { k: 1.4, r: 400 },
+  smk: { r: [60, 450], age: 8 }, esc: { r: 60, back: [8, 16], side: 4 }, per: { r: 7 }, ff: { t: 3, hold: 5 }, fix: { r: [60, 300], flank: 70 } };
+const drFresh = (b, s) => S.t - b.t < s;
+const drArm = b => b.c === 'tank' || b.c === 'lav';
+const drMen = q => q.men.filter(m => !m.dead && !m.down && m.ai);
+/* the odds: the threat it believes within r m against what the squad is worth (a man .5, with an anti-tank weapon 1 more) */
+function drOdds(q, K, r) {
+  let t = 0; if (q.bel) for (const [o, b] of q.bel) if (!o.dead && b.d < r && drFresh(b, 6)) t += MIND.thr[b.c] || 1;
+  return t / Math.max(.5, K.live.length * .5 + (K.at ? 1 : 0));
+}
+/* where a squad's order takes it: the order's place, or its s on its road */
+function drDest(q) { const O = q.ord || {}; if (O.x !== undefined) return O; const r = S.T.routes[q.ri]; return r ? routeAt(r, clamp(ORD[O.k] ? ORD[O.k](q, O) : q.s, 0, r.len)) : q.men.find(m => !m.dead); }
+const drMid = l => { let x = 0, z = 0; for (const m of l) { x += m.x; z += m.z; } return { x: x / (l.length || 1), z: z / (l.length || 1) }; };
+/* hide from e: each man a place out of its sight */
+function drHideAll(q, d, e, r, shift) { const used = []; d.p = []; for (const m of drMen(q)) d.p[m.ai.i] = drLeash(q, drHide(m, e, r, used, shift), m); }
+const drHideMan = st => (q, d, m, A) => { const p = d.p && d.p[A.i]; if (!p) return; const far = hdist(m, p) > 2; drGo(m, A, p, far && hdist(m, p) > 6, far ? 0 : st); };
+/* one fire team holds and fires, the other goes round by flank m to the enemy's side, then in: e the believed enemy */
+function drFlank(q, d, flank) {
+  const l = drMen(q), c = drMid(l), e = { x: d.x, z: d.z }, el = Math.hypot(e.x - c.x, e.z - c.z) || 1, ux = (e.x - c.x) / el, uz = (e.z - c.z) / el, s = (q.id + Math.round(d.T0)) % 2 ? 1 : -1;
+  d.F = drLeash(q, clearOf(e.x - ux * flank * .6 - uz * s * flank, e.z - uz * flank * .6 + ux * s * flank, 2, {}), c); d.ph = 0; d.p = [];
+  for (const m of l) if (!(m.ai.i & 1)) d.p[m.ai.i] = covBest(m.x, m.z, 10, e);
+}
+function drFlankMan(q, d, m, A) {
+  if (!(A.i & 1)) { const p = d.p[A.i]; if (p) drGo(m, A, p, hdist(m, p) > 6, hdist(m, p) > 2 ? 0 : 1); return; }   // the base of fire
+  const k = (A.i >> 1) - 1, g = d.ph ? { x: d.x + k * 3, z: d.z } : { x: d.F.x + k * 3, z: d.F.z };
+  if (!d.ph && hdist(m, d.F) < 12) d.ph = 1;
+  drGo(m, A, g, !d.ph, 0);
+  if (d.ph && m.nades > 0 && hdist(m, g) < IAI.nade && S.t > (A.dnT || 0) && Math.random() < .3) { A.dnT = S.t + 6; m.ctl.nade = 1; }
+}
+/* back toward P by bounds of len m, one fire team at a time, behind smoke: d.P the place */
+function drBack(q, d, P) {
+  const l = drMen(q), L = l[0]; d.P = drLeash(q, clearOf(P.x, P.z, 2, {}), L); d.t = 0; d.bT = 0; d.p = [];
+  const e = belTop(q, b => drFresh(b, 6)), s = e && l.filter(m => m.smk > 0).sort((a, b) => hdist(a, e) - hdist(b, e))[0];
+  if (s) drSmoke(s, e.x, e.z);
+}
+function drBackStep(q, d, len) {
+  const l = drMen(q); if (!l.length) return;
+  const go = l.filter(m => (m.ai.i & 1) === d.t), c = drMid(go.length ? go : l), dl = Math.hypot(d.P.x - c.x, d.P.z - c.z);
+  if (d.bT && S.t < d.bT + 15 && go.some(m => d.p[m.ai.i] && hdist(m, d.p[m.ai.i]) > 4)) return;
+  if (d.bT) d.t ^= 1;
+  d.bT = S.t;
+  const mv = l.filter(m => (m.ai.i & 1) === d.t), mc = drMid(mv.length ? mv : l), ml = Math.hypot(d.P.x - mc.x, d.P.z - mc.z) || 1, k = Math.min(len, ml);
+  for (const m of l) d.p[m.ai.i] = (m.ai.i & 1) === d.t ? clearOf(m.x + (d.P.x - mc.x) / ml * k, m.z + (d.P.z - mc.z) / ml * k, 1, {}) : { x: m.x, z: m.z };
+  if (dl < 15) d.at = 1;
+  sqSync(q, l);
+}
+const drBackMan = (q, d, m, A) => { const p = d.p && d.p[A.i]; if (!p) return; const mv = (A.i & 1) === d.t && !d.at; drGo(m, A, p, mv && hdist(m, p) > 8, mv ? 0 : 2); };
+DRILLS.push(
+  { id: 'tanque', cls: 'inf', s: 'blindado à vista sem anticarro: fumaça, abrigo fora da vista e mudar de lugar', min: 8, max: 60,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.tank; if (K.at) return 0;
+      const b = belTop(q, b => drArm(b) && b.g >= 2 && b.d < G.r && drFresh(b, d ? G.gone : 2));
+      return b ? { u: 1.6 + (1 - b.d / G.r), of: b.o, x: b.x, z: b.z } : 0;
+    },
+    act(q, d) {
+      const G = DRILL.inf.tank, l = drMen(q), e = { x: d.x, z: d.z };
+      if (!d.n) {
+        const s = l.filter(m => m.smk > 0).sort((a, b) => hdist(a, e) - hdist(b, e))[0]; if (s) drSmoke(s, e.x, e.z);
+        const L = l[0]; if (L) helpAsk(q, hdist(L, e) > MIND.ask.far ? 'arty' : 'fire', L, { o: d.of, x: e.x, z: e.z });
+      }
+      drHideAll(q, d, e, G.hide, d.n > 0); d.n++; d.at = S.t;
+    },
+    man(q, d, m, A) { drHideMan(2)(q, d, m, A); if (d.n < 3 && S.t - d.at > DRILL.inf.tank.again) d.re = 1; } },
+  { id: 'anticarro', cls: 'inf', s: 'blindado à vista com anticarro: o atirador flanqueia, dispara e muda de lugar', min: 6, max: 90,
+    when(q, bt, d, K) { const b = K.at && belTop(q, b => drArm(b) && b.g >= 2 && b.d < DRILL.inf.at.r && drFresh(b, 4)); return b ? { u: 1.2, of: b.o, x: b.x, z: b.z } : 0; },
+    man(q, d, m, A) {
+      const a = m.arms[1]; if (!a || !(a.d.k === 'heat' || a.d.k === 'atgm')) return;   // the rest fight as they do: the escort is theirs
+      if (a.t > d.T0 && S.t - a.t < 1.5 && !(A.dsc > S.t)) {   // he has fired: aside before the answer comes
+        const G = DRILL.inf.at, dx = m.x - d.x, dz = m.z - d.z, dl = Math.hypot(dx, dz) || 1, s = A.seed > 4.5 ? 1 : -1, R = rand(G.scoot[0], G.scoot[1]);
+        A.dsp = drLeash(q, covBest(m.x - dz / dl * s * R, m.z + dx / dl * s * R, 8, { x: d.x, z: d.z }), m); A.dsc = S.t + 6;
+      }
+      if (A.dsc > S.t && A.dsp) drGo(m, A, A.dsp, hdist(m, A.dsp) > 4, 1);
+    } },
+  { id: 'artilharia', cls: 'inf', s: 'artilharia caindo: abrigo em trincheira, prédio ou mata, fora da área batida', min: 6, max: 90,
+    when(q, bt, d) {
+      const G = DRILL.inf.art, l = q.drB; if (!l || !l.length) return 0;
+      let n = 0, x = 0, z = 0, last = -99; for (const b of l) if (S.t - b.t < (d ? G.quiet : G.life)) { n++; x += b.x; z += b.z; last = Math.max(last, b.t); }
+      if (!n) return 0;
+      const f = { u: 2.2 + .15 * Math.min(n, 4), x: x / n, z: z / n, lb: last }; if (d && last > (d.lb || 0) + 4 && S.t - d.at > 4) f.re = 1;
+      return f;
+    },
+    act(q, d) {
+      const G = DRILL.inf.art, used = [], c = { x: d.x, z: d.z }; d.p = []; d.at = S.t; d.lb = d.lb || S.t;
+      for (const m of drMen(q)) {
+        let p = (m.fc || m.cbin) && hdist(m, c) > G.far ? { x: m.x, z: m.z } : drCover(m, G.shel, c, G.far, used, true);
+        if (!p) { const dx = m.x - c.x, dz = m.z - c.z, dl = Math.hypot(dx, dz) || 1, R = rand(G.away[0], G.away[1]); p = covBest(m.x + dx / dl * R, m.z + dz / dl * R, 10, null); }
+        d.p[m.ai.i] = drLeash(q, p, m);
+      }
+    },
+    man: drHideMan(2) },
+  { id: 'predio', cls: 'inf', s: 'prédio atingido por fogo pesado: sair antes de desabar', min: 5, max: 30,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.bld; if (d) return d.p && d.p.some((p, i) => p && q.men.some(m => m.ai && m.ai.i === i && !m.dead && hdist(m, p) > 3)) ? 2 : 0;
+      for (const m of K.live) { const o = m.cbin && m.cbo, h = o && o.B.hh; if (h && (h.filter(t => S.t - t < G.win).length >= G.n || (S.os[o.id] === 1 && S.t - h[h.length - 1] < 5))) return { u: 2, b: o }; }
+      return 0;
+    },
+    act(q, d) {
+      const G = DRILL.inf.bld, o = d.b, e = belTop(q, b => drFresh(b, 6)), used = []; d.p = [];
+      for (const m of drMen(q)) {
+        if (m.cbo !== o) continue;
+        let p = null, bd = 1e9;
+        for (const w of near(o.x, o.z, G.out)) if (w !== o && w.B && S.os[w.id] < 2 && !w.B.K.open && !(w.B.hh && S.t - w.B.hh[w.B.hh.length - 1] < G.win)) { const b = bldBays(w, m.x, m.z).find(b => !used.includes(b)); const s = b ? hdist(b, m) + (e ? -hdist(b, e) * .3 : 0) : 1e9; if (s < bd) { bd = s; p = b; } }
+        if (!p) { const ax = e ? o.x - e.x : m.x - o.x, az = e ? o.z - e.z : m.z - o.z, al = Math.hypot(ax, az) || 1; p = covBest(o.x + ax / al * 30, o.z + az / al * 30, 10, e); }
+        used.push(p); d.p[m.ai.i] = drLeash(q, p, m);
+      }
+    },
+    man: drHideMan(1) },
+  { id: 'contato', cls: 'inf', s: 'reação ao contato: ao chão, depois cobertura e relatório', min: 2, max: 4, cool: 10,
+    when(q, bt, d, K) { return d ? (S.t - d.T0 < DRILL.inf.con.down + 1 ? 1.5 : 0) : K.first ? 1.5 : 0; },
+    act(q) { rep(q, 'contact', { dr: 1 }); },
+    man(q, d, m, A) { if (S.t - d.T0 < DRILL.inf.con.down && !m.cbin && !m.fc) drGo(m, A, m, false, 2); } },
+  { id: 'emboscada', cls: 'inf', s: 'emboscada próxima: assaltar através da zona de morte', min: 6, max: 25, lat: 1, fire: 1,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.amb;
+      if (d) return belTop(q, b => b.d < G.near + 15 && drFresh(b, 4) && b.c !== 'plane' && b.c !== 'heli') ? 2.4 : 0;
+      if (!K.mv || S.t - K.hitT > G.hit || !K.near || K.near.d > G.near || drArm(K.near) || drOdds(q, K, G.far) >= G.odds) return 0;
+      return { u: 2.4, of: K.near.o, x: K.near.x, z: K.near.z };
+    },
+    act(q, d) { const c = drMid(drMen(q)), dl = Math.hypot(d.x - c.x, d.z - c.z) || 1, P = DRILL.inf.amb.past; d.G = drLeash(q, clearOf(d.x + (d.x - c.x) / dl * P, d.z + (d.z - c.z) / dl * P, 2, {}), c); },
+    man(q, d, m, A) {
+      drGo(m, A, { x: d.G.x + ((A.i % 3) - 1) * 4, z: d.G.z + ((A.i >> 1) % 2) * 3 }, false, 0);   // at a walk, firing as he goes
+      if (m.nades > 0 && hdist(m, d) < IAI.nade && S.t > (A.dnT || 0) && Math.random() < .35) { A.dnT = S.t + 5; m.ctl.nade = 1; }
+    } },
+  { id: 'emboscada-dist', cls: 'inf', s: 'emboscada distante: fogo de cobertura e flanqueio', min: 8, max: 70, lat: 1,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.amb;
+      if (d) { const b = belTop(q, b => b.d < G.far + 50 && drFresh(b, 10) && b.c !== 'plane' && b.c !== 'heli'); return b ? { u: 1.8, x: b.x, z: b.z } : 0; }
+      if (!K.mv || S.t - K.hitT > G.hit || !K.near || K.near.d <= G.near || K.near.d > G.far || K.live.length < 4 || drOdds(q, K, G.far) >= G.odds) return 0;
+      return { u: 1.8, of: K.near.o, x: K.near.x, z: K.near.z };
+    },
+    act(q, d) { drFlank(q, d, DRILL.inf.amb.flank); },
+    man: drFlankMan },
+  { id: 'atirador', cls: 'inf', s: 'fogo de atirador de elite: abaixar, sair da linha, fumaça e fogo indireto', min: 6, max: 40,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.snp, b = belTop(q, b => b.c === 'snp' && b.g >= 2 && b.d < G.r && drFresh(b, d ? 15 : 4));
+      if (b) return { u: 1.7, of: b.o, x: b.x, z: b.z };
+      if (d || S.t - K.hitT > 2 || belTop(q, b => b.d < 300 && drFresh(b, 4))) return d && S.t - d.T0 < 20 ? 1.5 : 0;
+      const m = K.live.find(m => S.t - m.hitT < 2 && m.ln && m.ln.of && S.t - m.ln.t < 2 && Math.hypot(m.ln.x - m.x, m.ln.z - m.z) > 250);   // hit, and the shot heard from far
+      return m ? { u: 1.5, x: m.ln.x, z: m.ln.z } : 0;
+    },
+    act(q, d) {
+      const e = { x: d.x, z: d.z }; drHideAll(q, d, e, DRILL.inf.snp.hide, false);
+      const l = drMen(q), s = l.filter(m => m.smk > 0 && d.p[m.ai.i] && hdist(m, d.p[m.ai.i]) > 10)[0]; if (s) drSmoke(s, e.x, e.z);
+      const L = l[0]; if (L && hdist(L, e) > MIND.ask.far) helpAsk(q, 'arty', L, { o: d.of, x: e.x, z: e.z });
+    },
+    man: drHideMan(2) },
+  { id: 'aereo', cls: 'inf', s: 'aeronave inimiga: sair do aberto, abrigo em prédio ou mata, dispersar', min: 6, max: 60,
+    when(q, bt, d) {
+      const G = DRILL.inf.air, b = belTop(q, b => (b.c === 'plane' || b.c === 'heli') && b.g >= 2 && b.d < G.r && drFresh(b, d ? G.gone : 2));
+      return b ? { u: 1.4 + (b.d < G.near ? .5 : 0), of: b.o, x: b.x, z: b.z } : 0;
+    },
+    act(q, d) {
+      const G = DRILL.inf.air, l = drMen(q), used = []; d.p = [];
+      for (const m of l) {
+        if (m.arms[1] && m.arms[1].d.k === 'sam' && m.arms[1].mag + m.arms[1].res > 0) continue;   // the air-defence soldier stays and engages
+        let p = m.cbin || m.fc || kindAt(m.x, m.z) === 1 ? { x: m.x, z: m.z } : drCover(m, G.hide, null, 0, used, true);
+        if (!p) { let ax = 0, az = 0; for (const o of l) if (o !== m) { const dd = hdist(o, m) || 1; ax += (m.x - o.x) / dd; az += (m.z - o.z) / dd; } const al = Math.hypot(ax, az) || 1; p = clearOf(m.x + ax / al * G.gap, m.z + az / al * G.gap, 1, {}); }
+        d.p[m.ai.i] = drLeash(q, p, m);
+      }
+    },
+    man: drHideMan(2) },
+  { id: 'mina', cls: 'inf', s: 'mina: parar, voltar pelo próprio rastro, marcar e chamar o sapador', min: 20, max: 45, cool: 60,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.mine; if (d) return 2.3;
+      if (q.drM && S.t - q.drM.t < 3) return { u: 2.3, x: q.drM.x, z: q.drM.z };
+      if (!K.mv || !S.mines) return 0;
+      for (const o of S.mines) if (!o.gone && o.team !== q.team && mineKnown(o, q.team)) for (const m of K.live) if (Math.abs(m.x - o.x) < G.ahead && Math.abs(m.z - o.z) < G.ahead) return { u: 2.3, x: o.x, z: o.z };
+      return 0;
+    },
+    act(q, d) {
+      const G = DRILL.inf.mine; d.p = [];
+      for (const m of drMen(q)) {   // his own track, back as far as back m
+        const l = m.ai.trl || []; let p = { x: m.x, z: m.z }, w = 0, px = m.x, pz = m.z;
+        for (let i = l.length - 1; i >= 0 && w < G.back; i--) { w += Math.hypot(l[i].x - px, l[i].z - pz); px = l[i].x; pz = l[i].z; p = { x: px, z: pz }; }
+        d.p[m.ai.i] = p;
+      }
+      const t = q.team; if (!sus(t).some(s => Math.hypot(s.x - d.x, s.z - d.z) < 30)) sus(t).push({ x: d.x, z: d.z, t: S.t });
+      rep(q, 'need', { k: 'sap' }); gLog(t, 'def', 'Esquadra num campo minado: parou, voltou pelo rastro e marcou o lugar para os sapadores', d, 'drm' + Math.round(d.x / 50) + '_' + Math.round(d.z / 50));
+    },
+    man(q, d, m, A) { const p = S.t - d.T0 < DRILL.inf.mine.still ? m : d.p[A.i]; if (p) drGo(m, A, p, false, p === m ? 1 : hdist(m, p) > 1.5 ? 0 : 1); } },
+  { id: 'lances', cls: 'inf', s: 'terreno aberto sob observação: lances alternados e fumaça', min: 10, max: 90,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.open, O = K.O;
+      if (!K.mv || O.rush || q.bd || K.live.length < 4 || !(O.k === 'move' || O.k === 'assault' || O.k === 'escort' || O.k === 'patrol')) return 0;
+      const b = belTop(q, b => b.d > G.r[0] && b.d < G.r[1] && drFresh(b, 10) && b.c !== 'plane' && b.c !== 'heli'); if (!b || belTop(q, b => b.d <= G.r[0] && drFresh(b, 3))) return 0;
+      const L = K.L, open = cover(L).c < G.c && kindAt(L.x, L.z) !== 1;
+      return open || (d && d.bT && S.t - d.bT < 15) ? { u: 1, x: b.x, z: b.z } : 0;
+    },
+    act(q, d) { d.t = 1; d.bT = 0; d.p = []; d.D = drDest(q); },
+    man(q, d, m, A) {
+      const G = DRILL.inf.open, l = drMen(q), go = l.filter(n => (n.ai.i & 1) === d.t);
+      if (!d.bT || S.t > d.bT + 20 || go.every(n => !d.p[n.ai.i] || hdist(n, d.p[n.ai.i]) < 4)) {   // the next bound: the other team, len m on toward the order's place
+        d.t ^= 1; d.bT = S.t; const mv = l.filter(n => (n.ai.i & 1) === d.t), c = drMid(mv), D = d.D || c, dl = Math.hypot(D.x - c.x, D.z - c.z) || 1, k = Math.min(G.len, dl), e = { x: d.x, z: d.z };
+        for (const n of l) d.p[n.ai.i] = (n.ai.i & 1) === d.t ? drLeash(q, covBest(n.x + (D.x - c.x) / dl * k, n.z + (D.z - c.z) / dl * k, 8, e), n) : { x: n.x, z: n.z };
+        if (hdist(c, e) < G.smk) { const s = mv.find(n => n.smk > 0); if (s && !smokeAt(s.x + (e.x - s.x) * .1, s.z + (e.z - s.z) * .1, 25, 4)) drSmoke(s, e.x, e.z); }
+        sqSync(q, l);
+      }
+      const p = d.p[A.i]; if (!p) return;
+      const mv = (A.i & 1) === d.t; drGo(m, A, p, mv && hdist(m, p) > 10, mv ? 0 : 2);
+    } },
+  { id: 'municao', cls: 'inf', s: 'munição baixa: tiro a tiro e pedir remuniciamento', min: 5, max: 60,
+    when(q, bt, d, K) { return K.ammo < DRILL.inf.ammo.low && (K.near || S.t - K.hitT < 10) ? 1.05 : 0; },
+    act(q) { rep(q, 'need', { k: 'ammo' }); },
+    man(q, d, m, A) { drCtl(A, { cons: 1 }); } },
+  { id: 'recuo', cls: 'inf', s: 'perdas pesadas: recuar em ordem, por lances, para a posição anterior', min: 15, max: 90, cool: 60,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.wd, O = K.O;
+      if (d) return d.at && !K.near && S.t - K.hitT > 15 ? 0 : 1.9;
+      if (K.str > G.str || K.str <= IAI.rout || (O.k === 'hold' && O.tw) || (q.mis && q.mis.kind === 'garrison') || !(K.near || S.t - K.hitT < 5)) return 0;
+      return { u: 1.9, x: K.near ? K.near.x : K.L.x, z: K.near ? K.near.z : K.L.z };
+    },
+    act(q, d) {
+      const G = DRILL.inf.wd, L = drMen(q)[0], r = S.T.routes[q.ri];
+      let P = q.drP && hdist(q.drP, L) > 40 && hdist(q.drP, L) < G.back * 2 ? q.drP : null;   // where it last stood at its post
+      if (!P && r) { const p = routeAt(r, clamp(q.s - q.ds * G.back, 0, r.len)); P = { x: p.x - p.dz * 20, z: p.z + p.dx * 20 }; }
+      if (!P) { const dx = L.x - d.x, dz = L.z - d.z, dl = Math.hypot(dx, dz) || 1; P = { x: L.x + dx / dl * G.back, z: L.z + dz / dl * G.back }; }
+      drBack(q, d, P);
+    },
+    man(q, d, m, A) { if (A.i === drMen(q)[0].ai.i) drBackStep(q, d, DRILL.inf.wd.len); drBackMan(q, d, m, A); } },
+  { id: 'romper', cls: 'inf', s: 'inimigo superior: romper o contato com fumaça e fogo alternado', min: 15, max: 90, cool: 45,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.sup, O = K.O;
+      if (d) return d.at && !K.near ? 0 : 1.8;
+      if (!K.near || (q.at && (O.k === 'hold' || O.k === 'ambush')) || (q.mis && q.mis.kind === 'garrison')) return 0;
+      const k = drOdds(q, K, G.r); return k >= G.k ? { u: 1.7 + Math.min(1, k - G.k), x: K.near.x, z: K.near.z } : 0;
+    },
+    act(q, d) { const L = drMen(q)[0], dx = L.x - d.x, dz = L.z - d.z, dl = Math.hypot(dx, dz) || 1, B = DRILL.inf.wd.back; drBack(q, d, { x: L.x + dx / dl * B, z: L.z + dz / dl * B }); },
+    man(q, d, m, A) { if (A.i === drMen(q)[0].ai.i) drBackStep(q, d, DRILL.inf.wd.len); drBackMan(q, d, m, A); } },
+  { id: 'fumaca', cls: 'inf', s: 'fumaça inimiga à frente: armas na fumaça, fogo de reconhecimento e fogo indireto', min: 6, max: 20, fire: 1,
+    when(q, bt, d, K) {
+      if (d) return 1.3;
+      const G = DRILL.inf.smk, L = K.L;
+      for (const s of S.smokes) {
+        const r = Math.hypot(s.x - L.x, s.z - L.z); if (S.t - s.t0 > G.age || r < G.r[0] || r > G.r[1]) continue;
+        const b = belTop(q, b => drFresh(b, 20) && Math.hypot(b.x - s.x, b.z - s.z) < r * .8 && b.c !== 'plane' && b.c !== 'heli');   // nearer the enemy it believes than to it
+        if (b) return { u: 1.3, x: s.x, z: s.z, y: s.y + 1.5 };
+      }
+      return 0;
+    },
+    act(q, d) { const L = drMen(q)[0]; if (L) helpAsk(q, 'arty', L, { x: d.x, z: d.z }); d.f = { x: d.x, y: d.y, z: d.z }; },
+    man(q, d, m, A) { A.st = 1; drCtl(A, { face: { x: d.f.x + ((A.i % 5) - 2) * 6, y: d.f.y, z: d.f.z }, fire: 1 }); } },
+  { id: 'com-carro', cls: 'inf', s: 'avançando com carro amigo: atrás dele como cobertura, protegê-lo do anticarro', min: 5, max: 90,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.esc, O = K.O; if (!K.mv || !(O.k === 'move' || O.k === 'assault' || O.k === 'escort')) return 0;
+      const D = drDest(q), L = K.L;
+      for (const u of S.units) if (!u.dead && u.team === q.team && (u.kind === 'tank' || u.kind === 'lav') && Math.abs(u.x - L.x) < G.r && Math.abs(u.z - L.z) < G.r && hdist(u, L) < G.r && (d ? d.of === u : true)) {
+        const v = u.v || ZERO; if (Math.hypot(v.x, v.z) > 1 && v.x * (D.x - L.x) + v.z * (D.z - L.z) > 0) return { u: .9, of: u };
+      }
+      return 0;
+    },
+    man(q, d, m, A) {
+      const G = DRILL.inf.esc, u = d.of; if (!u || u.dead) return;
+      const fx = Math.cos(u.h), fz = -Math.sin(u.h), b = G.back[0] + (A.i >> 1) * (G.back[1] - G.back[0]) / 3, s = (A.i & 1 ? 1 : -1) * G.side, p = { x: u.x - fx * b - fz * s, z: u.z - fz * b + fx * s };
+      drGo(m, A, p, hdist(m, p) > 8, 0);
+      const at = belTop(q, b => b.c === 'at' && b.d < 300 && drFresh(b, 2));   // the anti-tank soldier first
+      if (at && at.o !== A.tgt && known(A, m, at.o)) A.tgt = at.o;
+    } },
+  { id: 'perimetro', cls: 'inf', s: 'parada no deslocamento: perímetro em 360 graus', min: 4, max: 90, cool: 5,
+    when(q, bt, d, K) {
+      const O = K.O; if (K.near || S.t - K.hitT < 20 || K.live.length < 3 || (q.pts && O.k === 'hold') || q.bd || q.bg) return 0;
+      return q.halt || q.ow > S.t || (q.rd && q.rd.st !== 'ride') || (q.at && (O.k === 'move' || O.k === 'withdraw') && !O.disp) ? .7 : 0;
+    },
+    act(q, d) { const l = drMen(q), c = drMid(l), n = l.length, R = DRILL.inf.per.r; d.p = []; l.forEach((m, k) => { const a = k * TAU / n + q.id; d.p[m.ai.i] = Object.assign(clearOf(c.x + Math.cos(a) * R, c.z + Math.sin(a) * R, 1, {}), { fx: c.x + Math.cos(a) * 40, fz: c.z + Math.sin(a) * 40 }); }); },
+    man(q, d, m, A) { const p = d.p[A.i]; if (!p) return; drGo(m, A, p, false, hdist(m, p) > 2 ? 0 : 1); drCtl(A, { face: { x: p.fx, y: hgt(p.fx, p.fz) + 1.5, z: p.fz } }); } },
+  { id: 'fogo-amigo', cls: 'inf', s: 'fogo amigo: cessar fogo, sinalizar com fumaça e informar', min: 4, max: 8, cool: 10,
+    when(q, bt, d) { const F = q.drF; return F && S.t - F.t < DRILL.inf.ff.t ? { u: 2, of: F.by } : d && S.t - d.T0 < DRILL.inf.ff.hold ? 2 : 0; },
+    act(q, d) {
+      const G = DRILL.inf.ff, l = drMen(q), s = l.find(m => m.smk > 0), by = d.of;
+      if (s) drSmoke(s, s.x + s.f.x * 3, s.z + s.f.z * 3);
+      if (by && !by.dead) by.ffQ = S.t + G.hold * 2;   // the shooter is told to hold
+      rep(q, 'ff'); gLog(q.team, 'def', 'Fogo amigo sobre uma esquadra: cessar fogo e sinal de fumaça', l[0], 'drf' + q.id);
+    },
+    man(q, d, m, A) { drCtl(A, { hold: 1 }); } },
+  { id: 'fixar', cls: 'inf', s: 'inimigo em posição forte: fixar pela frente e flanquear', min: 10, max: 80, lat: 1,
+    when(q, bt, d, K) {
+      const G = DRILL.inf.fix;
+      if (d) { const b = belTop(q, b => drFresh(b, 10) && Math.hypot(b.x - d.x, b.z - d.z) < 40); return b ? 1.6 : 0; }
+      if (K.O.k !== 'assault' || q.at || K.live.length < 4) return 0;
+      const b = belTop(q, (b, t) => b.g >= 2 && t.man && (t.cbin || t.fc) && b.d > G.r[0] && b.d < G.r[1] && drFresh(b, 3));
+      return b ? { u: 1.6, of: b.o, x: b.x, z: b.z } : 0;
+    },
+    act(q, d) { drFlank(q, d, DRILL.inf.fix.flank); },
+    man: drFlankMan }
+);
+/* a squad at its post keeps where it stood, for the withdrawal (recuo) to go back to */
+squadThink = (g => q => { g(q); if (q.at && !q.state && !q.dr) { const L = q.men.find(m => !m.dead); if (L) q.drP = { x: L.x, z: L.z }; } })(squadThink);
 /* --- every step: the AI's helicopters by the wave or the director, the transports' runs, and the ghosts' guns --- */
 const heliCount = (t, f) => S.planes.reduce((a, p) => a + (p.heli && p.team === t && !p.dead && !!p.ai && f(p) ? 1 : 0), 0);
 function heliAir(team, id, far) {

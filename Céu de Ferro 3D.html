@@ -29254,6 +29254,7 @@ function buildWorld() {
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
   scene.add(wo.rocks, ...wo.bt);
   cityScene();
+  vegBuild();
   const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }), cg = new THREE.IcosahedronGeometry(1, 1);
   for (let i = 0; i < 46; i++) { const k = new THREE.Mesh(cg, cm); k.scale.set(rand(160, 420), rand(35, 75), rand(120, 320)); k.position.set(rand(-3000, W + 3000), rand(1500, 3600), rand(-HW - 3000, HW + 3000)); scene.add(k); }
   /* dynamic layers */
@@ -29278,6 +29279,521 @@ function buildWorld() {
     sm.visible = false; scene.add(sm); shadows.push(sm);
   }
   camSt.init = false; buildMap();
+}
+
+/* ---------- vegetation (VEG): the trees by distance and the grass near the eye ----------
+   The trees stay the world objects they were: wo.trees and wo.leaf (an instance per tree, by id, in the mesh wtree() gives it, which
+   treeAt() and fortScene() stand, fell, press flat and char) are the record, and they are no longer drawn. What is drawn is read from it by the distance from the eye:
+   near: the full tree (a trunk and cards of needles or leaves round it) out to near m; mid: the same tree with a few large cards out to
+   mid m; far: an impostor, a picture of the full tree drawn once at load, turned to the eye, out to the fog (no felled tree there).
+   Each band gives way to the next over fade m by a dither, so that nothing pops. Two kinds: a conifer and a broadleaf, as the map has
+   them (o.v, map version 6), or on an older map by the tree's id (conifer: their share), each turned and widened a little by its id; wind: how far the crowns and the grass sway.
+   shadow: a soft dark patch on the ground under each standing near and mid tree, laid on the slope; where the quality draws the sun's
+   real shadows (GFXQ[].shadow, Alta) the near trees cast those instead, their cards cut out as drawn. The trees and the grass take the
+   ground's sober tone (ENVL.sat and tone: the grass all of it, the trees treeSat of it), and the haze of the sky reads the eye.
+   grass: clumps of blades within grass m of the eye, all of them near it and fewer toward the edge, coloured as the ground under them;
+   none on water, sand, roads, in streets and houses; a field grows its crop (crop: taller), a wood an undergrowth (wood: its share);
+   chunk: m of a square of grass made at once, at most `make` a frame, nearest first. The grass sinks into the ground as the eye climbs
+   from .3 to .45 of grass m above it, and is not drawn higher; below 1.5 of it the chunks are still made, hidden, so that none is
+   missing when it grows back. Nothing grows in in view: the first frame of a world (the camera on the player, before anything of the
+   match is shown) makes everything round the eye at once and compiles every shader (vegWarm), and so does a jump of the eye of more
+   than jump m in a frame (a respawn, another seat or camera).
+   Q: the levels, one for each graphics quality the player picks in the hangar (gfxLevel(): 0 Baixa, 1 Média, 2 Alta, read when the
+   world is built; mid where the page has no such choice); vegSet(level) fixes one. styles: the looks to choose from (dens: the grass,
+   tall: its height, conifer: the share of conifers on a map without its own broadleaves, tip: the grass's tips, wind: its share of the
+   wind). URL: ?veg=off draws the old cones, ?vq= a level (low, mid, high), ?vs= a style */
+const VEG = {
+  on: true, q: 'mid', style: 'mista',
+  Q: {
+    low: { near: 0, mid: 380, fade: 50, shadow: 0, grass: 0, dens: 0 },
+    mid: { near: 170, mid: 700, fade: 60, shadow: 1, grass: 60, dens: .75 },
+    high: { near: 300, mid: 1150, fade: 70, shadow: 1, grass: 90, dens: 1 }
+  },
+  styles: {
+    conifera: { conifer: .8, dens: .7, tall: .8, tip: 0xa8a35a, wind: .8 },
+    mista: { conifer: .5, dens: 1, tall: 1, tip: 0x9fb052, wind: 1 },
+    folhosa: { conifer: .2, dens: 1.35, tall: 1.2, tip: 0x8fb848, wind: 1.1 }
+  },
+  cell: 128, move: 10, every: .3, nearMax: 3000, midMax: 9000, wind: .5, wood: .25, crop: 1.5, chunk: 24, make: 2, grid: .55, jump: 80, treeSat: .6
+};
+const VS = { built: null, atlas: null, imp: null, base: null };
+/* the picture the cards are cut from: a spruce frond, a bunch of leaves, bark and dark foliage, drawn by hand on a canvas */
+function vegAtlas() {
+  if (VS.atlas) return VS.atlas;
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
+  const g = c.getContext('2d'); let sd = 7; const r = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  const hsl = (h, s, l) => 'hsl(' + h + ',' + s + '%,' + l + '%)';
+  g.fillStyle = 'rgba(40,56,30,0)'; g.fillRect(0, 0, 1024, 512);
+  /* a frond: a twig from the trunk (left) to the tip (right) with side twigs, every twig thick with needles */
+  const needles = (x0, y0, x1, y1, len, w) => {
+    const n = Math.hypot(x1 - x0, y1 - y0) / 3.2, a = Math.atan2(y1 - y0, x1 - x0);
+    for (let i = 0; i < n; i++) {
+      const t = i / n, x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t, L = len * (1 - .55 * t) * (.8 + .4 * r());
+      for (const s of [-1, 1]) {
+        const b = a + s * (1.0 + .3 * r()); g.strokeStyle = hsl(92 + 22 * r(), 38 + 18 * r(), 17 + 17 * r() + 8 * t); g.lineWidth = w;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + Math.cos(b) * L, y + Math.sin(b) * L); g.stroke();
+      }
+    }
+  };
+  g.lineCap = 'round';
+  g.strokeStyle = '#4b3b27'; g.lineWidth = 7; g.beginPath(); g.moveTo(6, 224); g.quadraticCurveTo(260, 236, 506, 218); g.stroke();
+  for (let t = .08; t < .93; t += .075) for (const s of [-1, 1]) {
+    const x = 6 + 500 * t, y = 224 + 10 * Math.sin(t * 3), L = 190 * (1 - t * .75) * (.75 + .5 * r()), a = s * (.55 + .25 * r());
+    const x1 = x + Math.cos(a) * L, y1 = y + Math.sin(a) * L;
+    g.strokeStyle = '#4f3f2a'; g.lineWidth = 3; g.beginPath(); g.moveTo(x, y); g.lineTo(x1, y1); g.stroke();
+    needles(x, y, x1, y1, 34, 3.2);
+  }
+  needles(6, 224, 506, 218, 40, 3.6);
+  /* a bunch of leaves: many small leaves in a ragged round, darker inside and below */
+  for (let i = 0; i < 1500; i++) {
+    const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 205 * (.85 + .15 * Math.sin(a * 5)), x = 768 + Math.cos(a) * d, y = 224 + Math.sin(a) * d * .92;
+    const lit = .5 + .5 * (1 - d / 205) * .3 - (y - 224) / 900;
+    g.save(); g.translate(x, y); g.rotate(r() * Math.PI * 2);
+    g.fillStyle = hsl(84 + 26 * r(), 32 + 20 * r(), 16 + 22 * r() * lit + 6 * lit); g.beginPath(); g.ellipse(0, 0, 13 + 6 * r(), 6 + 3 * r(), 0, 0, Math.PI * 2); g.fill();
+    g.restore();
+  }
+  /* bark (left of the strip below) and dark foliage (right), both opaque */
+  for (let x = 0; x < 512; x += 2) { g.fillStyle = hsl(28, 22 + 10 * r(), 16 + 14 * r()); g.fillRect(x, 448, 2, 64); }
+  for (let i = 0; i < 400; i++) { g.fillStyle = 'rgba(20,14,8,.35)'; g.fillRect(r() * 512, 448 + r() * 64, 1 + r() * 2, 6 + r() * 20); }
+  for (let x = 512; x < 1024; x += 4) for (let y = 448; y < 512; y += 4) { g.fillStyle = hsl(100 + 15 * r(), 30, 10 + 8 * r()); g.fillRect(x, y, 4, 4); }
+  const t = new THREE.CanvasTexture(c); t.anisotropy = 4;
+  return (VS.atlas = t);
+}
+/* the regions of the atlas, as [u0, v0, u1, v1] (v up) */
+const VUV = { frond: [0, 1 - 448 / 512, .5, 1], leaf: [.5, 1 - 448 / 512, 1, 1], bark: [0, 0, .5, 64 / 512], dark: [.5, 0, 1, 64 / 512] };
+/* a tree's geometry, in the frame of the old cone (28 high, its foot 2 under the ground, so treeAt() stands and fells it as before):
+   kind 0 a conifer, 1 a broadleaf; lod 0 full, 1 a few large cards round the same dark core. Attributes: position, normal (round the crown, so that it is lit as a
+   volume), uv into the atlas, color (darker inside and below) */
+function vegTreeGeo(kind, lod, cards) {
+  const P = [], N = [], U = [], C = [], I = []; let sd = 11 + kind * 7 + lod * 3; const r = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  const v3 = (x, y, z) => new THREE.Vector3(x, y, z), cen = kind ? v3(0, 4.5, 0) : v3(0, 2, 0);
+  const vert = (p, n, u, v, c) => { P.push(p.x, p.y, p.z); N.push(n.x, n.y, n.z); U.push(u, v); C.push(c, c, c); return P.length / 3 - 1; };
+  const cyl = (a, b, r0, r1, n, uv, c0, c1) => {   // a tapered tube from a to b
+    const ax = b.clone().sub(a).normalize(), s = Math.abs(ax.y) < .9 ? v3(0, 1, 0) : v3(1, 0, 0), e1 = s.cross(ax).normalize(), e2 = ax.clone().cross(e1), k = P.length / 3;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n * Math.PI * 2, d = e1.clone().multiplyScalar(Math.cos(t)).addScaledVector(e2, Math.sin(t)), u = uv[0] + (uv[2] - uv[0]) * i / n;
+      vert(a.clone().addScaledVector(d, r0), d, u, uv[1], c0); vert(b.clone().addScaledVector(d, r1), d, u, uv[3], c1);
+    }
+    for (let i = 0; i < n; i++) { const q = k + i * 2; I.push(q, q + 2, q + 1, q + 1, q + 2, q + 3); }
+  };
+  const card = (o, du, dv, uv, c0, c1, flip) => {   // a quad: o its middle on the near edge, du half its width, dv its length (along u of the atlas)
+    const p = [o.clone().sub(du), o.clone().add(du), o.clone().add(du).add(dv), o.clone().sub(du).add(dv)], n = p.map(q => q.clone().sub(cen).normalize().lerp(v3(0, 1, 0), .25).normalize());
+    const uu = flip ? [[uv[0], uv[1]], [uv[0], uv[3]], [uv[2], uv[3]], [uv[2], uv[1]]] : [[uv[0], uv[1]], [uv[2], uv[1]], [uv[2], uv[3]], [uv[0], uv[3]]];
+    const k = P.length / 3; p.forEach((q, i) => vert(q, n[i], uu[i][0], uu[i][1], i < 2 ? c0 : c1)); I.push(k, k + 1, k + 2, k, k + 2, k + 3);
+  };
+  if (!kind) {   // a spruce: a trunk to the top, tiers of drooping fronds round it, a dark core so that one does not see through it
+    cyl(v3(0, -12.5, 0), v3(0, 13.5, 0), .62, .08, lod ? 4 : 7, VUV.bark, .55, .9);
+    cyl(v3(0, -4.5, 0), v3(0, 12.5, 0), lod ? 3.2 : 2.6, .3, lod ? 5 : 6, VUV.dark, .45, .8);
+    const tiers = Math.round((lod ? 6 : 11) * cards);
+    for (let t = 0; t < tiers; t++) {
+      const f = t / (tiers - 1), y = -5 + 18.5 * f, R = (lod ? 6.9 : 6.4) * Math.pow(1 - f, .85) + .9, m = Math.max(3, Math.round((lod ? 4 : 5 + 4 * (1 - f)) * Math.min(1.3, cards))), a0 = r() * 6.3;
+      for (let i = 0; i < m; i++) {
+        const a = a0 + i / m * Math.PI * 2 + (r() - .5) * .4, dir = v3(Math.cos(a), -.32 - .2 * r() + .25 * f, Math.sin(a)).normalize(), tw = (i & 1 ? 1 : -1) * (.35 + .3 * r());
+        const side = v3(-Math.sin(a), 0, Math.cos(a)), up = side.clone().cross(dir).normalize(), du = side.multiplyScalar(Math.cos(tw)).addScaledVector(up, Math.sin(tw)).multiplyScalar(R * (lod ? .55 : .42));
+        const sh = .55 + .45 * f;
+        card(v3(Math.cos(a) * .2, y, Math.sin(a) * .2), du, dir.multiplyScalar(R * 1.08), VUV.frond, sh * .75, sh * 1.05, true);
+      }
+    }
+  } else {   // a broadleaf: a trunk that forks into boughs, bunches of leaves round an egg of a crown
+    cyl(v3(0, -12.5, 0), v3(0, -.5, 0), .85, .55, lod ? 4 : 7, VUV.bark, .5, .75);
+    const n = Math.round((lod ? 7 : 17) * cards), per = lod ? 2 : 3;
+    for (let i = 0; i < n; i++) {
+      const y = 1 - (i + .5) / n * 2, rr = Math.sqrt(1 - y * y), a = i * 2.39996 + r() * .3, d = .58 + .25 * r();
+      const p = v3(Math.cos(a) * rr * 7.4 * d, 4.5 + y * 6.4 * d, Math.sin(a) * rr * 7.4 * d);
+      if (!lod && i % 3 === 0 && y < .5) cyl(v3(0, -1.2, 0), p.clone().multiplyScalar(.75).setY(p.y * .7 - 1), .42, .12, 4, VUV.bark, .55, .7);
+      const sh = .55 + .45 * (y * .5 + .5), S = (lod ? 6.2 : 4.6) * (.85 + .3 * r());
+      for (let k = 0; k < per; k++) {
+        const b = r() * Math.PI, e = (r() - .5) * 1.2, du = v3(Math.cos(b), 0, Math.sin(b)).multiplyScalar(S / 2), nrm = v3(-Math.sin(b) * Math.cos(e), Math.sin(e), Math.cos(b) * Math.cos(e)), dv = nrm.clone().cross(du).normalize().multiplyScalar(S);
+        card(p.clone().addScaledVector(dv, -.5), du, dv, VUV.leaf, sh * .8, sh * 1.05);
+      }
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setIndex(I);
+  return g;
+}
+/* the shader of every piece: a Lambert material whose two faces are lit alike, the wind, the dither between the bands (band: [in from,
+   in to, out from, out to] m, by the instance's distance), and cut-out cards that do not thin away with the distance */
+const VU = { uTime: { value: 0 }, uWind: { value: .5 }, uEye: { value: null } };   // uEye: the eye, which three.js does not give a Lambert material
+function vegMat(o) {
+  const m = new THREE.MeshLambertMaterial({ color: o.color || 0xffffff, map: o.map || null, vertexColors: true, side: THREE.DoubleSide, alphaTest: o.map ? .42 : 0 });
+  m.userData.band = { value: new THREE.Vector4(-2, -1, 1e9, 2e9) };
+  const tn = o.kind === 'grass' ? null : vegTone(), ts = tn ? 1 - (1 - tn.sat) * VEG.treeSat : 1, key = 'veg-' + o.kind + (tn ? '-' + ts.toFixed(3) + '-' + tn.tone.toFixed(3) : '');
+  m.customProgramCacheKey = () => key;
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uTime = VU.uTime; sh.uniforms.uWind = VU.uWind; sh.uniforms.uBand = m.userData.band; sh.uniforms.uEye = VU.uEye;
+    let vs = 'uniform float uTime, uWind; uniform vec4 uBand; uniform vec3 uEye; varying float vFade, vAk;\n' + (o.head || '') + sh.vertexShader;
+    vs = vs.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + o.vert);
+    if (o.normal) vs = vs.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + o.normal);
+    if (o.color2) vs = vs.replace('#include <fog_vertex>', '#include <fog_vertex>\n' + o.color2);   // after the vertex's own values are made
+    sh.vertexShader = vs;
+    let fs = 'varying float vFade, vAk; uniform vec3 uEye;\n#define cameraPosition uEye\n' + sh.fragmentShader;
+    fs = fs.replace('( gl_FrontFacing ) ? vIndirectFront : vIndirectBack', 'vIndirectFront').replace('( gl_FrontFacing ) ? vLightFront : vLightBack', 'vLightFront');
+    fs = fs.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));\n if (vFade >= 0.0 ? ign > vFade : ign < -vFade) discard;');
+    if (tn) fs = fs.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .59, .11))), diffuseColor.rgb, ' + ts.toFixed(3) + ') * ' + tn.tone.toFixed(3) + ';');   // the ground's sober tone, a little less of it
+    if (o.map) fs = fs.replace('#include <alphatest_fragment>', ' diffuseColor.a *= vAk;\n#include <alphatest_fragment>');
+    sh.fragmentShader = fs;
+  };
+  return m;
+}
+/* cut-out cards keep their body with the distance: the alpha raised as the texture's mip level grows (by the distance d m), so that
+   the far crowns do not thin to nothing */
+const VAK = d => ' vAk = 1.0 + .3 * max(0.0, log2(' + d + ' / 45.0));\n';
+/* the dither of the bands, by the distance d: positive keeps a fragment under the value, negative keeps it over (the other side of
+   the same dither, so two bands that meet share every pixel without a gap) */
+const VFADE = 'float vegD = distance((modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz, uEye);\n' +
+  ' vFade = vegD < uBand.y ? (uBand.x < 0.0 ? 1.0 : -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0)) : 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0);\n' +
+  ' if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' + VAK('vegD');
+const VWIND = 'float vegW = clamp((position.y + 12.0) / 26.0, 0.0, 1.0); vegW *= vegW * uWind * step(.85, instanceMatrix[1].y / length(instanceMatrix[1].xyz));\n' +
+  ' float vegP = instanceMatrix[3].x * .043 + instanceMatrix[3].z * .061;\n' +
+  ' transformed.x += (sin(uTime * 1.3 + vegP) + .35 * sin(uTime * 3.1 + vegP * 2.0 + position.y)) * vegW * .55;\n' +
+  ' transformed.z += (sin(uTime * 1.1 + vegP * 1.3) + .35 * sin(uTime * 2.7 + vegP + position.x)) * vegW * .4;\n';
+/* the impostor: a quad of the size of the tree, turned about its trunk to the eye and tipped toward it when it is seen from above; it
+   shows the side picture, and the picture from above as the eye climbs. ip: x, y of the foot, z, scale (0: felled, not drawn); ic: its
+   shade; ik: its kind */
+const VIMP = 'attribute vec4 ip; attribute vec3 ic; attribute float ik; varying vec3 vImpC; varying vec2 vImpUv; varying float vImpTop;\n';
+function vegImpMat(tex) {
+  const m = vegMat({ kind: 'imp', map: tex, head: VIMP,
+    vert: 'vec3 vegC = vec3(ip.x, ip.y, ip.z); vec3 toE = uEye - vegC; float dE = length(toE); vec3 h = normalize(vec3(toE.x, 0.0, toE.z) + vec3(1e-4, 0.0, 0.0));\n' +
+      ' vec3 rgt = vec3(h.z, 0.0, -h.x); float el = clamp(toE.y / max(dE, 1.0), 0.0, 1.0); vImpTop = smoothstep(.5, .85, el);\n' +
+      ' vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), -h, el * .85));\n' +
+      ' transformed = vegC + (rgt * position.x + up * (position.y + 12.0)) * ip.w;\n' +
+      ' vImpUv = vec2(uv.x * .5 + ik * .5, uv.y); vImpC = ic;\n' +
+      ' float vegD = dE; vFade = 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0); if (vegD < uBand.y) vFade = -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0); if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' +
+      ' if (ip.w <= 0.0) transformed = vec3(0.0, -1e5, 0.0);\n' + VAK('dE'),
+    normal: 'objectNormal = normalize(vec3(0.0, 1.0, 0.0) + .6 * normalize(vec3(uEye.x - ip.x, 0.0, uEye.z - ip.z) + vec3(1e-4, 0.0, 0.0)));\n',
+    color2: 'vColor = vImpC;\n' });
+  m.onBeforeCompile = (f => sh => {
+    f(sh);
+    sh.fragmentShader = 'varying vec3 vImpC; varying vec2 vImpUv; varying float vImpTop;\n' + sh.fragmentShader.replace('#include <map_fragment>',
+      ' vec4 sideC = texture2D(map, vec2(vImpUv.x, vImpUv.y * .5 + .5)), topC = texture2D(map, vec2(vImpUv.x, vImpUv.y * .5));\n diffuseColor *= mix(sideC, topC, vImpTop);\n');
+  })(m.onBeforeCompile);
+  return m;
+}
+/* the pictures of the impostors, drawn once: each kind from the side (upper half of the texture) and from above (lower half), its left
+   half the conifer and its right half the broadleaf */
+function vegBake(geos) {
+  if (VS.imp) return VS.imp;
+  const rt = new THREE.WebGLRenderTarget(512, 1024, { minFilter: THREE.LinearMipmapLinearFilter, magFilter: THREE.LinearFilter, generateMipmaps: true });
+  const sc = new THREE.Scene(), cam = new THREE.OrthographicCamera(-9.5, 9.5, 15, -12, -50, 50);
+  sc.add(new THREE.HemisphereLight(0xffffff, 0x7d7a6a, .75)); const sun = new THREE.DirectionalLight(0xffffff, .45); sun.position.set(.3, 1, .6); sc.add(sun);
+  const m = new THREE.MeshLambertMaterial({ map: vegAtlas(), vertexColors: true, side: THREE.DoubleSide, alphaTest: .42 });
+  const meshes = geos.map(g => new THREE.Mesh(g, m)), cc = new THREE.Color(), ca = renderer.getClearAlpha(); renderer.getClearColor(cc);
+  renderer.setRenderTarget(rt); renderer.setClearColor(0x34432a, 0); renderer.clear();
+  rt.scissorTest = true;
+  meshes.forEach((me, k) => {
+    sc.add(me);
+    rt.viewport.set(k * 256, 512, 256, 512); rt.scissor.copy(rt.viewport); cam.left = -9.5; cam.right = 9.5; cam.top = 15; cam.bottom = -12; cam.position.set(0, 0, 20); cam.lookAt(0, 0, 0); cam.updateProjectionMatrix();
+    renderer.setRenderTarget(rt); renderer.render(sc, cam);
+    rt.viewport.set(k * 256, 0, 256, 512); rt.scissor.copy(rt.viewport); cam.top = 9.5; cam.bottom = -9.5; cam.position.set(0, 30, 0); cam.up.set(0, 0, -1); cam.lookAt(0, 0, 0); cam.up.set(0, 1, 0); cam.updateProjectionMatrix();
+    renderer.setRenderTarget(rt); renderer.render(sc, cam);
+    sc.remove(me);
+  });
+  rt.scissorTest = false; rt.viewport.set(0, 0, 512, 1024); rt.scissor.set(0, 0, 512, 1024);
+  renderer.setRenderTarget(null); renderer.setClearColor(cc, ca);
+  return (VS.imp = rt.texture);
+}
+/* the level and the look from the URL (fixed: a level that the graphics quality does not change) */
+(() => {
+  try {
+    const p = new URLSearchParams(location.search), q = p.get('vq'), s = p.get('vs');
+    if (p.get('veg') === 'off') VEG.on = false; if (VEG.Q[q]) { VEG.q = q; VEG.fixed = true; } if (VEG.styles[s]) VEG.style = s;
+  } catch (e) {}
+})();
+/* the level drawn: a fixed one, or the graphics quality's */
+function vegLevel() {
+  if (VEG.fixed || typeof gfxLevel !== 'function') return VEG.q;
+  if (typeof gfxAuto === 'function') gfxAuto();   // the first world's pick by the video card, made before it is read
+  return ['low', 'mid', 'high'][gfxLevel()] || VEG.q;
+}
+/* the sun's real shadows near the eye (the Alta quality), 0 without them; the ground's tone (how much of its colours' saturation it keeps,
+   how bright), so that the grass is of the ground it grows on */
+const vegSun = () => typeof GFXQ === 'object' && typeof gfxLevel === 'function' && GFXQ[gfxLevel()] ? GFXQ[gfxLevel()].shadow || 0 : 0;
+const vegTone = () => typeof ENVL === 'object' && ENVL ? { sat: ENVL.sat, tone: ENVL.tone } : { sat: 1, tone: 1 };
+/* a level of VEG.Q fixed from here on, and the scene made again with it */
+function vegSet(level) {
+  if (!VEG.Q[level]) return false;
+  VEG.q = level; VEG.fixed = true;
+  if (VS.built && VS.built.scene === scene) vegBuild();
+  return true;
+}
+/* a tree's row in the lists below: the two meshes of the record (wtree()) one after the other */
+const vegRow = (V, o) => wo.at[o.id] === undefined ? -1 : V.off[o.v ? 1 : 0] + wo.at[o.id];
+/* everything at once, after buildWorld() has made wo.trees and wo.leaf */
+function vegBuild() {
+  if (VS.built) vegDrop();
+  if (!VEG.on || !wo || !wo.trees || !wo.leaf) return;
+  VEG.q = vegLevel();
+  const T = S.T, Q = VEG.Q[VEG.q], St = VEG.styles[VEG.style], src = [wo.trees, wo.leaf], n = wo.trees.count + wo.leaf.count, V = { scene, n, Q, St, src, off: [0, wo.trees.count] };
+  VS.built = V; for (const me of src) me.visible = false; VU.uEye.value = camera.position;
+  /* the trees: kind, a turn and a width of its own, its matrix as drawn, its place on a grid */
+  const tl = T.objs.filter(o => o.k === 'tree' && vegRow(V, o) >= 0);
+  V.sp = new Uint8Array(n); V.L = new Float32Array(n * 16); V.R = new Float32Array(n * 16); V.C = new Float32Array(n * 3).fill(1); V.up = new Uint8Array(n); V.pos = new Float32Array(n * 3);
+  const M = new THREE.Matrix4(), L = new THREE.Matrix4(), q = new THREE.Quaternion(), Y = new THREE.Vector3(0, 1, 0), sc = new THREE.Vector3(), zero = new THREE.Vector3();
+  for (const o of tl) {
+    const i = vegRow(V, o);
+    V.sp[i] = T.trv ? (o.v ? 1 : 0) : hash2(o.id, 3, 1) < St.conifer ? 0 : 1;
+    const w = .85 + .3 * hash2(o.id, 9, 4); L.compose(zero, q.setFromAxisAngle(Y, hash2(o.id, 2, 8) * 6.283), sc.set(w, .9 + .2 * hash2(o.id, 4, 2), w)); L.toArray(V.L, i * 16);
+  }
+  const C = VEG.cell, W = S.W, HW = S.HW; V.gx0 = -4000; V.gz0 = -HW - 4000; V.gnx = Math.ceil((W + 8000) / C); V.gnz = Math.ceil((2 * HW + 8000) / C);
+  const cnt = new Int32Array(V.gnx * V.gnz + 1), cellOf = o => clamp(Math.floor((o.z - V.gz0) / C), 0, V.gnz - 1) * V.gnx + clamp(Math.floor((o.x - V.gx0) / C), 0, V.gnx - 1);
+  for (const o of tl) cnt[cellOf(o) + 1]++;
+  for (let k = 1; k < cnt.length; k++) cnt[k] += cnt[k - 1];
+  V.cs = cnt.slice(); V.ci = new Int32Array(tl.length); const fill = cnt.slice();
+  for (const o of tl) V.ci[fill[cellOf(o)]++] = vegRow(V, o);
+  /* the record: every change to a tree's matrix or shade marks its row */
+  V.dirty = new Set(); V.all = true; V.lastC = [null, null];
+  const keep = src.map((me, k) => {
+    const sm = me.setMatrixAt, scl = me.setColorAt, o = V.off[k];
+    me.setMatrixAt = function (i, m) { sm.call(this, i, m); if (VS.built === V) V.dirty.add(o + i); };
+    me.setColorAt = function (i, c) { scl.call(this, i, c); if (VS.built === V) V.dirty.add(o + i); };
+    return [sm, scl];
+  });
+  V.restore = () => src.forEach((me, k) => { me.setMatrixAt = keep[k][0]; me.setColorAt = keep[k][1]; });
+  /* what is drawn: per kind a near and a mid mesh, the shadows, the impostors */
+  const atlas = vegAtlas(), tint = new THREE.Color(S.E.tree), ref = new THREE.Color(0x3d4f2c), tc = new THREE.Color(clamp(tint.r / ref.r, .6, 1.6), clamp(tint.g / ref.g, .6, 1.6), clamp(tint.b / ref.b, .6, 1.6));
+  const cards = 1;
+  V.geo = [[vegTreeGeo(0, 0, cards), vegTreeGeo(0, 1, cards)], [vegTreeGeo(1, 0, cards), vegTreeGeo(1, 1, cards)]];
+  const mk = (geo, cap, kind) => {
+    const me = new THREE.InstancedMesh(geo, vegMat({ kind, map: atlas, color: tc, vert: VWIND + VFADE }), cap);
+    me.instanceMatrix.setUsage(THREE.DynamicDrawUsage); me.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3); me.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    me.count = 0; me.frustumCulled = false; scene.add(me); return me;
+  };
+  V.near = [0, 1].map(k => mk(V.geo[k][0], VEG.nearMax, 'near'));
+  V.sun = vegSun();
+  if (V.sun) {
+    const dm = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: atlas, alphaTest: .42, side: THREE.DoubleSide });
+    dm.customProgramCacheKey = () => 'veg-depth';
+    dm.onBeforeCompile = sh => { sh.uniforms.uTime = VU.uTime; sh.uniforms.uWind = VU.uWind; sh.vertexShader = 'uniform float uTime, uWind;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + VWIND); };
+    for (const me of V.near) { me.castShadow = true; me.customDepthMaterial = dm; }
+    V.depth = dm;
+  }
+  V.mid = [0, 1].map(k => mk(V.geo[k][1], VEG.midMax, 'mid'));
+  /* shadows: a soft round patch laid on the ground, a little toward the far side from the sun */
+  {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+    gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.55, 'rgba(0,0,0,.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    const sg = new THREE.PlaneGeometry(1, 1); sg.rotateX(-Math.PI / 2);
+    const sm2 = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    V.shadow = new THREE.InstancedMesh(sg, sm2, VEG.nearMax + VEG.midMax); V.shadow.instanceMatrix.setUsage(THREE.DynamicDrawUsage); V.shadow.count = 0; V.shadow.frustumCulled = false; V.shadow.renderOrder = -1;
+    scene.add(V.shadow);
+    V.SM = new Float32Array(n * 16); const nn = new THREE.Vector3(), qq = new THREE.Quaternion(), p = new THREE.Vector3();
+    for (const o of tl) {
+      const i = vegRow(V, o), s = o.sc || 1, e = 3;
+      nn.set(hgt(o.x - e, o.z) - hgt(o.x + e, o.z), 2 * e, hgt(o.x, o.z - e) - hgt(o.x, o.z + e)).normalize(); qq.setFromUnitVectors(Y, nn);
+      const r = (V.sp[i] ? 15 : 12) * s; p.set(o.x + 1.2 * s, hgt(o.x, o.z) + .25, o.z + .8 * s);
+      M.compose(p, qq, sc.set(r, 1, r)); M.toArray(V.SM, i * 16);
+    }
+  }
+  /* impostors: every tree, one draw */
+  {
+    const tex = vegBake([V.geo[0][0], V.geo[1][0]]), qg = new THREE.InstancedBufferGeometry();
+    qg.setAttribute('position', new THREE.Float32BufferAttribute([-9.5, -12, 0, 9.5, -12, 0, 9.5, 15, 0, -9.5, 15, 0], 3));
+    qg.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2)); qg.setIndex([0, 1, 2, 0, 2, 3]);
+    qg.setAttribute('normal', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], 3));
+    V.ip = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4); V.ic = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); V.ik = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    V.ip.setUsage(THREE.DynamicDrawUsage); V.ic.setUsage(THREE.DynamicDrawUsage);
+    for (let i = 0; i < n; i++) V.ik.array[i] = V.sp[i];
+    qg.setAttribute('ip', V.ip); qg.setAttribute('ic', V.ic); qg.setAttribute('ik', V.ik); qg.instanceCount = n;
+    V.imp = new THREE.Mesh(qg, vegImpMat(tex)); V.imp.material.color.copy(tc).multiplyScalar(1.1); V.imp.frustumCulled = false; scene.add(V.imp);
+  }
+  vegBands(V);
+  /* the grass */
+  vegGrassInit(V);
+  V.t = 0; V.eye = new THREE.Vector3(1e9, 0, 0); V.last = new THREE.Vector3(); V.warm = false;
+  vegSync(V); vegPick(V);
+}
+/* the bands of each mesh as uniforms */
+function vegBands(V) {
+  const Q = V.Q, f = Q.fade / 2, nf = Q.near ? Q.near : -1;
+  for (const me of V.near) me.material.userData.band.value.set(-2, -1, Q.near - f, Q.near + f);
+  for (const me of V.mid) me.material.userData.band.value.set(Q.near ? Q.near - f : -2, Q.near ? Q.near + f : -1, Q.mid - f, Q.mid + f);
+  V.imp.material.userData.band.value.set(Q.mid - f, Q.mid + f, 1e9, 2e9);
+  if (nf < 0) for (const me of V.near) me.visible = false;
+}
+function vegDrop() {
+  const V = VS.built; VS.built = null; if (!V) return;
+  V.restore(); for (const me of V.src) me.visible = true;
+  for (const me of [...V.near, ...V.mid, V.shadow, V.imp]) { if (me.parent) me.parent.remove(me); me.material.dispose(); if (me !== V.near[0] && me !== V.near[1] && me !== V.mid[0] && me !== V.mid[1]) me.geometry.dispose(); }
+  if (V.depth) V.depth.dispose();
+  V.geo.flat().forEach(g => g.dispose());
+  if (V.g) { for (const ch of V.g.chunks.values()) { if (ch.me.parent) ch.me.parent.remove(ch.me); ch.geo.dispose(); } V.g.mat.dispose(); V.g.base.dispose(); }
+}
+/* the record read again where it changed: the matrix as drawn, standing or not, the place, the shade; the impostor's row */
+function vegSync(V) {
+  const As = V.src.map(me => me.instanceMatrix.array), CAs = V.src.map(me => me.instanceColor ? me.instanceColor.array : null);
+  if (CAs[0] !== V.lastC[0] || CAs[1] !== V.lastC[1]) { V.lastC = CAs; V.all = true; }   // fortScene() gives the trees their shades once
+  if (!V.all && !V.dirty.size) return false;
+  const M = VS.m || (VS.m = new THREE.Matrix4()), L = VS.l || (VS.l = new THREE.Matrix4()), ip = V.ip.array, ic = V.ic.array, n0 = V.off[1];
+  const one = i => {
+    const k = i < n0 ? 0 : 1, r = i - V.off[k], A = As[k], CA = CAs[k];
+    M.fromArray(A, r * 16); L.fromArray(V.L, i * 16); M.multiply(L); M.toArray(V.R, i * 16);
+    const e = M.elements, up = e[5] / Math.hypot(e[4], e[5], e[6]) > .85 ? 1 : 0; V.up[i] = up;
+    V.pos[i * 3] = e[12]; V.pos[i * 3 + 1] = e[13]; V.pos[i * 3 + 2] = e[14];
+    if (CA) { V.C[i * 3] = CA[r * 3]; V.C[i * 3 + 1] = CA[r * 3 + 1]; V.C[i * 3 + 2] = CA[r * 3 + 2]; }
+    const s = Math.hypot(A[r * 16], A[r * 16 + 1], A[r * 16 + 2]);
+    ip[i * 4] = e[12]; ip[i * 4 + 1] = e[13] - 12 * s; ip[i * 4 + 2] = e[14]; ip[i * 4 + 3] = up ? s * Math.hypot(V.L[i * 16], V.L[i * 16 + 2]) : 0;
+    ic[i * 3] = V.C[i * 3]; ic[i * 3 + 1] = V.C[i * 3 + 1]; ic[i * 3 + 2] = V.C[i * 3 + 2];
+  };
+  if (V.all) { for (let i = 0; i < V.n; i++) one(i); V.all = false; V.dirty.clear(); }
+  else { for (const i of V.dirty) one(i); V.dirty.clear(); }
+  V.ip.needsUpdate = V.ic.needsUpdate = true;
+  return true;
+}
+/* the trees near the eye into the near and mid meshes, and their shadows */
+function vegPick(V) {
+  const cp = camera.position, Q = V.Q, f = Q.fade / 2, R = Q.mid + f, R2 = R * R, n2 = Q.near ? (Q.near + f) ** 2 : -1, m2 = Q.near ? (Q.near - f) ** 2 : -1, s2 = (Q.mid * .8) ** 2;
+  const C = VEG.cell, i0 = clamp(Math.floor((cp.x - R - V.gx0) / C), 0, V.gnx - 1), i1 = clamp(Math.floor((cp.x + R - V.gx0) / C), 0, V.gnx - 1), j0 = clamp(Math.floor((cp.z - R - V.gz0) / C), 0, V.gnz - 1), j1 = clamp(Math.floor((cp.z + R - V.gz0) / C), 0, V.gnz - 1);
+  const nn = [0, 0], mm = [0, 0], NA = V.near.map(m => m.instanceMatrix.array), NC = V.near.map(m => m.instanceColor.array), MA = V.mid.map(m => m.instanceMatrix.array), MC = V.mid.map(m => m.instanceColor.array);
+  const SA = V.shadow.instanceMatrix.array, RR = V.R, CC = V.C, P = V.pos; let sn = 0;
+  const put = (dst, dc, k, i) => { const a = k * 16, b = i * 16; for (let j = 0; j < 16; j++) dst[a + j] = RR[b + j]; dc[k * 3] = CC[i * 3]; dc[k * 3 + 1] = CC[i * 3 + 1]; dc[k * 3 + 2] = CC[i * 3 + 2]; };
+  for (let j = j0; j <= j1; j++) for (let c = j * V.gnx + i0, ce = j * V.gnx + i1; c <= ce; c++) for (let k = V.cs[c], ke = V.cs[c + 1]; k < ke; k++) {
+    const i = V.ci[k], dx = P[i * 3] - cp.x, dy = P[i * 3 + 1] - cp.y, dz = P[i * 3 + 2] - cp.z, d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > R2) continue;
+    const sp = V.sp[i];
+    if (d2 < n2 && nn[sp] < VEG.nearMax) put(NA[sp], NC[sp], nn[sp]++, i);
+    if (d2 > m2 && mm[sp] < VEG.midMax) put(MA[sp], MC[sp], mm[sp]++, i);
+    if (Q.shadow && !V.sun && V.up[i] && d2 < s2 && sn < VEG.nearMax + VEG.midMax) { const a = sn++ * 16, b = i * 16; for (let jj = 0; jj < 16; jj++) SA[a + jj] = V.SM[b + jj]; }
+  }
+  for (const sp of [0, 1]) {
+    const a = V.near[sp], b = V.mid[sp];
+    a.count = nn[sp]; b.count = mm[sp];
+    a.instanceMatrix.needsUpdate = a.instanceColor.needsUpdate = b.instanceMatrix.needsUpdate = b.instanceColor.needsUpdate = true;
+  }
+  V.shadow.count = sn; V.shadow.instanceMatrix.needsUpdate = true;
+  V.eye.copy(cp); V.t = 0;
+}
+/* ---- the grass ---- a clump: blades round a point, each bent a little; gh: how far up the blade (the wind and the shade go by it) */
+function vegClump(blades) {
+  const P = [], H = [], I = []; let sd = 5; const r = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  for (let b = 0; b < blades; b++) {
+    const a = r() * 6.283, d = Math.sqrt(r()) * .32, x = Math.cos(a) * d, z = Math.sin(a) * d, h = .55 + .45 * r(), w = .045 + .03 * r(), lean = r() * 6.283, bend = .12 + .22 * r();
+    const fx = Math.cos(lean), fz = Math.sin(lean), sx = -fz * w, sz = fx * w, k = P.length / 3;
+    for (let s = 0; s <= 2; s++) {
+      const t = s / 2, cx = x + fx * bend * t * t * h, cz = z + fz * bend * t * t * h, y = h * t, ww = 1 - t * .45;
+      P.push(cx - sx * ww, y, cz - sz * ww, cx + sx * ww, y, cz + sz * ww); H.push(t, t);
+    }
+    P.push(x + fx * bend * h * 1.15, h * 1.08, z + fz * bend * h * 1.15); H.push(1);
+    I.push(k, k + 1, k + 2, k + 1, k + 3, k + 2, k + 2, k + 3, k + 4, k + 3, k + 5, k + 4, k + 4, k + 5, k + 6);
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('gh', new THREE.Float32BufferAttribute(H, 1)); g.setIndex(I);
+  return g;
+}
+function vegGrassInit(V) {
+  const Q = V.Q; if (!Q.grass) return;
+  const T = S.T, N1 = T.N + 1, c = new THREE.Color();
+  const G = (V.g = { chunks: new Map(), free: [], col: new Float32Array(N1 * N1 * 3), dens: new Float32Array(N1 * N1), tall: new Float32Array(N1 * N1), R: Q.grass });
+  const tip = new THREE.Color(V.St.tip), Tn = vegTone(), tone = cc => { const l = cc.r * .3 + cc.g * .59 + cc.b * .11; return cc.setRGB((l + (cc.r - l) * Tn.sat) * Tn.tone, (l + (cc.g - l) * Tn.sat) * Tn.tone, (l + (cc.b - l) * Tn.sat) * Tn.tone); };
+  tone(tip);
+  for (let k = 0; k < N1 * N1; k++) {
+    const x = T.x0 + (k % N1) * T.cx, z = T.z0 + ((k / N1) | 0) * T.cz, h = T.h[k], kd = T.kind[k];
+    groundColor(k, x, z, c); tone(c); G.col.set([c.r, c.g, c.b], k * 3);
+    G.dens[k] = h < T.WL + 4 ? 0 : kd === 1 ? VEG.wood : kd === 8 ? .55 : kd === 9 ? .7 : h > 600 ? .3 : 1;
+    G.tall[k] = kd >= 2 && kd <= 4 ? VEG.crop : kd === 8 ? .5 : kd === 1 ? .8 : 1;
+  }
+  G.base = vegClump(6);
+  G.mat = vegMat({ kind: 'grass', head: 'attribute vec4 gp; attribute vec4 gc; attribute float gh; varying vec3 vGc;\n',
+    vert: 'float gd = distance(gp.xz, uEye.xz); float gk = 1.0 - smoothstep(uBand.z * .55, uBand.z, gd) * step(gp.w - floor(gp.w), 2.0);\n' +
+      ' gk *= 1.0 - smoothstep(uBand.z * .3, uBand.z * .45, uEye.y - gp.y);\n' +
+      ' float gs = gc.w * gk; float ga = gp.w * 6.2832; vec3 p = position; p.xz = mat2(cos(ga), -sin(ga), sin(ga), cos(ga)) * p.xz; p.y *= gs; p.xz *= .5 + .5 * gk;\n' +
+      ' float gw = (sin(uTime * 1.9 + gp.x * .31 + gp.z * .23) + .5 * sin(uTime * 3.7 + gp.x * .9 - gp.z * .4)) * uWind;\n' +
+      ' p.x += gw * .32 * gh * gh * gs; p.z += gw * .2 * gh * gh * gs;\n' +
+      ' transformed = p + gp.xyz; vGc = gc.rgb * mix(.42, .86, gh) + vec3(.03, .035, .01) * gh * gh; vFade = 1.0;\n',
+    normal: 'objectNormal = vec3(0.0, 1.0, 0.0);\n', color2: 'vColor = vGc;\n' });
+  G.mat.userData.band.value.set(-2, -1, Q.grass, Q.grass * 2);
+  G.tip = tip; G.dm = Q.dens * V.St.dens; G.tm = V.St.tall;
+}
+/* the ground's colour, the grass's density and height at a point, between the grid's nodes */
+function vegGround(G, x, z, out) {
+  const T = S.T, N = T.N, N1 = N + 1, gx = clamp((x - T.x0) / T.cx, 0, N - .001), gz = clamp((z - T.z0) / T.cz, 0, N - .001), i = gx | 0, j = gz | 0, u = gx - i, v = gz - j;
+  const k = j * N1 + i, w0 = (1 - u) * (1 - v), w1 = u * (1 - v), w2 = (1 - u) * v, w3 = u * v, ks = [k, k + 1, k + N1, k + N1 + 1], ws = [w0, w1, w2, w3];
+  out[0] = out[1] = out[2] = out[3] = out[4] = 0;
+  for (let q = 0; q < 4; q++) { const kk = ks[q], w = ws[q]; out[0] += G.col[kk * 3] * w; out[1] += G.col[kk * 3 + 1] * w; out[2] += G.col[kk * 3 + 2] * w; out[3] += G.dens[kk] * w; out[4] += G.tall[kk] * w; }
+  return out;
+}
+/* a chunk of grass: its clumps on a jittered grid, the same each time it is made; sorted by a rank, so that a chunk far from the eye
+   draws only the first of them */
+function vegChunk(V, ci, cj) {
+  const G = V.g, T = S.T, CS = VEG.chunk, sp = VEG.grid, n = Math.floor(CS / sp), x0 = ci * CS, z0 = cj * CS, out = [0, 0, 0, 0, 0], pts = [];
+  const mx = x0 + CS / 2, mz = z0 + CS / 2, nearRoad = routeDist(T, mx, mz) < CS * .75 + 14;
+  const burg = (T.burgs || []).find(b => Math.hypot(mx - b.x, mz - b.z) < b.ru + 60 + CS), hs = burg ? T.houses.filter(q => Math.abs(q.x - mx) < CS + q.r && Math.abs(q.z - mz) < CS + q.r) : null;
+  const st = burg ? (T.streets || []).filter(l => Math.min(l[0], l[2]) < x0 + CS + 10 && Math.max(l[0], l[2]) > x0 - 10 && Math.min(l[1], l[3]) < z0 + CS + 10 && Math.max(l[1], l[3]) > z0 - 10) : null;
+  const sd = (l, x, z) => { const ex = l[2] - l[0], ez = l[3] - l[1], t = clamp(((x - l[0]) * ex + (z - l[1]) * ez) / (ex * ex + ez * ez || 1), 0, 1); return Math.hypot(x - l[0] - ex * t, z - l[1] - ez * t); };
+  for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
+    const gi = ci * n + a, gj = cj * n + b, x = x0 + (a + hash2(gi, gj, 1)) * sp, z = z0 + (b + hash2(gi, gj, 2)) * sp, keep = hash2(gi, gj, 3);
+    vegGround(G, x, z, out); if (keep >= out[3] * G.dm) continue;
+    const y = hgt(x, z); if (y < T.WL + 3) continue;
+    if (nearRoad && routeDist(T, x, z) < 5.5) continue;
+    if (hs && hs.some(q => footD(q, x, z) < 1.5)) continue;
+    if (st && st.some(l => sd(l, x, z) < CITY.plan.street / 2)) continue;
+    pts.push([hash2(gi, gj, 4), x, y, z, out[0], out[1], out[2], out[4]]);
+  }
+  pts.sort((p, q) => p[0] - q[0]);
+  const m = pts.length, gp = new Float32Array(m * 4), gc = new Float32Array(m * 4), tip = G.tip;
+  for (let k = 0; k < m; k++) {
+    const p = pts[k], v = hash2(k, ci * 31 + cj, 5), mix = .12 + .2 * v;
+    gp.set([p[1], p[2] - .05, p[3], p[0] * .999 + Math.floor(hash2(k, ci, cj) * 1e3)], k * 4);
+    gc.set([(p[4] * (1 - mix) + tip.r * mix) * (.9 + .2 * v), (p[5] * (1 - mix) + tip.g * mix) * (.9 + .2 * v), (p[6] * (1 - mix) + tip.b * mix) * (.85 + .2 * v), p[7] * G.tm * (.7 + .6 * hash2(ci, k, 6))], k * 4);
+  }
+  for (let k = 0; k < m; k++) gp[k * 4 + 3] = (gp[k * 4 + 3] - Math.floor(gp[k * 4 + 3])) + Math.floor(hash2(k, ci, cj) * 1e3);
+  let ch = G.free.pop();
+  if (!ch) { const geo = new THREE.InstancedBufferGeometry(); geo.index = G.base.index; geo.setAttribute('position', G.base.getAttribute('position')); geo.setAttribute('gh', G.base.getAttribute('gh')); ch = { geo, me: new THREE.Mesh(geo, G.mat) }; }
+  const geo = ch.geo;
+  geo.setAttribute('gp', new THREE.InstancedBufferAttribute(gp, 4)); geo.setAttribute('gc', new THREE.InstancedBufferAttribute(gc, 4));
+  geo.instanceCount = m; ch.m = m; ch.ranks = pts.map(p => p[0]);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(mx, m ? pts[m >> 1][2] : 0, mz), CS * .75 + 20);
+  ch.x = mx; ch.z = mz; ch.me.visible = m > 0;
+  if (!ch.me.parent) scene.add(ch.me);
+  return ch;
+}
+/* each frame: the chunks round the eye kept, the missing ones made nearest first, the far ones drawing fewer clumps */
+function vegGrass(V, all) {
+  const G = V.g; if (!G) return;
+  const cp = camera.position, R = G.R, CS = VEG.chunk, h = cp.y - hgt(cp.x, cp.z), high = h > R * .45;
+  for (const ch of G.chunks.values()) ch.me.visible = !high && ch.m > 0;
+  if (h > R * 1.5) return;   // lower than this the chunks are kept (hidden while high), so that none is missing as the grass grows back
+  const i0 = Math.floor((cp.x - R) / CS), i1 = Math.floor((cp.x + R) / CS), j0 = Math.floor((cp.z - R) / CS), j1 = Math.floor((cp.z + R) / CS), want = [];
+  for (const [key, ch] of G.chunks) if (Math.hypot(ch.x - cp.x, ch.z - cp.z) > R + CS) { ch.me.visible = false; G.chunks.delete(key); G.free.push(ch); }
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const d = Math.hypot((i + .5) * CS - cp.x, (j + .5) * CS - cp.z); if (d > R + CS * .71) continue;
+    const key = i * 65536 + j, ch = G.chunks.get(key);
+    if (!ch) { want.push([d, i, j, key]); continue; }
+    const far = clamp((d - R * .35) / (R * .65), 0, 1), share = 1 - far * .8;   // fewer clumps toward the edge: the first `share` of the ranks
+    let lo = 0, hi = ch.m; while (lo < hi) { const mid = (lo + hi) >> 1; if (ch.ranks[mid] < share) lo = mid + 1; else hi = mid; }
+    ch.geo.instanceCount = lo;
+  }
+  want.sort((a, b) => a[0] - b[0]);
+  for (let k = 0, e = all ? want.length : Math.min(VEG.make, want.length); k < e; k++) { const [, i, j, key] = want[k], ch = vegChunk(V, i, j); if (high) ch.me.visible = false; G.chunks.set(key, ch); }
+}
+/* everything round the eye made at once: the record read, the trees picked, every chunk of grass; the first time in a world (the first
+   frame after buildWorld(), with the camera on the player, before anything of the match is shown) also every shader compiled, the grass's
+   even while it is hidden; then again whenever the eye jumps (a respawn, another seat or camera), so that nothing grows in in view */
+function vegWarm(V) {
+  const t0 = performance.now();
+  vegSync(V); vegPick(V); vegGrass(V, true);
+  if (!V.warm && renderer && renderer.compile) {
+    let probe = null;
+    if (V.g) {
+      const pg = new THREE.InstancedBufferGeometry(); pg.index = V.g.base.index; pg.setAttribute('position', V.g.base.getAttribute('position')); pg.setAttribute('gh', V.g.base.getAttribute('gh'));
+      pg.setAttribute('gp', new THREE.InstancedBufferAttribute(new Float32Array(4), 4)); pg.setAttribute('gc', new THREE.InstancedBufferAttribute(new Float32Array(4), 4)); pg.instanceCount = 0;
+      probe = new THREE.Mesh(pg, V.g.mat); probe.frustumCulled = false; scene.add(probe);
+    }
+    try { renderer.compile(scene, camera); } catch (e) {}
+    if (probe) scene.remove(probe);   // not disposed: it shares the clump's buffers with the chunks
+  }
+  V.warm = true; V.warmMs = performance.now() - t0;
+}
+/* each frame, from syncScene(): the clock of the wind, the record's changes, the trees round the eye picked again when it has moved or
+   every `every` s, the grass */
+function vegFrame(dt) {
+  const V = VS.built; if (!V || V.scene !== scene) return;
+  VU.uTime.value += dt || 0; VU.uWind.value = VEG.wind * V.St.wind * (reduced ? .3 : 1);
+  const cp = camera.position, jump = !V.warm || cp.distanceToSquared(V.last) > VEG.jump * VEG.jump; V.last.copy(cp);
+  if (jump) { vegWarm(V); return; }
+  const ch = vegSync(V); V.t += dt || 0;
+  if (ch || V.t > VEG.every || camera.position.distanceToSquared(V.eye) > VEG.move * VEG.move) vegPick(V);
+  vegGrass(V);
 }
 
 /* an object as its stage has it (WLOOK: how dark by stage). A house: its walls, then darker, then a low heap with what is left of the roof
@@ -29504,6 +30020,7 @@ function syncScene(dt) {
   const B = S.bm && S.bm.x !== undefined && !S.my.dead ? S.bm : null; gGhost.visible = !!B;
   if (B) { gGhost.position.set(B.x, B.y + BLD.size[2] / 2 + .2, B.z); gGhost.rotation.y = B.a; gGhost.material.color.setHex(B.why ? 0xe2604f : 0x6fd67a); }
   fortScene();
+  vegFrame(dt);
   sync(S.debris, gDebris, debrisMesh, (o, m) => { m.position.set(o.x, o.y, o.z); m.quaternion.set(o.q.x, o.q.y, o.q.z, o.q.w); });
   sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? new THREE.Mesh(cylX(.34, .1, 3, 6), mat(0x2f322e)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => new THREE.Mesh(cylX(.22, .22, 4.2, 6), mat(0xeceae2)), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });

@@ -3445,9 +3445,10 @@ const ZONE = ['tronco', 'cabeça', 'pernas', 'braços'];
 const STANCE = [{ name: 'Em pé', h: 1.75, eye: 1.62, spd: 1, sp: 1, vis: 1, blast: 1 }, { name: 'Agachado', h: 1.15, eye: 1.05, spd: .5, sp: .6, vis: .6, blast: .8 }, { name: 'Deitado', h: .45, eye: .32, spd: .22, sp: .35, vis: .3, blast: .3 }];
 /* cover that the walls themselves do not give (a round stops at a house, and a line of sight too): [concealment, protection] in woods,
    from every side, and crouched or prone within near m of a wall or of rubble, from the side it is on. Concealment shortens the distance
-   a soldier is seen at; protection is the chance that a round stops in the cover and the share of a burst it takes. every: s between
-   looks at where a soldier stands */
-const COVER = { wood: [.5, .45], wall: [.3, .5], near: 3, every: .5 };
+   a soldier is seen at; protection is the chance that a round stops in the cover and the share of a burst it takes. bush (COVERS): inside
+   one from every side, crouched or prone within near m of one, with no protection; its third, what that is worth to an AI soldier
+   choosing where to stand (coverSpot), beside a wall's protection. every: s between looks at where a soldier stands */
+const COVER = { wood: [.5, .45], wall: [.3, .5], bush: [.6, 0, .15], near: 3, every: .5 };
 /* suppression: a round passing within r m, or a burst within blast times its radius, pins an AI soldier for t s: prone, spread times sp */
 const SUP = { r: 2.5, blast: 1.7, t: 3.5, sp: 2.4 };
 /* infantry AI. think: s between a soldier's looks around; cap: soldiers on the map at once, bodies included. see: how far it looks for a
@@ -3747,8 +3748,8 @@ let S = null;
 
 /* ---------- terrain: a height grid generated once per era, with valleys cut along the roads ---------- */
 /* MAPV: the map's version. 1 is the first map, two roads; 2 adds the road network (RN, T.net), 3 the new places and points, 4 the centre axis and the manoeuvres,
-   5 the seat towns beside the bases, with their lots (CITY.plan.seat). A room's version is its first player's, told in welcome (Net.mv) */
-let MAPV = 5;
+   5 the seat towns beside the bases, with their lots (CITY.plan.seat), 6 the rocks and bushes on open ground (COVERS). A room's version is its first player's, told in welcome (Net.mv) */
+let MAPV = 6;
 const TERRAIN = {};
 function hash2(i, j, s) { const n = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); }
 function vnoise(x, z, s) {
@@ -4019,6 +4020,7 @@ function genTerrain(eraId, mv) {
   fortTerrain(T, eraId, sd);
   cityObjs(T);
   if (mv >= 4) axisNet(T, eraId);   // map version 4: the centre axis, after everything is placed
+  if (mv >= 6) coverTerrain(T, eraId, sd);   // map version 6: rocks and bushes, last, so that no other id moves
   return (TERRAIN[ck] = T);
 }
 function hgtT(T, x, z) {
@@ -4063,6 +4065,7 @@ function rayObj(o, ax, ay, az, dx, dy, dz, air) {
   if (o.rd) {
     const R = air && o.cr ? o.cr : o.rd, a = dx * dx + dz * dz, b = px * dx + pz * dz, c = px * px + pz * pz - R * R, q = b * b - a * c;
     if (c > 0) { if (a < 1e-9 || b >= 0 || q < 0) return; t0 = (-b - Math.sqrt(q)) / a; if (t0 > 1) return; }
+    if (o.K.veil && (c <= 0 || (-b + Math.sqrt(q)) / a >= 1)) return;   // a bush hides what is behind it, not who is in it, nor from him
     if (a > 1e-9) t1 = Math.min(1, (-b + Math.sqrt(Math.max(0, q))) / a);
     const y0 = ay + dy * t0; an = 0;
     if (y0 < lo) return;
@@ -4084,7 +4087,7 @@ function rayObj(o, ax, ay, az, dx, dy, dz, air) {
 function ray(ax, ay, az, bx, by, bz, mode) {
   const T = S.T, G = T.grid, C = OBJS.cell, nx = G.nx, nz = G.nz, bit = mode === 1 ? 1 : 2, dy = by - ay, wx = bx - ax, wz = bz - az;
   RAY.o = null; RAY.t = 1;
-  if (mode === 1) { let near = false; for (const b of T.walls) if (!(Math.max(ax, bx) < b[0] || Math.min(ax, bx) > b[2] || Math.max(az, bz) < b[1] || Math.min(az, bz) > b[3])) { near = true; break; } if (!near) return null; }
+  if (mode === 1 && !T.cvn) { let near = false; for (const b of T.walls) if (!(Math.max(ax, bx) < b[0] || Math.min(ax, bx) > b[2] || Math.max(az, bz) < b[1] || Math.min(az, bz) > b[3])) { near = true; break; } if (!near) return null; }
   const fx = (ax - T.x0) / C, fz = (az - T.z0) / C, dx = wx / C, dz = wz / C, si = dx > 0 ? 1 : -1, sj = dz > 0 ? 1 : -1, ddx = dx ? si / dx : Infinity, ddz = dz ? sj / dz : Infinity, dyn = mode !== 1 && S.dyn.size;
   let i = Math.floor(fx), j = Math.floor(fz);
   if (!dyn && i === Math.floor(fx + dx) && j === Math.floor(fz + dz) && !(i >= 0 && i < nx && j >= 0 && j < nz && G.f[j * nx + i] & bit)) return null;   // a short step over an empty cell
@@ -4092,7 +4095,7 @@ function ray(ax, ay, az, bx, by, bz, mode) {
   for (let n = 0; n < 2000; n++) {
     if (i >= 0 && i < nx && j >= 0 && j < nz) {
       const k = j * nx + i;
-      if (G.f[k] & bit) for (const o of G.c[k]) if (mode !== 1 || o.K.sight) rayObj(o, ax, ay, az, wx, dy, wz, mode === 2);
+      if (G.f[k] & bit) for (const o of G.c[k]) if (mode === 1 ? o.K.sight || o.K.veil : !o.K.veil) rayObj(o, ax, ay, az, wx, dy, wz, mode === 2);
       if (dyn) { const l = S.dyn.get(k); if (l) for (const o of l) rayObj(o, ax, ay, az, wx, dy, wz, false); }
     }
     const t = Math.min(tx, tz);
@@ -4209,7 +4212,7 @@ function shotObj(o, b, dmg, x, y, z, vx, vy, vz) {
   if (o.B && S.os[o.id] < 2) return bShot(o, b, dmg, x, y, z, vx, vy, vz);
   const v = Math.hypot(vx, vy, vz) || 1, B = OBJS.back, an = RAY.ax, sg = RAY.sg;
   OUT.x = x - vx / v * B; OUT.y = y - vy / v * B; OUT.z = z - vz / v * B;
-  if (dmg >= OBJS.hole && o.K.sight && an !== 1 && S.os[o.id] < 2) { S.holes.push({ id: o.id, x, y, z, nx: (an ? o.s : o.c) * sg, nz: (an ? o.c : -o.s) * sg, r: clamp(dmg / 14, 1, 3.2) }); if (S.holes.length > OBJS.holes) S.holes.shift(); }
+  if (dmg >= OBJS.hole && o.K.sight && !o.K.rock && an !== 1 && S.os[o.id] < 2) { S.holes.push({ id: o.id, x, y, z, nx: (an ? o.s : o.c) * sg, nz: (an ? o.c : -o.s) * sg, r: clamp(dmg / 14, 1, 3.2) }); if (S.holes.length > OBJS.holes) S.holes.shift(); }
   hitObj(o, dmg * o.K.take[1], b.by);
   return OUT;
 }
@@ -6285,7 +6288,7 @@ function wayTo(M, x, z, gx, gz, r, heavy) {
   WAY.x = gx; WAY.z = gz;
   if (heavy) return WAY;
   for (const o of near(x + ux * L / 2, z + uz * L / 2, L / 2 + r)) {
-    if (S.os[o.id] > 1 || o.K.sight) continue;
+    if (S.os[o.id] > 1 || (o.K.sight && !o.K.rock) || o.K.veil) continue;   // a rock is gone round as a tree is; a bush is walked through
     const px = o.x - x, pz = o.z - z, t = px * ux + pz * uz, l = pz * ux - px * uz, R = (o.rd || o.r) + r;
     if (t <= 0 || Math.abs(l) >= R || Math.hypot(gx - o.x, gz - o.z) < R) continue;
     const e = t - Math.sqrt(R * R - l * l);
@@ -6672,11 +6675,15 @@ const manEye = m => ({ x: m.x, y: m.y + STANCE[m.st].eye * MAN.sc, z: m.z });
 /* cover, the one rule (COVER) for what the walls do not do by standing there: what the ground a soldier stands on gives it. c concealment,
    p protection, from every side (all), or for one that is not standing from the side x z points to, where the wall or the rubble is */
 function coverAt(x, z, c) {
-  let bd = COVER.near, b = null;
-  c.c = c.p = 0; c.all = false;
-  for (const o of near(x, z, COVER.near)) { const d = o.K.sight ? footD(o, x, z) || (o.B && S.os[o.id] < 2 ? 9 : 0) : 9; if (d < bd) { bd = d; b = o; } }
+  let bd = COVER.near, b = null, vd = COVER.near, v = null;
+  c.c = c.p = 0; c.all = false; c.b = 0;
+  for (const o of near(x, z, COVER.near)) {
+    if (o.K.veil) { const d = S.os[o.id] < 2 ? footD(o, x, z) : 9; if (d < vd) { vd = d; v = o; } continue; }
+    const d = o.K.sight && !(o.K.rock && S.os[o.id] > 1) ? footD(o, x, z) || (o.B && S.os[o.id] < 2 ? 9 : 0) : 9; if (d < bd) { bd = d; b = o; }
+  }
   if (b) { c.c = COVER.wall[0]; c.p = COVER.wall[1]; c.x = b.x - x; c.z = b.z - z; }
   else if (kindAt(x, z) === 1) { c.c = COVER.wood[0]; c.p = COVER.wood[1]; c.all = true; }
+  else if (v) { c.c = COVER.bush[0]; c.all = !vd; c.b = 1; c.x = v.x - x; c.z = v.z - z; }   // a bush (COVERS): it hides, it does not stop
   return c;
 }
 function cover(m) {
@@ -6847,7 +6854,7 @@ const slot = (q, i) => {
 function postPts(t, x, z, n, R) {
   const bp = bldPts(t, x, z, n, R); if (bp) return bp;
   const fp = fortPts(t, x, z, n, R); if (fp) return fp;
-  const e = S.base[1 - t], out = [], hs = R ? [] : near(x, z, 60).filter(o => o.K.sight && S.os[o.id] < 2).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 4);
+  const e = S.base[1 - t], out = [], hs = R ? [] : near(x, z, 60).filter(o => o.K.sight && !o.K.rock && S.os[o.id] < 2).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 4);
   for (let i = 0; i < n; i++) {
     const w = hs[i % (hs.length || 1)], a = i * 2.4, r = R || 6 + 2.5 * (i >> 1); let p = { x: x + Math.cos(a) * r, z: z + Math.sin(a) * r };
     if (w) p = CORN4.map(q => { const lx = q[0] * (w.hw + 1.4), lz = q[1] * (w.hd + 1.4); return { x: w.x + lx * w.c + lz * w.s, z: w.z - lx * w.s + lz * w.c }; }).sort((a, b) => hdist(a, e) - hdist(b, e))[((i / hs.length) | 0) % 2];
@@ -7047,12 +7054,13 @@ function coverSpot(m, sl, o) {
   const tryAt = (x, z) => {   // cover on the enemy's side, the enemy in sight from a crouch, and not far to go
     if (hgt(x, z) < S.T.WL + .5) return;
     coverAt(x, z, CV);
-    const sc = CV.p * (CV.all || (o.x - x) * CV.x + (o.z - z) * CV.z > 0 ? 1 : .3) + (walled(x, hgt(x, z) + eye, z, o.x, ty, o.z) ? 0 : IAI.sight) - Math.hypot(x - m.x, z - m.z) * .004 * dw - mates({ x, z });
+    const sc = (CV.p || (CV.b ? COVER.bush[2] : 0)) * (CV.all || (o.x - x) * CV.x + (o.z - z) * CV.z > 0 ? 1 : .3) + (walled(x, hgt(x, z) + eye, z, o.x, ty, o.z) ? 0 : IAI.sight) - Math.hypot(x - m.x, z - m.z) * .004 * dw - mates({ x, z });
     if (sc > bs) { bs = sc; best = { x, z }; }
   };
   tryAt(sl.x, sl.z); bs += .1;
   for (let i = 0; i < 16; i++) { const a = i * TAU / 8, R = IAI.spot * (i < 8 ? 1 : .5); tryAt(sl.x + Math.cos(a) * R, sl.z + Math.sin(a) * R); }
-  for (const w of near(sl.x, sl.z, IAI.spot)) if (w.K.sight) for (const q of CORN4) { const lx = q[0] * (w.hw + 1.4), lz = q[1] * (w.hd + 1.4); tryAt(w.x + lx * w.c + lz * w.s, w.z - lx * w.s + lz * w.c); }   // the corners of a house or of its rubble
+  for (const w of near(sl.x, sl.z, IAI.spot)) if ((w.K.rock || w.K.veil) && S.os[w.id] < 2) { const dx = o.x - w.x, dz = o.z - w.z, l = Math.hypot(dx, dz) || 1, R = w.K.veil ? w.rd * .4 : w.rd + 1.1; tryAt(w.x - dx / l * R, w.z - dz / l * R); }   // behind a rock, or in a bush, from the enemy (COVERS)
+  else if (w.K.sight) for (const q of CORN4) { const lx = q[0] * (w.hw + 1.4), lz = q[1] * (w.hd + 1.4); tryAt(w.x + lx * w.c + lz * w.s, w.z - lx * w.s + lz * w.c); }   // the corners of a house or of its rubble
   return (A.cs = { x: best.x + Math.cos(A.i * 2.4) * 2.5, z: best.z + Math.sin(A.i * 2.4) * 2.5, s: sl, t: S.t + 4 + 4 * Math.random(), t0: S.t, o });   // not all on the same spot
 }
 /* a rocket soldier works round a vehicle: to a point beside and a little behind it, inside range, until it is off the frontal arc */
@@ -7394,7 +7402,7 @@ function hideAt(x, z, r) {
   for (let k = 0; k < 13; k++) {
     const a = k * 2.4, R = k ? r * Math.sqrt(k / 12) : 0, px = clamp(x + Math.cos(a) * R, 100, S.W - 100), pz = clamp(z + Math.sin(a) * R, -S.HW + 100, S.HW - 100), h = hgt(px, pz);
     if (h < S.T.WL + 1) continue;
-    const sc = (kindAt(px, pz) === 1 ? 2 : 0) + (near(px, pz, 10).some(o => o.K.sight && S.os[o.id] < 2) ? 1.5 : 0) + clamp((h - h0) / 10, -1, 1.5) - (routeDist(S.T, px, pz) < 40 ? 2 : 0);
+    const nb = near(px, pz, 10), sc = (kindAt(px, pz) === 1 ? 2 : 0) + (nb.some(o => o.K.sight && S.os[o.id] < 2) ? 1.5 : 0) + (nb.some(o => o.K.veil && S.os[o.id] < 2 && footD(o, px, pz) < 4) ? 1.5 : 0) + clamp((h - h0) / 10, -1, 1.5) - (routeDist(S.T, px, pz) < 40 ? 2 : 0);
     if (sc > bs) { bs = sc; best = { x: px, z: pz }; }
   }
   return best || { x, z };
@@ -7494,6 +7502,7 @@ function dHide(m, A, q) {
   if (m.cbin || m.fc || kindAt(m.x, m.z) === 1) g = { x: m.x, z: m.z };
   if (!g) { const b = near(m.x, m.z, G.cover).filter(o => o.B && S.os[o.id] < 2).sort((a, c) => hdist(a, m) - hdist(c, m))[0]; if (b) g = bldBays(b, m.x, m.z)[0]; }
   if (!g) for (const f of S.forts) if (f.prog >= 1 && f.team === m.team && hdist(f, m) < G.cover) { g = fortSlots(f).find(p => !p.by || p.by === m || p.by.dead) || null; if (g) break; }
+  if (!g) { const b = near(m.x, m.z, G.cover).filter(o => o.K.veil && S.os[o.id] < 2).sort((a, c) => hdist(a, m) - hdist(c, m))[0]; if (b) g = { x: b.x, z: b.z }; }   // into a bush (COVERS)
   if (!g) for (let k = 0; k < 12 && !g; k++) { const a = k * TAU / 6, R = k < 6 ? G.cover * .4 : G.cover * .8, x = m.x + Math.cos(a) * R, z = m.z + Math.sin(a) * R; if (kindAt(x, z) === 1) g = { x, z }; }
   if (!g) {   // in the open: apart from the others and from vehicles
     let ax = 0, az = 0;
@@ -11529,6 +11538,90 @@ function fortTerrain(T, era, sd) {
   }
   T.nid = T.fid + FORT.slots;
 }
+/* ---------- rocks and bushes (COVERS, map version 6) ----------
+   Cover on open ground, the same on every client from the map's seed: clusters of rocks and bushes beside every road, off m from its
+   middle, one every gap m of road on each side that the dice give the era's `on`, and over the open country one in each square open m
+   on a side that they give the era's `open`. A cluster is n objects within r m of its middle: on rocky ground (steeper than rock.slope, or by the era's share `rock`)
+   mostly rock (rock.in of them), elsewhere mostly bush; in a field, by the era's share `hedge`, a hedge instead: bushes in a row
+   hedge.gap m apart along the field's edge. Nothing stands within edge m of the map's border, road m of a road, base m of an airfield,
+   in a built-up place, in the water (wet m over it), in a dense wood (which is cover already), or within pad m of anything standing (near m of
+   another rock or bush).
+   They stay out of the walls' boxes (T.walls, which the soldiers' paths in the towns are built over); as they lie all over the map, a
+   line of sight walks the grid (ray) on a map that has them (T.cvn) instead of looking at those boxes first. Ids follow the buildings' (from T.nid), max at most, and with the dynamic ones after them under the 65536 the server lets through.
+   rock: [radius, height] ranges, m. A rock is a wall (OBJ.rock.sight): it stops a line of sight and a round, a hull slides along it, and
+   a soldier crouched beside it has a wall's cover (COVER.wall) from its side.
+   bush: the same. A bush is a veil (OBJ.bush.veil): a line of sight that passes through it below its top hides what is behind, but one
+   that starts or ends inside it does not: who is in a bush sees out, and is made out only at the distance COVER.bush leaves. Rounds and
+   aircraft go through it, a soldier walks through it, a hull drives over it keeping slow of its speed, and a tank or a gun carriage
+   crushes it. The scene draws both from the same objects, so what hides a soldier from the AI hides him from a player's eyes too */
+const COVERS = { max: 5200, edge: 150, road: 60, base: 1700, wet: 5, pad: 4, near: .7, gap: 110, off: [62, 340], open: 420, n: [3, 7], r: [7, 16],
+  rock: { r: [.8, 2], h: [.9, 2.3], slope: .1, in: .75 }, bush: { r: [1.2, 2.5], h: [1.2, 2.1], slow: .85 }, hedge: { gap: 3.4, n: [5, 9] },
+  ww2: { on: .65, open: .45, rock: .3, hedge: .35 }, modern: { on: .45, open: .3, rock: .5, hedge: .1 } };
+OBJ.rock = { hp: [900, 0], sight: 1, rock: 1, take: [1, .15, .05] };
+OBJ.bush = { hp: [14, 0], veil: 1, take: [0, 1, .6], dug: 99, veh: bushBump };
+/* a hull in a bush: it slows, and a heavy one crushes it as a tree */
+function bushBump(u, o, cx, cz, hw) {
+  if (S.os[o.id] > 1 || footD(o, BUMP.x, BUMP.z) > hw) return 1;
+  if ((u.kind === 'tank' || u.kind === 'art') && S.t - S.ot[o.id] > 1) { S.ot[o.id] = S.t; hitObj(o, OBJD.crush, u); }
+  return COVERS.bush.slow;
+}
+/* the rocks and bushes of a terrain, after everything else is placed */
+function coverTerrain(T, era, sd) {
+  const D = COVERS, Q = D[era], G = T.grid, C = OBJS.cell, W = T.W, HW = T.HW, lines = T.net ? T.net.e.map(e => e.p) : T.routes, id0 = T.nid;
+  const room = Math.min(D.max, 65536 - 16 - NDYN - NECO - id0);
+  let n = 0;
+  const taken = (x, z, r) => {   // anything standing within r m
+    const i0 = Math.max(0, Math.floor((x - r - T.x0) / C)), i1 = Math.min(G.nx - 1, Math.floor((x + r - T.x0) / C)), j0 = Math.max(0, Math.floor((z - r - T.z0) / C)), j1 = Math.min(G.nz - 1, Math.floor((z + r - T.z0) / C));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (const o of G.c[j * G.nx + i] || []) if (Math.hypot(o.x - x, o.z - z) < r + o.r + (o.K.rock || o.K.veil ? D.near : D.pad)) return true;
+    return false;
+  };
+  const fit = (x, z, r) => {
+    if (!(x > D.edge && x < W - D.edge && Math.abs(z) < HW - D.edge)) return false;
+    const k = T.kind[nodeAt(T, x, z)];
+    if (k === 1 || k === 8 || k === 9 || hgtT(T, x, z) < T.WL + D.wet) return false;
+    if (Math.min(Math.hypot(x - T.bases[0].x, z - T.bases[0].z), Math.hypot(x - T.bases[1].x, z - T.bases[1].z)) < D.base || !cityFar(T, x, z)) return false;
+    return routeDist(T, x, z) > D.road && !taken(x, z, r);
+  };
+  const put = (k, x, z, r, h, a) => {
+    const o = Object.assign(addObj(T, id0 + n++, k, x, z, 0, 0, h, a, r), { sc: r });
+    const veil = !!o.K.veil;
+    cellsOf(T, o, c => { (G.c[c] || (G.c[c] = [])).push(o); G.f[c] |= veil ? 1 : 3; });
+  };
+  const one = (k, x, z, s1, s2) => { const R = D[k], r = R.r[0] + (R.r[1] - R.r[0]) * s1, h = R.h[0] + (R.h[1] - R.h[0]) * s2; if (n < room && fit(x, z, r)) put(k, x, z, r, Math.min(h, r * (k === 'rock' ? 1.4 : 1.6) + .4), s1 * 6.283); };
+  const cluster = (x, z, a, b, s) => {   // a cluster at x z; a b s: its dice
+    const h = (i, j) => hash2(a * 31 + i, b * 17 + j, sd + s), sl = Math.max(Math.abs(hgtT(T, x + 10, z) - hgtT(T, x - 10, z)), Math.abs(hgtT(T, x, z + 10) - hgtT(T, x, z - 10))) / 20, kd = T.kind[nodeAt(T, x, z)];
+    if (!fit(x, z, 0)) return;
+    if (kd >= 2 && kd <= 4 && h(0, 1) < Q.hedge) {   // a hedge along the field's edge
+      const H = D.hedge, m = H.n[0] + Math.floor((H.n[1] - H.n[0] + 1) * h(0, 2)), ax = h(0, 3) < .5, x0 = ax ? x - m * H.gap / 2 : Math.round(x / 330) * 330, z0 = ax ? Math.round(z / 260) * 260 : z - m * H.gap / 2;
+      for (let i = 0; i < m; i++) one('bush', x0 + (ax ? i * H.gap : (h(i, 4) - .5) * 1.2), z0 + (ax ? (h(i, 4) - .5) * 1.2 : i * H.gap), .2 + .6 * h(i, 5), h(i, 6));
+      return;
+    }
+    const rocky = sl > D.rock.slope || h(0, 1) < Q.rock, m = D.n[0] + Math.floor((D.n[1] - D.n[0] + 1) * h(0, 2)), R = D.r[0] + (D.r[1] - D.r[0]) * h(0, 3);
+    for (let i = 0; i < m; i++) {
+      const an = h(i, 4) * 6.283, d = i ? R * Math.sqrt(h(i, 5)) : 0, k = (h(i, 6) < D.rock.in) === rocky ? 'rock' : 'bush';
+      one(k, x + Math.cos(an) * d, z + Math.sin(an) * d, h(i, 7), h(i, 8));
+    }
+  };
+  lines.forEach((l, e) => {   // beside the roads
+    let s = 0, nx = D.gap / 2, st = 0;
+    for (let i = 1; i < l.length; i++) {
+      const p = l[i - 1], q = l[i], L = Math.hypot(q.x - p.x, q.z - p.z); if (L < 1e-6) continue;
+      const dx = (q.x - p.x) / L, dz = (q.z - p.z) / L;
+      for (; nx < s + L; nx += D.gap, st++) for (const sg of [1, -1]) {
+        if (hash2(st, e * 2 + (sg > 0 ? 0 : 1), sd + 61) > Q.on) continue;
+        const t = nx - s, off = sg * (D.off[0] + (D.off[1] - D.off[0]) * hash2(st, e * 2 + (sg > 0 ? 0 : 1), sd + 62));
+        cluster(p.x + dx * t - dz * off, p.z + dz * t + dx * off, st, e * 2 + (sg > 0 ? 0 : 1), 63);
+      }
+      s += L;
+    }
+  });
+  const O = D.open;   // over the open country
+  for (let b = 0; b * O < 2 * HW; b++) for (let a = 0; a * O < W; a++) {
+    if (hash2(a, b, sd + 71) > Q.open) continue;
+    cluster((a + .2 + .6 * hash2(a, b, sd + 72)) * O, -HW + (b + .2 + .6 * hash2(a, b, sd + 73)) * O, a + 1000, b + 1000, 74);
+  }
+  T.cvn = n; T.cv0 = id0; T.nid += n;
+}
 
 /* a work's record f and its object f.o, under the id its owner gave it: a faces the enemy, the object lies across it. Its object is found
    by id like the terrain's own (T.byId), so that the host's word on its stage and a guest's hits on it need nothing of their own */
@@ -11697,7 +11790,7 @@ function fortSlots(f) {
    until it is under fire (fortSpot) */
 function fortPts(t, x, z, n, R) {
   const A = FORT.ai, l = [], out = [];
-  if (!R && near(x, z, 60).some(o => o.K.sight && S.os[o.id] < 2)) return null;
+  if (!R && near(x, z, 60).some(o => o.K.sight && !o.K.rock && S.os[o.id] < 2)) return null;
   for (const f of S.forts) if (f.prog >= 1 && !f.in[1 - t] && Math.abs(f.x - x) < A.post && Math.abs(f.z - z) < A.post) for (const p of fortSlots(f)) l.push(p);
   if (!l.length) return null;
   l.sort((a, b) => a.f.k - b.f.k || Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
@@ -14342,6 +14435,7 @@ function gueClusters(C) {
 function gueCover(x, z) {
   let c = kindAt(x, z) === 1 ? 2 : 0;
   for (const o of near(x, z, 25)) if (o.K && o.K.sight && S.os[o.id] < 2) { c += 2; break; }
+  for (const o of near(x, z, 15)) if (o.K && o.K.veil && S.os[o.id] < 2) { c++; break; }
   if (hgt(x, z) - (hgt(x + 40, z) + hgt(x - 40, z) + hgt(x, z + 40) + hgt(x, z - 40)) / 4 > 1.5) c++;
   return c;
 }
@@ -20800,8 +20894,8 @@ function buildUnit(u, wreck) {
 }
 
 const PAL = {
-  ww2: { sand: 0xb3a67c, forest: 0x3f5a30, fields: [0xb9a655, 0x7f9247, 0x8a6f4a], snow: 0xe9ebe8, water: 0x3f6f8c, road: 0x8a7d62, wall: 0xc4b89f, roof: 0x8a4b3a },
-  modern: { sand: 0xbcae84, forest: 0x55633a, fields: [0xa89c62, 0x8f8a52, 0x7a6a4c], snow: 0xe4e2dc, water: 0x3b6d86, road: 0x4c4c4a, wall: 0xb4aea2, roof: 0 }
+  ww2: { sand: 0xb3a67c, forest: 0x3f5a30, fields: [0xb9a655, 0x7f9247, 0x8a6f4a], snow: 0xe9ebe8, water: 0x3f6f8c, road: 0x8a7d62, wall: 0xc4b89f, roof: 0x8a4b3a, rock: 0x8b877c, bush: 0x445e2c },
+  modern: { sand: 0xbcae84, forest: 0x55633a, fields: [0xa89c62, 0x8f8a52, 0x7a6a4c], snow: 0xe4e2dc, water: 0x3b6d86, road: 0x4c4c4a, wall: 0xb4aea2, roof: 0, rock: 0x8f8a80, bush: 0x56683a }
 };
 const TC = typeof THREE !== 'undefined' ? new THREE.Color() : null;
 let mapCv = null, mapBig = null;
@@ -20881,7 +20975,7 @@ function buildWorld() {
   }
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
   /* airfields, turned toward the middle of the map */
-  wo = { seen: 0, at: {}, base: {}, falls: [], trees: null, houses: null, roofs: null, holes: null };
+  wo = { seen: 0, at: {}, base: {}, cv: {}, falls: [], trees: null, houses: null, roofs: null, holes: null, rocks: null, bushes: null };
   S.base.forEach((b, t) => {
     const g = new THREE.Group(), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
     add(new THREE.BoxGeometry(1100, 1, 44), mat(0x3a3c3b), 0, 2, 150);
@@ -20907,6 +21001,15 @@ function buildWorld() {
   for (const id in wo.base) lookObj(T.byId[id]);
   wo.seen = S.olog.length; wo.houses.instanceColor.needsUpdate = wo.roofs.instanceColor.needsUpdate = true;
   scene.add(wo.trees, wo.houses, wo.roofs, wo.holes);
+  /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
+  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bg = new THREE.IcosahedronGeometry(1, 1), rkg = new THREE.DodecahedronGeometry(1, 0);
+  bg.translate(0, .55, 0); rkg.translate(0, .45, 0);
+  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr)); wo.bushes = new THREE.InstancedMesh(bg, mat(P.bush), Math.max(1, cvl.length - nr));
+  let ir = 0, ib = 0; const cc = new THREE.Color();
+  for (const o of cvl) { const r = o.k === 'rock'; wo.cv[o.id] = [r ? wo.rocks : wo.bushes, r ? ir++ : ib++]; wo.cv[o.id][0].setColorAt(wo.cv[o.id][1], cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
+  wo.rocks.count = ir; wo.bushes.count = ib;
+  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true; if (wo.bushes.instanceColor) wo.bushes.instanceColor.needsUpdate = true;
+  scene.add(wo.rocks, wo.bushes);
   cityScene();
   const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }), cg = new THREE.IcosahedronGeometry(1, 1);
   for (let i = 0; i < 46; i++) { const k = new THREE.Mesh(cg, cm); k.scale.set(rand(160, 420), rand(35, 75), rand(120, 320)); k.position.set(rand(-3000, W + 3000), rand(1500, 3600), rand(-HW - 3000, HW + 3000)); scene.add(k); }
@@ -20946,7 +21049,11 @@ function treeAt(o, a, k) {   // k: 0 standing to 1 down, toward a
 }
 function lookObj(o, live) {
   const st = S.os[o.id], M = WM, i = wo.at[o.id], R = o.K.ruin, roof = PAL[S.era].roof;
-  if (o.k === 'tree') {
+  if (wo.cv[o.id]) {   // a rock or a bush: standing, or gone flat when it is down
+    const [me, j] = wo.cv[o.id], r = o.rd, h = o.h * .9, dn = st > 1 ? (o.k === 'bush' ? .12 : .3) : 1;
+    M.q.setFromAxisAngle(M.up, o.a); M.mx.compose(M.v.set(o.x, o.y - .25, o.z), M.q, M.s.set(r * (st > 1 ? 1.2 : 1), h * dn, r * (o.k === 'rock' ? .85 : 1) * (st > 1 ? 1.2 : 1)));
+    me.setMatrixAt(j, M.mx); me.instanceMatrix.needsUpdate = true;
+  } else if (o.k === 'tree') {
     const a = S.ofa.has(o.id) ? S.ofa.get(o.id) : o.id * 2.399;
     if (st > 1 && live) wo.falls.push({ o, a, t: 0 }); else treeAt(o, a, st > 1 ? 1 : 0);
   } else if (i !== undefined) {

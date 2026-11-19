@@ -7,7 +7,9 @@
    enemy's eyes; the view and the state; the cost of it all in an AI battle of SECS s (default 240) in each era */
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 240;
 const box = (era, o) => {
-  const C = H.load(Object.assign({ seed: 4, mapv: 6 }, o)), $ = C.$, S = C.sandbox(era || 'modern');
+  const C = H.load(Object.assign({ seed: 4, mapv: 6 }, o)), $ = C.$;
+  /* the economy is only in a match (a conquest that is not a demo): with o.eco a solo conquest emptied as the sandbox is (as tests/posts.js) */
+  const S = o && o.eco ? (s => { s.demo = false; s.over = true; s.units = []; s.planes = []; s.men = []; s.squads = []; for (const f of s.forts.slice()) C.fortDrop(f); s.forts = []; return s; })(C.newState(era || 'modern', $('ERAS')[era || 'modern'].sides[0].fighter, { cls: 'plane' })) : C.sandbox(era || 'modern');
   S.cmd = [$('cmdOf')(0), $('cmdOf')(1)]; for (const f of S.fld) f.next = 1e9; for (const Cm of S.cmd) { Cm.mnT = 1e9; Cm.atkT = 1e9; }
   const CN = $('CN'), CNR = $('CNR'), FORT = $('FORT'), W = S.W, b0 = S.base[0];
   const squad = (t, x, z, job, kits) => {
@@ -108,14 +110,16 @@ console.log('-- fort radio: the general\'s builder puts a relay up --');
   const { C, $, S, CN, FORT, W, b0, squad, look, site } = box('modern', { eco: 1 });
   C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 0 });
   const cmd = c => C.genCmd(0, c, 'me'), P = site(b0.x + W * CN.hq.r - 600, b0.z), e = squad(0, P.x - 80, P.z - 60, 'eng');
-  for (let i = 0; i < FORT.ai.cap; i++) { const s = site(P.x + 300 + 40 * i, P.z + 400); C.fortStart(1, 0, s.x, s.z, 0); }
+  const fcap = $('fortCap')(0, 0);   // the field works' cap, grown by the side's economy tier and points held (cf-construir-mais)
+  for (let i = 0; i < fcap; i++) { const s = site(P.x + 300 + 40 * (i % 8), P.z + 400 + 40 * Math.floor(i / 8)); C.fortStart(1, 0, s.x, s.z, 0); }
   const d = S.eco.d[0], en = d.en; d.en = 0; ok(cmd({ c: 'fort', k: 'radio', x: P.x, z: P.z }).why === 'cost', 'short of energy: cost'); d.en = Math.max(en, 500); d.mt = Math.max(d.mt, 500);
-  const e0 = d.en, r = cmd({ c: 'fort', k: 'radio', x: P.x, z: P.z }), op = S.cmd[0].ops.find(o => o.id === r.id);
-  ok(r.ok && op && op.sq[0] === e && e.ord.dig && e.ord.dig.k === 8 && e.mis.kind === 'build', 'with the side\'s ' + FORT.ai.cap + ' field works up it is still accepted: the engineers go to build it (' + (r.why || 'ok') + ')');
+  const e0 = d.en, m0 = d.mt, r = cmd({ c: 'fort', k: 'radio', x: P.x, z: P.z }), op = S.cmd[0].ops.find(o => o.id === r.id), atOrder = [e0 - d.en, m0 - d.mt];
+  ok(r.ok && op && op.sq[0] === e && e.ord.dig && e.ord.dig.k === 8 && e.mis.kind === 'build', 'with the side\'s ' + fcap + ' field works up it is still accepted: the engineers go to build it (' + (r.why || 'ok') + ')');
   ok(cmd({ c: 'fort', k: 'trench', x: P.x + 200, z: P.z }).why === 'fcap', '  a trench is refused fcap as before');
-  for (let i = 0; i < 160 && !S.forts.some(f => f.k === 8 && f.prog >= 1); i++) { C.run(1, null, 1 / 20); for (const t of [0, 1]) C.$('plan')(t); look(); }
+  let paid = atOrder[0] > 0 ? atOrder : null;   // what the side's stock dropped by when it was ordered, or else in the step the work began (the income of the minutes it takes to build is no part of it)
+  for (let i = 0; i < 160 && !S.forts.some(f => f.k === 8 && f.prog >= 1); i++) { const en = d.en, mt = d.mt; C.run(1, null, 1 / 20); for (const t of [0, 1]) C.$('plan')(t); look(); if (!paid && S.forts.some(f => f.k === 8 && f.team === 0)) paid = [en - d.en, mt - d.mt]; }
   const f = S.forts.find(f => f.k === 8 && f.team === 0);
-  ok(f && f.prog >= 1 && Math.hypot(f.x - P.x, f.z - P.z) < 40 && d.en <= e0 - FORT.rel.cost[0] + 5, 'they build it there, its cost paid (' + FORT.rel.cost.join(' energy, ') + ' metal)');
+  ok(f && f.prog >= 1 && Math.hypot(f.x - P.x, f.z - P.z) < 40 && paid && paid[0] >= FORT.rel.cost[0] - 2 && paid[1] >= FORT.rel.cost[1] - 2, 'they build it there, its cost paid when it began (' + FORT.rel.cost.join(' energy, ') + ' metal; the stock fell ' + (paid ? paid.map(Math.round).join(', ') : '-') + ')');
   look(); ok(S.cn.nodes[0].some(n => n.o === f), '  and it is in the net');
   for (let i = 0; i < 2; i++) { const s = site(P.x, P.z - 300 - 200 * i); C.fortAt(C.fortStart(8, 0, s.x, s.z, 0), 1); }
   ok(cmd({ c: 'fort', k: 'radio', x: P.x + 300, z: P.z }).why === 'rcap', 'the side\'s ' + FORT.rel.cap + ' relays up: rcap (' + $('gNo')('rcap') + ')');
@@ -146,17 +150,17 @@ console.log('-- the gaps and the AI general closing them --');
   const V = C.genVM(0, false); ok(V.cn.gap.length === 1 && V.cn.gap[0][3] === 2 && V.cn.gap[0][4] === 0, 'the view has the gap: 2 squads, nothing on its way');
   const st = C.genState(0); ok(st.cn.gaps.length === 1 && st.cn.gaps[0].squads === 2 && st.cn.gaps[0].fix === null, 'and so does the state (the MCP\'s picture)');
   C.genCtl(0, 'ai'); Cm.cnT = 0;
-  const t0 = S.t; let fixT = -1, inT = -1;
-  for (let i = 0; i < 420 && inT < 0; i++) {
+  const t0 = S.t, e0 = { x: e.men[0].x, z: e.men[0].z }; let fixT = -1, inT = -1;
+  for (let i = 0; i < 600 && inT < 0; i++) {
     C.run(1, null, 1 / 20); for (const t of [0, 1]) C.$('plan')(t); look();
     if (fixT < 0 && (Cm.cnFix || []).length) fixT = S.t - t0;
     if (q.cnL === 2 && q2.cnL === 2) inT = S.t - t0;
   }
-  const f = S.forts.find(f => f.k === 8 && f.team === 0), L = radio(S, 0);
+  const f = S.forts.find(f => f.k === 8 && f.team === 0), L = radio(S, 0), walk = f ? Math.hypot(e0.x - f.x, e0.z - f.z) : 0, due = walk / $('MAN').walk + $('FORT').rel.time + 60;   // its engineers walk there and build it
   ok(fixT >= 0 && fixT <= CNR.every + 1 && L.some(s => /Brecha na rede .*antena de rádio ordenada/.test(s)), 'the AI general orders a relay for it within ' + Math.round(fixT) + ' s, and says why');
-  ok(f && f.prog >= 1 && inT >= 0 && inT <= 300, 'the relay is up and both squads are in the net ' + Math.round(inT) + ' s after the AI took the chair back');
-  ok(C.genVM(0, false).cn.gap.length === 0, '  the gap is closed on the view');
+  ok(f && f.prog >= 1 && inT >= 0 && inT <= due, 'the relay is up and both squads are in the net ' + Math.round(inT) + ' s after the AI took the chair back (the engineers walk ' + Math.round(walk) + ' m and build it: due in ' + Math.round(due) + ' s)');
   for (let i = 0; i < CNR.every + 1; i++) { S.t += 1; C.$('plan')(0); }
+  ok(C.genVM(0, false).cn.gap.length === 0, '  the gap is closed on the view (by the next look at the gaps, every ' + CNR.every + ' s)');
   ok(!e.op && !(Cm.cnFix || []).some(x => x.k === 'rel'), 'the builders are handed back once it is up');
 }
 

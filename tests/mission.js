@@ -25,7 +25,7 @@ for (const [era, mapv, eco] of [['ww2', 1, 0], ['modern', 4, 1]]) {
   $('misScan')();   // what the commander did to the squads since the last scan
   const sq = S.squads.filter(q => q.live > 0);
   ok(sq.length && sq.every(q => q.men.every(m => m.dead || m.mis === q.mis)), era + ': a squad\'s soldiers carry their squad\'s mission (' + sq.length + ' squads)');
-  ok(sq.every(q => !q.ord || q.mis.kind === ($('MIS').job[q.job] || (q.ord.b || q.ord.es ? 'garrison' : $('MIS').ord[q.ord.k]) || q.mis.kind)), era + ': a squad\'s mission follows its order: ' + [...new Set(sq.map(q => q.job + '/' + (q.ord && q.ord.k) + '→' + q.mis.kind))].slice(0, 12).join(' '));
+  ok(sq.every(q => !q.ord || q.mis.kind === ((q.ord.aid && q.ord.aid.kind) || $('MIS').job[q.job] || (q.ord.b || q.ord.es ? 'garrison' : $('MIS').ord[q.ord.k]) || q.mis.kind)), era + ': a squad\'s mission follows its order: ' + [...new Set(sq.map(q => q.job + '/' + (q.ord && q.ord.k) + '→' + q.mis.kind))].slice(0, 12).join(' '));
   const N = S.cmd.map(C => C.repN || {});
   ok(N.every(n => n.contact > 0), era + ': the units report contact up and the commanders read it: ' + JSON.stringify(N));
 }

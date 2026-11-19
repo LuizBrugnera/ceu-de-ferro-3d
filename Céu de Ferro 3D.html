@@ -8806,9 +8806,19 @@ function moveUnit(u, dt) {
    per blow to a world object; man: [hurt, m] to a soldier on the ground storey near the blow, by blow up to 1; self: share of its hp a heavy
    hull takes per blow; crash: share of its hp a light one takes at v[1], with the square of its speed (brk: what it breaks, times);
    slow: the share of its speed a hull that breaks through keeps, at blow 0 and at least (one that crashes bounces back at bounce);
-   cd: s between two blows of one hull */
+   cd: s between two blows of one hull; shed: the blow a light hull deals the bay it strikes of a shed, times (a car at v[1] opens a barn's
+   wall, at half that only cracks it) */
 const RAM = { w: { tank: 1, art: .8, aa: .6, lav: .45, truck: .3, car: .15, rad: .35 }, v: [2.5, 20], heavy: .6, thru: .4,
-  bld: [45, 3.5, 2, 7], obj: 70, man: [30, 4], self: .015, crash: .25, brk: .3, slow: [.85, .35], bounce: -.15, cd: .6 };
+  bld: [45, 3.5, 2, 7], obj: 70, man: [30, 4], self: .015, crash: .1, brk: .3, slow: [.85, .35], bounce: -.15, cd: .6, shed: 3 };
+/* the ground-storey outer wall of building o nearest x z: the bay a hull strikes */
+function ramWall(o, x, z) {
+  const B = o.B, px = x - o.x, pz = z - o.z, lx = px * o.c - pz * o.s + o.hw, lz = px * o.s + pz * o.c + o.hd, nx = B.nx, nz = B.nz;
+  let best = -1, bd = 1e9;
+  const at = (e, ex, ez) => { const d = Math.hypot(ex - lx, ez - lz); if (d < bd && B.kd[e]) { bd = d; best = e; } };
+  for (let j = 0; j < nz; j++) for (const i of [0, nx]) at(j * (nx + 1) + i, i * B.bw, (j + .5) * B.bd);
+  for (let i = 0; i < nx; i++) for (const j of [0, nz]) at(B.oZ + j * nx + i, (i + .5) * B.bw, j * B.bd);
+  return best;
+}
 const ramW = u => u.def.ram || (u.def.rad && u.kind === 'car' ? RAM.w.rad : RAM.w[u.kind] || 0);
 /* one blow of hull u into object o at x z (its wall), closing at v m/s: the object takes what the hull's weight breaks, the soldiers
    behind that wall are thrown about, and the hull pays for it. Each client deals its own hulls' blows: hitObj and cityBlast send a
@@ -8820,6 +8830,7 @@ function ramHit(u, o, x, z, v) {
   const brk = o.B ? heavy || !!o.B.K.shed : !!o.K.lite || (heavy && !!o.K.ruin), h = { k: HK.blast, pt: 0 }, B = RAM.bld;
   if (brk && o.B) {
     cityBlast(x, o.y + 1.6, z, Math.min(B[3], B[1] + B[2] * imp) / CITY.dmg.r, B[0] * imp / CITY.dmg.k, u);
+    const e = ramWall(o, x, z); if (e >= 0) bDmg(o, e, B[0] * imp * (heavy ? 1 : RAM.shed), u);   // the bay it strikes takes the whole blow (the burst alone, its fall-off from the bay's middle, left a barn whole under a car and a brick block under a tank)
     for (const m of S.men) if (!m.dead && !m.net && m.cbo === o && !m.cbl && Math.hypot(m.x - x, m.z - z) < RAM.man[1]) damageMan(m, RAM.man[0] * Math.min(1, imp), u, true, h);
   } else if (brk) hitObj(o, RAM.obj * imp, u);
   damageUnit(u, u.def.hp * (heavy ? RAM.self * imp : RAM.crash * (v / RAM.v[1]) ** 2 * (brk ? RAM.brk : 1)), null, true, h);

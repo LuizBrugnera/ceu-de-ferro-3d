@@ -19,7 +19,7 @@ A fundação P0 ainda não estava no main; os nomes `SIDES` e `foe` do plano já
 - **`civLook`**: `obs` e `c.sn` têm um lugar por lado.
 - **Kit da milícia por lado**: `civKit(t)` copia `CIV.mil.kit[era]` com `side` = facção de t (antes fixo 0). `civRecruit` usa o kit do lado e, se `INF[era][fac]` ainda não existe (Insurgentes antes da P4), cai no primeiro kit de `INF[era][0]` como id.
 - **`civState`** (estado do general/MCP): `hate` continua `us`/`them`/`both` (`both` = nós e mais alguém); novo `against` (lista: `'us'` ou nome do lado) e `bySide` (mortos por lado). `enemyKilled` soma todos os inimigos.
-- **Revisão (`anaReport`, parte civ)**: `civ.side` tem um item por lado (pelo tamanho de `R.tickets` ou pelo maior `s` dos eventos `cv`, no mínimo 2).
+- **Revisão (`anaReport`, parte civ)**: ficou a versão da P9 (`anaSides(R.ns)`, `anaHide`), que já faz um item por lado.
 
 ## O que NÃO foi testado
 

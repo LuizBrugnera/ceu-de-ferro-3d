@@ -4,7 +4,7 @@
    bunker, anti-tank post, observation post, AA position, minefields, supply base: the general picks the builder), the support requests
    (req fire, recon, cas, lift: the general picks who answers) and rt, a route of waypoints on every order that sends squads to a place,
    walked in order and carried by the squad's mission (mis.route); the AI's flanks carry the composite route they walk. Refusals keep their
-   reasons. The same seeded AI battle is compared with the page before W21 (BEFORE=<page>, else that page from git history; SECS, default 90) */
+   reasons. With BEFORE=<commit|page>, the same seeded AI battle is compared with the page before W21 (SECS, default 90); without it that part is not run */
 const fs = require('fs'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 90;
 const solo = (C, era) => C.newState(era, C.$('ERAS')[era].sides[0].fighter, { cls: 'plane' });
@@ -240,18 +240,44 @@ console.log('-- the AI general\'s flank walks a composite route; a person\'s fla
   else console.log('  skip  no point far enough for the way check');
 }
 
+console.log('-- a fire request among civilians in sight: the rules of engagement of whoever asked (as the fire mission T) --');
+{
+  /* the oracle is the fire mission's own contract (tests/civ-war.js): a model's strike there is refused roe, a person's is accepted as theirs
+     (M.usr) with a warning, the AI's own is not weighed by roeHeld at the order */
+  const C = H.load({ seed: 37 }), $ = C.$, S = $('sandbox')('modern'); $('cqInit')(1); $('civBegin')(); $('civInit')(); C.run(2);
+  const n = new Map(); for (const c of S.civs) if (c.g && c.g.b) n.set(c.g, (n.get(c.g) || 0) + 1);
+  const g = [...n.keys()].sort((a, b) => n.get(b) - n.get(a))[0], b = g.b, Cm = $('cmdOf')(0);
+  const L = S.civs.filter(c => c.g === g && !c.dead && !c.gone && !c.in).slice(0, 6), p = { x: L[0].x, z: L[0].z };
+  C.addUnit('art', 0, b.x > S.W / 2 ? b.x - 3000 : b.x + 3000, b.z, S.E.sides[S.fac[0]].art, true);
+  const pin = () => L.forEach((o, i) => { if (o.dead) return; o.mode = 2; o.goal = null; o.v = { x: 0, y: 0, z: 0 }; o.in = null; o.x = p.x + (i % 3) * 3; o.z = p.z + Math.floor(i / 3) * 3; o.sn = [S.t, -1e9]; });
+  const live = () => Cm.fm.filter(M => !M.dead && S.t < M.T && M.k === 'he'), clear = () => { for (const M of Cm.fm) M.dead = true; };
+  pin(); C.run(.05, pin); pin();
+  C.genCtl(0, 'mcp', { eco: 0, atk: 0, def: 0, sup: 0 });
+  let r = C.genCmd(0, { c: 'req', k: 'fire', x: p.x, z: p.z, n: 3 }, 'mcp');
+  ok(!r.ok && r.why === 'roe' && live().length === 0, 'a model\'s fire request there: refused roe, as its fire mission is (' + (r.why || 'accepted') + ')');
+  clear(); C.genCtl(0, 'me', { eco: 0, atk: 0, def: 0, sup: 0 }); pin();
+  const n0 = S.glog.l[0].length;
+  r = C.genCmd(0, { c: 'req', k: 'fire', x: p.x, z: p.z, n: 3 }, 'me');
+  const warn = S.glog.l[0].slice(n0).some(e => e.k === 'fire' && /civis à vista e alvo não identificado/.test(e.s));
+  ok(r.ok && live().length === 1 && live()[0].usr && warn, 'a person\'s fire request there: accepted as theirs (M.usr), with the warning (' + (r.why || 'accepted') + ')');
+  clear(); pin();
+  r = C.genCmd(0, { c: 'ord', k: 'fire', x: p.x, z: p.z, n: 3 }, 'me');
+  ok(r.ok && live().length === 1 && live()[0].usr, 'and the verb fire of an order of theirs, the same (' + (r.why || 'accepted') + ')');
+  clear(); C.genCtl(0, 'me'); pin();
+  r = C.genCmd(0, { c: 'req', k: 'fire', x: p.x, z: p.z, n: 3 }, 'ai');
+  ok(r.ok && live().length === 1 && !live()[0].usr, 'the AI\'s own fire request: queued, its battery\'s rules weigh it when it fires (' + (r.why || 'accepted') + ')');
+}
+
 console.log('-- nothing changes a battle no one commands --');
 {
   const print = (C, S) => { let s = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) s += o.x * 1.3 + o.z + (o.hp || 0); return [S.men.length, S.units.length, S.squads.length, s.toFixed(6), C.$('Math').random().toFixed(12)].join(' '); };
   const run = page => { const C = H.load({ seed: 23, mapv: 5, page }), S = solo(C, 'modern'); C.run(SECS, () => park(S)); return print(C, S); };
-  /* the oracle: the page before W21, BEFORE=<page>, else from git (the parent of the commit that brought the abstract orders) */
-  let BEFORE = process.env.BEFORE ? path.resolve(process.env.BEFORE) : '';
-  if (!BEFORE) try {
-    const git = a => execFileSync('git', a, { cwd: H.ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20 });
-    const c = git(['log', '-n', '1', '--format=%H', '--grep=abstract orders and multi-waypoint routes', 'HEAD']).trim();
-    if (c) { BEFORE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'w21-')), 'before.html'); fs.writeFileSync(BEFORE, git(['show', c + '^:Céu de Ferro 3D.html'])); }
-  } catch (e) { BEFORE = ''; }
-  if (BEFORE && fs.existsSync(BEFORE)) { const A = run(), B = run(BEFORE); ok(A === B, 'the same seeded AI battle, ' + SECS + ' s, as on the page before the abstract orders: ' + A); }
-  else console.log('  skip  no page before the abstract orders (BEFORE=<page>, or git history with its commit)');
+  /* opt-in: BEFORE=<commit> (its page, by git show) or BEFORE=<page>, the page before W21 */
+  const B0 = process.env.BEFORE || '';
+  let BEFORE = '';
+  if (B0 && fs.existsSync(B0)) BEFORE = path.resolve(B0);
+  else if (B0) { BEFORE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'w21-')), 'before.html'); fs.writeFileSync(BEFORE, execFileSync('git', ['show', B0 + ':Céu de Ferro 3D.html'], { cwd: H.ROOT, maxBuffer: 64 << 20 })); }
+  if (BEFORE) { const A = run(), B = run(BEFORE); ok(A === B, 'the same seeded AI battle, ' + SECS + ' s, as on the page before the abstract orders (' + B0 + '): ' + A); }
+  else console.log('  not run: the comparison with the page before the abstract orders (set BEFORE=<commit|page>)');
 }
 H.done();

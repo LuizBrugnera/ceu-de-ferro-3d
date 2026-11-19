@@ -61,6 +61,9 @@ console.log('-- tank: immobilized --');
 { box('ww2'); const u = unit('tank', 0, mid(), tankOf(0)), sm0 = u.smk; u.mod.drive = 0; u.hitT = S.t;
   think(u); const R = S.help && S.help.l.find(R => R.by === u);
   ok(u.dr && u.dr.id === 'imobilizado' && u.smk < sm0 && R && R.k === 'repair', 'its tracks gone under fire: smoke, and a call for repair (' + (R && R.k) + ')'); }
+{ box('ww2'); const u = unit('tank', 0, mid(), tankOf(0)); u.mod.drive = 0; u.hp = u.max * .3; u.hitT = -99; const tr = unit('truck', 0, mid() + 400 * u.ds, null, 10);
+  const R = $('helpAsk')(u, 'repair', u, null); C.run(60, () => { u.hitT = -99; u.ai.tgt = null; });
+  ok(R && R.resp === tr && R.st === 'done' && u.hp >= u.max * .9, 'the truck that answers comes up to it where it sits and mends it (hp ' + Math.round(u.hp / u.max * 100) + '%)'); }
 
 console.log('-- tank: a town ahead and no infantry --');
 { box('ww2'); const T = S.T.towns.map(w => Object.assign($('railOf')(w.x, w.z), w)).find(p => p.ri === 0 && Math.abs(p.off) < 120);

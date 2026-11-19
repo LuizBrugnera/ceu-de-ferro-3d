@@ -6,7 +6,8 @@
    trn (transport: the class trn, the sniper kits, and the messages board, seats, eject and cargo), cmd (the commander: the mortar kits,
    toss k 3 and 4, s on shot and aishot, and the message cmd), eco (the economy: eco, ecs, keep) and gen (the general: gen, glog, gclaim,
    gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
-   messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill).
+   messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill)
+   and hlp (the units' calls for help: the messages hlp, hask and hacc).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -128,7 +129,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -536,6 +537,19 @@ RX.ill = (c, m) => {
   if (!int(m.k, 0, 1) || !vec(m.p, 3) || !vec(m.q, 2) || !num(m.d) || m.d < 0 || m.d > 30 || (!host(c) && now - (c.ilt || 0) < 400)) return;
   c.ilt = now; cast(c, { t: 'ill', k: m.k, p: m.p, q: m.q, d: m.d });
 };
+/* the units' calls for help (welcome says hlp: 1). hlp: the host's open calls of side s, to that side's players (and the spectators): rows
+   [id, need 0 to 6, x, z, st 0 open 1 answered by the AI 2 by a player, the asker's player id or 0], 24 at most. hask: a guest calls for need k
+   from p [x, z] for q [x, z], to the host, 1 s apart at least; hacc: a guest answers call id, to the host */
+{
+  const hrow = r => Array.isArray(r) && r.length === 6 && int(r[0], 1, 1e9) && int(r[1], 0, 6) && num(r[2]) && num(r[3]) && int(r[4], 0, 2) && int(r[5], 0, 1e9);
+  RX.hlp = (c, m) => { if (host(c) && (m.s === 0 || m.s === 1) && lst(m.e, 24) && m.e.every(hrow)) castSide(c, { t: 'hlp', s: m.s, e: m.e }, m.s); };
+  RX.hask = (c, m) => {
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.spec || !int(m.k, 0, 6) || !vec(m.p, 2) || !vec(m.q, 2) || now - (c.hkt || 0) < 1000) return;
+    c.hkt = now; send(h.ws, { t: 'hask', from: c.player.id, k: m.k, p: m.p, q: m.q });
+  };
+  RX.hacc = (c, m) => { const h = c.room.host; if (h && h !== c && !c.spec && int(m.id, 1, 1e9)) send(h.ws, { t: 'hacc', from: c.player.id, id: m.id }); };
+}
 function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) || 1; for (let i = 0; i < n; i++) send(room.host.ws, { t: 'mine', q: K.q, i, n, e: K.e.slice(i * 40, (i + 1) * 40), s: K.s }); }
 /* suspended matches (welcome says rs: 1). The battle lives in the host's browser, so the server keeps the last word of each kind the host
    sent the room (snapIn: the ai rows, cq, the objects' stages, the buildings, bases, forts, eco, ecs, gen, glog, rad; keep is room.keep),

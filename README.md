@@ -149,6 +149,10 @@ O hangar escolhe também a hora e o tempo da partida. A hora é um relógio de l
 
 Cada lado tem um comandante que joga pelos pontos: reúne os pelotões a 720 m do objetivo, pede fumaça e fogo de morteiro e artilharia, e ataca com os blindados da estrada. Mantém guarnições nas vilas, guarda nas bases de suprimento e no veículo-rádio, emboscadas junto das estradas e uma equipe de morteiro. Uma linha sob o mapa e marcas nele mostram o que o comando do seu lado pretende: X o objetivo, círculo cinza a fumaça, círculo laranja o fogo, triângulo verde uma emboscada à espera. A IA não enxerga através de fumaça nem de paredes, conserta os veículos quando ninguém atira neles e usa drones (hoje).
 
+Cada soldado, esquadra, veículo e aeronave da IA decide sozinho dentro da sua missão: guarda o que a própria percepção já viu (só o que viu, no degrau a que chegou: algo ali, a classe, o modelo), pontua as opções (cumprir a missão, recuar abaixo da força de recuo, atender um pedido) e escolhe a melhor. As regras de engajamento da missão valem para todos (segurar o fogo, só responder a quem atirou, fogo livre), e com latitude 0 um blindado não sai da estrada nem atende pedidos.
+
+**Pedidos de ajuda.** As unidades pedem ajuda umas às outras pelo rádio, e responde quem estiver perto e puder, pela utilidade (a prioridade do pedido, a distância e o que custa à própria missão): esquadra pregada pede fogo HE a um tanque ou blindado a até 600 m; tanque numa vila pede uma esquadra a até 400 m para limpar o anticarro; veículo avariado ou sem munição chama um caminhão ou vai à base de suprimento; quem está sob ataque aéreo chama a antiaérea ou uma esquadra com míssil a até 1,5 km; observador ou atirador com alvo chama morteiro ou artilharia; esquadra a pé longe do posto pede carona a um caminhão. Um pedido aberto por unidade, por 60 s; recusado ou sem ninguém, sobe ao general, que anota tudo no diário (AJUDA) e pode vetar. Quem ajudou volta à missão. Os pedidos do seu lado aparecem no rádio e no mapa (losango amarelo): **8** atende o mais perto, **9** pede ajuda (a pé, fogo onde você mira; num veículo, reparo se avariado, senão infantaria).
+
 ## Cargas dos aviões
 
 Na ficha do hangar cada avião tem cargas prontas (Padrão, Bombardeio, Ataque ao solo, Superioridade aérea, Mista) e um editor por grupo de pontos de fixação. Há bombas de queda livre, de cacho e guiadas, mísseis ar-solo, foguetes, mísseis ar-ar de curto e médio alcance e munição extra. O peso conta: carregado, o avião acelera, sobe e curva pior, e melhora conforme solta. B e V disparam os dois primeiros armamentos e G passa a lista. A carga escolhida vale na decolagem e ao rearmar sobre a pista. No PvP o servidor confere a carga; uma recusada vira a padrão.
@@ -221,6 +225,7 @@ Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos.
 | V | Morteiro: explosiva ou fumaça |
 | 7 | Sinalizador (também nos veículos de solo): ilumina uns 260 m à frente por 28 s, seis por vida |
 | 6 | Visão noturna (só hoje), em qualquer classe |
+| 8, 9 | Rádio: atender o pedido de ajuda aberto mais perto; pedir ajuda aos NPCs perto (em qualquer classe de solo) |
 
 **Controle e rádio de FPV.** O jogo lê qualquer controle pela Gamepad API: ligue, aperte um botão e ele aparece em Controles, com sensibilidade, zona morta e o botão de cada ação por classe. Um rádio de FPV em modo joystick USB voa os drones em acro; o assistente de mapeamento descobre os canais.
 

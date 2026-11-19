@@ -7953,6 +7953,347 @@ AI.tank = (old => (u, dt) => {
   if (A.tgt || !p || !p.heli || p.dead || p.V > HREACT.tank[1] || dist(p, u) > HREACT.tank[0] || !u.arms[0] || !los(u, eyeY(u), p, p.y)) return;
   const s = lead(u, p, ldW(u.arms[0]).spd, true); c.aim = s.d; c.sp[0] = GAI.tank.sp[0] * 3; c.fire[0] = onAim(u, s.d, GAI.tank.tol * 2);
 })(AI.tank);
+/* ---------- the unit's mind (phase F5 of the General's design): beliefs, utility, the rules of engagement and the latitude, and the calls for help ----------
+   Each soldier's squad, vehicle and aircraft of the AI thinks every MIND.every s (staggered), over the controllers of today, in three steps:
+   beliefs (o.bel): what its own perception ladder has of the enemy (the meters notice fills, read and never filled here: nothing it has not perceived), each
+   contact with the rung it has reached (1 detected, at the ladder's error off where it is; 2 its class; 3 its model), where it was last made out and how much of a
+   threat it is (MIND.thr by its class as far as it is made out, '?' only detected, less with the distance); kept MIND.keep s after it was last fresh.
+   utility (o.mind): its options, scored, the best taken (a change only by hyst more): duty, what its controller does for its mission (more the more threat it
+   is fighting); fall, under its mission's break-off strength brk with a threat near, a vehicle backs back along its road and an aircraft breaks off for home;
+   help, answering a call it was given (what it was worth when it took it, plus stick for keeping a word given). A responder whose duty outgrows the call drops it
+   (refused: the call goes to another, or up).
+   the mission's rules: roe hold, no shot at all; return, only at what has hit it (or its squad) in the last agg s, and a missile coming in; free, as before.
+   Latitude 0: a vehicle keeps to its road in contact and nobody answers a call; 2: it answers from 1.5 times as far and its leash is 1.5 times as wide.
+   Calls for help (lateral, NEEDS): ask(o, k, at, tgt) goes to the friends within the need's reach (r m; arty: the gun's own range); the one that answers is the
+   one whose utility is best: the call's priority (the need's times the asker's mission's) times how near it is, less what answering costs its own mission (a
+   fight of its own, its own priority, leaving its leash). At most one open call a unit, for MIND.ask.life s; the same need again only after `again` s. Nobody
+   good enough, or vetoed: the call goes up to the commander (a report 'need', up) and stays open for a player or a later answer. The commander writes every call
+   in its diary and may veto (a garrison does not leave its post, a squad in an operation stays in it, or C.hveto[k] set by the general). The one who helped
+   goes back to its mission and reports done. A player sees the calls of his side on the radio and the map, answers one with 8 and calls with 9.
+   The asker's side of each need, and who may answer:
+   fire: a squad pinned (half its men suppressed) by a ground enemy it knows within ask m: a tank or armoured car on its road comes and lays on where it points
+   clear: a tank or armoured car in a town (bld buildings within town m) that has made out an anti-tank soldier within at m: a squad on its road assaults round it
+   repair, ammo: a vehicle under hurt of its hp, or under ammo of its rounds: a supply base on its road (it goes there) or an empty truck (it comes and serves it)
+   aa: a vehicle or squad under air attack: an AA vehicle on its road comes, or a squad with an air-defence soldier moves up to it
+   arty: a squad that observes (rec, lp, wood, or with a sniper) with a still enemy recognized beyond far m: a mortar or a battery fires a mission on it
+   lift: a squad on foot whose order lies more than far m along its road, with no enemy near: an empty truck on its road takes it there */
+const MIND = { on: 1, every: 1, hyst: .08, stick: .25, keep: 30, agg: 30, back: 250, util: .12, retry: 5, tick: .5, look: 2500,
+  w: { duty: .45, thr: .12, fall: .55 },
+  thr: { tank: 3, lav: 2, aa: .6, aag: 1, art: 1.4, truck: .3, car: .6, rad: .3, man: .5, mg: 1.1, at: 1.8, snp: .9, plane: 2, heli: 2.4, '?': 1 },
+  ask: { life: 60, again: 25, pin: .5, near: 700, hurt: .5, ammo: .15, town: 150, bld: 3, at: 300, far: 450, lift: 1200, air: 1500 },
+  serve: { r: 25, hp: 7.5, ammo: .1, done: .92 },
+  arty: { n: 6 }, done: { fire: 4, clear: 8, aa: 10, repair: 0, ammo: 0, arty: 0, lift: 0, pl: 15 } };
+const NEEDS = { fire: { r: 600, pri: 2, s: 'fogo HE' }, clear: { r: 400, pri: 2, s: 'limpar o anticarro dos prédios' }, repair: { r: 600, pri: 1, s: 'reparo' },
+  ammo: { r: 600, pri: 1, s: 'munição' }, aa: { r: 1500, pri: 2, s: 'cobertura antiaérea' }, arty: { r: 0, pri: 1.5, s: 'fogo indireto' }, lift: { r: 600, pri: 1, s: 'carona' } };
+const NEEDK = Object.keys(NEEDS);
+/* the class a contact is made out as: the model's for a soldier (machine gun, anti-tank, sniper), a vehicle's kind, an aircraft */
+const belCls = t => (t.man ? (t.def.snp ? 'snp' : t.arms && t.arms[1] && (t.arms[1].d.k === 'heat' || t.arms[1].d.k === 'atgm') ? 'at' : t.arms && t.arms[0] && t.arms[0].d.lmg ? 'mg' : 'man') : t.kind ? (MIND.thr[t.kind] ? t.kind : 'lav') : t.heli ? 'heli' : 'plane');
+/* the beliefs of o (a vehicle, an aircraft, a squad: its men's together), at the rung each reached */
+function belief(o) {
+  const B = o.bel || (o.bel = new Map()), eyes = o.men ? o.men.filter(m => !m.dead && m.pm) : o.pm ? [o] : [], at = o.men ? o.men.find(m => !m.dead) || o.men[0] : o;
+  for (const a of eyes) for (const [t, e] of a.pm) {
+    if (!e.kn || t.dead || t.team === o.team || S.t - e.t > 1) continue;
+    const g = S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1, b = B.get(t), x = g < 2 ? t.x + e.ex : t.x, z = g < 2 ? t.z + e.ez : t.z;
+    if (!b || b.t < S.t || g > b.g) B.set(t, { t: S.t, g: b && b.t >= S.t ? Math.max(b.g, g) : g, x, z, c: g < 2 ? '?' : belCls(t) });
+  }
+  let thr = 0, top = null;
+  for (const [t, b] of B) {
+    if (t.dead || S.t - b.t > MIND.keep) { B.delete(t); continue; }
+    const d = Math.hypot(b.x - at.x, b.z - at.z); b.d = d; b.thr = (MIND.thr[b.c] || 1) * clamp(1 - d / MIND.look, .1, 1) * (S.t - b.t < 2 ? 1 : .5);
+    thr += b.thr; if (!top || b.thr > top.thr) top = Object.assign(b, { o: t });
+  }
+  o.belT = { thr, top, n: B.size }; return o.belT;
+}
+const belTop = (o, f) => { let best = null; if (o.bel) for (const [t, b] of o.bel) if (!t.dead && f(b, t) && (!best || b.thr > best.thr)) best = Object.assign(b, { o: t }); return best; };
+/* how strong o still is, 0 to 1 */
+const mStr = o => (o.men ? o.men.filter(m => !m.dead && !m.down).length / Math.max(1, o.n0 || o.men.length) : o.max ? o.hp / o.max : o.def && o.def.hp ? o.hp / o.def.hp : 1);
+const leash = o => (o.mis ? o.mis.area.r * (o.mis.lat === 2 ? 1.5 : 1) : 1e9);
+/* the mind of one AI unit: beliefs, then its options scored, then the best (o.mind) */
+function mindThink(o) {
+  const M = o.mis, bt = belief(o), W = MIND.w, sc = { duty: W.duty + W.thr * Math.min(bt.thr, 6) }, s = mStr(o);
+  if (M && s < M.brk && bt.thr > .3 && !o.men && !o.fixed) sc.fall = W.fall + (M.brk - s) + .05 * bt.thr;
+  const R = o.help; if (R && R.resp === o && (R.st === 'on')) sc.help = R.u + MIND.stick;
+  const was = o.mind && o.mind.k; let k = 'duty';
+  for (const j in sc) if (sc[j] > sc[k]) k = j;
+  if (was && was !== k && sc[was] !== undefined && sc[was] + MIND.hyst >= sc[k]) k = was;
+  o.mind = { k, sc, thr: +bt.thr.toFixed(2), n: bt.n, T: S.t };
+  if (R && R.resp === o && k !== 'help') helpRefuse(R, o);
+  if (k === 'fall' && was !== 'fall') mindFall(o);
+  if (!o.hq || o.hq.st === 'done' || o.hq.st === 'gone') mindAsk(o, bt);
+}
+/* fall back: a vehicle back along its road (away from where it was going), an aircraft for home */
+function mindFall(o) {
+  if (o.ai && o.ri !== undefined && o.ai.reloc !== undefined && !o.fixed) { const r = S.T.routes[o.ri]; if (r) o.ai.reloc = clamp(o.s - o.ds * MIND.back, 0, r.len); }
+  else if (o.def && o.def.vmax && !o.heli) o.egress = Math.max(o.egress || 0, 40);
+}
+/* what o needs, by what it believes and how it stands: one call at most */
+function mindAsk(o, bt) {
+  const K = MIND.ask;
+  if (o.men) {
+    const live = o.men.filter(m => !m.dead && !m.down), L = live[0]; if (!L || o.state || o.lift || o.rd) return;
+    const pin = live.filter(m => m.sup > S.t).length >= live.length * K.pin && live.length > 1, g = belTop(o, b => b.d < K.near && b.c !== 'plane' && b.c !== 'heli');
+    if (pin && g) return helpAsk(o, 'fire', L, g);
+    const air = belTop(o, (b, t) => (b.c === 'plane' || b.c === 'heli' || (b.g < 2 && t.def && t.def.vmax)) && b.d < K.air && (t.v ? t.v.y < 0 || t.heli : true));
+    if (air && !live.some(m => m.arms[1] && m.arms[1].d.k === 'sam' && m.arms[1].mag + m.arms[1].res > 0)) return helpAsk(o, 'aa', L, air);
+    if (['rec', 'lp', 'wood'].includes(o.job) || live.some(m => m.def.snp) || (o.ord && o.ord.k === 'observe')) {
+      const f = belTop(o, (b, t) => b.g >= 2 && b.d > K.far && !t.man && b.c !== 'plane' && b.c !== 'heli' && S.t - (t.moveT || 0) > 3);
+      if (f) return helpAsk(o, 'arty', L, f);
+    }
+    const O = o.ord;
+    if (O && O.s !== undefined && O.ri === o.ri && (O.k === 'hold' || O.k === 'assault' || O.k === 'move') && !O.rush && !O.fast && !o.op && !o.col && !o.tp && !o.hf && o.fd > FIELD.dbl && Math.abs(O.s - o.s) > K.lift) return helpAsk(o, 'lift', L, null);
+    return;
+  }
+  if (!o.ai || o.fld || o.run || o.fixed || o.def.vmax) return;
+  if (o.hp < o.max * K.hurt) return helpAsk(o, 'repair', o, null);
+  const a = o.arms && o.arms[0]; if (a && a.d.ammo > 0 && a.ammo !== Infinity && a.ammo < a.d.ammo * K.ammo) return helpAsk(o, 'ammo', o, null);
+  if (airThreat(o)) { const p = belTop(o, b => b.c === 'plane' || b.c === 'heli' || b.c === '?'); if (o.kind !== 'aa') return helpAsk(o, 'aa', o, p); }
+  if ((o.kind === 'tank' || o.kind === 'lav') && near(o.x, o.z, K.town).filter(b => b.B && S.os[b.id] < 2).length >= K.bld) {
+    const at = belTop(o, b => b.c === 'at' && b.d < K.at); if (at) return helpAsk(o, 'clear', o, at);
+  }
+}
+/* ---- the calls ---- */
+const helps = () => S.help || (S.help = { n: 0, l: [], v: 0 });
+const helpWho = o => (o.men ? 'Esquadra' + (o.job ? ' (' + o.job + ')' : '') : o.pid || o === S.my ? (o.name || 'Jogador') : o.kind ? (o.def.name || o.kind) : o.def ? o.def.name : 'unidade');
+const helpLive = o => !!o && (o.men ? o.live > 0 && o.men.some(m => !m.dead) : !o.dead && !o.gone);
+const helpAt = o => (o.men ? o.men.find(m => !m.dead) || o.men[0] : o);
+/* o asks for k, at the place of at, for tgt (a belief: its x z as o believes; or a point) */
+function helpAsk(o, k, at, tgt) {
+  if ((S.net && !S.host) || !MIND.on || !NEEDS[k] || !helpLive(o)) return null;
+  if (o.hq && (o.hq.st === 'open' || o.hq.st === 'on' || o.hq.st === 'up')) return null;
+  const T = o.hqT || (o.hqT = {}); if (T[k] !== undefined && S.t - T[k] < MIND.ask.again) return null;
+  T[k] = S.t;
+  const H = helps(), N = NEEDS[k], p = at || helpAt(o), R = { id: ++H.n, k, team: o.team, by: o, x: p.x, z: p.z, tx: tgt ? tgt.x : p.x, tz: tgt ? tgt.z : p.z, tgt: tgt && tgt.o || null,
+    pri: N.pri * (o.mis ? o.mis.pri : 1), T0: S.t, T: S.t + MIND.ask.life, st: 'open', resp: null, u: 0, tried: new Set(), pl: null, pid: 0, okT: 0, atT: 0, pick: 0 };
+  o.hq = R; H.l.push(R); H.v++;
+  rep(o, 'need', { k, help: R.id });
+  gLog(o.team, 'help', helpWho(o) + ' pede ' + N.s, p, null, tgt);
+  helpPick(R);
+  return R;
+}
+/* who may answer call R, and from how far */
+function helpCands(R) {
+  const t = R.team, k = R.k, out = [], same = (o, ri) => o.ri === ri;
+  const rp = railOf(R.x, R.z), A = o => !!o.ai && !o.net && !o.dead && o.team === t && o !== R.by && !o.help && !(o.mis && o.mis.lat === 0);
+  const Q = q => !q.net && q.team === t && q !== R.by && q.live >= 2 && !q.state && !q.lift && !q.rd && !q.help && !q.tp && !(q.mis && q.mis.lat === 0);
+  if (k === 'fire') for (const u of S.units) if (A(u) && (u.kind === 'tank' || u.kind === 'lav') && !u.run && same(u, rp.ri)) out.push(u);
+  if (k === 'clear') for (const q of S.squads) if (Q(q) && same(q, rp.ri) && q.job !== 'mort') out.push(q);
+  if (k === 'aa') { for (const u of S.units) if (A(u) && u.kind === 'aa' && !u.fixed && same(u, rp.ri)) out.push(u); for (const q of S.squads) if (Q(q) && same(q, rp.ri) && q.men.some(m => !m.dead && m.arms[1] && m.arms[1].d.k === 'sam' && m.arms[1].mag + m.arms[1].res > 0)) out.push(q); }
+  if (k === 'arty') { for (const u of S.units) if (A(u) && u.kind === 'art' && !u.ai.fm && u.arms[0].ammo > 0) out.push(u); for (const q of S.squads) if (Q(q) && q.job === 'mort' && q.men.some(m => !m.dead && m.def.mort)) out.push(q); }
+  if (k === 'repair' || k === 'ammo') {
+    for (const b of S.sup) if (!b.dead && b.prog >= 1 && b.team === t && R.by.ai && R.by.ri !== undefined && b.ri === R.by.ri) out.push(b);
+    for (const u of S.units) if (A(u) && u.kind === 'truck' && !u.cargo && !u.fld && !u.run && !(u.ai && u.ai.park) && same(u, rp.ri)) out.push(u);
+  }
+  if (k === 'lift') for (const u of S.units) if (A(u) && u.kind === 'truck' && !u.cargo && !u.fld && !u.run && !(u.ai && u.ai.park) && R.by.ri === u.ri && roomIn(u) >= R.by.live) out.push(u);
+  return out;
+}
+/* what answering R is worth to c (below 0: it cannot) */
+function helpUtil(R, c) {
+  const M = c.mis, lat = M ? M.lat : 1, at = helpAt(c), d = Math.hypot(at.x - R.x, at.z - R.z);
+  let r = NEEDS[R.k].r;
+  if (R.k === 'arty') { const w = c.men ? (c.men.find(m => !m.dead && m.def.mort) || {}).arms : c.arms; const g = w && (c.men ? w[1] : w[0]); if (!g) return -1; r = g.d.range || 0; const dt = Math.hypot(at.x - R.tx, at.z - R.tz); if (dt > r || dt < (g.d.min || GAI.art.near)) return -1; }
+  r *= lat === 2 ? 1.5 : 1;
+  if (!r || d > r) return -1;
+  if (M && M.roe === 'hold' && (R.k === 'fire' || R.k === 'arty' || R.k === 'aa' || R.k === 'clear')) return -1;
+  let cost = M ? (M.pri - 1) * .4 : 0;
+  if (c.men ? c.fd < IAI.hold : c.ai && c.ai.tgt && !c.ai.tgt.dead && !c.ai.tgt.lost) cost += .6;
+  if (M && M.area && R.k !== 'arty') cost += Math.max(0, Math.hypot(M.area.x - R.x, M.area.z - R.z) - leash(c)) / 600 * .5;   // leaving its leash (a battery fires from where it is)
+  if (c.sup) cost = 0;   // a supply base serves whoever comes
+  return R.pri * (1 - d / (r * 1.25)) - cost;
+}
+/* the commander's veto on c answering R: '' or why not */
+function helpVeto(R, c) {
+  const C = S.cmd && S.cmd[R.team];
+  if (C && C.hveto && C.hveto[R.k]) return 'o general vetou pedidos de ' + NEEDS[R.k].s;
+  if (c.men && c.mis && c.mis.kind === 'garrison') return 'a guarnição não deixa o posto';
+  if (c.men && c.op) return 'a esquadra está numa operação';
+  return '';
+}
+/* the best of the friends answers R; none: up to the commander */
+function helpPick(R) {
+  R.pick = S.t;
+  const l = helpCands(R).filter(c => !R.tried.has(c)).map(c => [c, helpUtil(R, c)]).filter(a => a[1] > MIND.util).sort((a, b) => b[1] - a[1]);
+  for (const [c, u] of l) {
+    const v = helpVeto(R, c);
+    if (v) { R.tried.add(c); gLog(R.team, 'help', 'Vetado: ' + helpWho(c) + ' não atende ' + helpWho(R.by) + ' (' + v + ')', helpAt(c), 'hv' + R.id); continue; }
+    R.resp = c; R.u = u; R.st = 'on'; R.atT = 0; c.help = R; helps().v++;
+    helpStart(R, c);
+    gLog(R.team, 'help', helpWho(c) + ' atende ' + helpWho(R.by) + ': ' + NEEDS[R.k].s, helpAt(c), null, R);
+    return c;
+  }
+  if (R.st !== 'up') { R.st = 'up'; helps().v++; rep(R.by, 'need', { k: R.k, help: R.id, up: 1 }); gLog(R.team, 'help', 'Ninguém perto atende ' + helpWho(R.by) + ' (' + NEEDS[R.k].s + '): sobe ao comando', R, 'hu' + R.id); }
+  return null;
+}
+/* c sets out to help */
+function helpStart(R, c) {
+  const k = R.k, rp = railOf(R.x, R.z);
+  if (c.sup) { const u = R.by; c.help = null; if (u.ai && u.ri === c.ri) u.ai.reloc = c.s; return; }
+  if (k === 'arty') {
+    const C = cmdOf(R.team), by = c.men ? c.men.find(m => !m.dead && m.def.mort) : c, M = cmdMission(C, 'he', R.tx, R.tz, MIND.arty.n, Math.max(5, R.T - S.t), null);
+    M.by = by; R.fm = M; return;
+  }
+  if (c.men) {   // a squad: an order of the moment, the one it had kept
+    c.hprev = c.ord;
+    const O = k === 'clear' ? { k: 'assault', ri: rp.ri, s: rp.s, x: R.x, z: R.z, help: R.id } : { k: 'hold', ri: rp.ri, s: rp.s, x: R.x, z: R.z, R: 14, help: R.id };
+    setOrd(c, O); R.ord = c.ord; return;
+  }
+  if (k === 'lift') {
+    const q = R.by, O = q.ord, ds = Math.sign(O.s - q.s) || 1;
+    c.hrun = 1; c.home = c.s; c.run = { legs: [{ s: q.s, k: 'load', q }, { s: clamp(O.s - ds * FIELD.drop, 0, S.T.routes[c.ri].len), k: 'drop' }], i: 0, T: 0 }; return;
+  }
+  c.ai.hs = rp.s;   // a vehicle: along its road to the call
+}
+/* c lets R go: back to its own mission, and it says so */
+function helpFree(R, c, ok) {
+  if (!c) return;
+  if (c.help === R) c.help = null;
+  if (c.sup) { if (R.by.ai && R.by.ai.reloc === c.s) R.by.ai.reloc = null; return; }
+  if (R.fm) { R.fm.dead = true; R.fm = null; }
+  if (c.men) { if (c.ord === R.ord && c.live > 0) setOrd(c, c.hprev || { k: 'hold', ri: c.ri, s: c.s }); c.hprev = null; }
+  else if (c.ai) { c.ai.hs = null; if (c.hrun) { if (c.run && c.run.legs[0] && c.run.legs[0].q && c.run.legs[0].q.lift) { const q = c.run.legs[0].q; setOrd(q, q.lift.ord || q.ord); q.lift = null; } c.run = null; c.hrun = 0; c.bye = false; } }
+  rep(c, 'done', { k: 'help', need: R.k, id: R.id, ok: ok ? 1 : 0 });
+}
+/* the responder will not (its own fight is worth more now): another, or up */
+function helpRefuse(R, c) {
+  if (R.resp !== c) return;
+  helpFree(R, c, false); R.tried.add(c); R.resp = null; R.st = 'open'; helps().v++;
+  gLog(R.team, 'help', helpWho(c) + ' não pode mais atender ' + helpWho(R.by) + ' (' + NEEDS[R.k].s + ')', helpAt(c), 'hr' + R.id);
+  helpPick(R);
+}
+function helpEnd(R, st) {
+  if (R.st === 'done' || R.st === 'gone') return;
+  helpFree(R, R.resp, st === 'done'); if (R.by.hq === R) R.by.hq = null;
+  R.st = st; R.end = S.t; helps().v++;
+  if (st === 'done') gLog(R.team, 'help', 'Pedido de ' + helpWho(R.by) + ' atendido (' + NEEDS[R.k].s + ')' + (R.resp ? ' por ' + helpWho(R.resp) : R.pl ? ' por ' + helpWho(R.pl) : ''), R, 'hd' + R.id);
+}
+/* is R's need met (true), by what its asker believes and how it stands */
+function helpMet(R) {
+  const o = R.by, K = MIND.ask;
+  if (R.pl && hdist(R.pl, R) < 150) return true;
+  if (!o.ai && !o.men) return R.k === 'arty' ? !!R.fm && (R.fm.dead || R.fm.n <= 0) : R.k === 'repair' && !o.net ? o.hp >= o.max * MIND.serve.done : !!R.atT && S.t - R.atT > MIND.done.pl;   // a player's call: once help has been there a while
+  switch (R.k) {
+    case 'fire': return !belTop(o, b => b.d < K.near && b.c !== 'plane' && b.c !== 'heli' && S.t - b.t < 3) || !!(R.tgt && R.tgt.dead);
+    case 'clear': return !belTop(o, b => b.c === 'at' && b.d < K.at && S.t - b.t < 3);
+    case 'aa': return o.men ? !belTop(o, b => (b.c === 'plane' || b.c === 'heli') && b.d < K.air && S.t - b.t < 3) : !airThreat(o);
+    case 'repair': return !o.max || o.hp >= o.max * MIND.serve.done;
+    case 'ammo': { const a = o.arms && o.arms[0]; return !a || a.ammo === Infinity || a.ammo >= a.d.ammo * .8; }
+    case 'arty': return !!R.fm && (R.fm.dead || R.fm.n <= 0);
+    case 'lift': return !!R.lifted && !(R.resp && R.resp.cargo);
+  }
+  return false;
+}
+/* a truck by a vehicle it came to: it mends and rearms it, as a supply base does */
+function helpServe(R, c) {
+  const u = R.by, V = MIND.serve;
+  if (u.net || hdist(u, c) > V.r + (u.def.env ? u.def.env[5] : 5) || S.t - u.hitT < 3) return;
+  if (u.hp < u.max) { u.hp = Math.min(u.max, u.hp + V.hp); mend(u, .2); if (u.ai) u.ai.rest = S.t + 1; }
+  for (const a of u.arms) if (a.d.ammo > 0 && a.ammo !== Infinity && a.ammo < a.d.ammo) { a.ammo = Math.min(a.d.ammo, a.ammo + Math.ceil(a.d.ammo * V.ammo)); if (a.he !== undefined) shFix(a); }
+}
+/* every MIND.tick s: each open call is looked at */
+function helpTick() {
+  const H = S.help; if (!H || !H.l.length) return;
+  for (const R of H.l) {
+    if (R.st === 'done' || R.st === 'gone') continue;
+    const c = R.resp;
+    if (R.k === 'lift' && c && c.cargo && helpLive(c)) { R.lifted = 1; R.T = Math.max(R.T, S.t + 5); }   // aboard, the squad is the truck's load (no longer a squad of its own), and the ride is seen through
+    if (!helpLive(R.by) && !(R.lifted && helpLive(c))) { helpEnd(R, 'gone'); continue; }
+    if (R.pl && (R.pl.dead || (R.pl !== S.my && R.pid && !Net.ghosts.has(R.pid) && S.net))) R.pl = null;
+    if (helpMet(R)) { if (!R.okT) R.okT = S.t; if (S.t - R.okT >= (R.pl ? 0 : MIND.done[R.k])) { helpEnd(R, 'done'); continue; } } else R.okT = 0;
+    if (S.t > R.T) { helpEnd(R, 'gone'); gLog(R.team, 'help', 'O pedido de ' + helpWho(R.by) + ' (' + NEEDS[R.k].s + ') venceu', R, 'hx' + R.id); continue; }
+    if (c && !helpLive(c)) { R.tried.add(c); R.resp = null; R.st = 'open'; helpPick(R); continue; }
+    if (!c) { if (S.t - R.pick > MIND.retry) helpPick(R); continue; }
+    if (c.sup) continue;
+    if (c.men) { if (c.at && c.ord === R.ord && !R.atT) R.atT = S.t; continue; }
+    if (R.k === 'lift') { if (c.cargo) R.lifted = 1; if (!c.run || (c.run.legs[0] && c.run.legs[0].k === 'bye')) { if (!R.lifted) helpRefuse(R, c); else helpEnd(R, 'done'); } continue; }
+    if (c.ai && c.ai.hs !== undefined && c.ai.hs !== null) {   // a vehicle on its way, or there: it looks where it was pointed, and a truck serves
+      const r = S.T.routes[c.ri], p = railOf(R.by.men ? helpAt(R.by).x : R.by.x, R.by.men ? helpAt(R.by).z : R.by.z);
+      if (R.k === 'repair' || R.k === 'ammo') { if (p.ri === c.ri) c.ai.hs = p.s; helpServe(R, c); }
+      if (r && Math.abs(c.ai.hs - c.s) < 60 && !R.atT) R.atT = S.t;
+      if (!c.ai.tgt && hdist(c, R) < 1200 && (R.k === 'fire' || R.k === 'aa')) c.ln = { x: R.tx, z: R.tz, t: S.t, of: null };
+    }
+  }
+  if (H.l.length > 40) H.l = H.l.filter(R => !((R.st === 'done' || R.st === 'gone') && S.t - R.end > 20));
+}
+/* what the mind and the calls add to a controller, after it: a responder on its way along its road, a strict vehicle that keeps to it, and the rules of engagement */
+const aggr = (o, t) => { const g = (o.sq || o).agg; return !!t && !!g && g.has(t) && S.t - g.get(t) < MIND.agg; };
+function mindGate(o) {
+  const M = o.mis, c = o.ctl, A = o.ai; if (!c) return;
+  if (o.hrun && o.help && (!o.run || (o.run.legs[0] && o.run.legs[0].k === 'bye'))) { const R = o.help; if (R.lifted) helpEnd(R, 'done'); else helpRefuse(R, o); }   // a lift that came to nothing: not on to its home and gone
+  if (A && !o.man && !o.def.vmax) {
+    if (A.hs !== undefined && A.hs !== null && o.rail && !o.run && !(A.tgt && !A.tgt.dead) && A.reloc === null && !o.fixed && !(o.help && o.help.k === 'lift')) {
+      const e = (A.hs - o.s) * o.ds;
+      c.drive = Math.abs(e) < 40 || A.blocked ? 0 : Math.sign(e) * GAI.march / o.def.spd;
+    }
+    if (M && M.lat === 0 && !o.rail && A.off !== undefined && !o.fixed && (o.kind === 'tank' || o.kind === 'lav')) { o.rail = true; A.hc = null; }   // strict: on its road, firing from it
+  }
+  if (!M || M.roe === 'free') return;
+  if (o.man) { if (c.fire && (M.roe === 'hold' || !aggr(o, A.tgt))) c.fire = false; if (M.roe === 'hold') c.nade = c.nade === 2 ? 2 : 0; return; }
+  if (o.def.vmax) { if (o.fire && (M.roe === 'hold' || !aggr(o, o.tgt))) o.fire = false; return; }
+  if (!c.fire) return;
+  if (M.roe === 'hold') { c.fire[0] = c.fire[1] = false; return; }
+  if (A && A.msl && !A.msl.gone) return;   // a missile coming in is always answered
+  if (!aggr(o, A && (A.tgt || A.inf))) c.fire[0] = false;
+  if (!aggr(o, A && (A.low || A.inf || A.tgt))) c.fire[1] = false;
+}
+/* who has hit o, and when (for roe return) */
+impact = (g => (...a) => {
+  const o = a[0], by = a[3];
+  if (o && by && by.team !== undefined && o.team !== undefined && by.team !== o.team) { const h = o.sq || o; (h.agg || (h.agg = new Map())).set(by, S.t); if (h.agg.size > 12) h.agg.delete(h.agg.keys().next().value); }
+  return g(...a);
+})(impact);
+/* every frame where the battle is simulated: the minds whose time has come (staggered by their mission's id), and the calls */
+function mindStep(dt) {
+  if ((S.net && !S.host) || !MIND.on) return;
+  const due = o => { if (o.mindT === undefined) o.mindT = S.t + ((o.mis ? o.mis.id : 0) % 10) / 10 * MIND.every; if (S.t < o.mindT) return false; o.mindT = S.t + MIND.every; return true; };
+  for (const u of S.units) if (u.ai && !u.net && !u.dead && due(u)) mindThink(u);
+  for (const q of S.squads) if (!q.net && q.live > 0 && !q.mil && due(q)) mindThink(q);
+  for (const p of S.planes) if (p.ai && !p.net && !p.dead && due(p)) mindThink(p);
+  if ((S.helpT = (S.helpT || 0) - dt) <= 0) { S.helpT = MIND.tick; helpTick(); }
+}
+let mindWrapped = false;
+function mindWrap() {   // the gate goes round the controllers last, after every other layer has had its say
+  if (mindWrapped) return; mindWrapped = true;
+  for (const k in AI) AI[k] = (g => (u, dt) => { g(u, dt); mindGate(u); })(AI[k]);
+  aiMan = (g => (m, dt) => { g(m, dt); if (!m.down) mindGate(m); })(aiMan);
+  aiPlane = (g => (p, dt) => { g(p, dt); mindGate(p); })(aiPlane);
+}
+step = (g => dt => { mindWrap(); g(dt); mindStep(dt); })(step);
+/* a player's calls and answers: 9 calls for what he needs where he is (in a vehicle, a repair when hurt, else clearing round it; on foot, fire on where he aims,
+   indirect fire beyond far m), 8 answers the nearest open call of his side; a guest's go to the host (hask, hacc) */
+function helpMine(P, tx, tz) {
+  if (!P || P.dead || P.def.vmax) return null;
+  if (P.kind) return { k: P.hp < P.max * .7 ? 'repair' : 'clear', tx: P.x, tz: P.z };
+  const d = Math.hypot(tx - P.x, tz - P.z);
+  return { k: d > MIND.ask.far ? 'arty' : 'fire', tx, tz };
+}
+function helpCall(P, k, tx, tz) {   // where the battle is simulated: the player's own call
+  const R = helpAsk(P, k, P, { x: tx, z: tz }); if (R) R.pid = P.pid || 0;
+  return R;
+}
+function helpTake(R, P) {
+  if (!R || R.team !== P.team || R.by === P || R.st === 'done' || R.st === 'gone' || R.pl) return false;
+  R.pl = P; R.pid = P.pid || 0; helps().v++;
+  gLog(R.team, 'help', helpWho(P) + ' atende pelo rádio ' + helpWho(R.by) + ': ' + NEEDS[R.k].s, P, null, R);
+  return true;
+}
+/* the calls of side t a player can see: [id, need, x, z, st 0 open 1 answered by the AI 2 by a player, mine 1 if he asked] */
+function helpRows(t, P) {
+  const l = S.net && !S.host ? (S.hlpIn || []) : (S.help ? S.help.l : []).filter(R => R.team === t && (R.st === 'open' || R.st === 'on' || R.st === 'up')).map(R => [R.id, NEEDK.indexOf(R.k), Math.round(R.x), Math.round(R.z), R.pl ? 2 : R.resp ? 1 : 0, R.by === P || (P && R.pid && R.pid === P.pid) ? 1 : 0]);
+  return l;
+}
+/* online (welcome hlp: 1): the host's calls to each side (hlp, rows as helpRows', the asker's player id last), a guest's call (hask k, p where, q the target) and answer (hacc id) */
+Object.assign(Net, { hlp: false, hv: -1, hT: 0,
+  helps() {
+    for (const t of [0, 1]) Net.send('hlp', { s: t, e: (S.help ? S.help.l : []).filter(R => R.team === t && (R.st === 'open' || R.st === 'on' || R.st === 'up')).slice(-24).map(R => [R.id, NEEDK.indexOf(R.k), Math.round(R.x), Math.round(R.z), R.pl ? 2 : R.resp ? 1 : 0, R.pid || 0]) });
+  } });
+Net.tick = (g => dt => { g(dt); if (S && S.net && S.host && Net.hlp && S.help && (S.help.v !== Net.hv || Date.now() - Net.hT > 3000) && Date.now() - Net.hT > 500) { Net.hv = S.help.v; Net.hT = Date.now(); Net.helps(); } })(Net.tick);
+Net.rx.welcome = (g => m => { Net.hlp = m.hlp === 1; g(m); })(Net.rx.welcome);
+Net.rx.hlp = m => { if (!S || !S.net || S.host || !Array.isArray(m.e)) return; S.hlpIn = m.e.filter(r => Array.isArray(r) && r.length === 6).map(r => [r[0], r[1], r[2], r[3], r[4], r[5] && r[5] === Net.id ? 1 : 0]); };
+Net.rx.hask = m => {
+  const g = Net.ghosts.get(m.from);
+  if (!S || !S.net || !S.host || !g || g.dead || !NEEDK[m.k] || !Array.isArray(m.p) || !Array.isArray(m.q)) return;
+  const R = helpAsk(g, NEEDK[m.k], g, { x: m.q[0], z: m.q[1] }); if (R) R.pid = m.from;
+};
+Net.rx.hacc = m => { const g = Net.ghosts.get(m.from), R = S && S.help && S.help.l.find(R => R.id === m.id); if (S && S.net && S.host && g && !g.dead && R) { helpTake(R, g); R.pid = m.from; } };
 /* --- every step: the AI's helicopters by the wave or the director, the transports' runs, and the ghosts' guns --- */
 const heliCount = (t, f) => S.planes.reduce((a, p) => a + (p.heli && p.team === t && !p.dead && !!p.ai && f(p) ? 1 : 0), 0);
 function heliAir(team, id, far) {
@@ -17061,12 +17402,61 @@ function buildHangar() {
     gen: ['Tab', 'Visão de General: o mapa do comandante, suas ordens e o que ele pensa. O jogo continua enquanto o mapa está aberto'],
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
-  for (const [key, v] of (LEGEND[k] || LEGEND.plane)(d, o).concat(d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], skyKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
+  for (const [key, v] of (LEGEND[k] || LEGEND.plane)(d, o).concat(d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], skyKeys(), helpKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
   $('#briefing').textContent = text.slice(0, cut); $('#mission').textContent = text.slice(cut).trim() + ' ' + CQBRIEF(pvp);
   $('#btnInv').textContent = (k === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa'); ffChip();
   for (const b of document.querySelectorAll('#ctrls .tab')) b.lastChild.textContent = CTRLTXT[k === 'heli' ? 1 : 0][b.dataset.ctrl === 'mouse' ? 1 : 0];
   susFill(); if (!(Date.now() - (Net.susAt || 0) < 2000)) susPoll();
 }
+/* ---------- calls for help on the radio (F5): the open calls of the player's side near him, on the screen and on the maps; 8 answers the nearest
+   one nobody of the room answers yet, 9 calls (helpMine says for what) ---------- */
+const HELPUI = { far: 2500, show: 3, aim: [400, 1500] };
+const helpKeys = () => [['8', 'Rádio: atender o pedido de ajuda aberto mais perto do seu lado (fogo, reparo, cobertura antiaérea, carona…); quem pediu e o general ficam sabendo'],
+  ['9', 'Rádio: pedir ajuda aos NPCs perto. A pé, fogo HE onde você mira (fogo indireto, se for longe); num veículo, reparo se estiver avariado, senão infantaria para limpar o anticarro em volta']];
+function helpNear(P) { return helpRows(P.team, P).map(r => r.concat(Math.hypot(r[2] - P.x, r[3] - P.z))).filter(r => r[5] || r[6] < HELPUI.far).sort((a, b) => a[6] - b[6]); }
+function helpHud() {
+  if (playMode !== 'play' || !S || !S.my || S.my.dead || GV.on) return;
+  const P = S.my, l = helpNear(P); if (!l.length) return;
+  const u = clamp(cw / 1000, .62, 1), seen = S.hlpSeen || (S.hlpSeen = new Set());
+  for (const r of l) if (!r[5] && !seen.has(r[0])) { seen.add(r[0]); S.feed.push({ text: 'Rádio: pedido de ' + NEEDS[NEEDK[r[1]]].s + ' a ' + Math.round(r[6]) + ' m · 8 atende', life: 6, team: P.team }); if (S.feed.length > 4) S.feed.shift(); }
+  let y = ch * .78, first = true;
+  for (const r of l.slice(0, HELPUI.show)) {
+    const N = NEEDS[NEEDK[r[1]]], who = r[4] === 2 ? 'um jogador atende' : r[4] === 1 ? 'a IA atende' : 'sem resposta';
+    const s = r[5] ? 'RÁDIO · seu pedido: ' + N.s + ' · ' + who : 'RÁDIO · ' + N.s + ' a ' + Math.round(r[6]) + ' m · ' + who + (first && r[4] !== 2 ? '  ·  8: ATENDER' : '');
+    if (!r[5] && r[4] !== 2) first = false;
+    txt(s, 18 * u, y, 12 * u, r[5] ? '#ffd84a' : FRIEND, 'left'); y += 16 * u;
+  }
+}
+drawHud = (g => () => { g(); helpHud(); })(drawHud);
+/* on a map: a call of the side, a yellow diamond (the player's own filled) */
+function helpMarks(X, Y, u, big) {
+  const P = S && S.my; if (!P) return;
+  const r = big ? 8 : 4.5;
+  for (const h of helpRows(P.team, P)) {
+    const x = X(h[2]), y = Y(h[3]);
+    hx.beginPath(); hx.moveTo(x, y - r); hx.lineTo(x + r, y); hx.lineTo(x, y + r); hx.lineTo(x - r, y); hx.closePath();
+    hx.lineWidth = big ? 3 : 2; hx.strokeStyle = 'rgba(8,12,13,.85)'; hx.stroke(); hx.lineWidth = big ? 1.6 : 1; hx.strokeStyle = '#ffd84a'; hx.stroke();
+    if (h[5]) { hx.fillStyle = 'rgba(255,216,74,.55)'; hx.fill(); }
+  }
+}
+cueMarks = (g => (X, Y, me, u, big) => { g(X, Y, me, u, big); helpMarks(X, Y, u, big); })(cueMarks);
+addEventListener('keydown', e => {
+  if (e.repeat || playMode !== 'play' || sw.on || GV.on || !S || !S.my || S.my.dead || (e.code !== 'Digit8' && e.code !== 'Digit9') || /INPUT|TEXTAREA/.test(e.target.tagName || '')) return;
+  const P = S.my, guest = S.net && !S.host;
+  if (guest && !Net.hlp) { S.banner = { text: 'Rádio sem pedidos de ajuda', sub: 'O servidor desta sala é antigo', life: 2 }; return; }
+  if (e.code === 'Digit8') {
+    const r = helpNear(P).find(r => !r[5] && r[4] !== 2);
+    if (!r) { S.banner = { text: 'Nenhum pedido aberto perto', sub: 'Os pedidos do seu lado aparecem no rádio e no mapa', life: 2 }; return; }
+    if (guest) Net.send('hacc', { id: r[0] }); else helpTake(S.help.l.find(R => R.id === r[0]), P);
+    S.banner = { text: 'Você atende: ' + NEEDS[NEEDK[r[1]]].s, sub: 'A ' + Math.round(r[6]) + ' m, marcado no mapa', life: 2.5 };
+    return;
+  }
+  const d = S.aim ? S.aim.d : P.f, g = hgt(P.x, P.z), k = d.y < -.01 ? clamp((eyeY(P) - g) / -d.y, 0, HELPUI.aim[1]) : HELPUI.aim[0], m = helpMine(P, P.x + d.x * k, P.z + d.z * k);
+  if (!m) { S.banner = { text: 'Sem pedido de ajuda daqui', sub: 'Aeronaves pedem apoio pelo general', life: 2 }; return; }
+  if (guest) Net.send('hask', { k: NEEDK.indexOf(m.k), p: [Math.round(P.x), Math.round(P.z)], q: [Math.round(m.tx), Math.round(m.tz)] });
+  const R = guest ? 1 : helpCall(P, m.k, m.tx, m.tz);
+  S.banner = R ? { text: 'Pedido no rádio: ' + NEEDS[m.k].s, sub: 'Quem estiver perto e puder, atende', life: 2.5 } : { text: 'Já há um pedido seu no ar', sub: 'Um por vez, e o mesmo de novo só depois de ' + MIND.ask.again + ' s', life: 2 };
+});
 /* the Controles panel: opened by its chip, closed by its button, by Esc or by the chip again; the focus goes in and comes back */
 function keysPanel(v) {
   const p = $('#keysPanel'), b = $('#btnKeys');
@@ -18111,7 +18501,7 @@ function genLog(V) {
   if (GV.sig.log === sg) return; GV.sig.log = sg;
   const prev = GV.seen; GV.seen = last ? last.t : 0; ol.replaceChildren();
   if (!L.length) { ol.appendChild(gE('li', '', V.cmd || !V.net ? 'Nenhuma ordem ainda.' : 'Ordens do comandante: só no anfitrião da sala.')); return; }
-  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG' };
+  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG', help: 'AJUDA' };
   for (let i = L.length - 1; i >= 0; i--) {
     const e = L[i], li = gE('li', 'k-' + e.k + (e.t > prev && prev ? ' fresh' : '')), row = e.x !== undefined ? gE('button') : gE('div');
     if (e.x !== undefined) { row.type = 'button'; row.addEventListener('click', () => { GV.cx = e.x; GV.cz = e.z; GV.ping = { x: e.x, z: e.z, T: performance.now() }; GV.drawT = 0; }); }

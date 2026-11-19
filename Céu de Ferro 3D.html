@@ -6707,7 +6707,7 @@ function spawnPlayer() {
   S.mouse = S.pref || S.cls !== 'plane';
   if (S.cls === 'heli') S.mouse = S.pref;
   S.aim = S.mouse ? { h, p: 0, d: { x: Math.cos(h), y: 0, z: -Math.sin(h) } } : null;
-  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = S.noLos = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
+  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = S.noLos = S.farGnd = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
@@ -7874,9 +7874,29 @@ const LO = {
     if (!kind) { for (const u of S.units) if (!u.dead && u.team !== team) { if (u.kind === 'tank') tank++; else soft++; } for (const m of S.men) if (!m.dead && m.team !== team) soft += 1 / 6; }
     return R.sets[(kind ? kind === 'tank' : tank >= soft) ? A.tank : A.soft];
   },
+  /* the lock of a guided bomb o (GBU): of what the seeker line sees within the cone, the NEAREST one the bomb can still reach from here
+     (LO.reach, by height, speed and fin limits); never one beyond it. LOCK.far: a visible target beyond the reach, when nothing is in it
+     (the HUD says FORA DE ALCANCE). LOCK.blk as in lockOn. Same line-of-sight rule as every guided weapon */
+  lockBomb(p, o, list) {
+    LOCK.blk = LOCK.far = null;
+    if (p.mod && !p.mod.lock) return null;
+    const R = LO.reach(p, o); let best = null, bd = 1e9, far = null, fd = 1e9, bb = null, bbo = .8;
+    for (const q of list || S.units) {
+      if (q.dead || q.team === p.team) continue;
+      const dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z, d = Math.hypot(dx, dy, dz);
+      if (d > GUIDE.rng || d < 1) continue;
+      const off = Math.acos(clamp((dx * p.f.x + dy * p.f.y + dz * p.f.z) / d, -1, 1));
+      if (off >= .8) continue;
+      if (hid(p, q) || !seekLine(p, eyeY(p), q, bodyY(q))) { if (off < bbo) { bbo = off; bb = q; } continue; }
+      const h = Math.hypot(dx, dz);
+      if (h < R) { if (h < bd) { bd = h; best = q; } } else if (h < fd) { fd = h; far = q; }
+    }
+    LOCK.blk = best || far ? null : bb; LOCK.far = best ? null : far;
+    return best;
+  },
   /* what a guided bomb is let go at: the vehicle in the sight (an AI's own target) or, with none, the ground under the nose, as a point */
   aim(p) {
-    const t = p.ai && p.tgt && !p.tgt.lost && (p.tgt.kind || p.tgt.man) ? p.tgt : lockOn(p, S.units, GUIDE.rng, .8, true), g = t ? null : LO.spot(p);
+    const t = p.ai && p.tgt && !p.tgt.lost && (p.tgt.kind || p.tgt.man) && hdist(p.tgt, p) < LO.reach(p, p.def.ord.find(o => o.gd) || p.def.ord[0]) ? p.tgt : LO.lockBomb(p, p.def.ord.find(o => o.gd && p.ord[p.def.ord.indexOf(o)] > 0) || p.def.ord.find(o => o.gd)), g = t ? null : LO.spot(p);
     return t || (g && { kind: 'pt', x: g.x, y: g.y - 2, z: g.z, v: ZERO });
   },
   /* the ground a guided bomb o let go now can still cover: the best of a few straight glides, each flown while its fins can hold the
@@ -7937,8 +7957,8 @@ const LO = {
   },
   /* what B and V can lock: the first of the two of that kind with rounds left */
   seek(P, k) {
-    const l = P.def.ord; LOCK.blk = null;
-    for (let i = 0; i < 2; i++) if (l[i] && (l[i].k === k || (l[i].gd && k === 'agm')) && P.ord[i] > 0) { if (k === 'agm') S.lockW = l[i]; else S.lockA = l[i]; return k === 'aam' ? MSL.pick(P, l[i]) : lockOn(P, S.units, 6500, .8, true); }
+    const l = P.def.ord; LOCK.blk = LOCK.far = null;
+    for (let i = 0; i < 2; i++) if (l[i] && (l[i].k === k || (l[i].gd && k === 'agm')) && P.ord[i] > 0) { if (k === 'agm') S.lockW = l[i]; else S.lockA = l[i]; return k === 'aam' ? MSL.pick(P, l[i]) : l[i].gd ? LO.lockBomb(P, l[i]) : lockOn(P, S.units, 6500, .8, true); }
     return null;
   },
   /* each step: cluster bombs open; the player's plane takes the loadout chosen meanwhile where it rearms, low
@@ -8365,7 +8385,7 @@ function seekLine(a, ay, t, ty, smk) {
 }
 /* LOCK.blk: what the last lock (lockOn, MSL.pick) found nearest its line but could not take for the seeker's line alone, when it took nothing:
    the player's HUD says SEM LINHA DE VISADA over it */
-const LOCK = { blk: null };
+const LOCK = { blk: null, far: null };
 const known = (M, a, t) => (!hid(a, t) && grade(a, t) >= 2) || (!!M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem);
 function sight(M, a, t) {
   let m = M.mem;
@@ -10910,7 +10930,7 @@ function fly(P, I, dt) {
   if ((I.flare || autoFlare(P)) && dropFlare(P) && S.net) Net.flare(P);
   if (I.smoke && !P.nxK) LO.next(P);
   P.nxK = !!I.smoke;
-  S.lockAir = LO.seek(P, 'aam'); const na = LOCK.blk; S.lockGnd = LO.seek(P, 'agm'); S.noLos = LOCK.blk || na;
+  S.lockAir = LO.seek(P, 'aam'); const na = LOCK.blk; S.lockGnd = LO.seek(P, 'agm'); S.noLos = LOCK.blk || na; S.farGnd = S.lockGnd ? null : LOCK.far;
 }
 /* where the ground player looks from: behind and above the turret along the aim, or from a seat (S.gv), given as t metres ahead, above
    and right of the turret pivot and turning with the turret. hatch: measured from the tank's own roof hatch */
@@ -29990,6 +30010,12 @@ function drawHud() {
   if (seat) { seat.draw(P, u, ink, acc, disp, blink); fpFx(P); }
   if (!P.dead && S.t - P.dazeT < 1.6) { hx.globalAlpha = .8 * (1 - (S.t - P.dazeT) / 1.6); hx.fillStyle = '#050607'; hx.fillRect(0, 0, cw, ch); hx.globalAlpha = 1; }   // the pilot is hit: the view goes dark for a moment
   (P.man ? hudMan : P.kind ? hudDrive : hudFly)(P, u, ink, acc, disp, blink, seat);
+  const fg = S.farGnd;   // a guided bomb's target in sight but beyond what it can reach from here
+  if (fg && !P.dead && !fg.dead && !fg.gone && !S.lockGnd) {
+    const s = proj(fg.x, bodyY(fg) + (fg.kind ? .5 : 0), fg.z), amb = '#ffd24a';
+    if (s.front) { hx.setLineDash([4, 4]); bracket(s.x, s.y, 15, amb); hx.setLineDash([]); }
+    txt('FORA DE ALCANCE', cw / 2, ch * .5 + 60 * u, 12 * u, amb, 'center');
+  }
   const nl = S.noLos;   // a guided weapon's seeker has a target in its cone that only the ground, a wall, trees or smoke keep from it: no lock
   if (nl && !P.dead && !nl.dead && !nl.gone) {
     const s = proj(nl.x, bodyY(nl) + (nl.kind ? .5 : 0), nl.z), amb = '#ffd24a';

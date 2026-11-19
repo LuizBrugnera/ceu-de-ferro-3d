@@ -232,7 +232,7 @@ Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos.
 
 "Controles", no hangar, mostra as teclas do veículo escolhido e o resumo da missão. Em todas as classes: C troca a câmera, H troca de veículo, Tab abre a visão de general, Esc solta o mouse, M abre o mapa de tiro onde ele existe.
 
-**Avião.** Dois esquemas: "Clássico" (manche no teclado) e "Mira com mouse" (você aponta e o avião voa até a mira).
+**Avião.** Dois esquemas: "Mira com mouse" (o padrão: você aponta e o avião voa até a mira) e "Clássico" (manche no teclado). A escolha salva no navegador vale.
 
 | Tecla | Ação |
 | --- | --- |

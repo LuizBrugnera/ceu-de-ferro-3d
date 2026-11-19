@@ -393,7 +393,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .gen-card li{font-size:12.5px;line-height:1.35;padding:1px 0}
 .gc-cardh{font-family:var(--f-data);font-size:13px;color:var(--fg)}
 .gen[data-seat] #genMap{cursor:crosshair}
-@media (min-width:981px){.gen[data-seat] .gen-l,.gen[data-seat] .gen-r{top:calc(var(--gt,92px) + 6px)}}
+@media (min-width:981px){.gen[data-seat] .gen-l,.gen[data-seat] .gen-r{top:calc(var(--gt,92px) + 6px)}.gen:not([data-seat]) .gen-l,.gen:not([data-seat]) .gen-r{top:calc(var(--gt,50px) + 6px)}}   /* the spectator's bar wraps to two lines at 1280 px: the panels start under it, seated or not */
 .gc-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}
 .gc-grid>*{min-width:0}
 .gc-grid .chip,.gc-row .chip{display:flex;justify-content:space-between;align-items:center;gap:6px;text-align:left}
@@ -8392,18 +8392,22 @@ function aiPlane(p, dt) {
   if (p.V > d.vne * .92) { c.thr = .2; c.brake = true; }
   steer(p, dir, p.skill);
 }
+/* a downed aircraft is a wreck that falls on its own until it strikes the ground or something on it. It holds nobody: the player's death,
+   the tickets and the respawn countdown are all at the moment it was lost (lose, heliLost), and the player may be back in the air while it
+   still falls (stepFrame). A remote player's wreck (p.fall, Net.fall) falls the same on every copy; the object it strikes is its owner's to damage */
+function wreckFall(p, dt) {
+  const v = p.v;
+  v.y -= GR * dt; v.x *= 1 - .15 * dt; v.z *= 1 - .15 * dt;
+  p.x += v.x * ASPD * dt; p.y += v.y * ASPD * dt; p.z += v.z * ASPD * dt; spin(p, p.sp.x, p.sp.y, p.sp.z, dt); axes(p);
+  p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .04; puff(p.x, p.y, p.z, 'smoke', 1.3); if (Math.random() < .5) puff(p.x, p.y, p.z, 'fire', .7); }
+  const g = hgt(p.x, p.z), o = p.y < g + OBJS.air ? ray(p.x - v.x * dt, p.y - v.y * dt, p.z - v.z * dt, p.x, p.y, p.z, 2) : null;
+  if (o && !p.net) hitObj(o, OBJD.crash, p.lastBy);
+  if (o || p.y <= g + 2) { blastFx(p.x, p.y + 2, p.z, 30); p.gone = true; }
+}
 function stepPlane(p, dt) {
   if (p.heli && !p.dead) return stepHeli(p, dt);
   const d = p.def, v = p.v;
-  if (p.dead) {
-    v.y -= GR * dt; v.x *= 1 - .15 * dt; v.z *= 1 - .15 * dt;
-    p.x += v.x * ASPD * dt; p.y += v.y * ASPD * dt; p.z += v.z * ASPD * dt; spin(p, p.sp.x, p.sp.y, p.sp.z, dt); axes(p);
-    p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .04; puff(p.x, p.y, p.z, 'smoke', 1.3); if (Math.random() < .5) puff(p.x, p.y, p.z, 'fire', .7); }
-    const g = hgt(p.x, p.z), o = p.y < g + OBJS.air ? ray(p.x - v.x * dt, p.y - v.y * dt, p.z - v.z * dt, p.x, p.y, p.z, 2) : null;
-    if (o) hitObj(o, OBJD.crash, p.lastBy);
-    if (o || p.y <= g + 2) { blastFx(p.x, p.y + 2, p.z, 30); p.gone = true; }
-    return;
-  }
+  if (p.dead) return wreckFall(p, dt);
   p.inv -= dt; p.gcool -= dt; p.ocool[0] -= dt; p.ocool[1] -= dt; p.fcool -= dt; p.rcool -= dt; p.mcool -= dt;
   const c = p.ctl, f = p.f, u = p.u, r = p.r, V = vlen(v) || 1, Wt = d.m * GR, Q = p.mod, F = d.pf;
   /* aerodynamic angles and coefficients. Past the stall angle the flow breaks: a fifth of the lift goes at once, the drag climbs, and it
@@ -8482,6 +8486,7 @@ function stepPlane(p, dt) {
 }
 /* remote player: its own client flies it. Here it dead-reckons from the last snapshot and eases onto it */
 function stepGhost(p, dt) {
+  if (p.fall) return wreckFall(p, dt);
   const s = p.snap, v = p.v, q = p.q, sq = s.q, k = Math.min(1, dt * 10), sg = q.x * sq.x + q.y * sq.y + q.z * sq.z + q.w * sq.w < 0 ? -1 : 1;
   p.gcool -= dt;
   if ((s.age += dt) < 1) { const k = ASPD * dt; s.x += v.x * k; s.y += v.y * k; s.z += v.z * k; p.x += v.x * k; p.y += v.y * k; p.z += v.z * k; }
@@ -11253,7 +11258,7 @@ function step(dt) {
   if (S.over) return;
   if (P && P.dead && S.respawn > 0 && !S.hold) {   // what was lost may be on its countdown: the player waits for it, or picks something else
     S.respawn -= dt;
-    if (S.respawn <= 0) { if (cqOut(S.me)) S.respawn = 1; else if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (P.gone || P.man) { if (ecoMe()) S.respawn = 1; else spawnPlayer(); } else S.respawn = .3; }
+    if (S.respawn <= 0) { if (cqOut(S.me)) S.respawn = 1; else if (cdLeft(S.cls, S.model) > 0 || radHold() > 0) S.respawn = .2; else if (ecoMe()) S.respawn = 1; else { if (!P.gone && !P.man) P.me = 0; spawnPlayer(); } }   // a wreck still falling falls on without the player (wreckFall)
   }
   if (!S.net || S.host) { a0 = AIB.now(); director(dt); AIB.g += AIB.now() - a0; }
 }
@@ -12071,6 +12076,8 @@ const Net = {
   },
   label: g => (g ? (g.name || g.def.name) + ' (IA)' : 'IA'),
   say(text) { if (!S.net) return; S.feed.push({ text, life: 5 }); if (S.feed.length > 4) S.feed.shift(); },
+  /* a remote player's downed aircraft that its owner no longer reports (back in another one, or another class): it falls on here as a wreck */
+  fall(g) { if (g.gone || g.man || g.kind) return false; g.dead = g.fall = true; g.fire = false; g.sp = g.sp || { x: rand(-2.5, 2.5), y: rand(-.4, .4), z: rand(-.6, .2) }; return true; },
   kill(g, det) { if (g.dead) return; if (g.man) { g.dead = true; g.deadT = S.t; g.ctl.fire = false; return; } if (g.kind) return killUnit(g, det); g.dead = true; g.fire = false; blastFx(g.x, g.y, g.z, 18); },
   who: id => (id === Net.id ? S.my : (id > 0 ? Net.ghosts : Net.ai).get(id) || null),
   /* a relayed hit on something of mine, as its shooter resolved it */
@@ -12131,7 +12138,7 @@ const Net = {
       if (!d || !S.net) return;
       if (m.id === Net.id && m.no) swapBack(m.cls, m.model);
       p.cls = m.cls; p.model = m.model; p.lo = m.lo || null;
-      if (g) { if (!g.dead) Net.kill(g); if (!g.gone && !g.man) { g.gone = true; blastFx(g.x, g.y + 2, g.z, 30); } Net.ghosts.delete(m.id); }
+      if (g) { if (!(g.dead && Net.fall(g))) { if (!g.dead) Net.kill(g); if (!g.gone && !g.man) { g.gone = true; blastFx(g.x, g.y + 2, g.z, 30); } } Net.ghosts.delete(m.id); }   // one already down falls on (Net.fall)
       if (m.id !== Net.id) Net.say(p.name + ' agora está em ' + d.name);
       Net.roll();
     },
@@ -12139,8 +12146,8 @@ const Net = {
       const pl = Net.players.get(m.from), dead = !!(m.f & 4);
       if (!pl || pl.cls !== 'plane' || !S.net) return;
       let g = Net.ghosts.get(m.from);
-      if (!g || (g.dead && !dead)) {   // first sight, or a fresh aircraft after a respawn
-        if (g) g.gone = true;
+      if (!g || (g.dead && !dead)) {   // first sight, or a fresh aircraft after a respawn: the old one, if still in the air, falls on
+        if (g) Net.fall(g);
         if (dead) return;
         g = addPlane(pl.model, PLANES[pl.model].side, m.p[0], m.p[1], m.p[2], 0, false, 0, pl.lo || null);
         Object.assign(g, { net: true, pid: pl.id, name: pl.name, ammo: Infinity, q: { x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] } });
@@ -15221,7 +15228,7 @@ Net.rx.hstate = m => {
   if (!pl || pl.cls !== 'heli' || !S.net || !HELIS[pl.model]) return;
   let g = Net.ghosts.get(m.from);
   if (!g || (g.dead && !dead)) {
-    if (g) g.gone = true;
+    if (g) Net.fall(g);
     if (dead) return;
     g = addHeli(pl.model, HELIS[pl.model].side, m.p[0], m.p[1], m.p[2], 0, false, pl.lo || null);
     Object.assign(g, { net: true, pid: pl.id, name: pl.name, ammo: Infinity, q: { x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] } });
@@ -17400,7 +17407,7 @@ function cmdAttack(C, sq) {
   if (go.length > 1) return campAI(C, sq, go);   // more than one front at once: a campaign with a common H-hour (F4)
   if (go.length) { const g = go[0]; genCmd(t, Object.assign({ c: 'atk' }, g.P.tw ? { pi: gPts().indexOf(g.P.tw) } : { ri: g.P.ri, s: g.P.s }, { sd: g.sd, ids: g.pool.map(q => q.id) }), 'ai', g); return; }
   if (C.gue) return;   // map version 4: harassing (gue), it asks for no assault squads
-  C.want = { ri: P0.ri, n: D.push }; gLog(t, 'rf', 'Sem força para atacar ' + gName(P0) + ': pede ' + D.push + ' esquadras', routeAt(R[P0.ri], P0.s), 'want' + P0.ri);
+  C.want = { ri: P0.ri, n: D.push }; gLog(t, 'rf', 'Sem força para atacar ' + gName(P0) + ': pede ' + gN(D.push) + ' esquadras', routeAt(R[P0.ri], P0.s), 'want' + P0.ri);
 }
 /* an assault, opened: what cmdAttack applies once it has chosen (also for the general's own order: U carries forming-up, second axis, H-hour, smoke) */
 function atkOpen(C, P, sd, pool, walk, own, foe, U) {
@@ -20742,7 +20749,7 @@ function genPosture(C) {
   }
   if (C.ops.some(o => o.k === 'ctr' && !o.over)) return { k: 'Contra-ataque', s: 'A reserva ataca o inimigo que perdeu o ímpeto.' };
   if (C.thr > 2) return { k: 'Defensiva', s: 'Inimigo com força ' + gN(C.thr) + ' junto a uma vila sua; a reserva se posiciona.' };
-  if (C.want) return { k: 'Acumulando forças', s: 'Quer atacar na rota ' + (C.want.ri + 1) + ', mas falta força; pede ' + C.want.n + ' esquadras.' };
+  if (C.want) return { k: 'Acumulando forças', s: 'Quer atacar na rota ' + (C.want.ri + 1) + ', mas falta força; pede ' + gN(C.want.n) + ' esquadras.' };
   if (S.t < C.atkT) return { k: S.t < CMD.open ? 'Abertura' : 'Reorganização', s: 'Próximo assalto possível em ' + Math.ceil(C.atkT - S.t) + ' s.' };
   if (C.post.length && C.post.every(p => p === 'def')) return { k: 'Defensiva', s: 'O inimigo conhecido é mais forte em todas as rotas.' };
   const na = C.ops.filter(o => o.k === 'amb' && !o.over).length;
@@ -28249,7 +28256,7 @@ function afpTry(C, A, it) {
   const bc = F ? F.cost : afpMine(it.k) ? bmrMineCost() : null;
   if (bc && !bmrPay(t, bc, 'afp')) { A.fn[it.key] = S.t + AFP.every; if (S.t >= (A.budT || 0)) { A.budT = S.t + 60; afpSay(C, A, it, 0, 'aguarda o orçamento de obras (' + Math.round(BMR.bud.share * 100) + '% da renda por minuto)'); } return false; }   // over the works' budget of the minute (BMR): later, without holding the economy
   const sp = it.spot(); if (!sp) return no('nenhum lugar livre ali');
-  const q = afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + AFP.reach / 1000 + ' km');
+  const q = afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + gN(AFP.reach / 1000) + ' km');
   const mw = q.mis ? q.mis.why : undefined, r = genCmd(t, { c: 'fort', k: it.k, x: sp.x, z: sp.z, a: it.a, ids: [q.id], why: 'plano de fortificação: ' + it.why }, 'ai');
   if (!r.ok) return no('recusado, ' + gNo(r.why).toLowerCase());
   const op = C.ops.find(o => o.k === 'usr' && o.id === r.id) || null;
@@ -29311,7 +29318,7 @@ function stkFx(x, y, z, r) {
   if (d < 9000) fx.boom(r * 2, Math.min(3400, d * .4));
   const L = S.craters || (S.craters = []);
   L.push({ x, z, r: Math.min(F.crater[1], r * F.crater[0]), m: null });
-  if (L.length > F.keep) { const c = L.shift(); if (c.m) kill(c.m); }
+  if (L.length > F.keep) L.shift();   // its mesh (c.m) goes with the view's next stkScene: the sim names nothing of the view
 }
 /* ---- each step where the battle is simulated: a strike ends when nothing of it is left ---- */
 function stkStep() {
@@ -32546,7 +32553,8 @@ function groundCard(kind, d, role, fire) {
 }
 /* a class with no builder of its own still shows: its name, and the model of a plane if it is one */
 const cardOf = (k, id) => (CARD[k] ? CARD[k](id, DEFS[k][id]) : { mesh: () => (PLANES[id] ? buildPlane(id) : new THREE.Group()), L: 20, role: CLS[k] ? CLS[k][0] : k, meters: [], spec: '', arm: '' });
-const fleetIds = (k, side) => (DEFS[k] ? Object.keys(DEFS[k]).filter(id => DEFS[k][id].era === era && (side === undefined || DEFS[k][id].side === side)) : []);
+/* the hangar only lists models of a side the era has colours for (ERAS[era].sides): the insurgents' side 2 models (#67) exist only in a 3-side match, and the Today era has two sides in the hangar */
+const fleetIds = (k, side) => (DEFS[k] ? Object.keys(DEFS[k]).filter(id => DEFS[k][id].era === era && ERAS[era].sides[DEFS[k][id].side] && (side === undefined || DEFS[k][id].side === side)) : []);
 const fleetCls = side => Object.keys(CLS).filter(c => fleetIds(c, side).length);
 /* the side the player picks in the hangar (cf-3l-p4-faccao; NOT TESTED): on the modern front each of its sides with its own vehicles and
    classes only (the Insurgents have no aircraft), kept between visits; 1944 lists both of its sides' together, as before. sides2: the
@@ -33498,7 +33506,7 @@ function genBar() {
 }
 function genFit() {
   if (!S || !GV.w) return;
-  const w = GV.w, h = GV.h, wide = w >= 981, gd = $('#gen'), x0 = wide ? 16 + 300 + 12 : 0, x1 = wide ? w - 16 - 340 - 12 : w, y0 = wide && gd.hasAttribute('data-seat') ? (parseFloat(gd.style.getPropertyValue('--gt')) || 86) + 6 : 56, y1 = wide ? h - (gd.hasAttribute('data-hold') ? 130 : 40) : h * .58, fw = Math.max(50, x1 - x0), fh = Math.max(50, y1 - y0);
+  const w = GV.w, h = GV.h, wide = w >= 981, gd = $('#gen'), x0 = wide ? 16 + 300 + 12 : 0, x1 = wide ? w - 16 - 340 - 12 : w, y0 = wide ? (parseFloat(gd.style.getPropertyValue('--gt')) || (gd.hasAttribute('data-seat') ? 86 : 50)) + 6 : 56, y1 = wide ? h - (gd.hasAttribute('data-hold') ? 130 : 40) : h * .58, fw = Math.max(50, x1 - x0), fh = Math.max(50, y1 - y0);
   GV.sc = GV.fit = .94 * Math.min(fw / S.W, fh / (2 * S.HW));
   GV.cx = S.W / 2 - ((x0 + x1) / 2 - w / 2) / GV.sc; GV.cz = -((y0 + y1) / 2 - h / 2) / GV.sc;
   GV.V = null;
@@ -34437,7 +34445,7 @@ function gorBar() {
   if (g.hasAttribute('data-seat') !== show) g.toggleAttribute('data-seat', show);
   if (g.hasAttribute('data-hold') !== seat) g.toggleAttribute('data-hold', seat);
   gorSet('#genSeat', 'hidden', !show);
-  if (show) { const h = Math.ceil(document.querySelector('.gen-top').getBoundingClientRect().height) + 'px'; if (g.style.getPropertyValue('--gt') !== h) { g.style.setProperty('--gt', h); GV.drawT = 0; } }
+  if (GV.on || show) { const h = Math.ceil(document.querySelector('.gen-top').getBoundingClientRect().height) + 'px'; if (g.style.getPropertyValue('--gt') !== h) { g.style.setProperty('--gt', h); GV.drawT = 0; } }
   if (!show) { gorSet('#genOrd', 'hidden', true); gorSet('#genTabs', 'hidden', true); return; }
   const hid = S.net ? (Net.gn && Net.gn[S.me]) || 0 : 0, other = !seat && !!hid && hid !== Net.id;
   gorSet('#genClaim', 'textContent', seat ? 'Devolver à IA' : 'Assumir o comando');
@@ -36582,7 +36590,7 @@ gorCampP = (g => V => {
     const ul = gE('ul', 'gc-list');
     ul.append(gE('li', 'sub', 'Abordagens de ' + A.nm + (A.st && A.st.nm ? ' a partir de ' + A.st.nm : '') + ' · há ' + Math.max(0, Math.round(S.t - A.rx + (A.age || 0))) + ' s'));
     A.a.forEach((a, i) => {
-      const li = gorLi('A' + (i + 1) + ' · ' + a.ang + '° do eixo · ' + gN(a.len / 1000) + ' km · ' + a.min + ' min a pé · ' + a.exp + '% à vista · ' + a.wood + '% na mata', [btn('Fixar e flanquear por A' + (i + 1), { a: 'm7go', k: 'fixflank', n: i }, 'Uma esquadra fixa pelo eixo; a manobra vai por A' + (i + 1), undefined, !tac)]
+      const li = gorLi('A' + (i + 1) + ' · ' + a.ang + '° do eixo · ' + gN(a.len / 1000) + ' km · ' + gN(a.min) + ' min a pé · ' + a.exp + '% à vista · ' + a.wood + '% na mata', [btn('Fixar e flanquear por A' + (i + 1), { a: 'm7go', k: 'fixflank', n: i }, 'Uma esquadra fixa pelo eixo; a manobra vai por A' + (i + 1), undefined, !tac)]
         .concat(A.a.length >= 3 && i > 0 ? [btn('Envolver', { a: 'm7go', k: 'envelop', n: i, n2: i === 1 ? 2 : 1 }, 'Duas manobras: A' + (i + 1) + ' e A' + (i === 1 ? 3 : 2), undefined, !tac)] : []));
       li.firstChild.style.color = M7AC[i % 3]; ul.appendChild(li);
     });
@@ -36606,7 +36614,7 @@ function gAp(g, V, P, now) {
     g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const p of pts.slice(1)) g.lineTo(p[0], p[1]);
     g.lineTo(P.X(A.x), P.Y(A.z)); g.strokeStyle = c; g.lineWidth = 2.4; g.globalAlpha = .9; g.stroke(); g.globalAlpha = 1;
     if (a.asm) gRing(g, P.X(a.asm[0]), P.Y(a.asm[1]), 6 * k, c, 1.6);
-    if (a.pos) { const x = P.X(a.pos[0]), y = P.Y(a.pos[1]); gRing(g, x, y, 5 * k, c, 2.2); gTxt(g, 'A' + (i + 1) + ' · ' + a.min + ' min · ' + a.exp + '% à vista · ' + a.ang + '°', x + 8 * k, y - 6 * k, 10.5 * k, c); }
+    if (a.pos) { const x = P.X(a.pos[0]), y = P.Y(a.pos[1]); gRing(g, x, y, 5 * k, c, 2.2); gTxt(g, 'A' + (i + 1) + ' · ' + gN(a.min) + ' min · ' + a.exp + '% à vista · ' + a.ang + '°', x + 8 * k, y - 6 * k, 10.5 * k, c); }
   });
   if (A) gRing(g, P.X(A.x), P.Y(A.z), 10 * k, '#ece6d6', 1.6);
   for (const o of V.ops || []) {
@@ -36754,6 +36762,7 @@ function stkScene() {
     }
     g.position.set(c.x, y0, c.z); STK.g.add(g); c.m = g;
   }
+  for (const m of STK.g.children.slice()) if (!(S.craters || []).some(c => c.m === m)) kill(m);   // a crater the battle let go (more than STK's keep)
 }
 syncScene = (g => dt => { g(dt); try { stkScene(); } catch (e) { /* a crater that would not draw: the battle goes on */ } })(syncScene);
 /* ---- the General's view: Campanha, the strike button (a click on the map) and the list of the side's strikes ---- */

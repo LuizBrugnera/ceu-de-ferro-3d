@@ -42,6 +42,7 @@ node tests/heli-arms.js      # torre fora do nariz, foguetes, míssil guiado e f
 node tests/heli-ai.js        # IA: esconde, sobe, atira e desce (tempo exposto), volta ferido, transporte entrega, o que a outra IA faz com um helicóptero (TRIALS=10, SECS=420)
 node tests/heli-relay.js     # servidor: classe, hstate, lift, linhas da IA, troca
 node tests/heli-online.js    # anfitrião e dois convidados de helicóptero pelo servidor de verdade
+node tests/respawn-air.js    # abatido no ar, volta quando acaba a contagem (3 s), não quando o destroço chega ao chão: avião e helicóptero, o mesmo ou outro escolhido no painel, o destroço que cai sozinho e ainda bate no chão, uma morte e um tíquete só; online (anfitrião e convidado ligados no próprio processo) o destroço do outro cai em vez de sumir no ar, também depois da troca de classe; a ejeção da IA
 node tests/heli-oldserver.js # SERVER=<server.js antigo>: sem helicópteros; com o servidor novo, o diretor põe os dele em campo
 node tests/loadout.js       # cargas dos aviões: tabelas e a cópia do servidor, peso e arrasto (aceleração, subida, curva), cada armamento em cada alvo, teclas B, V e G, rearmar, IA por papel e alvo (SEED=11; TRIALS=5 lançamentos na média da bomba de cacho)
 node tests/loadout-online.js # cargas pelo servidor de verdade: o que cada um voa e os outros veem, tanque de jogador morto por bomba de queda livre, troca de avião, perda, rearmar, IA do anfitrião, cargas recusadas; com SERVER=<servidor antigo>, todos na carga padrão

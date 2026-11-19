@@ -10,6 +10,7 @@ fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.ndjson.gz'), zlib.gzipSync('{"
 fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.json'), JSON.stringify({ id: MATCH, era: 'ww2', src: 'tourney', hdr: { fac: ['A', 'B'], doc: ['cautious', 'aggressive'] }, end: { win: 0, why: 2, t: 1800 }, rep: { win: 0, dur: 1800, whyTxt: 'o tempo acabou' } }));
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const MCP = path.join(__dirname, '..', 'mcp-general.js'), kids = [];
+const VER = /const VERSION = '([^']+)'/.exec(fs.readFileSync(MCP, 'utf8'))[1];   // the bridge's own version: the check follows it as it grows
 function bridge(env) {
   const p = spawn(process.execPath, [MCP], { env: Object.assign({}, process.env, { CEU_URL: 'ws://localhost:' + N.PORT, CEU_ROOM: 'modern', CEU_SIDE: '1', CEU_KEY: 'secret', CEU_NAME: 'T' }, env), stdio: ['pipe', 'pipe', 'ignore'] });
   kids.push(p);
@@ -154,7 +155,7 @@ function bridge(env) {
   const qn = await b.call('send_command', { question: { q: 'nope' } });
   ok(!qp.length && qn.isError, 'every question the host answers (§10 and W13: ' + qk.length + ') goes through the bridge and the relay to it, an unknown one does not (' + qp.join(', ') + ')');
   const tl2 = (await b.rpc('tools/list')).result.tools.map(t => t.name), initV2 = await b.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
-  ok(['get_threats', 'get_missions', 'get_unit', 'get_lots', 'get_mines', 'create_campaign', 'attach_operation', 'end_campaign', 'set_defence_policy', 'triage_threat', 'send_qrf', 'claim_deposit', 'lay_minefield', 'clear_mines', 'sabotage', 'arm_militia'].every(x => tl2.includes(x)) && initV2.result.serverInfo.version === '2.0.0', 'tools/list has the MCP v2 tools and the server says version 2.0.0');
+  ok(['get_threats', 'get_missions', 'get_unit', 'get_lots', 'get_mines', 'create_campaign', 'attach_operation', 'end_campaign', 'set_defence_policy', 'triage_threat', 'send_qrf', 'claim_deposit', 'lay_minefield', 'clear_mines', 'sabotage', 'arm_militia', 'get_tactical_map', 'plan_approaches', 'order_maneuver', 'plan_ambush', 'guard_route'].every(x => tl2.includes(x)) && initV2.result.serverInfo.version === VER, 'tools/list has the MCP v2 tools and M7\'s manoeuvre tools, and the server says its version ' + VER + ' (' + initV2.result.serverInfo.version + ')');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

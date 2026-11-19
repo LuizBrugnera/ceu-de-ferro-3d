@@ -561,8 +561,8 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
     <section class="hg" id="hangar" aria-label="Hangar">
       <div class="hg-top">
         <div class="seg" role="tablist" aria-label="Época">
-          <button class="era" id="era-ww2" role="tab" type="button" data-era="ww2" aria-selected="true"><b>1944</b><span>Hélices, canhões, bombas e Flak</span></button>
-          <button class="era" id="era-modern" role="tab" type="button" data-era="modern" aria-selected="false"><b>Hoje</b><span>Jatos, mísseis guiados e flares</span></button>
+          <button class="era" id="era-ww2" role="tab" type="button" data-era="ww2" aria-selected="false"><b>1944</b><span>Hélices, canhões, bombas e Flak</span></button>
+          <button class="era" id="era-modern" role="tab" type="button" data-era="modern" aria-selected="true"><b>Hoje</b><span>Jatos, mísseis guiados e flares</span></button>
         </div>
         <div class="hg-set" id="hgSet">
           <button class="chip hg-setb" id="btnSet" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="setPanel" title="Duração, hora do dia, tempo, e a personalidade e a dificuldade do general da IA"><b>Partida</b><span id="setSum"></span></button>
@@ -634,8 +634,8 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
         <div class="kp-head"><h2 id="keysTitle">Controles</h2><button class="ghost" id="keysClose" type="button">Fechar (Esc)</button></div>
         <div class="kp-body">
           <div class="seg" id="ctrls" role="tablist" aria-label="Esquema de controle">
-            <button class="tab" role="tab" type="button" data-ctrl="classic" aria-selected="true"><b>Clássico</b><span>Manche no teclado: role e puxe</span></button>
-            <button class="tab" role="tab" type="button" data-ctrl="mouse" aria-selected="false"><b>Mira com mouse</b><span>Aponte a mira e o instrutor virtual leva o avião até ela</span></button>
+            <button class="tab" role="tab" type="button" data-ctrl="classic" aria-selected="false"><b>Clássico</b><span>Manche no teclado: role e puxe</span></button>
+            <button class="tab" role="tab" type="button" data-ctrl="mouse" aria-selected="true"><b>Mira com mouse</b><span>Aponte a mira e o instrutor virtual leva o avião até ela</span></button>
           </div>
           <dl class="keys" id="keys"></dl>
           <p id="mission"></p>
@@ -3568,7 +3568,7 @@ DEFS.inf = KITS;
    Everything standing on the map that can be hit: one table of kinds, one list per terrain (T.objs, the same on every client, each with an
    id that follows from the rule that places it) and one grid that every query walks (ray, near). A kind: hp [base, per m3 of its box];
    sight: it hides what is behind it; take: what it takes of [a bullet, a direct hit, a burst]; crush: a tank or a gun carriage drives it
-   down and keeps this share of its speed; ruin: what is left when it falls, rubble h m high in which a vehicle or a soldier keeps `slow` of
+   down and keeps this share of its speed (lite: any hull, a car or a truck too; RAM); ruin: what is left when it falls, rubble h m high in which a vehicle or a soldier keeps `slow` of
    its pace (none: it is gone, and in nobody's way); fall: the collapse hurts soldiers and light vehicles within r m of the walls, by up to dmg.
    The state is the match's, by id: S.oh the hp, S.os the stage, 0 intact, 1 damaged (under OBJS.hurt of its hp), 2 down */
 const OBJ = {
@@ -3576,7 +3576,7 @@ const OBJ = {
   tower: { hp: [110, .02], sight: 1, take: [1, 1, 1], ruin: { h: 2.6, slow: .5 }, fall: { r: 7, dmg: 30 } },
   hangar: { hp: [260, .004], sight: 1, take: [.5, 1, 1], ruin: { h: 2.2, slow: .5 }, fall: { r: 5, dmg: 26 } },
   ctl: { hp: [150, .02], sight: 1, take: [1, 1, 1], ruin: { h: 2.6, slow: .5 }, fall: { r: 7, dmg: 30 } },
-  pole: { hp: [6, 0], take: [0, 1, 1], crush: .97 },
+  pole: { hp: [6, 0], take: [0, 1, 1], crush: .97, lite: 1 },
   tree: { hp: [22, 0], take: [0, 1, 1], crush: .8 },
   wreck: { hp: [70, 0], take: [0, 1, .6], crush: .35 },
   supply: { hp: [230, 0], take: [1, 1, 1] }
@@ -6203,11 +6203,42 @@ function moveUnit(u, dt) {
   }
   u.v = { x: (u.x - x0) / dt, y: (u.y - y0) / dt, z: (u.z - z0) / dt };
 }
+/* a hull driven into what stands: w its weight by kind (rad: a radio half-track, which is a car; a def may say its own ram), v the closing
+   speed m/s [under which it is no blow, at which a weight of 1 strikes a blow of 1]: a blow imp = w * v / v[1]. heavy: the weight from
+   which a hull breaks in (tanks, guns, tracked air defence): the walls of any building (and a building of a CITY type with ram it drives
+   through once it is damaged, creeping at thru of its top speed, breaking what is ahead of its nose) and the world objects that fall
+   (OBJ house, tower, hangar...). A lighter hull breaks only what is light (CITY types with shed, objects with lite) and crashes into
+   the rest. bld: [damage, radius at blow 0, radius more per blow, most radius] of the burst a blow is to a building's walls; obj: damage
+   per blow to a world object; man: [hurt, m] to a soldier on the ground storey near the blow, by blow up to 1; self: share of its hp a heavy
+   hull takes per blow; crash: share of its hp a light one takes at v[1], with the square of its speed (brk: what it breaks, times);
+   slow: the share of its speed a hull that breaks through keeps, at blow 0 and at least (one that crashes bounces back at bounce);
+   cd: s between two blows of one hull */
+const RAM = { w: { tank: 1, art: .8, aa: .6, lav: .45, truck: .3, car: .15, rad: .35 }, v: [2.5, 20], heavy: .6, thru: .4,
+  bld: [45, 3.5, 2, 7], obj: 70, man: [30, 4], self: .015, crash: .25, brk: .3, slow: [.85, .35], bounce: -.15, cd: .6 };
+const ramW = u => u.def.ram || (u.def.rad && u.kind === 'car' ? RAM.w.rad : RAM.w[u.kind] || 0);
+/* one blow of hull u into object o at x z (its wall), closing at v m/s: the object takes what the hull's weight breaks, the soldiers
+   behind that wall are thrown about, and the hull pays for it. Each client deals its own hulls' blows: hitObj and cityBlast send a
+   guest's to the host, which takes the walls down and tells the room (no message of its own). False: no blow */
+function ramHit(u, o, x, z, v) {
+  const w = ramW(u), heavy = w >= RAM.heavy, imp = w * v / RAM.v[1];
+  if (v < RAM.v[0] || !w || u.net || S.t < (u.ramT || 0)) return false;
+  u.ramT = S.t + RAM.cd;
+  const brk = o.B ? heavy || !!o.B.K.shed : !!o.K.lite || (heavy && !!o.K.ruin), h = { k: HK.blast, pt: 0 }, B = RAM.bld;
+  if (brk && o.B) {
+    cityBlast(x, o.y + 1.6, z, Math.min(B[3], B[1] + B[2] * imp) / CITY.dmg.r, B[0] * imp / CITY.dmg.k, u);
+    for (const m of S.men) if (!m.dead && !m.net && m.cbo === o && !m.cbl && Math.hypot(m.x - x, m.z - z) < RAM.man[1]) damageMan(m, RAM.man[0] * Math.min(1, imp), u, true, h);
+  } else if (brk) hitObj(o, RAM.obj * imp, u);
+  damageUnit(u, u.def.hp * (heavy ? RAM.self * imp : RAM.crash * (v / RAM.v[1]) ** 2 * (brk ? RAM.brk : 1)), null, true, h);
+  u.sp *= brk ? Math.max(RAM.slow[1], RAM.slow[0] - .5 * imp) : RAM.bounce;
+  for (let i = 0; i < (brk ? 4 : 2); i++) puff(x + rand(-1, 1), o.y + rand(.5, 2.5), z + rand(-1, 1), 'dust', brk ? rand(2, 3.5) : 1.5, rand(-2, 2), rand(0, 2), rand(-2, 2));
+  const d = dist(u, S.ear); if (d < 1500) { fx.boom(brk ? 12 + 10 * Math.min(1, imp) : 8, d); if (u === S.my) S.shake = Math.max(S.shake, .25 + .35 * Math.min(1, imp)); }
+  return true;
+}
 /* a hull against the world objects, as two circles of its half width, fore and aft: it slides along a wall and loses the speed it had
    into it, drives down what its kind can crush, and crawls through rubble. BUMP: where it ends up */
 const BUMP = { x: 0, z: 0 }, FORE = [1, -1];
 function bump(u, x, z, cx, cz) {
-  const e = u.def.env, hw = e[5], off = Math.max(0, e[3] - hw), heavy = u.kind === 'tank' || u.kind === 'art', dir = u.sp < 0 ? -1 : 1;
+  const e = u.def.env, hw = e[5], off = Math.max(0, e[3] - hw), heavy = u.kind === 'tank' || u.kind === 'art', dir = u.sp < 0 ? -1 : 1, v = Math.abs(u.sp) * GSPD;
   let slow = 1;
   BUMP.x = x; BUMP.z = z;
   for (const o of near(x, z, e[3] + 1)) {
@@ -6216,8 +6247,9 @@ function bump(u, x, z, cx, cz) {
     if (st > 1) { if (K.ruin && footD(o, x, z) < hw) slow = Math.min(slow, K.ruin.slow); continue; }
     for (const s of FORE) {
       if (!pushOut(o, BUMP.x + cx * off * s, BUMP.z + cz * off * s, hw + (heavy && o.cr ? o.cr - o.rd : 0))) continue;   // a tree goes down as the hull reaches its crown
-      if (K.crush && heavy) { if (S.t - S.ot[o.id] > 1 || o.wk) { if (!o.wk) S.ot[o.id] = S.t; u.sp *= K.crush; S.ofa.set(o.id, Math.atan2(cz * dir, cx * dir)); hitObj(o, OBJD.crush, u); } break; }
+      if (K.crush && (heavy || K.lite)) { if (S.t - S.ot[o.id] > 1 || o.wk) { if (!o.wk) S.ot[o.id] = S.t; u.sp *= K.crush; S.ofa.set(o.id, Math.atan2(cz * dir, cx * dir)); hitObj(o, OBJD.crush, u); } break; }
       const vn = (cx * PUSH.nx + cz * PUSH.nz) * dir;
+      if (vn < -.5) ramHit(u, o, BUMP.x + cx * off * s - PUSH.nx * hw, BUMP.z + cz * off * s - PUSH.nz * hw, -vn * v);   // a blow: it breaks what falls, or the hull crashes (RAM)
       BUMP.x += PUSH.x; BUMP.z += PUSH.z; if (vn < 0) u.sp *= 1 - .25 * vn * vn;
     }
   }
@@ -13056,15 +13088,15 @@ Object.assign(Net, { ft: false, fq: false, facc: 0,
    dmg: gun: a bullet's share (OBJD.gun) times this, a soldier's small arm only breaks a window's glass; a burst reaches the elements
    within r times its radius with k times its damage, falling with the square of the distance; crack: the share of its hp under which
    an element shows cracks; at none it is holed, and gone after `gone` of its hp more (at once, when one hit brings both); crash
-   [radius, damage] of an aircraft flying into one; ram [m/s, damage, s between]: a tank driving into a type it may ram.
+   [radius, damage] of an aircraft flying into one (a hull driving into one: RAM).
    sup: the rule of what stands, looked at T s after the damage and then every step s while something falls: a corner post stands
    while a wall segment that meets it does (every inner corner is a pillar, which stands by itself) and something under it holds; the slab over a
    bay falls when its own floor is gone or fewer than `posts` of its four corners stand (all four: two segments gone side by side take the bays they shared a post with), and takes the walls that stood on it; each
    look only drops what the storey below no longer carries, so a building comes down a storey at a time. What falls cracks the floor
    it lands on, breaks one already cracked, and heaps rubble at the bottom. With less than `fall` of its ground bays still roofed the
    whole building is down (stage 2, a ruin as before). fall: damage to who stands on a slab that goes, under it, and within r m of it.
-   types: nx nz nl ranges, bay and sh when not the usual, roof (gable, flat, spire), mat, open: one hall, no partitions; ram: a tank
-   brings it down by driving into it; gate, win: the share of its outer bays with a window. mix: what stands in the middle of a town,
+   types: nx nz nl ranges, bay and sh when not the usual, roof (gable, flat, spire), mat, open: one hall, no partitions; ram: a heavy
+   hull drives through it once it is damaged, bringing it down; shed: a light one (a car, a truck) breaks its walls too (RAM); gate, win: the share of its outer bays with a window. mix: what stands in the middle of a town,
    around it and at its edge, by era, [type, weight]. plan: town and village [half length along the road, half width], out: m from a town
    to its village, keep: m left clear round a garrison's walls, block [length,
    depth], thin: the chance a lot at the edge stays empty, street and main: m between blocks and from the road's middle to the first row; court: m between the two rows of a block;
@@ -13079,14 +13111,14 @@ Object.assign(Net, { ft: false, fq: false, facc: 0,
 const CITY = { bay: 5, sh: 4.4, body: 2,
   gap: { 2: [.28, .72, .34, .8], 3: [.26, .74, 0, .77], 4: [.1, .9, 0, .85], 6: [.26, .74, 0, .77], hole: [.17, .83, 0, .7] },
   mat: { plaster: { hp: 14 }, brick: { hp: 18 }, concrete: { hp: 24 }, stone: { hp: 28 }, metal: { hp: 10 } }, hp: { slab: 1.5, part: .5 },
-  dmg: { gun: 2, k: .34, r: .42, crack: .6, gone: .6, crash: [9, 160], ram: [4, 30, 1.5] },
+  dmg: { gun: 2, k: .34, r: .42, crack: .6, gone: .6, crash: [9, 160] },
   sup: { posts: 4, T: 1.5, step: .4, fall: .34 }, rub: [0, .9, 1.7, 2.6], fall: { on: 9, under: 34, near: 12, r: 3.5 },
   types: {
     house: { nx: [2, 3], nz: [2, 2], nl: [1, 2], bay: 4.6, roof: 'gable', mat: 'plaster', ram: 1, win: .7 },
     row: { nx: [2, 3], nz: [2, 3], nl: [2, 3], bay: 4.8, roof: 'gable', mat: 'brick', win: .9 },
     block: { nx: [3, 6], nz: [2, 3], nl: [2, 4], roof: 'flat', mat: 'brick', win: .9 },
     hall: { nx: [5, 9], nz: [3, 4], nl: [1, 1], bay: 6, sh: 7.5, roof: 'gable', mat: 'metal', open: 1, gate: 1, win: .4 },
-    barn: { nx: [3, 4], nz: [2, 2], nl: [1, 1], bay: 5.5, sh: 6, roof: 'gable', mat: 'plaster', open: 1, gate: 1, ram: 1, win: .2 },
+    barn: { nx: [3, 4], nz: [2, 2], nl: [1, 1], bay: 5.5, sh: 6, roof: 'gable', mat: 'plaster', open: 1, gate: 1, ram: 1, shed: 1, win: .2 },
     church: { nx: [4, 5], nz: [2, 2], nl: [1, 1], bay: 6, sh: 10, roof: 'gable', mat: 'stone', open: 1, win: .8 },
     tower: { nx: [2, 2], nz: [2, 2], nl: [7, 7], bay: 4.5, sh: 5, roof: 'spire', mat: 'stone', win: .5 },
     apart: { nx: [4, 7], nz: [3, 3], nl: [6, 10], roof: 'flat', mat: 'concrete', win: 1 },
@@ -13476,15 +13508,21 @@ function bldStep(dt) {
   for (const c of S.chg) if (c.w && !c.done && S.t >= c.T - dt) { c.done = 1; bDmg(c.w, c.e, BLD.charge.dmg, c.by); }
   if (S.cbfall.size) for (const [o, T] of S.cbfall) if (S.t >= T) { if (S.os[o.id] < 2 && bldSettle(o)) S.cbfall.set(o, S.t + CITY.sup.step); else S.cbfall.delete(o); }
 }
-/* a hull against a building: stopped by its box while it stands, slowed by its rubble (wheels more); a tank that drives into a type
-   it may ram breaks the walls it meets */
+/* a hull against a building: stopped by its box while it stands, slowed by its rubble (wheels more); a blow into its walls breaks what
+   the hull's weight may (RAM), and a heavy one drives on through a house it may ram once that is damaged, its nose breaking what is ahead */
 function bldBump(u, o, cx, cz, hw, off) {
-  const heavy = u.kind === 'tank' || u.kind === 'art', dir = u.sp < 0 ? -1 : 1, R = CITY.dmg.ram, sl = o.K.ruin.slow;
+  const heavy = ramW(u) >= RAM.heavy, dir = u.sp < 0 ? -1 : 1, sl = o.K.ruin.slow, v = Math.abs(u.sp) * GSPD;
   if (S.os[o.id] > 1) return footD(o, BUMP.x, BUMP.z) < hw ? (heavy ? sl : sl * .5) : 1;
+  if (heavy && o.B.K.ram && S.os[o.id] > 0 && (v >= RAM.v[0] || footD(o, BUMP.x, BUMP.z) < hw)) {
+    if (!FORE.some(s => footD(o, BUMP.x + cx * off * s, BUMP.z + cz * off * s) < hw)) return 1;
+    const nx = BUMP.x + cx * (off + hw) * dir, nz = BUMP.z + cz * (off + hw) * dir;
+    if (footD(o, nx, nz) < 1) ramHit(u, o, nx, nz, v);
+    return RAM.thru;
+  }
   for (const s of FORE) {
     if (!pushOut(o, BUMP.x + cx * off * s, BUMP.z + cz * off * s, Math.max(hw, CITY.body))) continue;
     const vn = (cx * PUSH.nx + cz * PUSH.nz) * dir;
-    if (heavy && o.B.K.ram && vn < -.5 && Math.abs(u.sp) * GSPD > R[0] && S.t - S.ot[o.id] > R[2]) { cityBlast(BUMP.x + cx * off * s - PUSH.nx * hw, o.y + 2, BUMP.z + cz * off * s - PUSH.nz * hw, 6 / CITY.dmg.r, R[1] / CITY.dmg.k, u); S.ot[o.id] = S.t; u.sp *= .5; }
+    if (vn < -.5) ramHit(u, o, BUMP.x + cx * off * s - PUSH.nx * hw, BUMP.z + cz * off * s - PUSH.nz * hw, -vn * v);
     BUMP.x += PUSH.x; BUMP.z += PUSH.z; if (vn < 0) u.sp *= 1 - .25 * vn * vn;
   }
   return 1;
@@ -14127,6 +14165,7 @@ const ambOrd = (op, i) => { const s = op.site, p = s.pos[i % s.pos.length]; retu
 /* it is sprung: everything fires, the rocket men at the first and the last vehicle in it */
 function cmdSpring(op) {
   if (op.k === 'blk') return blkSpring(op);   // map version 4: a blocking position has its own words
+  if (op.k === 'emb' || op.k === 'itd') return embSpring(op);   // M4: the planned ambush and the interdiction too
   const s = op.site, A = CMD.amb, l = S.units.filter(u => !u.dead && u.team !== op.team && Math.abs(u.x - s.x) < A.kz * 2.5 && Math.abs(u.z - s.z) < A.kz * 2.5).sort((a, b) => (a.x - b.x) * s.dx + (a.z - b.z) * s.dz);
   op.sprung = S.t; op.T = S.t + rand(A.t[0], A.t[1]); op.first = l[0] || null; op.last = l[l.length - 1] || null;
   gLog(op.team, 'amb', 'Emboscada disparada na rota ' + (s.ri + 1) + (l.length ? ': ' + l.length + (l.length > 1 ? ' veículos' : ' veículo') + ' na zona de morte' : ''), op.kz);
@@ -14294,11 +14333,11 @@ const OPS = {
     if (op.st === 'set') {
       if (op.sprung) { op.st = 'fire'; cmdMission(C, 'he', s.x + s.dx * ds * 150, s.z + s.dz * ds * 150, 4, 40, op); return; }
       if (!op.tank && C.post[s.ri] !== 'atk' && S.t - op.T0 < A.hold) {
-        const u = S.units.find(u => u.kind === 'tank' && u.ai && !u.net && !u.dead && u.team === t && u.ri === s.ri && u.rail && !u.ai.amb && !u.ai.tgt && Math.abs(u.s - s.s) < 1500 && S.t - u.hitT > 20);
+        const u = m5Tank(t, s.x, s.z, M5.amb.reach, s.ri, s.s);   // M5: from any axis near, by road (it was its own axis within 1500 m)
         for (const sd of u ? [1, -1] : []) {
           const b = routeAt(r, clamp(s.s - ds * 120, 0, r.len)), x = b.x - b.dz * 100 * sd, z = b.z + b.dx * 100 * sd, y = hgt(x, z);
           if (op.tank || y < S.T.WL + 1 || !los({ x, z }, y + 2.5, op.kz, hgt(op.kz.x, op.kz.z) + 2)) continue;
-          op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; gLog(t, 'amb', 'Carro de combate posto à espera junto à emboscada', { x, z });
+          op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; m5Amb(u); gLog(t, 'amb', 'Carro de combate posto à espera junto à emboscada', { x, z });
         }
       }
       if (C.doc.bait && !op.bait && l.some(q => q.at) && S.t - op.T0 > 30) {   // a patrol goes out to be seen and comes back through the ambush
@@ -15376,11 +15415,11 @@ OPS.blk = (C, op) => {
     if (!op.arr && l.every(q => q.at)) op.arr = S.t;
     if (op.arr && S.t - op.arr > A.hold) return off('nenhum veículo passou em ' + A.hold + ' s');
     if (!op.tank && op.arr) {   // a tank free near by lies in wait beside it, as an ambush's does
-      const u = S.units.find(u => u.kind === 'tank' && u.ai && !u.net && !u.dead && u.team === t && u.rail && !u.ai.amb && !u.ai.tgt && hdist(u, s) < BLKX.tank && S.t - u.hitT > 20);
+      const u = m5Tank(t, s.x, s.z, M5.on ? M5.amb.reach : BLKX.tank);   // M5: from farther, by road
       for (const sd of u ? [1, -1] : []) {
         const x = s.x - s.dz * 100 * sd, z = s.z + s.dx * 100 * sd, y = hgt(x, z);
         if (op.tank || y < S.T.WL + 1 || !los({ x, z }, y + 2.5, op.kz, hgt(op.kz.x, op.kz.z) + 2)) continue;
-        op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; gLog(t, 'amb', 'Carro de combate posto à espera junto ao bloqueio', { x, z });
+        op.tank = u; u.ai.amb = { x, z, op, T: S.t + A.hold }; m5Amb(u); gLog(t, 'amb', 'Carro de combate posto à espera junto ao bloqueio', { x, z });
       }
     }
   } else if (op.st === 'fire') {
@@ -18730,7 +18769,7 @@ function lgConvoy(t, o, why) {
   if (L.cv.filter(c => c.t === t && c.c > 0).length >= LG.cmax) return 'conv';
   if (lgCap(o) - o.lc - lgInb(t, key) <= 0) return 'full';
   if (d.mt < LG.mt) return 'mt';
-  const { ri, s } = lgS(o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);
+  const { ri, s } = m5Lg(t, o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);   // M5: the axis drawn among those that cost about the same
   d.mt -= LG.mt;
   const paid = v => Object.assign(v, { lgp: 1 });   // paid for by the main base: not by a node it is born near
   const M = { kind: 'lift', why: 'comboio de suprimento: ' + nm + (why ? ' (' + why + ')' : ''), target: { ri, s } }, u = dispatch(t, M, () => paid(errand(t, 'truck', ri, s0, [{ s, k: 'sup' }, { s: s0, k: 'bye' }])));
@@ -21411,7 +21450,7 @@ anaReport = (f => (ev, me) => {
      at the end, a [front, oblique left, oblique right, flank left, flank right, rear]: samples of the leaders of its squads between MVA.near and
      MVA.min m of the objective in screen, go or fight, by the angle to the axis (from the objective toward the forming-up place: under 35°, 70°,
      120°, beyond), off: samples more than MVA.off m from the axis route, mv the manoeuvre kinds that served it, dur s }.
-   ab an ambush (amb) or a road block (blk): { f amb|blk, e arm|fire|end, x z the killing ground, ri; fire: nv vehicles of the enemy in the zone;
+   ab an ambush (amb), a road block (blk), a planned ambush or an interdiction (M4: emb, itd): { f amb|blk|emb|itd, e arm|fire|end, x z the killing ground, ri; fire: nv vehicles of the enemy in the zone;
      end: kv enemy vehicles lost within MVA.kz m of it since it fired, lm men its squads lost, sq the men of its largest squad, ok 1 it fired, took a
      vehicle at least and lost a squad at most }.
    tr the traffic, every MVA.tr s: e [side][edge] samples (one every MVA.dt s) of its AI vehicles and moving squads within MVA.road m of that edge of
@@ -21457,7 +21496,7 @@ const anaPt = P => (P && P.hold !== undefined ? P : null);
 function anaMvOpen(C, op) {
   const t = C.t, R = { op, t, T0: S.t, k: op.k };
   if (op.k === 'atk') Object.assign(R, { a: [0, 0, 0, 0, 0, 0], off: 0, st: 0, bk: 0, mv: new Set(), n: op.sq.length, walk0: !!op.walk });
-  else if (op.k === 'amb' || op.k === 'blk') {
+  else if (op.k === 'amb' || op.k === 'blk' || op.k === 'emb' || op.k === 'itd') {   // M4's planned ambush (emb) and interdiction (itd) are ambushes too
     const s = op.site; Object.assign(R, { f: op.k, x: Math.round(s.x), z: Math.round(s.z), fire: 0, men: new Map() });
     anaPush({ k: 'ab', t: anaR(S.t), s: t, id: op.id, f: op.k, e: 'arm', x: R.x, z: R.z, ri: s.ri });
   }
@@ -21594,7 +21633,7 @@ function anaMano(ev, s) {
     smp: n, smpAtk: na, arr: { front: sh(A[0], n), obl: sh(A[1] + A[2], n), flank: sh(A[3] + A[4], n), rear: sh(A[5], n) },
     flank: sh(A[3] + A[4] + A[5], n), flankAtk: sh(Aa[3] + Aa[4] + Aa[5], na), off: sh(off, n), withMv: sh(withMv, atk.length), withMvN: withMv,
     mv: byK, mvN: opened.length, mvBy: byBy, flkNo: no,
-    amb: { arm: arm.length, fire: fire.length, ok: end.filter(e => e.ok).length, okShare: sh(end.filter(e => e.ok).length, fire.length), nv: sum(fire.map(e => e.nv)), kv: sum(end.map(e => e.kv)), byF: { amb: arm.filter(e => e.f === 'amb').length, blk: arm.filter(e => e.f === 'blk').length } },
+    amb: { arm: arm.length, fire: fire.length, ok: end.filter(e => e.ok).length, okShare: sh(end.filter(e => e.ok).length, fire.length), nv: sum(fire.map(e => e.nv)), kv: sum(end.map(e => e.kv)), byF: { amb: arm.filter(e => e.f === 'amb').length, blk: arm.filter(e => e.f === 'blk').length, emb: arm.filter(e => e.f === 'emb').length, itd: arm.filter(e => e.f === 'itd').length } },
     tr: E ? { axis: sh(axis, road), offAxis: sh(road - axis, road), offRoad: sh(o, road + o), top } : null,
     veh: { rail: sh(v[0], mov), trip: sh(v[1], mov), off: sh(v[2], mov), parked: sh(v[3], mov + v[3]) },
     want: ev.filter(e => e.k === 'lg' && e.s === s && e.c === 'rf' && /^Sem força para atacar/.test(e.x)).length,
@@ -23002,6 +23041,441 @@ function tmAsk(t, k) {
 genQuery = (f => (t, q) => (q && q.q === 'tmap' && (t === 0 || t === 1) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && (s === 0 || s === 1))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
+/* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
+   Four procedures of the general, made through opNew (so the person and the MCP have them too: man k=ambush | interdict | guard, x z), each
+   reading only side C's tactical map C.tm (what the side knows) and its habits of the enemy (C.hu, C.hp: what the side itself has seen pass):
+     emb (P7, Emboscada planejada): on the road the enemy is known to use most (an edge of the network whose habit h is MANT.emb.h or more), the
+       best place along it (embSite: the side of the road with more wood, cover where the men lie and no enemy sight on it; a straight stretch
+       makes it linear, a bend an L), an assault and a support element and up to two security pickets, each squad walking there by the way the
+       enemy sees least (tmWalk); it is meant to be there MANT.emb.lead s before the next pass the habit predicts (the first pass it can make),
+       silent until two vehicles are in the killing ground (cmdSquad, CMD.amb.n), and out by its escape way within MANT.emb.out s of the first
+       shot. Given up when found (half its men lost), or when the window passes MANT.emb.waits times with nobody;
+     itd (P9, Interdição da logística): the same ambush on a road the enemy's supply runs by (blkRoads) with a timetable the side knows (two
+       passes or more, a period), at its narrowest place (the choke layer k), and MANT.itd.fire rounds on the killing ground at the hour due;
+     grd (P8, Guarda da rua alternativa): the enemy's ways to a point the side holds, by the network, from its nearest point (the shortest and
+       MANT.grd.alt others that leave the shortest: its flanks); a junction or a bridge on them whose loss makes the enemy's way (or its way
+       round the main road) MANT.grd.ratio times as long or more is held by a squad that walks there unseen; given up when the point falls or
+       the enemy there is MANT.grd.foe times its strength;
+     P11 (Contra-flanco): the threat board's reaction (thbOpen) to an enemy on a flank of a point the side holds (MANT.p11.lat rad or more off
+       the line from the point to the enemy's nearest point) sends each flanking squad round the side the enemy sees less, by a hidden way,
+       and puts the mortars on the enemy's way in at H.
+   M4.on 0 (or no tactical map: TM.on 0) leaves all four out. M4S(): the counts of the match (tests and measurement read them). No random number */
+const M4 = { on: 1, seen: .3, wet: .5, bend: .35, step: 50, cap: 4,
+  doc: { cautious: { emb: 1.1, itd: 1, grd: 1.3 }, balanced: {}, aggressive: { emb: 1.2, itd: 1.2, grd: .8 } },
+  per: { ret: { grd: 1.4, emb: 1.1 }, blz: { emb: .8, itd: .9, grd: .6 }, gue: { emb: 1.8, itd: 1.5, grd: .8 }, art: { itd: 1.2 }, log: { itd: 1.6, grd: 1.2 } } };
+Object.assign(MANT, {
+  emb: { w: 1, h: .4, top: 3, n: [2, 4], max: 2, lead: 60, win: 90, hold: 240, waits: 2, far: 600, near: 4, walk: 4500, exp: .6, t: [25, 40], out: 60, back: 380, sec: 260, T: 1500, cd: 90 },
+  itd: { w: .9, n: 2, fire: 3, at: 10, T: 1500, cd: 150 },
+  grd: { w: .8, max: 2, near: [500, 3000], ratio: 1.3, pen: 4, alt: 2, enemy: 800, foe: 2, pts: 4, walk: 4500, every: 30, T: 900, cd: 90, again: 300 },
+  p11: { lat: .8, fire: 3, back: 200 } });
+MANORD.push('emb', 'itd', 'grd');
+Object.assign(MANC, { ambush: ['emb', 'atk'], interdict: ['itd', 'atk'], guard: ['grd', 'def'] });
+Object.assign(GEN.man, { emb: 'Emboscada planejada', itd: 'Interdição da logística', grd: 'Guarda da rua alternativa' });
+Object.assign(GEN.mfem, { emb: 1, itd: 1, grd: 1 });
+Object.assign(GEN.mtag, { emb: 'EMB', itd: 'ITD', grd: 'GRD' });
+Object.assign(GEN.mlg, { emb: 'pontilhado da chegada escondida até a zona de morte, barra ao longo da estrada', itd: 'como a emboscada, na estrada de suprimento, com a mira do fogo na hora prevista', grd: 'quadrado no entroncamento ou na ponte guardada' });
+Object.assign(GEN.cn, { ambush: 'emboscada planejada', interdict: 'interdição da logística', guard: 'guardar rua alternativa' });
+const M4S = () => S.m4s || (S.m4s = { emb: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0 }, itd: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0, fire: 0 }, grd: { open: 0, held: 0, fell: 0, foe: 0 }, p11: 0, why: {} });
+const m4w = k => { const w = M4S().why; w[k] = (w[k] || 0) + 1; return null; };   // why a candidate was not made, counted (the tests and the probes read it)
+const m4On = C => !!(M4.on && TM.on && C && C.tm && S.T.mv >= 4 && S.T.net && S.T.tms && S.cq);
+/* the weight of kind k for side C: its doctrine's (M4.doc) times its personality's (M4.per: PERS.w keeps the kinds the match's taste is drawn for) */
+const m4W = (C, k) => ((M4.doc[docK(C)] || {})[k] || 1) * ((S.per && M4.per[S.per[C.t]] || {})[k] || 1);
+const m4Cell = (M, x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
+/* the cells a walk may not enter: water, but where a bridge stands (or a pontoon carries) */
+function tmWet(Z) {
+  if (Z.wet && Z.wetK === Z.key) return Z.wet;
+  const w = new Uint8Array(Z.nx * Z.nz), c = Z.c;
+  for (let q = 0; q < w.length; q++) if (Z.water[q] > M4.wet) w[q] = 1;
+  for (const b of brs()) if (!brDown(b) || brPont(b)) { const i0 = b.x / c | 0, j0 = (b.z + Z.HW) / c | 0; for (let j = j0 - 1; j <= j0 + 1; j++) for (let i = i0 - 1; i <= i0 + 1; i++) if (i >= 0 && j >= 0 && i < Z.nx && j < Z.nz && Z.road[j * Z.nx + i] > 0) w[j * Z.nx + i] = 0; }
+  Z.wet = w; Z.wetK = Z.key; return w;
+}
+/* the share of polyline p's length that side C's map says the enemy sees (V over M4.seen) and that runs in a wood, every M4.step m */
+function tmExp(C, p) {
+  const M = C.tm, Z = S.T.tms; let a = 0, w = 0, n = 0;
+  if (!M || !p || !(p.len > 0)) return { exp: 0, wood: 0 };
+  for (let s = 0; s <= p.len; s += M4.step) { const o = routeAt(p, s), q = m4Cell(M, o.x, o.z); n++; if (M.v[q] > M4.seen) a++; if (Z.wood[q] > .5) w++; }
+  return { exp: a / n, wood: w / n };
+}
+/* the tactical walk (§8): the cheapest way on foot over side C's map, a cell of TM.cell m costing cell x (1 + 4 V + 2 F) x .75 in a wood x .85
+   on a road (V where the enemy sees, F the known enemy strength as 0 to 1), water with no standing bridge no way. A* over the cells, 8
+   neighbours; one of the side's footPath calls (difOf(t).fp a plan tick, the difficulty's depth). A polyline (polyOf) from x0 z0 to x1 z1 with
+   exp (the share the enemy sees) and wood, or null: no map, no budget, no way */
+function tmWalk(C, x0, z0, x1, z1) {
+  const M = C && C.tm, Z = S.T.tms; if (!M || !Z || Z.nx !== M.nx || Z.nz !== M.nz) return null;
+  if (C.fpT !== S.t) { C.fpT = S.t; C.fpN = 0; }
+  if (C.fpN >= difOf(C.t).fp) return null;
+  C.fpN++;
+  const c = M.c, nx = M.nx, nz = M.nz, n = nx * nz, V = M.v, F = M.f, wet = tmWet(Z);
+  const cost = k => (wet[k] ? Infinity : c * (1 + 4 * V[k] + 2 * F[k] / (F[k] + 3)) * (Z.wood[k] > .5 ? .75 : 1) * (Z.road[k] > .1 ? .85 : 1));
+  const a = m4Cell(M, x0, z0), b = m4Cell(M, x1, z1), g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
+  const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
+  const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
+  const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
+  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return .6375 * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost
+  g[a] = 0; push(h(a), a);
+  while (hk.length) {
+    const u = pop(); if (done[u]) continue; done[u] = 1; if (u === b) break;
+    const ui = u % nx, uj = u / nx | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const v = j * nx + i, k = v === b ? c : cost(v); if (k === Infinity) continue;
+      const w = g[u] + k * (di && dj ? 1.414 : 1); if (w < g[v]) { g[v] = w; via[v] = u; push(w + h(v), v); }
+    }
+  }
+  if (g[b] === Infinity) return null;
+  let pts = [];
+  for (let v = b; v !== -1; v = via[v]) pts.push({ x: (v % nx + .5) * c, z: -S.HW + ((v / nx | 0) + .5) * c });
+  pts.reverse(); pts[0] = { x: x0, z: z0 }; if (pts.length < 2) pts.push({ x: x1, z: z1 }); pts[pts.length - 1] = { x: x1, z: z1 };
+  if (Math.hypot(x1 - x0, z1 - z0) < 1) pts[pts.length - 1] = { x: x0 + 1, z: z0 };
+  for (let r = 0; r < 2; r++) { const q = [pts[0]]; for (let i = 0; i + 1 < pts.length; i++) { const p = pts[i], o = pts[i + 1]; q.push({ x: .75 * p.x + .25 * o.x, z: .75 * p.z + .25 * o.z }, { x: .25 * p.x + .75 * o.x, z: .25 * p.z + .75 * o.z }); } q.push(pts[pts.length - 1]); pts = q; }
+  const out = polyOf(pts), X = tmExp(C, out); out.exp = X.exp; out.wood = X.wood; out.cost = g[b]; return out;
+}
+
+/* ===== emb and itd: the planned ambush (P7) and the interdiction of the supply (P9) ===== */
+/* the best place for an ambush on edge ei of the network (between lo and hi m along it): every 80 m, the side of the road with more cover (the
+   wood or the cover layer at 60 to 260 m out) where the men lie (70 or 115 m out: cover, wood, height over the road, less where the enemy sees),
+   linear on a straight stretch (less than M4.bend rad over 250 m) or an L at a bend; never by a base or in a town, nor where the side knows
+   more than MANT.emb.near of the enemy. { e, s, x, z, dx, dz, sd, pos (the lying places, best first), wood, f lin|L, sc, ri, rs } or null */
+function embSite(C, ei, lo, hi) {
+  const T = S.T, E = T.net.e[ei], M = C.tm, Z = T.tms; if (!E || !M || E.len < 400) return null;
+  const r = E.p, a0 = Math.max(200, lo || 0), a1 = Math.min(E.len - 200, hi === undefined ? E.len : hi); let best = null;
+  for (let s = a0; s <= a1; s += 80) {
+    const p = routeAt(r, s), y = hgt(p.x, p.z);
+    if (T.bases.some(o => hdist(o, p) < 1800) || T.towns.some(o => hdist(o, p) < FIELD.town) || cmdKnown(C, p.x, p.z, 300) > MANT.emb.near) continue;
+    let side = null;
+    for (const sd of [1, -1]) {
+      let wood = 0; const pos = [];
+      for (const off of [60, 110, 160, 210, 260]) { const x = p.x - p.dz * off * sd, z = p.z + p.dx * off * sd; if (kindAt(x, z) === 1 || Z.o[m4Cell(M, x, z)] >= .5) wood++; }
+      for (const off of [70, 115]) {
+        const x = p.x - p.dz * off * sd, z = p.z + p.dx * off * sd, h = hgt(x, z), q = m4Cell(M, x, z), wd = kindAt(x, z) === 1;
+        if (h <= T.WL + 1 || (!wd && Z.o[q] < .3 && h - y < 6)) continue;
+        pos.push({ x, z, v: 2 * Z.o[q] + (wd ? 1 : 0) + clamp((h - y) / 8, 0, 1.5) - 2 * M.v[q] });
+      }
+      if (!pos.length) continue;
+      pos.sort((u, v) => v.v - u.v);
+      const sc = pos[0].v + .4 * wood;
+      if (!side || sc > side.sc) side = { sd, pos, wood, sc };
+    }
+    if (!side) continue;
+    const u = routeAt(r, s - 125), v = routeAt(r, s + 125), bend = Math.abs(wrap(Math.atan2(v.dz, v.dx) - Math.atan2(u.dz, u.dx))), f = bend < M4.bend ? 'lin' : 'L', sc = side.sc + (f === 'L' ? .5 : 0);
+    if (!best || sc > best.sc) best = { e: ei, s, x: p.x, z: p.z, dx: p.dx, dz: p.dz, sd: side.sd, pos: side.pos, wood: side.wood, f, sc, bend };
+  }
+  if (best) { const q = railOf(best.x, best.z); best.ri = q.ri; best.rs = q.s; }
+  return best;
+}
+/* the places of n squads of an ambush on site: the assault where the men lie best; the support at the far end of the killing ground (an L: by
+   the road, firing along it; linear: beside it); the first picket MANT.emb.sec m up the road toward the enemy (the end of the edge nearer its
+   base), the second as far down it; the escape place MANT.emb.back m out on the hidden side. [{ role, x, z }], esc */
+function embPlaces(site, n, t) {
+  const E = S.T.net.e[site.e], r = E.p, sd = site.sd, K = MANT.emb, hq = S.base[1 - t], up = hdist(r[0], hq) < hdist(r[r.length - 1], hq) ? -1 : 1;
+  const at = (s, off) => { const p = routeAt(r, clamp(s, 0, E.len)), x = p.x - p.dz * off * sd, z = p.z + p.dx * off * sd; return hgt(x, z) > S.T.WL + 1 ? { x, z } : { x: site.pos[0].x, z: site.pos[0].z }; };
+  const L = [Object.assign({ role: 'asl' }, { x: site.pos[0].x, z: site.pos[0].z })];
+  if (n >= 2) L.push(Object.assign({ role: 'sup' }, site.f === 'L' ? at(site.s - up * 120, 45) : at(site.s - up * 75, 100)));
+  if (n >= 3) L.push(Object.assign({ role: 'sec' }, at(site.s + up * K.sec, 80)));
+  if (n >= 4) L.push(Object.assign({ role: 'sec' }, at(site.s - up * K.sec, 80)));
+  return { L, esc: at(site.s, K.back), up };
+}
+/* the first pass of the habit H the side can be there MANT.emb.lead s before, eta s from now: a match time, or -1 when no period is known */
+function embPass(H, eta) {
+  if (!(H.per > 0) || H.next < 0) return -1;
+  let T = H.next; while (T - S.t < eta + MANT.emb.lead) T += H.per;
+  return T;
+}
+const m4Lead = q => q.men.find(m => !m.dead);
+/* the n free squads (of pool) nearest site, the nearest first, within MANT.emb.walk m (a person's order: however far) */
+const embSquads = (pool, site, n, far) => pool.map(q => [q, m4Lead(q)]).filter(a => a[1] && hdist(a[1], site) < far).sort((a, b) => hdist(a[1], site) - hdist(b[1], site) || (a[0].id || 0) - (b[0].id || 0)).slice(0, n).map(a => a[0]);
+/* the edges side C knows the enemy's supply runs by: on its supply roads (blkRoads), behind its line, with a timetable (two passes and a period) */
+function itdEdges(C) {
+  const e = 1 - C.t, roads = blkRoads(C, e), out = [];
+  if (!roads.length || !C.hu) return out;
+  S.T.net.e.forEach((E, i) => {
+    if (!(C.hu[i] > 0)) return; const H = habOf(C, i); if (H.n < 2 || !(H.per > 0)) return;
+    const m = E.smp[E.smp.length >> 1]; if (ecoDepth(e, m.x, m.z) < 0 || !roads.some(r => E.smp.some(p => blkDist(r, p.x, p.z) < BLKX.edge))) return;
+    out.push([i, H]);
+  });
+  return out;
+}
+/* the narrowest place of edge ei by side C's choke layer: { s, k } (s along it) */
+function itdChoke(C, ei) {
+  const E = S.T.net.e[ei], M = C.tm; let b = { s: E.len / 2, k: 0 };
+  for (let s = 200; s < E.len - 200; s += 100) { const p = routeAt(E.p, s), k = M.k[m4Cell(M, p.x, p.z)]; if (k > b.k) b = { s, k }; }
+  return b;
+}
+const embBusy = (C, ei) => C.man.some(o => !o.over && (o.k === 'emb' || o.k === 'itd') && o.e === ei);
+const embLive = C => C.man.filter(o => !o.over && (o.k === 'emb' || o.k === 'itd')).length;
+/* a candidate on edge ei: the site, the assault squad and its hidden walk, the pass it makes; null when none */
+function embCand(C, X, k, ei, H, lo, hi) {
+  const K = MANT.emb, site = embSite(C, ei, lo, hi); if (!site) return m4w(k + ':site');
+  const qs = embSquads(X.free, site, 1, K.walk); if (!qs.length) return m4w(k + ':sq');
+  const L = m4Lead(qs[0]), way = tmWalk(C, L.x, L.z, site.pos[0].x, site.pos[0].z);
+  if (!way) return m4w(k + ':way');
+  if (way.len > K.walk * 1.3 || way.exp > K.exp) return m4w(k + ':exp');
+  const eta = way.len / MAN.pace, Tp = embPass(H, eta);
+  if (Tp >= 0 && Tp - S.t - eta > K.far) return m4w(k + ':far');   // no longer than MANT.emb.far s lying in wait for it
+  return { site, q: qs[0], way, eta, Tp, H };
+}
+const embKm = v => gN(Math.round(v / 100) / 10) + ' km', embPc = v => Math.round(v * 100) + '%';
+MANG.emb = (C, X) => {
+  const K = MANT.emb, out = [];
+  if (!m4On(C) || !C.hu || X.free.length < K.n[0] || embLive(C) >= K.max) return out;
+  const E = S.T.net.e, hot = [], cd = C.m4cd || {};
+  for (let i = 0; i < E.length; i++) { if (!(C.hu[i] > 0) || embBusy(C, i) || S.t < (cd[i] || 0)) continue; const H = habOf(C, i); if (H.h >= K.h) hot.push([i, H]); }
+  hot.sort((a, b) => b[1].h - a[1].h || C.hu[b[0]] - C.hu[a[0]] || a[0] - b[0]);
+  for (const [ei, H] of hot.slice(0, K.top)) {
+    const c = embCand(C, X, 'emb', ei, H); if (!c) continue;
+    const s = c.site, mid = E[ei].smp[E[ei].smp.length >> 1];
+    const sc = clamp(K.w * (.5 + H.h) * clamp(s.sc / 3, .5, 1.3) * (1 - .6 * c.way.exp) * (c.Tp < 0 ? .8 : 1) * m4W(C, 'emb'), 0, 2);
+    out.push({ k: 'emb', sc, spec: { c: 'ambush', x: s.x, z: s.z, why: 'rua movimentada' }, at: { x: s.x, z: s.z }, res: c,
+      why: 'rua mais usada pelo inimigo ' + habName(mid) + ' (' + H.n + ' passagens' + (H.per ? ', uma a cada ~' + Math.round(H.per) + ' s' : '') + '): emboscada ' + (s.f === 'L' ? 'em L' : 'linear') + ', chegada por ' + embKm(c.way.len) + ' com ' + embPc(c.way.exp) + ' à vista' });
+  }
+  return out;
+};
+MANG.itd = (C, X) => {
+  const K = MANT.itd, out = [];
+  if (!m4On(C) || !C.hu || X.free.length < K.n || embLive(C) >= MANT.emb.max) return out;
+  const cd = C.m4cd || {}, L = itdEdges(C).filter(([i]) => !embBusy(C, i) && !(S.t < (cd[i] || 0))).sort((a, b) => b[1].n - a[1].n || b[1].h - a[1].h || a[0] - b[0]);
+  for (const [ei, H] of L.slice(0, 2)) {
+    const ch = itdChoke(C, ei), c = embCand(C, X, 'itd', ei, H, ch.s - 400, ch.s + 400); if (!c || c.Tp < 0) continue;
+    const s = c.site;
+    const sc = clamp(K.w * (.6 + .1 * Math.min(H.n, 4) + .5 * ch.k) * clamp(s.sc / 3, .5, 1.3) * (1 - .6 * c.way.exp) * m4W(C, 'itd'), 0, 2);
+    out.push({ k: 'itd', sc, spec: { c: 'interdict', x: s.x, z: s.z, why: 'logística inimiga' }, at: { x: s.x, z: s.z }, res: Object.assign(c, { ck: ch.k }),
+      why: 'suprimento inimigo passa ' + ecoNear(s.x, s.z) + ' a cada ~' + Math.round(H.per) + ' s (' + H.n + ' passagens): emboscada no gargalo e fogo na hora prevista' });
+  }
+  return out;
+};
+/* the door of both: the site (the AI's, or the best within 400 m of the road nearest x z), the squads (the AI's free ones nearest it, n of them:
+   MANT.emb.n, or spec.n), the walks, the op; each squad goes to its place by the hidden way */
+function embOpen(t, C, spec, by, R, k) {
+  const K = MANT.emb, res = R && R.res;
+  if (!m4On(C)) return gBad('off');
+  let site = res && res.site, H = res && res.H;
+  if (!site) {
+    const a = manAt(spec); if (!a) return gBad('at');
+    const nn = netNear(a.x, a.z); if (nn.e < 0 || nn.d > GENC.road) return gBad('at');
+    site = embSite(C, nn.e, nn.s - 400, nn.s + 400); if (!site) return gBad('at');
+    H = habOf(C, site.e);
+  }
+  if (embBusy(C, site.e)) return gBad('busy');
+  if (embLive(C) >= K.max) return gBad('max');
+  const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), ai = by === 'ai';
+  const pool = ai ? manFree(all) : all.filter(q => q.live >= 2 && !q.lift && !q.rd && !(q.op && !q.op.over && q.op.man));
+  const n = Number.isInteger(spec.n) ? spec.n : ai ? clamp(pool.length - MAN.keep, K.n[0], k === 'itd' ? MANT.itd.n : K.n[1]) : 2;
+  let qs = embSquads(pool, site, n, ai ? K.walk : 1e9);
+  if (res && res.q && pool.includes(res.q)) qs = [res.q].concat(qs.filter(q => q !== res.q)).slice(0, n);
+  if (!qs.length) return gBad('sq');
+  const P = embPlaces(site, qs.length, t), ways = [];
+  for (let i = 0; i < qs.length; i++) {
+    const L = m4Lead(qs[i]), p = P.L[i];
+    const w = (i === 0 && res && res.q === qs[i] && res.way) || tmWalk(C, L.x, L.z, p.x, p.z) || footPath(C, L.x, L.z, p.x, p.z) || tripOf(L.x, L.z, p.x, p.z, { mode: 'foot', team: t });
+    if (!w) { if (!i) return gBad('path'); qs.length = i; break; }
+    ways.push(w);
+  }
+  const way = ways[0], X = way.exp === undefined ? tmExp(C, way) : way, d = tmExp(C, polyOf([m4Lead(qs[0]), P.L[0]])), eta = Math.max(...ways.map(w => w.len)) / MAN.pace;
+  const Tp = H ? embPass(H, eta) : -1, kz = { x: site.x, z: site.z }, E = S.T.net.e[site.e], mid = E.smp[E.smp.length >> 1];
+  const o = { site, e: site.e, kz, ri: site.ri, f: site.f, st: 'go', Tp, per: H ? H.per : 0, waits: 0, sprung: 0, first: null, last: null, tank: null, arr: 0, vk: [], nsq: qs.length,
+    n0: qs.reduce((a, q) => a + manLive(q), 0), path: way, exp: X.exp, wood: X.wood, dexp: d.exp, esc: P.esc, nm: k === 'itd' ? ecoNear(site.x, site.z) : habName(mid), fired: 0 };
+  if (!Number.isFinite(spec.T)) o.Tmax = clamp((Tp >= 0 ? Tp - S.t : eta) + K.hold * (K.waits + 1) + K.out + 60, 180, MAN.life);
+  const op = manOpen(C, k, spec, by, o);
+  qs.forEach((q, i) => {
+    const p = P.L[i], w = ways[i], r = railOf(p.x, p.z); q.er = p.role;
+    opTake(op, q, p.role === 'sec' ? { k: 'observe', ri: r.ri, s: r.s, x: p.x, z: p.z, R: 6, wp: w, fast: 1, quiet: 1 } : { k: 'ambush', ri: site.ri, s: site.rs, x: p.x, z: p.z, R: 9, kz, op, wp: w, fast: 1 });
+  });
+  const M = M4S()[k]; M.arm++;
+  C.m4cd = C.m4cd || {}; C.m4cd[site.e] = S.t + K.T;
+  gLog(t, 'amb', (k === 'itd' ? 'Interdição da logística ' : 'Emboscada planejada ') + (site.f === 'L' ? 'em L' : 'linear') + ' na estrada ' + o.nm + ': ' + qs.length + (qs.length > 1 ? ' esquadras' : ' esquadra') + ' (assalto' + (qs.length > 1 ? ', apoio' : '') + (qs.length > 2 ? ', ' + (qs.length - 2) + ' segurança' + (qs.length > 3 ? 's' : '') : '') + '); chegada por ' + embKm(way.len) + ' com ' + embPc(X.exp) + ' à vista (direto ' + embPc(d.exp) + ')' + (Tp >= 0 ? ', próxima passagem prevista em ~' + Math.round(Tp - S.t) + ' s' : ', sem horário conhecido') + (spec.why && by !== 'ai' ? ' (' + spec.why + ')' : ''), site);
+  return gYes(op.id);
+}
+MANO.emb = (t, C, spec, by, R) => embOpen(t, C, spec, by, R, 'emb');
+MANO.itd = (t, C, spec, by, R) => embOpen(t, C, spec, by, R, 'itd');
+/* it is sprung: everything fires, the rocket men at the first and the last vehicle in it; the fire lasts no longer than MANT.emb.out s */
+function embSpring(op) {
+  const s = op.site, A = CMD.amb, K = MANT.emb, l = S.units.filter(u => !u.dead && u.team !== op.team && Math.abs(u.x - s.x) < A.kz * 2.5 && Math.abs(u.z - s.z) < A.kz * 2.5).sort((a, b) => (a.x - b.x) * s.dx + (a.z - b.z) * s.dz);
+  op.sprung = S.t; op.T = S.t + Math.min(K.out, (K.t[0] + K.t[1]) / 2); op.first = l[0] || null; op.last = l[l.length - 1] || null; op.vk = l.slice(0, 8);
+  M4S()[op.k].sprung++;
+  gLog(op.team, 'amb', (op.k === 'itd' ? 'Interdição disparada ' : 'Emboscada planejada disparada ') + 'na estrada ' + op.nm + (l.length ? ': ' + l.length + (l.length > 1 ? ' veículos' : ' veículo') + ' na zona de morte' : ''), op.kz);
+  for (const q of op.sq) { q.hf = false; for (const m of q.men) if (m.ai && !m.dead) m.ai.think = Math.min(m.ai.think, .05 * (m.ai.i % 3)); }
+}
+/* each plan tick: on the way (go), in place (set: waiting for the pass, the window moved on with the habit), firing (fire), out by the escape way (back) */
+OPS.emb = (C, op) => {
+  const t = C.t, K = MANT.emb, l = opLive(op), own = l.reduce((a, q) => a + manLive(q), 0), Mk = M4S()[op.k], tag = op.k === 'itd' ? 'Interdição' : 'Emboscada planejada';
+  const off = why => { gLog(t, 'amb', tag + ' na estrada ' + op.nm + ' recolhe: ' + why, op.kz); return opEnd(C, op); };
+  if (!l.length) return off('sem esquadras');
+  if (op.st === 'go' || op.st === 'set') {
+    if (op.sprung) { if (op.st === 'go') { Mk.found++; gLog(t, 'amb', tag + ' descoberta a caminho: combate onde está', op.kz); } op.st = 'fire'; return; }
+    if (own <= op.n0 * .5) { Mk.found++; return off('descoberta, perdas pesadas'); }
+    const H = habOf(C, op.e);
+    if (op.per > 0 && H.per > 0 && H.next > op.Tp - K.win && H.next < op.Tp + K.win) op.Tp = Math.max(op.Tp, H.next);   // the habit seen again: the hour due kept up to date
+    if (op.k === 'itd' && !op.fired && op.Tp >= 0 && S.t >= op.Tp - MANT.itd.at && op.st === 'set') {   // the guns on the killing ground at the hour due
+      op.fired = S.t;
+      if (gFireSrc(t, 'he', op.kz.x, op.kz.z) && C.fm.filter(M => !M.dead && S.t < M.T).length < GENC.fm) { cmdMission(C, 'he', op.kz.x, op.kz.z, MANT.itd.fire, 60, op); Mk.fire++; gLog(t, 'fire', 'Interdição: fogo sobre a estrada ' + op.nm + ' na hora prevista da passagem', op.kz); }
+    }
+    if (op.st === 'go' && l.filter(q => q.er !== 'sec').every(q => q.at)) {
+      op.st = 'set'; op.arr = S.t; Mk.set++; if (op.Tp >= 0 && op.Tp - S.t >= K.lead) Mk.early++;
+      gLog(t, 'amb', tag + ' em posição na estrada ' + op.nm + (op.Tp >= 0 ? (op.Tp >= S.t ? ', ' + Math.round(op.Tp - S.t) + ' s antes da passagem prevista' : ', a passagem prevista já passou') : '') + ': silêncio até 2 veículos na zona', op.kz);
+    }
+    const due = op.Tp >= 0 ? op.Tp + K.win : op.arr ? op.arr + K.hold : Infinity;
+    if (S.t > due) {
+      if (op.per > 0 && op.waits < K.waits) { op.waits++; op.Tp = H.per > 0 && H.next > S.t ? H.next : op.Tp + op.per * Math.max(1, Math.ceil((S.t - op.Tp) / op.per)); op.fired = 0; gLog(t, 'amb', tag + ' na estrada ' + op.nm + ': janela passou sem ninguém, espera a próxima passagem (~' + Math.round(op.Tp - S.t) + ' s)', op.kz); return; }
+      Mk.miss++; return off('janela passou');
+    }
+    return;
+  }
+  if (op.st === 'fire') {
+    if (S.t > op.T || own <= op.n0 * .5 || cmdKnown(C, op.kz.x, op.kz.z, 400) > own * INC.amb.odds) {
+      op.st = 'back'; op.T = S.t; gLog(t, 'amb', tag + ' na estrada ' + op.nm + ': recuar pela rota de fuga', op.esc);
+      l.forEach(q => { const L = m4Lead(q); if (L && L.smk > 0) L.ctl.nade = 2; const c = clearOf(op.esc.x, op.esc.z, 2, {}), r = railOf(c.x, c.z); opTake(op, q, { k: 'withdraw', ri: r.ri, s: r.s, x: c.x, z: c.z, R: 9 }); });
+    }
+    return;
+  }
+  if (S.t - op.T > K.out || l.every(q => q.at)) return opEnd(C, op);
+};
+OPS.itd = OPS.emb;
+/* the end: a sprung one that took at least one vehicle of those in the killing ground, losing no more than a squad's worth of men, did its work */
+MANE.emb = (C, op) => {
+  if (!op.sprung) return;
+  const lost = op.n0 - op.sq.reduce((a, q) => a + manLive(q), 0), ok = op.vk.some(u => u.dead) && lost <= op.n0 / Math.max(1, op.nsq);
+  if (ok) M4S()[op.k].ok++;
+  op.ok = ok ? 1 : 0;
+};
+MANE.itd = MANE.emb;
+/* ===== end emb, itd ===== */
+
+/* ===== grd: the alternate street (P8) ===== */
+/* the enemy's ways to side C's points by the network (the planner run from the enemy's side): for up to MANT.grd.pts points it holds, nearest the
+   enemy first, from the enemy point (or base) nearest it, the shortest way and MANT.grd.alt others that leave it (its edges cost MANT.grd.pen
+   times as much); every junction (3 roads or more) and bridge on them MANT.grd.near m from the point, not within MANT.grd.enemy m of an enemy
+   point and with little known enemy at it, is worth how much longer the enemy's way gets without it (r: the shortest, or the way round the
+   main road when it is on a flank). Kept MANT.grd.every s. [{ P, pi, x, z, nm, cut (edges), r, d0, d1, alt, node | b }], best first */
+function grdSites(C) {
+  const t = C.t, e = 1 - t, K = MANT.grd, N = S.T.net, Q = S.cq.p;
+  if (C.m4g && S.t - C.m4g.T < K.every && C.m4g.n === N.e.length) return C.m4g.l;
+  const cls = RN.cls.veh, len = E => E.len * cls[E.c], out = [];   // netPath itself weighs each edge by what the bridges make of it
+  brs();
+  const foes = Q.filter(p => p.hold === e).concat([S.base[e]]), mine = Q.filter(p => p.hold === t && p.base < 0);
+  const near = p => foes.reduce((a, f) => (hdist(f, p) < hdist(a, p) ? f : a), foes[0]);
+  const pts = mine.map(p => [p, near(p)]).sort((a, b) => hdist(a[0], a[1]) - hdist(b[0], b[1])).slice(0, K.pts);
+  const path = (a, b, f) => netPath(a, b, E => { const c = f(E); return c === Infinity ? Infinity : c; });
+  for (const [P, O] of pts) {
+    const a = mresIdx(O.x, O.z), b = mresIdx(P.x, P.z); if (a === b) continue;
+    const main = path(a, b, len); if (!main) continue;
+    const mset = new Set(main.e), pen = new Set(main.e), ways = [{ p: main, alt: false }];
+    for (let i = 0; i < K.alt; i++) { const w = path(a, b, E => len(E) * (pen.has(E.i) ? K.pen : 1)); if (!w || w.e.every(x => mset.has(x))) break; ways.push({ p: w, alt: true }); for (const x of w.e) pen.add(x); }
+    const round = path(a, b, E => (mset.has(E.i) ? Infinity : len(E))), seen = new Set(), cand = [];
+    for (const W of ways) {
+      for (const ni of W.p.n) { const n = N.n[ni]; if (n.e.length >= 3 && !seen.has('n' + ni)) { seen.add('n' + ni); cand.push({ x: n.x, z: n.z, cut: new Set(n.e), node: ni, nm: mresName(n), alt: W.alt && !main.n.includes(ni) }); } }
+      for (const ei of W.p.e) for (const B of (S.T.brE && S.T.brE[ei]) || []) if (!brDown(B) && !seen.has('b' + B.i)) { seen.add('b' + B.i); cand.push({ x: B.x, z: B.z, cut: new Set([ei]), b: B.i, nm: brName(B), alt: W.alt && !mset.has(ei) }); }
+    }
+    for (const c of cand) {
+      const d = hdist(c, P); if (d < K.near[0] || d > K.near[1] || foes.some(f => hdist(f, c) < K.enemy) || cmdKnown(C, c.x, c.z, 400) > M4.cap) continue;
+      let r;
+      if (!c.alt) { const w = path(a, b, E => (c.cut.has(E.i) ? Infinity : len(E))); r = w ? w.c / main.c : Infinity; c.d0 = main.c; c.d1 = w ? w.c : Infinity; }
+      else { if (!round) continue; const w = path(a, b, E => (mset.has(E.i) || c.cut.has(E.i) ? Infinity : len(E))); r = w ? w.c / round.c : Infinity; c.d0 = round.c; c.d1 = w ? w.c : Infinity; }
+      if (r < K.ratio) continue;
+      out.push(Object.assign(c, { P, pi: Q.indexOf(P), r: Math.min(r, M4.cap), O }));
+    }
+  }
+  const val = p => (p.tw ? (p.big ? 1.4 : 1.2) : 1);
+  out.sort((x, y) => val(y.P) * y.r - val(x.P) * x.r || x.x - y.x || x.z - y.z);
+  C.m4g = { T: S.t, n: N.e.length, l: out };
+  return out;
+}
+const grdKey = c => (c.b !== undefined ? 'b' + c.b : 'n' + c.node);
+const grdSay = c => c.nm + ' (' + (c.d1 === Infinity ? 'sem ela o inimigo não chega a ' + gName(c.P) : 'sem ela o inimigo roda ' + embKm(c.d1) + ' em vez de ' + embKm(c.d0) + ' até ' + gName(c.P)) + (c.alt ? ', pelo flanco' : '') + ')';
+MANG.grd = (C, X) => {
+  const t = X.t, K = MANT.grd, out = [];
+  if (!m4On(C) || !X.free.length || C.ops.filter(o => !o.over && o.k === 'grd').length >= K.max) return out;
+  const cd = C.m4cd || {}, busy = new Set(C.ops.filter(o => !o.over && o.k === 'grd').map(o => o.key));
+  for (const c of grdSites(C)) {
+    if (out.length >= 2) break;
+    const key = grdKey(c); if (busy.has(key) || S.t < (cd[key] || 0)) continue;
+    const q = embSquads(X.free, c, 1, K.walk)[0]; if (!q) continue;
+    const kk = C.tm.k[m4Cell(C.tm, c.x, c.z)], sc = clamp(K.w * (c.P.tw ? 1.2 : 1) * clamp(.5 + .5 * Math.log2(c.r), .5, 1.6) * (.7 + .4 * kk) * m4W(C, 'grd'), 0, 2);
+    out.push({ k: 'grd', sc, spec: { c: 'guard', x: c.x, z: c.z, why: 'rua alternativa' }, at: { x: c.x, z: c.z }, res: { c, q }, why: 'guardar ' + grdSay(c) });
+  }
+  return out;
+};
+MANO.grd = (t, C, spec, by, R) => {
+  if (!m4On(C)) return gBad('off');
+  const K = MANT.grd, ai = by === 'ai';
+  let c = R && R.res && R.res.c;
+  if (!c) { const a = manAt(spec); if (!a) return gBad('at'); c = grdSites(C).filter(o => hdist(o, a) < 800).sort((x, y) => hdist(x, a) - hdist(y, a))[0]; if (!c) return gBad('at'); }
+  if (C.ops.some(o => !o.over && o.k === 'grd' && o.key === grdKey(c))) return gBad('busy');
+  if (ai && C.ops.filter(o => !o.over && o.k === 'grd').length >= K.max) return gBad('max');
+  const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), pool = ai ? manFree(all) : all.filter(q => q.live >= 2 && !q.lift && !q.rd && !(q.op && !q.op.over && q.op.man));
+  const q = (R && R.res && R.res.q && pool.includes(R.res.q) && R.res.q) || embSquads(pool, c, 1, ai ? K.walk : 1e9)[0]; if (!q) return gBad('sq');
+  const L = m4Lead(q), way = tmWalk(C, L.x, L.z, c.x, c.z) || footPath(C, L.x, L.z, c.x, c.z) || tripOf(L.x, L.z, c.x, c.z, { mode: 'foot', team: t }); if (!way) return gBad('path');
+  const X = way.exp === undefined ? tmExp(C, way) : way, r = railOf(c.x, c.z);
+  const op = manOpen(C, 'grd', spec, by, { key: grdKey(c), pi: c.pi, x: c.x, z: c.z, kz: { x: c.x, z: c.z }, ri: r.ri, nm: c.nm, st: 'go', path: way, exp: X.exp, r: c.r, d0: c.d0, d1: c.d1, n0: manLive(q) });
+  if (!Number.isFinite(spec.T)) op.Tmax = clamp(way.len / MAN.pace + K.T, 120, MAN.life);
+  opTake(op, q, { k: 'hold', ri: r.ri, s: r.s, x: c.x, z: c.z, R: 10, wp: way, fast: 1 });
+  C.man = C.man.filter(o => o !== op);   // a guard is a post, not a manoeuvre on the move: in C.ops (it runs, ends and is shown as one) but it takes none of the side's live manoeuvres (manMax, MAN.share)
+  C.m4cd = C.m4cd || {}; C.m4cd[op.key] = S.t + K.again; M4S().grd.open++;
+  gLog(t, 'def', 'Guarda da rua alternativa: esquadra a caminho de ' + grdSay(c) + '; chegada por ' + embKm(way.len) + ' com ' + embPc(X.exp) + ' à vista', c);
+  return gYes(op.id);
+};
+OPS.grd = (C, op) => {
+  const t = C.t, K = MANT.grd, l = opLive(op), P = S.cq.p[op.pi], M = M4S().grd, off = (why, k) => { if (k) M[k]++; gLog(t, 'def', 'Guarda de ' + op.nm + ' encerrada: ' + why, op.kz); return opEnd(C, op); };
+  if (!l.length) return off('sem esquadras');
+  if (!P || P.hold !== t) return off('o ponto ' + (P ? gName(P) : '') + ' caiu', 'fell');
+  const foe = cmdKnown(C, op.x, op.z, 450), own = l.reduce((a, q) => a + manLive(q), 0) * CMD.val.inf;
+  if (foe > K.foe * Math.max(1, own)) return off('inimigo ' + gN(foe / Math.max(1, own)) + ' vezes mais forte ali', 'foe');
+  if (op.st === 'go' && l.every(q => q.at)) { op.st = 'hold'; M.held++; gLog(t, 'def', 'Rua alternativa guardada: ' + op.nm + ' nas nossas mãos', op.kz); }
+};
+/* ===== end grd ===== */
+
+/* ===== P11: the counter-flank, in the threat board's reaction ===== */
+/* the enemy is known on a flank of a point side C holds (MANT.p11.lat rad or more off the line to the enemy's nearest point): each flanking squad of
+   the reaction goes to the side the enemy sees less (the straight line to each side's place and the place itself on the sight layer), by the
+   hidden walk; the mortars go on the enemy's way in (MANT.p11.back m behind it, toward where it came from) at H */
+function p11(C, op, I) {
+  const t = C.t, e = 1 - t, K = MANT.p11, M = C.tm, fl = op.sq.filter(q => q.qr === 'flk' && q.op === op);
+  if (!fl.length) return;
+  const P = S.cq.p.find(p => hdist(p, I) < 50 && p.hold === t); if (!P) return;
+  const foes = S.cq.p.filter(p => p.hold === e).concat([S.base[e]]), src = foes.reduce((a, f) => (hdist(f, P) < hdist(a, P) ? f : a), foes[0]);
+  const lat = Math.abs(wrap(Math.atan2(I.kz - P.z, I.kx - P.x) - Math.atan2(src.z - P.z, src.x - P.x)));
+  if (lat < K.lat) return;
+  let ux = I.x - I.kx, uz = I.z - I.kz; const d = Math.hypot(ux, uz) || 1; ux /= d; uz /= d;
+  const look = (a, b) => { const p = polyOf([a, b]), X = tmExp(C, p); return X.exp + M.v[m4Cell(M, b.x, b.z)]; };
+  let side = 0, worst = 0, far = 0;
+  for (const q of fl) {
+    const L = m4Lead(q); if (!L) continue;
+    const pl = [1, -1].map(sd => { const x = I.kx + ux * THB.stage - uz * sd * THB.flank, z = I.kz + uz * THB.stage + ux * sd * THB.flank; return gMapOk(x, z) ? { sd, x, z, v: look(L, { x, z }) } : null; }).filter(Boolean);
+    if (!pl.length) continue;
+    pl.sort((a, b) => a.v - b.v || a.sd - b.sd);
+    const p = pl[0], w = tmWalk(C, L.x, L.z, p.x, p.z), r = railOf(p.x, p.z);
+    opTake(op, q, { k: 'hold', ri: r.ri, s: r.s, x: p.x, z: p.z, R: 12, wp: w && w.len < RN.tripMax * 2 ? w : undefined, fast: w ? 1 : undefined });
+    side = side || p.sd; worst = Math.max(worst, w ? w.exp : p.v); far = Math.max(far, w ? w.len : hdist(L, p));
+  }
+  if (!side) return;
+  op.H = Math.max(op.H, S.t + Math.round(clamp(far / THB.pace + 10, THB.H[0], THB.H[1])));   // H waits for the longer, hidden way
+  let bx = src.x - I.kx, bz = src.z - I.kz; const bd = Math.hypot(bx, bz) || 1; bx /= bd; bz /= bd;
+  op.p11 = { x: I.kx + bx * K.back, z: I.kz + bz * K.back, f: 0, lat };
+  M4S().p11++;
+  gLog(t, 'def', 'Contra-flanco em ' + I.nm + ': o inimigo vem pelo flanco (' + Math.round(lat * 180 / Math.PI) + '° do eixo); a reação contorna pelo lado que ele menos vê (' + embPc(Math.min(1, worst)) + ' à vista), morteiro na abordagem dele na hora H', I, 0, { x: I.kx, z: I.kz });
+}
+thbOpen = (g => (C, I, qs, by) => { const op = g(C, I, qs, by); if (op && I.k === 'pt' && m4On(C)) p11(C, op, I); return op; })(thbOpen);
+OPS.qrf = (g => (C, op) => {
+  const A = op.p11;
+  if (A && !A.f && op.st === 'go' && S.t >= op.H && !op.over) {
+    A.f = 1;
+    if (gFireSrc(C.t, 'he', A.x, A.z) && C.fm.filter(M => !M.dead && S.t < M.T).length < GENC.fm) cmdMission(C, 'he', A.x, A.z, MANT.p11.fire, 60, op);
+  }
+  return g(C, op);
+})(OPS.qrf);
+/* ===== end P11 ===== */
+/* M4B: M4's own time (its candidates, doors, ops and the counter-flank), per call, read only (the tests and the probes measure it) */
+const M4B = { ms: 0, n: 0, worst: 0, stat() { return { calls: M4B.n, ms: Math.round(M4B.ms * 100) / 100, worst: Math.round(M4B.worst * 100) / 100 }; } };
+const m4T = f => function () { const a = AIB.now(); try { return f.apply(this, arguments); } finally { const d = AIB.now() - a; M4B.ms += d; M4B.n++; if (d > M4B.worst) M4B.worst = d; } };
+for (const T of [MANG, MANO, OPS]) for (const k of ['emb', 'itd', 'grd']) T[k] = m4T(T[k]);
+p11 = m4T(p11);
+
+/* the view's entry (genManOp): an ambush's hidden way and its killing ground along the road, a guard's way and the junction or bridge it holds (drawn by gManOp, after the scene) */
+genManOp = (g => (C, op) => {
+  const e = g(C, op);
+  if (op.k === 'emb' || op.k === 'itd') { const s = op.site || {}; e.nm = (op.f === 'L' ? 'em L · ' : 'linear · ') + String(op.nm || ''); e.path = genPath(op.path); e.to = gXZ(s); e.a = Number.isFinite(s.dx) ? Math.round(Math.atan2(s.dz, s.dx) * 10) / 10 : 0; }
+  else if (op.k === 'grd') { e.nm = String(op.nm || ''); e.path = genPath(op.path); e.to = gXZ(op.kz); }
+  return e;
+})(genManOp);
 /* ---------- the approaches (M2 of the general's manoeuvre): the cheapest tactical way to each side of an objective, on the side's tactical map ----------
    apBuild(C, P, sd): a Dijkstra over the cells of side C's tactical map (C.tm, TM.cell m) from the start of the attack (apStart: the nearest place the side
    holds on side sd of objective P, AP.start m to CMD.reach m from it, else its road AP.back m short of it), a cell costing TM.cell x (1 + AP.kV x the enemy's
@@ -23642,6 +24116,38 @@ function groundColor(k, x, z, c) {
   if (h > 280) c.lerp(TC.setHex(E.ground[2]), clamp((h - 280) / 170, 0, 1));
   if (h > 640) c.lerp(TC.setHex(P.snow), clamp((h - 640) / 160, 0, 1));
 }
+/* the towns on every map: each built-up place (T.burgs: town, seat town, village, hamlet) as a tinted footprint along its road, from the
+   place's own size (ru, rv), never from its lots: the seat's disguised installation lots are not drawn. The names are drawn live, by the zoom
+   (s px per m): a town's from 30 px/km, a village's from 45, a hamlet's from 90 */
+function burgAng(T, b) {
+  if (b.ma !== undefined) return b.ma;
+  let best = 1e18, a = 0;
+  const scan = p => { for (let i = 1; i < p.length; i++) { const q = p[i - 1], ex = p[i].x - q.x, ez = p[i].z - q.z, L2 = ex * ex + ez * ez || 1, t = clamp(((b.x - q.x) * ex + (b.z - q.z) * ez) / L2, 0, 1), d = Math.hypot(b.x - q.x - ex * t, b.z - q.z - ez * t); if (d < best) { best = d; a = Math.atan2(ez, ex); } } };
+  try { if (b.e !== undefined && T.net && T.net.e[b.e]) scan(T.net.e[b.e].p); else (T.routes || []).forEach(scan); } catch (e) { a = 0; }
+  return (b.ma = a);
+}
+function drawTownsFoot(g, T, X, Z, s) {
+  for (const b of T.burgs || []) {
+    const a = burgAng(T, b), c = Math.cos(a), sn = Math.sin(a), u = b.ru, v = b.rv, hm = b.k === 'hamlet', P = [[-u, -v], [u, -v], [u, v], [-u, v]];
+    g.beginPath(); P.forEach(([pu, pv], i) => { const x = X(b.x + pu * c - pv * sn), y = Z(b.z + pu * sn + pv * c); i ? g.lineTo(x, y) : g.moveTo(x, y); }); g.closePath();
+    g.fillStyle = hm ? 'rgba(236,196,120,.16)' : 'rgba(236,196,120,.26)'; g.fill(); g.strokeStyle = 'rgba(236,196,120,.75)'; g.lineWidth = Math.max(.8, hm ? .8 : 1.1); g.stroke();
+  }
+}
+function townLabel(b) {
+  if (b.nm) return b.nm;
+  const p = S.cq && S.cq.p.find(p => hdist(p, b) < 150); if (p) return p.name;
+  return b.k === 'town' ? 'Vila' : b.k === 'village' ? 'Aldeia' : '';
+}
+function drawTownNames(g, X, Z, s, k, on) {
+  const km = s * 1000;
+  for (const b of S.T.burgs || []) {
+    const need = b.k === 'town' ? 30 : b.k === 'village' ? 45 : 90; if (km < need) continue;
+    const nm = townLabel(b), x = X(b.x), y = Z(b.z); if (!nm || (on && !on(x, y))) continue;
+    const fs = clamp(9 + km / 60, 9, 13) * (k || 1), a = clamp((km - need) / need, .35, 1);
+    g.save(); g.globalAlpha = a; g.font = '600 ' + fs + 'px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineJoin = 'round'; g.lineWidth = 3; g.strokeStyle = 'rgba(8,12,13,.85)'; g.strokeText(nm, x, y); g.fillStyle = '#f4dca4'; g.fillText(nm, x, y); g.restore();
+  }
+}
 /* the battlefield from above, w pixels wide. relief: for the fire-control map, slopes shaded, a contour every 100 m and no roads (it draws its own) */
 function mapImg(w, relief) {
   const T = S.T, P = PAL[S.era], N1 = T.N + 1, h = Math.round(w * 2 * S.HW / S.W), c = new THREE.Color(), cvs = document.createElement('canvas'), up = new Int16Array(w), nc = relief ? new Float32Array(N1 * N1 * 3) : null;
@@ -23660,6 +24166,7 @@ function mapImg(w, relief) {
     im.data.set([c.r * 255, c.g * 255, c.b * 255, 255], (py * w + px) * 4);
   }
   g.putImageData(im, 0, 0);
+  drawTownsFoot(g, T, x => x / S.W * w, z => (z + S.HW) / (2 * S.HW) * h, w / S.W);
   if (relief) return cvs;
   g.strokeStyle = 'rgba(244,232,196,.95)'; g.lineWidth = 1.4;
   drawRoads(g, T, x => x / S.W * w, z => (z + S.HW) / (2 * S.HW) * h, g.lineWidth);
@@ -25020,6 +25527,7 @@ function fpMap(P, u, ink, acc, disp, blink) {
   hx.stroke();
   hx.strokeStyle = 'rgba(244,232,196,.9)'; hx.lineWidth = 1.6;
   drawRoads(hx, S.T, X, Y, hx.lineWidth);
+  drawTownNames(hx, X, Y, 1 / mpp, u, on);
   hx.setLineDash(DASH); hx.strokeStyle = acc; hx.lineWidth = 1.3; hx.beginPath(); hx.arc(X(P.x), Y(P.z), w.range / mpp, 0, TAU); hx.stroke(); hx.setLineDash(SOLID);
   for (const s of S.smokes) { hx.fillStyle = 'rgba(214,216,210,.55)'; hx.beginPath(); hx.arc(X(s.x), Y(s.z), Math.max(3, (s.r || SMOKE.r) / mpp), 0, TAU); hx.fill(); }
   const px = X(P.x), py = Y(P.z), ax = X(F.x), ay = Y(F.z), ok = !!sol && sol.ok, col = ok ? acc : FOE, br = Math.atan2(F.z - P.z, F.x - P.x), hf = Math.hypot(P.f.x, P.f.z) || 1;
@@ -25917,7 +26425,7 @@ function audioTick(dt) {
 }
 
 /* ---------- interface ---------- */
-let matchLen = CQ.def, playMode = 'demo', paused = false, era = 'ww2', overShown = false, invertY = false, ready = false, ctrl = 'classic', cls = 'plane';
+let matchLen = CQ.def, playMode = 'demo', paused = false, era = 'modern', overShown = false, invertY = false, ready = false, ctrl = 'mouse', cls = 'plane';
 const sel = { ww2: { plane: 'stuka', tank: 'tiger', aa: 'wirbel', art: 'hummel', inf: 'schutze' }, modern: { plane: 'f22', tank: 'abrams', aa: 'nasams', art: 'pzh', inf: 'blueRifle' } };
 const reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
@@ -25925,7 +26433,7 @@ const hangar = $('#hangar'), overEl = $('#over'), touchEl = $('#touch');
 try { invertY = localStorage.getItem('ceu-de-ferro-3d-inverter') === '1'; const l = localStorage.getItem('ceu-de-ferro-3d-duracao'); if (l !== null && CQ.len[+l]) matchLen = +l; } catch (e) {}
 try { const f = localStorage.getItem('ceu-de-ferro-3d-fogoamigo'); if (f !== null) FF.on = +f ? 1 : 0; } catch (e) {}
 for (const b of document.querySelectorAll('.tab[data-len]')) b.addEventListener('click', () => { matchLen = +b.dataset.len; try { localStorage.setItem('ceu-de-ferro-3d-duracao', String(matchLen)); } catch (e) {} buildHangar(); });
-try { if (localStorage.getItem('ceu-de-ferro-3d-controle') === 'mouse') ctrl = 'mouse'; $('#pname').value = localStorage.getItem('ceu-de-ferro-3d-nome') || ''; } catch (e) {}
+try { if (localStorage.getItem('ceu-de-ferro-3d-controle') === 'classic') ctrl = 'classic'; $('#pname').value = localStorage.getItem('ceu-de-ferro-3d-nome') || ''; } catch (e) {}
 const mouseAim = () => ctrl === 'mouse' && !coarse;
 /* the class in play: ground vehicles need a mouse */
 const klass = () => (coarse ? 'plane' : cls);
@@ -27059,7 +27567,7 @@ function gTerrain(g, V, P) {
   g.globalAlpha = 1; g.fillStyle = 'rgba(26,32,33,.7)';
   const hs = Math.max(1.6, 9 * P.s);
   for (const o of S.T.houses) if (S.os[o.id] < 2 && gOn(P, o.x, o.z, 4)) g.fillRect(P.X(o.x) - hs / 2, P.Y(o.z) - hs / 2, hs, hs);
-  for (const b of S.T.burgs) if (b.nm && gOn(P, b.x, b.z, 80)) gTxt(g, b.nm, P.X(b.x), P.Y(b.z) - Math.max(8 * P.k, b.rv * P.s) - 4 * P.k, 10 * P.k, 'rgba(236,230,214,.7)', 'center');   // the places of map version 3
+  drawTownNames(g, P.X, P.Y, P.s, P.k, (x, y) => x > -80 && x < GV.w + 80 && y > -30 && y < GV.h + 30);   // the towns, villages and hamlets, named by the zoom
   const wide = GV.w >= 981, cx = (wide ? 340 : 36), cy = GV.h - (wide ? 70 : GV.h * .45), km = 1000 * P.s;
   gHeadAt(g, cx, cy + 6, cx, cy - 24, 8, '#ece6d6'); gLine(g, cx, cy + 14, cx, cy - 16, '#ece6d6', 1.5); gTxt(g, 'N', cx - 4, cy - 29, 12, '#ece6d6');
   gLine(g, cx + 24, cy + 12, cx + 24 + km, cy + 12, '#ece6d6', 2); gTxt(g, '1 km', cx + 24, cy + 7, 11, '#ece6d6');
@@ -28020,7 +28528,7 @@ function gorOpsL(id, ops, tac) {
   }) : [gE('li', '', 'Nenhuma operação sua ou da IA')]);
 }
 /* Campanha: doctrine, campaigns (open, attach the operation picked with a role, end), the manoeuvres, the roads' posture, the known targets */
-const GORMAN = ['flank', 'infiltrate', 'raid', 'encircle', 'block', 'depth', 'feint', 'reserve', 'harass'];
+const GORMAN = ['flank', 'infiltrate', 'raid', 'encircle', 'block', 'depth', 'feint', 'reserve', 'harass', 'ambush', 'interdict', 'guard'];   // M4: the planned ambush, the interdiction and the guard of an alternate street, by a click on the road or the junction
 function gorCampP(V) {
   const W = GOR.w13, E = gorEco(), tac = gorTac(), ops = gorOps(V), K = V.camp || [], C = !S.net || S.host ? cmdOf(S.me) : null, up = C && C.upos ? C.upos : {};
   const Pz = V.per && typeof V.per === 'object' ? V.per : null, Dz = V.dif && typeof V.dif === 'object' ? V.dif : null;
@@ -28826,6 +29334,7 @@ function hudDroneMap(P, u, ink, acc) {
   hx.fillStyle = '#0c1213'; hx.fillRect(0, 0, cw, ch); hx.drawImage(mapBig, X(0), Y(-S.HW), S.W / mpp, 2 * S.HW / mpp);
   hx.strokeStyle = 'rgba(244,232,196,.9)'; hx.lineWidth = 1.4;
   drawRoads(hx, S.T, X, Y, hx.lineWidth);
+  drawTownNames(hx, X, Y, 1 / mpp, u);
   const mark = (o, col, r, sq) => { const x = X(o.sx === undefined || o.team === P.team ? o.x : o.sx), y = Y(o.sz === undefined || o.team === P.team ? o.z : o.sz); hx.fillStyle = col; hx.beginPath(); if (sq) hx.rect(x - r, y - r, r * 2, r * 2); else { hx.moveTo(x, y - r); hx.lineTo(x + r, y); hx.lineTo(x, y + r); hx.lineTo(x - r, y); } hx.fill(); };
   for (const q of S.units) if (!q.dead && (q.team === P.team || spotted(q))) mark(q, q.team === P.team ? FRIEND : FOE, 4, q.team === P.team);
   for (const b of S.sup) if (!b.dead && (b.team === P.team || spotted(b))) mark(b, b.team === P.team ? FRIEND : FOE, 6, true);
@@ -29562,6 +30071,17 @@ gManOp = (g => (c, V, P, o, now) => {
   c.setLineDash(o.k === 'tra' ? [4, 3] : o.k === 'reb' ? [1, 3] : []); gRing(c, to[0], to[1], r, own, 2); c.setLineDash([]);
   gTxt(c, (GEN.mtag[o.k] || '') + ' · ' + (GEN.mst[o.st] || o.st || '') + (o.nm ? ' · ' + o.nm : ''), to[0], to[1] - r - 8 * k, 10.5 * k, own, 'center');
 })(gManOp);
+/* the general's view, M4: an ambush's hidden way (dotted) and a bar along the road at its killing ground (a ring for an interdiction), a guard's way and a square at what it holds */
+gManOp = (g => (c, V, P, o, now) => {
+  g(c, V, P, o, now);
+  if (o.k !== 'emb' && o.k !== 'itd' && o.k !== 'grd') return;
+  const k = P.k, own = gCol(V, V.t), q = gPth(P, o.path), to = gPt(P, o.to);
+  if (q) { c.lineCap = 'round'; c.setLineDash([.1, 6]); c.beginPath(); q.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1]))); c.strokeStyle = own; c.lineWidth = 2.6; c.stroke(); c.setLineDash([]); c.lineCap = 'butt'; }
+  if (!to) return;
+  if (o.k === 'grd') { const r = 8 * k; c.strokeStyle = own; c.lineWidth = 2; c.strokeRect(to[0] - r, to[1] - r, 2 * r, 2 * r); }
+  else { const a = Number.isFinite(o.a) ? o.a : 0, ux = Math.cos(a), uy = Math.sin(a), L = 15 * k; gLine(c, to[0] - ux * L, to[1] - uy * L, to[0] + ux * L, to[1] + uy * L, own, 4); if (o.k === 'itd') gRing(c, to[0], to[1], 7 * k, FOE, 1.4); }
+  gTxt(c, (GEN.mtag[o.k] || '') + ' · ' + (GEN.mst[o.st] || o.st || '') + (o.nm ? ' · ' + o.nm : ''), to[0], to[1] - 16 * k, 10.5 * k, own, 'center');
+})(gManOp);
 /* the HUD: a soldier at either end of a standing bridge is told N sets a charge there; the pontoon's build mode and its progress */
 Object.assign(PWHY, { nobr: 'Pontão: na cabeceira de uma ponte destruída ou na margem de um trecho estreito do rio; ponte: na cabeceira de uma destruída', whole: 'A ponte está de pé', pont: 'Já há um pontão aí', server: PWHY.server,
   up: 'A ponte está de pé: nada a reconstruir', reb: 'Essa ponte já está sendo reconstruída', wide: 'O rio é largo demais aqui (até ' + BR.ps.max + ' m)', bank: 'Margem íngreme demais para o pontão', near: 'Perto de uma ponte: lance na cabeceira dela', map: 'Fora do mapa', link: 'Nenhuma estrada ao alcance desta margem' });
@@ -29587,6 +30107,160 @@ function frame(now) {
     Net.tick(dt);
   }
   updateCamera(dt); syncScene(dt); if (!GV.on) render3d(); drawHud(); audioTick(dt); genSample(); if (GV.on) genFrame(now);
+}
+/* ---------- vehicles off the rail (M5 of the general's manoeuvre; not tested, see docs/nao-testado/cf-m5-veiculos-trilho.md) ----------
+   The AI's vehicles rode their axis most of the time (the scout measured ~86%). Here:
+   - the cost of a road edge for side t (m5Cost) is today's (length times class, times 1 + C.et) times 1 + what the tactical map (M1, C.tm)
+     says along it, the mean of its samples: kV the enemy's sight (v), kF its strength (f, f / (1 + f)), kP our losses (p, the same), kT its
+     traffic (t). Kept per side until the map's next refresh (C.m5e, C.m5n). jit: a draw of 1 to 1 + M5.jit an edge, so ways that cost about
+     the same take turns (the logistics: no habit for the enemy to lie in wait on);
+   - tripTac: a trip (tripTo's record) by that cost. Every AI vehicle's trip by tripTo takes it while the side has a map (tripTo is wrapped);
+     trucks and cars draw the jitter;
+   - the assault's armour (m5Atk): when the AI opens an assault that is not a walk, up to M5.atk.n[0] tanks (n[1] with 3 squads or more)
+     riding an axis within M5.reach m of the objective, idle and whole, go by the tactical trip to the road nearest a firing place off the
+     front of the objective (m5Spot: the assault position of an approach of the planner's (M2, op.pl.A), one the squads do not take first, else
+     theirs, M5.atk.front to M5.atk.rear degrees off the axis; else the best cell of a ring of M5.atk.r m:
+     little sight, strength and losses, cover, the objective in view, near a road, off the assault's line, op.ax, by M5.atk.front degrees or more), then
+     hold there (u.ai.m5) firing at what they see, until the op ends or falls back, the tank is hurt below M5.atk.hp, or M5.atk.hold s pass;
+     then they go back to the nearest axis by a trip (m5Home);
+   - the ambush and the roadblock: the tank that lies in wait may come from any axis within M5.amb.reach m (it was its own axis within 1500 m,
+     or 900 m for the roadblock), and goes there by the tactical trip to the road nearest its place, its wait made longer by the ride;
+     afterwards it goes home by a trip when it is off its road (m5Home);
+   - the convoys (m5Lg): among the axes a node lies on (rs[j]), the ones within M5.lg.k of the cheapest (length times 1 + lgThr) are drawn,
+     the one the last convoy to that node took left out when there is another.
+   M5.on 0 leaves all of it out. Only the host (or solo) runs any of it: it moves AI vehicles (no u.net) */
+const M5 = { on: 1, kV: 3, kF: 1.5, kP: .6, kT: .3, jit: .15, reach: 4000, near: 300, road: 250, onRoad: 60, back: 200,
+  atk: { n: [1, 2], r: [380, 520], front: 35, rear: 120, hold: 480, hp: .5, retry: 20, apart: 250, much: 3 },
+  amb: { reach: 3500 }, lg: { k: .15 } };
+/* the tactical multiplier of each edge for commander C (null without a map) */
+function m5Edge(C) {
+  const M = C && C.tm, N = S.T && S.T.net;
+  if (!M || !N || !M.v) return null;
+  if (C.m5e && C.m5n === M.n && C.m5e.length === N.e.length) return C.m5e;
+  const a = new Float32Array(N.e.length), cl = (x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
+  for (const e of N.e) {
+    let v = 0, f = 0, p = 0, tr = 0; const sm = e.smp || [], n = sm.length || 1;
+    for (const s of sm) { const q = cl(s.x, s.z), ff = M.f[q] || 0, pp = M.p[q] || 0; v += M.v[q] || 0; f += ff / (1 + ff); p += pp / (1 + pp); tr += M.t[q] || 0; }
+    a[e.i] = 1 + (M5.kV * v + M5.kF * f + M5.kP * p + M5.kT * tr) / n;
+  }
+  C.m5n = M.n; return (C.m5e = a);
+}
+const m5Jit = () => { const N = S.T.net, a = new Float32Array(N.e.length); for (let i = 0; i < a.length; i++) a[i] = 1 + Math.random() * M5.jit; return a; };
+/* the cost of an edge for side t: today's, times the map's, times the jitter */
+function m5Cost(t, mode, jit) {
+  const C = S.cmd && S.cmd[t], base = edgeCostOf(C, mode || 'veh'), m = m5Edge(C);
+  if (!m && !jit) return null;
+  return e => base(e) * (m ? m[e.i] : 1) * (jit ? jit[e.i] : 1);
+}
+/* tripTo by the tactical cost; o.max: no trip longer than that */
+function tripTac(u, x, z, o) {
+  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
+  o = o || {}; const cost = m5Cost(u.team, 'veh', o.jit); if (!cost) return null;
+  const p = tripOf(u.x, u.z, x, z, { mode: 'veh', cost }); if (!p || (o.max && p.len > o.max)) return null;
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '', tac: 1 });
+}
+tripTo = (g => (u, x, z, o) => {
+  if (!M5.on || !u || u.net || !u.ai || !S.cmd || !S.cmd[u.team] || !S.cmd[u.team].tm) return g(u, x, z, o);
+  return tripTac(u, x, z, Object.assign({}, o, { jit: u.kind === 'truck' || u.kind === 'car' ? m5Jit() : null })) || g(u, x, z, o);
+})(tripTo);
+/* the seconds a trip takes the vehicle at full drive */
+const m5Eta = (u, T) => (T && T.p ? T.p.len / Math.max(1, u.def.spd * GSPD) : 0);
+/* send u toward (x, z) by the tactical trip to the road nearest it: true when it went (or is already near) */
+function m5Go(u, x, z, why) {
+  if (hdist(u, { x, z }) < M5.near) return true;
+  const n = netNear(x, z), gx = n.d > M5.onRoad ? n.x : x, gz = n.d > M5.onRoad ? n.z : z;
+  return !!tripTac(u, gx, gz, { why, max: M5.reach * 2 });
+}
+/* a tank that can be taken for the general's manoeuvre: an AI tank riding an axis, idle and whole */
+const m5Free = (u, t) => u.kind === 'tank' && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.tgt && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && u.hp >= u.max * .6 && S.t - u.hitT > 20;
+/* the nearest such tank of side t to (x, z) within r m (or on axis ri within 1500 m along it when ri is given: today's choice), or null */
+function m5Tank(t, x, z, r, ri, s) {
+  let b = null, bd = 1e9;
+  for (const u of S.units) {
+    if (!m5Free(u, t)) continue;
+    const d = hdist(u, { x, z }), ok = (ri !== undefined && u.ri === ri && Math.abs(u.s - s) < 1500) || (M5.on && d < r);
+    if (ok && d < bd) { b = u; bd = d; }
+  }
+  return b;
+}
+/* a tank sent to wait at an ambush or a roadblock rides there by road; its wait is made longer by the ride */
+function m5Amb(u) {
+  const P = u.ai.amb; if (!M5.on || !P) return;
+  if (m5Go(u, P.x, P.z, 'amb')) P.T += m5Eta(u, u.trip);
+}
+/* back to the nearest axis by a trip when far off it, else to its brain's way home */
+function m5Home(u) {
+  const A = u.ai, p = railOf(u.x, u.z);
+  u.ri = p.ri; u.s = p.s; A.off = clamp(p.off, -150, 150); A.back = 0;
+  if (!M5.on || u.trip || u.dead || (A.tgt && !A.tgt.dead) || S.t - u.hitT < 5 || p.d < M5.back) return;
+  const r = S.T.routes[p.ri], q = routeAt(r, clamp(p.s, 0, r.len)), was = u.rail; u.rail = true;
+  if (!tripTo(u, q.x, q.z, { why: 'home' })) u.rail = was;
+}
+tankAmb = (g => (u, A) => { const P = A.amb, r = g(u, A); if (!r && P && !A.amb) m5Home(u); return r; })(tankAmb);
+/* the firing place for a tank of op (an assault), away from those taken: { x, z } or null */
+function m5Spot(C, op, taken) {
+  const O = op.O, M = C.tm, R = M5.atk, far = p => taken.every(q => Math.hypot(q.x - p.x, q.z - p.z) >= R.apart);
+  const ok = (x, z) => x > 100 && x < S.W - 100 && Math.abs(z) < S.HW - 100 && hgt(x, z) > S.T.WL + 1;
+  const used = Array.isArray(op.ap) ? op.ap : [], all = op.pl && Array.isArray(op.pl.A) ? op.pl.A : [];
+  for (const a of all.filter(a => !used.includes(a)).concat(used)) {   // the planner's approaches (M2): one the squads do not take first (fire from another side), then theirs
+    const x = a && a.pos && a.pos.x, z = a && a.pos && a.pos.z;
+    if (!Number.isFinite(x) || !Number.isFinite(z) || a.ang < R.front || a.ang > R.rear) continue;
+    if (ok(x, z) && far({ x, z })) return { x, z };
+  }
+  const cl = (x, z) => (M ? clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1) : -1), oy = hgt(O.x, O.z) + 2;
+  let b = null, bs = 1e9;
+  for (let k = 0; k < 16; k++) for (const r of R.r) {
+    const a = k * Math.PI / 8, x = O.x + Math.cos(a) * r, z = O.z + Math.sin(a) * r;
+    if (!ok(x, z) || !far({ x, z })) continue;
+    const ang = Math.acos(clamp(Math.cos(a) * op.ax + Math.sin(a) * op.az, -1, 1)) * 180 / Math.PI, q = cl(x, z), n = netNear(x, z);
+    let sc = ang < R.front ? 1 : ang > R.rear ? .6 : 0;   // off the front, not behind the enemy
+    if (q >= 0) { const f = M.f[q] || 0, p = M.p[q] || 0; sc += M5.kV * (M.v[q] || 0) + M5.kF * f / (1 + f) + M5.kP * p / (1 + p) - (M.o[q] || 0); }
+    if (!los({ x, z }, hgt(x, z) + 2.5, O, oy)) sc += 1;
+    sc += Math.max(0, n.d - M5.road) / 1000;
+    if (sc < bs) { bs = sc; b = { x, z }; }
+  }
+  return b;
+}
+/* the assault's armour: the tanks that go the back roads to fire on the objective from off its front */
+function m5Atk(C, op) {
+  if (!M5.on || op.walk || op.over || (op.by && op.by !== 'ai') || S.t < (op.m5T || 0)) return;
+  op.m5T = S.t + M5.atk.retry; op.m5 = op.m5 || [];
+  const t = C.t, O = op.O, want = (op.sq.length >= 3 ? M5.atk.n[1] : M5.atk.n[0]) - op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op).length;
+  for (let i = 0; i < want; i++) {
+    const u = m5Tank(t, O.x, O.z, M5.reach); if (!u) return;
+    if (C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) return;   // the last tank of a road held with difficulty stays
+    const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) return;
+    if (!m5Go(u, sp.x, sp.z, 'atk')) { op.m5T = S.t + M5.atk.retry; return; }
+    const eta = m5Eta(u, u.trip);
+    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + eta + M5.atk.hold, k: 'atk' }; op.m5.push(u);
+    gLog(t, 'atk', 'Carro de combate vai por estradas secundárias apoiar o assalto a ' + gName(O) + ' pelo flanco' + (eta ? ' (' + Math.round(eta / 60 * 10) / 10 + ' min)' : ''), sp, 'm5a' + op.id + '.' + i);
+  }
+}
+atkOpen = (g => (...a) => { const op = g(...a); if (op && a[0]) m5Atk(a[0], op); return op; })(atkOpen);
+OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && (op.st === 'form' || op.st === 'prep' || op.st === 'screen')) m5Atk(C, op); })(OPS.atk);
+/* a tank holding its firing place: its brain fights as ever from off its road; the drive is the place's */
+AI.tank = (old => (u, dt) => {
+  const A = u.ai, H = A && A.m5;
+  if (!H) return old(u, dt);
+  const op = H.op;
+  if (!M5.on || op.over || op.st === 'back' || op.st === 'cons' || S.t > H.T || u.hp < u.max * M5.atk.hp) { A.m5 = null; m5Home(u); return old(u, dt); }
+  u.rail = false; old(u, dt); u.rail = false;
+  if (A.amb) return;
+  driveTo(u, H.x, H.z);
+  if (!(A.tgt && !A.tgt.dead) && !A.inf && !A.low) u.ctl.aim = vnorm({ x: op.O.x - u.x, y: 0, z: op.O.z - u.z });
+})(AI.tank);
+/* a convoy's axis: one of those a node lies on that cost about the least, not the last one taken to it when there is another */
+function m5Lg(t, o) {
+  const b = lgS(o);
+  if (!M5.on || o.sup || !Array.isArray(o.rs)) return b;
+  const c = [];
+  o.rs.forEach((s, ri) => { if (s === null || s === undefined || !S.T.routes[ri]) return; c.push({ ri, s, c: Math.abs(s - endS(t, ri, FIELD.main)) * (1 + lgThr(t, ri, s)) }); });
+  if (c.length < 2) return b;
+  const lo = Math.min(...c.map(q => q.c)), M = S.m5lg || (S.m5lg = {}), key = t + ':' + lgKey(o);
+  let ok = c.filter(q => q.c <= lo * (1 + M5.lg.k));
+  if (ok.length > 1 && M[key] !== undefined) ok = ok.filter(q => q.ri !== M[key]) || ok;
+  const p = ok[Math.floor(Math.random() * ok.length)] || b;
+  M[key] = p.ri; return { ri: p.ri, s: p.s };
 }
 function boot() {
   try {

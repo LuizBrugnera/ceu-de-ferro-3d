@@ -28,7 +28,7 @@ function bridge(env) {
   h.ws.on('message', d => {
     const m = JSON.parse(d);
     if (m.t === 'gcmd') { seenCmd.push(m); const bad = m.c.c === 'nope'; h.send({ t: 'gres', to: m.from, n: m.n, ok: !bad, why: bad ? 'unknown' : '', id: bad ? 0 : 77 }); }
-    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, tickets: [{ loss: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 } } }); }
+    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, tickets: [{ loss: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 }, sq: [{ id: 1, nm: 'Esquadra Urso', rank: 2, x: 5, z: 6, n: 4 }], vet: [{ who: 'T-90M', g: 'tank', rank: 3, xp: 40, x: 1, z: 2 }] } }); }
   });
 
   const b = bridge({});
@@ -120,6 +120,8 @@ function bridge(env) {
   const gp = await b.call('get_production_plan'); ok(!gp.isError && seenAsk[seenAsk.length - 1].q.q === 'plan', 'get_production_plan: the relay passes gask plan to the host');
   await new Promise(r => setTimeout(r, 1100)); const gl2 = await b.call('get_logistics'); ok(!gl2.isError && seenAsk[seenAsk.length - 1].q.q === 'logi', 'get_logistics: the relay passes gask logi to the host');
   await new Promise(r => setTimeout(r, 1100)); const gr = await b.call('get_recovery'); ok(!gr.isError && seenAsk[seenAsk.length - 1].q.q === 'rec', 'get_recovery: the relay passes gask rec to the host');
+  const gm = (await b.call('get_state', { refresh_map: true })).json;
+  ok(gm && gm.general.squads[0].name === 'Esquadra Urso' && gm.general.squads[0].rank === 'veteran' && gm.map.veterans[0].unit === 'T-90M' && gm.map.veterans[0].rank === 'elite', 'get_state with the map: each squad\'s name and rank, the veteran vehicles and aircraft');
   await new Promise(r => setTimeout(r, 1100)); const gb = await b.call('get_bridges'); ok(!gb.isError && seenAsk[seenAsk.length - 1].q.q === 'brg', 'get_bridges: the relay passes gask brg to the host');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');

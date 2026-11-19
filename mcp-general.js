@@ -342,12 +342,14 @@ async function askState() {
 }
 /* a squad's radio link in the host's picture (genState sq.link): 0 cut by a jammer, 1 out of the command net, 2 in it; orders reach it later the worse it is */
 const LINK = ['cut', 'out of net', 'in net'];
+/* veterancy (the page's VET.rank): a squad's rank in the map's state, and the side's Veterano and Elite vehicles and aircraft */
+const RANKS = ['recruit', 'regular', 'veteran', 'elite'];
 const pos = (x, z) => (typeof x === 'number' && typeof z === 'number' ? { x: Math.round(x), z: Math.round(z) } : null);
 function stateView(logN) {
   const e = R.ecs && R.ecs.m, g = R.gen && R.gen.m, v = e && e.v, pd = R.pic && R.pic.d;
   const sqPic = new Map(((pd && pd.sq) || []).map(q => [q.id, q]));
-  const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null, radio: LINK[p.link], orderArrivesInS: p.eta }; })
-    : ((pd && pd.sq) || []).map(p => ({ id: p.id, job: p.job, at: pos(p.x, p.z), men: p.n }));
+  const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, name: p.nm, rank: RANKS[p.rank], job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null, radio: LINK[p.link], orderArrivesInS: p.eta }; })
+    : ((pd && pd.sq) || []).map(p => ({ id: p.id, name: p.nm, rank: RANKS[p.rank], job: p.job, at: pos(p.x, p.z), men: p.n }));
   const out = {
     link: { connected: R.up, room: ROOM, side: SIDE, playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
     matchClockT: R.T, clockAgeSeconds: age(R.Tat),
@@ -371,7 +373,7 @@ function stateView(logN) {
   if (pd) out.map = {
     ageSeconds: age(R.pic.at),
     points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? (p.base === SIDE ? 'ours' : 'enemy') : undefined })),
-    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
+    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
     commandNet: pd.cn || undefined,
     personality: pd.per || undefined, difficulty: pd.dif || undefined, enemyHabits: pd.hab && pd.hab.length ? pd.hab : undefined,   // W17: the side's AI general, and the roads the enemy is seen to use again and again
@@ -396,7 +398,7 @@ function rtOf(a) {
 const IDS = { type: 'array', maxItems: 12, items: { type: 'integer' }, description: 'squad ids from get_state (general.squads); omit to let the general pick' };
 const withRt = (c, a) => { const rt = rtOf(a); if (rt) c.rt = rt; return c; };
 const TOOLS = [
-  { name: 'get_state', description: 'Read what your side knows, in readable names: economy (stock, income, your sites with ids and progress, the production queue with ids, reserves, known enemy sites), the commander view (posture, operations, squads with ids and jobs) and the last order-log lines. Every part carries ageSeconds: trust the age. Cheap and unlimited, it never asks the host. The MAP part (points with index, name, position and holder; roads; enemy sightings; your vehicles; squad positions and men; tickets) comes from one question to the host: pass refresh_map: true to ask now (about a second, at most one a second; do it on your first call and after big moves); wait also refreshes it every 8 s, so after a wait it is recent. Positions are metres on the map (x, z). The ids in it are what the tactical commands name (squad ids in ids, point indexes in pi, enemy site ids in strike/raid). With from_host: true you instead get the host\'s raw whole picture (genState, large) as data.',
+  { name: 'get_state', description: 'Read what your side knows, in readable names: economy (stock, income, your sites with ids and progress, the production queue with ids, reserves, known enemy sites), the commander view (posture, operations, squads with ids and jobs) and the last order-log lines. Every part carries ageSeconds: trust the age. Cheap and unlimited, it never asks the host. The MAP part (points with index, name, position and holder; roads; enemy sightings; your vehicles; squad positions and men; tickets; the name and rank of each squad, and your veteran vehicles and aircraft) comes from one question to the host: pass refresh_map: true to ask now (about a second, at most one a second; do it on your first call and after big moves); wait also refreshes it every 8 s, so after a wait it is recent. Positions are metres on the map (x, z). The ids in it are what the tactical commands name (squad ids in ids, point indexes in pi, enemy site ids in strike/raid). With from_host: true you instead get the host\'s raw whole picture (genState, large) as data.',
     inputSchema: { type: 'object', properties: { log_lines: { type: 'integer', minimum: 0, maximum: 80, description: 'how many recent log lines to include (default 10)' }, refresh_map: { type: 'boolean', description: 'ask the host for a fresh map picture and merge it in' }, from_host: { type: 'boolean', description: 'return the host\'s raw picture instead (large)' } }, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async a => {
       const e = need(a, { log_lines: ['i', false, 0, 80] }); if (e) throw new Error(e);

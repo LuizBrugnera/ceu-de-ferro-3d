@@ -103,9 +103,9 @@ function salvo(c, S, p, n) {
 {
   fresh('modern'); const p = flat(3), D = build(6, 0, p.x, p.z, 0);
   /* across the flat ground round the dome, so the seeker has the tank from launch (from 700 m out the rise hid it, and it was a draw whether
-     the seeker found it again before the dome could see a target) */
+     the seeker found it again before the dome could see a target); the shooter off to one side, so the dome itself is not on the seeker's line */
   const tk = C.addUnit('tank', 0, p.x - 40, p.z, S.E.sides[0].tanks[1], true); tk.ai = null;
-  const at = C.addMan($('INF').modern[1][0], 1, p.x + 140, p.z, 0); at.ai = null; const atSeen = at.seenT, e = $('manEye')(at);
+  const at = C.addMan($('INF').modern[1][0], 1, p.x + 140, p.z + 40, 0); at.ai = null; const atSeen = at.seenT, e = $('manEye')(at);
   const ms = $('MSHOT').atgm(at, SARMS.kornet, e, $('vnorm')({ x: tk.x - e.x, y: 0, z: tk.z - e.z }), tk); C.run(1);
   ok(ms.dj && at.seenT > atSeen, 'a guided missile fired at its side within its radius is engaged, and its radar shows who fired it too');
 }

@@ -53,6 +53,7 @@ console.log('-- the planner refills a post --');
 for (const bases of [false, true]) { const C = H.load({ seed: 9 }), $ = C.$; if (!bases) C.planSup = () => {}; const S = solo(C, 'ww2'), F = $('FIELD'), q = S.squads.find(q => q.team === 0 && q.job === 'line' && q.jk === 0), post = { x: q.ord.x, z: q.ord.z };
   C.run(bases ? 60 : 1, () => { park(S); calm(S); });
   for (const m of q.men) C.killMan(m, null);
+  if (bases) $('IAI').cap += 10;   // room under the side's cap for the refill: whether other men fall meanwhile (the drills keep more of them alive) is not the point
   const t0 = S.t; let tT = -1, tU = -1, tG = -1, tr = null, far = 0, nq = null;
   C.run(900, () => { park(S); calm(S); if (!nq) nq = S.squads.find(x => x !== q && x.team === 0 && x.job === 'line' && x.jk === 0) || null; if (nq && tU < 0) tU = S.t - t0;
     if (!tr) { tr = S.units.find(u => u.fld && u.team === 0 && u.job === 'line'); if (tr) { tT = S.t - t0; far = Math.abs(tr.s - q.ord.s); } } else if (tG < 0 && tr.gone) tG = S.t - t0; return !(nq && nq.at && (!tr || tG >= 0)); });

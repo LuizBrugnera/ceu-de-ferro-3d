@@ -102,6 +102,12 @@ console.log('-- contact: down at the first one, an ambush near and far, a strong
   const { C, $, S, mid, at, squad, know, live, took, clear } = box(21, 'ww2');
   const foe = (s, off, i) => { const p = at(s, off), m = C.addMan($('INF').ww2[S.fac[1]][i || 0], 1, p.x, p.z, 0); m.inv = 1e9; m.ai = null; return m; };
   {
+    const q = squad(0, mid, 0), r = foe(mid + 40, 0), g = foe(mid + 200, 0, 1), bel = (o, d, c, thr) => [o, { x: o.x, z: o.z, d, c, g: 2, t: S.t, thr }];
+    q.bel = new Map([bel(g, 200, 'mg', 1.01), bel(r, 40, 'man', .49)]); const K = $('drInfo')(q);
+    ok(K && K.near && K.near.o === r && K.near.d === 40, 'a rifleman believed at 40 m and a machine gun at 200 m: the nearest contact is the rifleman (' + (K && K.near && K.near.d) + ' m), not the greater threat');
+    q.bel = null; clear();
+  }
+  {
     const q = squad(0, mid, 0); C.run(6); const e = foe(mid + 300, 0); for (const m of live(q)) { m.hitT = S.t; m.sup = S.t + 3; } q.drCt = -1e9;
     C.run(1.2); const id = q.dr && q.dr.id, st = live(q).filter(m => m.st === 2 || m.ctl.st === 2).length, R = (S.rep || [[]])[0].filter(r => r.k === 'contact' && r.data && r.data.dr).length;
     ok(id === 'contato' && st >= live(q).length - 1 && R === 1, 'first contact after a quiet spell: down where they are (' + st + ' of ' + live(q).length + ') and a contact report');
@@ -191,11 +197,29 @@ console.log('-- movement: bounds in the open, behind a friendly tank, a halt, a 
     clear();
   }
   {
-    const q = squad(0, mid, 0, null, { k: 'move', s: mid, x: at(mid).x, z: at(mid).z }); C.run(20);
-    const l = live(q), c = { x: l.reduce((a, m) => a + m.x, 0) / l.length, z: l.reduce((a, m) => a + m.z, 0) / l.length }, ang = l.map(m => Math.atan2(m.z - c.z, m.x - c.x)).sort((a, b) => a - b);
+    const q = squad(0, mid, 0, null, { k: 'move', s: mid, x: at(mid).x, z: at(mid).z }), l = live(q), mid0 = () => ({ x: l.reduce((a, m) => a + m.x, 0) / l.length, z: l.reduce((a, m) => a + m.z, 0) / l.length });
+    let out = 0; C.run(20, () => { if (q.dr && q.dr.id === 'perimetro') { const c = mid0(); out = Math.max(out, l.filter(m => m.f && ((m.x - c.x) * m.f.x + (m.z - c.z) * m.f.z) > 0).length); } });
+    const c = mid0(), ang = l.map(m => Math.atan2(m.z - c.z, m.x - c.x)).sort((a, b) => a - b);
     let gap = 0; for (let i = 0; i < ang.length; i++) gap = Math.max(gap, ((ang[(i + 1) % ang.length] - ang[i]) + Math.PI * 2) % (Math.PI * 2) || Math.PI * 2);
-    const out = l.filter(m => m.f && ((m.x - c.x) * m.f.x + (m.z - c.z) * m.f.z) > 0).length;
-    ok(took(q, 'perimetro') && gap < Math.PI * .9 && out >= l.length - 1, 'halted at the end of its walk with nothing near: a ring all round (widest gap ' + (gap * 180 / Math.PI).toFixed(0) + ' deg), ' + out + ' of ' + l.length + ' facing out');
+    ok(took(q, 'perimetro') && gap < Math.PI * .9 && out >= l.length - 1, 'halted at the end of its walk with nothing near: a ring all round that it keeps (widest gap ' + (gap * 180 / Math.PI).toFixed(0) + ' deg), ' + out + ' of ' + l.length + ' facing out as it formed');
+    const h = q.drH.find(h => h[0] === 'perimetro');
+    ok(!(q.dr && q.dr.id === 'perimetro') && h && h[2] - h[1] < 15, 'the ring formed, the perimeter is over (from ' + (h && h[1]) + ' s to ' + (h && h[2]) + ' s), not held to its ' + $('drOf')('perimetro').max + ' s');
+    C.run(130);
+    ok(q.at && S.drN.all[0].perimetro === 1 && !(q.dr && q.dr.id === 'perimetro'), 'still halted 130 s on: the perimeter taken once for the halt (' + S.drN.all[0].perimetro + ')');
+    clear();
+  }
+  {
+    const q = squad(0, mid - 300, 0, null, { k: 'move', s: mid + 600, x: at(mid + 600).x, z: at(mid + 600).z }); C.run(2); q.rd = { st: 'call', sP: q.ts, T: S.t + 999 };   // waiting at the meeting place for its ride
+    C.run(25); const R = q.drPer, l = live(q), ring = () => l.filter(m => R && R.p[m.ai.i] && $('hdist')(m, R.p[m.ai.i]) < 2.5).length;
+    const n0 = ring(), ended = !(q.dr && q.dr.id === 'perimetro') && took(q, 'perimetro'); C.run(40); const n1 = ring();
+    q.rd = null; const col = l.filter(m => R && R.p[m.ai.i] && $('hdist')($('slot')(q, m.ai.i), R.p[m.ai.i]) > .1).length;
+    ok(ended && n0 >= l.length - 1 && n1 >= l.length - 1 && col === l.length, 'waiting for its ride: the ring formed, the drill over, ' + n1 + ' of ' + l.length + ' still in their ring places 40 s on; the ride gone, ' + col + ' back to the column\'s places');
+    clear();
+  }
+  {
+    const q = squad(0, mid, 0, null, { k: 'move', s: mid, x: at(mid).x, z: at(mid).z }); q.at = true;
+    const t0 = $('lodTier')(q); q.dr = { id: 'perimetro' }; const t1 = $('lodTier')(q); q.dr = { id: 'artilharia' }; const t2 = $('lodTier')(q); q.dr = null;
+    ok(t0 > 0 && t1 === t0 && t2 === 0, 'a far, quiet squad: its pace (LOD tier ' + t0 + ') kept in the perimeter (' + t1 + '), the usual pace under shells (' + t2 + ')');
     clear();
   }
   {
@@ -259,7 +283,7 @@ if (SECS) for (const era of ['ww2', 'modern']) {
     if (p.D.id === 'artilharia' && !(o.drB || []).length) bad.push('artilharia without a burst');
   };
   C.run(SECS);
-  ok(n > 0 && !bad.length && !H.nan(S), era + ': AI battle of ' + SECS + ' s: ' + n + ' drills taken ' + JSON.stringify(seen) + ', every one from what the squad believed (a friend it keeps with, com-carro, is no contact)' + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
+  ok(n > 0 && !bad.length && !H.nan(S), era + ': AI battle of ' + SECS + ' s: ' + n + ' drills taken ' + JSON.stringify(seen) + ', every one from what the squad believed' + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
 }
 
 console.log('-- the review and the cost --');

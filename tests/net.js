@@ -1,11 +1,12 @@
 'use strict';
-/* starts the relay server under test on its own port (SERVER=<path>, default the project's server.js; PORT_T, default 8093) and hands out sockets */
+/* starts the relay server under test on its own port (SERVER=<path>, default the project's server.js; PORT_T, default 8093), on this computer only
+   (HOST 127.0.0.1 unless the environment says otherwise), and hands out sockets */
 const { spawn } = require('child_process'), path = require('path'), WebSocket = require('ws');
 const SERVER = process.env.SERVER ? path.resolve(process.env.SERVER) : path.join(__dirname, '..', 'server.js'), PORT = +process.env.PORT_T || 8093;
 let child = null;
 function start() {
   return new Promise((res, rej) => {
-    child = spawn(process.execPath, [SERVER], { env: Object.assign({}, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
+    child = spawn(process.execPath, [SERVER], { env: Object.assign({ HOST: '127.0.0.1' }, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
     child.stdout.on('data', d => { if (String(d).includes('no ar')) res(); }); child.on('error', rej); setTimeout(() => rej(new Error('server did not start')), 5000);
   });
 }

@@ -1,7 +1,10 @@
 'use strict';
 /* bridges and pontoons online, headless, through the real relay server on its own port (map v5): every client has the same bridges, a
    guest sapper's charges bring one down on the host and everyone (obj), a guest's request starts a pontoon the room sees laid (fort, kind 7),
-   it opens the river on every client, and whoever comes in later is given both */
+   it opens the river on every client, and whoever comes in later is given both. Then (W20b, welcome brb: 1) a guest's request starts a pontoon at a
+   narrow stretch away from the bridges that every client has across the river and walks on, and a guest's rebuild of the fallen bridge stands
+   it up again on every client (obj with stage 0) with its pontoon taken up; the destroyed free pontoon shuts on every client, and a later player
+   is given the bridge standing and what is left */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const all = [], dt = 1 / 60;
 async function client(name, cls, model) {
@@ -58,6 +61,42 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   console.log('-- whoever comes in later --');
   const g3 = await client('Tarde', 'inf', 'redEng'); await run(1); await until(() => g3.S.os[id] === 2 && pf(g3) && pf(g3).prog >= 1);
   ok(g3.S.os[id] === 2 && pf(g3) && pf(g3).prog >= 1 && g3.S.brk === b.i + 'p', 'a player who joins later is given the fallen bridge and the finished pontoon');
+  const C4 = [host, g1, g2, g3];
+
+  console.log('-- a pontoon at a new point of the river --');
+  ok(C4.every(c => c.Net.brb), 'the server says brb: 1');
+  const site = host.$('brSites()').reduce((a, s) => (Math.abs(s.z) < Math.abs(a.z) ? s : a)), se = site.ends[0];
+  const near = (x, z) => until(() => { put(g1, x, z); const q = host.Net.ghosts.get(g1.id); return q && Math.hypot(q.x - x, q.z - z) < 5; });
+  await near(se.x, se.z);
+  g1.Net.fbuild({ k: 7, x: se.x + 2, z: se.z, a: 0 });
+  const sf = c => c.S.forts.find(f => f.k === 7 && f.ps && f.ps.z === site.z);
+  await until(() => C4.every(c => sf(c)));
+  ok(C4.every(c => sf(c) && sf(c).id === sf(host).id && Math.abs(sf(c).o.hw - site.len / 2) < 1 && c.S.pe.length === 1), 'the guest\'s request: the host starts it at the bank end, and every client has it across the river under one id (z ' + site.z + ')');
+  host.$('fortAt')(sf(host), .995); host.$('Net').fq = true;
+  await until(() => C4.every(c => sf(c) && sf(c).prog >= 1), 8000);
+  await run(.3);
+  ok(C4.every(c => c.S.pe[0].op && c.hgt(site.x, site.z) > c.S.T.WL + .3 && c.S.brk.includes('f' + sf(host).id + 'p')), 'finished: on every client the new crossing carries and its deck is ground (' + g2.S.brk + ')');
+
+  console.log('-- the fallen bridge built again --');
+  await near(e.x, e.z);
+  g1.Net.fbuild({ k: 9, x: e.x, z: e.z, a: 0 });
+  const rf = c => c.S.forts.find(f => f.k === 9 && f.b === b.i);
+  await until(() => C4.every(c => rf(c)));
+  ok(C4.every(c => rf(c) && rf(c).id === rf(host).id), 'the guest\'s request: the host starts the rebuild at the bank end, and every client has it (fort, kind 9)');
+  const r0 = rf(host).prog, rt0 = host.S.t; await run(6, () => { put(g1, e.x, e.z); });
+  const rr = (rf(host).prog - r0) / (host.S.t - rt0);
+  ok(rr > 0 && Math.abs(1 / rr - host.$('FORT').rebuild.time) < 40, 'the guest\'s sapper standing at it builds it on the host at one builder\'s pace (' + Math.round(1 / rr) + ' s for the whole)');
+  host.$('fortAt')(rf(host), .999); await run(1, () => { put(g1, e.x, e.z); });
+  await until(() => C4.every(c => c.S.os[id] === 0 && !rf(c) && !pf(c)), 8000);
+  ok(C4.every(c => c.S.os[id] === 0 && !rf(c) && !pf(c) && c.$('brOpen')(c.$('brs()')[b.i]) && c.hgt(b.x, b.z) > c.S.T.WL + 1 && !c.S.brk.includes(b.i + 'x') && !c.S.brk.includes(b.i + 'p')), 'finished on the host: on every client the bridge stands again (obj stage 0), its pontoon and the work gone (' + g3.S.brk + ')');
+  ok(C4.every(c => c.S.oh[id] === L(c)[b.i].o.hp), 'with its full hp');
+
+  console.log('-- the free pontoon destroyed, and a later player --');
+  host.$('hitObj')(sf(host).o, 1e4, null);
+  await until(() => C4.every(c => !sf(c) && !c.S.pe[0].op), 8000); await run(.3);
+  ok(C4.every(c => !sf(c) && !c.S.pe[0].op && c.hgt(site.x, site.z) <= c.S.T.WL + .3), 'destroyed on the host: on every client it is gone and the river shut there');
+  const g4 = await client('Mais', 'inf', 'blueRifle'); await run(1); await until(() => g4.S.forts.length >= host.S.forts.length);
+  ok(g4.S.os[id] === 0 && !pf(g4) && !rf(g4) && !sf(g4) && g4.$('brOpen')(L(g4)[b.i]), 'a player who joins later is given the bridge standing and no pontoon');
   for (const c of all) c.Net.ws && c.Net.ws.close();
   N.stop(); done();
 })().catch(e => { console.error(e); N.stop(); process.exitCode = 1; });

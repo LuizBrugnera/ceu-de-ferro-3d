@@ -8,7 +8,7 @@ const fs = require('fs'), os = require('os'), zlib = require('zlib'), ANAD = fs.
 process.env.ANA_DIR = ANAD; fs.mkdirSync(path.join(ANAD, 'ww2'));
 fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.ndjson.gz'), zlib.gzipSync('{"k":"hdr","t":0}\n'));
 fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.json'), JSON.stringify({ id: MATCH, era: 'ww2', src: 'tourney', hdr: { fac: ['A', 'B'], doc: ['cautious', 'aggressive'] }, end: { win: 0, why: 2, t: 1800 }, rep: { win: 0, dur: 1800, whyTxt: 'o tempo acabou' } }));
-const N = require('./net'), { ok, done } = require('./harness');
+const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const MCP = path.join(__dirname, '..', 'mcp-general.js'), kids = [];
 function bridge(env) {
   const p = spawn(process.execPath, [MCP], { env: Object.assign({}, process.env, { CEU_URL: 'ws://localhost:' + N.PORT, CEU_ROOM: 'modern', CEU_SIDE: '1', CEU_KEY: 'secret', CEU_NAME: 'T' }, env), stdio: ['pipe', 'pipe', 'ignore'] });
@@ -24,10 +24,11 @@ function bridge(env) {
   const h = await N.raw(); h.send({ t: 'join', room: 'modern', name: 'host', cls: 'tank', model: 'abrams' }); h.w = await h.wait('welcome', 800);
   ok(h.w && h.w.gen === 1 && h.w.host === h.w.id, 'the fake host joined and is the host of a relay with the gen feature');
   /* the fake host: answers every gcmd and gask */
-  const seenCmd = [], seenAsk = [];
+  const seenCmd = [], seenAsk = [], force = [];
   h.ws.on('message', d => {
     const m = JSON.parse(d);
-    if (m.t === 'gcmd') { seenCmd.push(m); const bad = m.c.c === 'nope'; h.send({ t: 'gres', to: m.from, n: m.n, ok: !bad, why: bad ? 'unknown' : '', id: bad ? 0 : 77 }); }
+    if (m.t === 'gcmd' && force.length) { seenCmd.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: false, why: force.shift(), id: 0 }); return; }
+    if (m.t === 'gcmd') { seenCmd.push(m); const bad = m.c.c === 'nope' || (m.c.c === 'expand' && m.c.id === 9); h.send({ t: 'gres', to: m.from, n: m.n, ok: !bad, why: bad ? (m.c.c === 'expand' ? 'hasmine' : 'unknown') : '', id: bad ? 0 : 77 }); }
     if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, tickets: [{ loss: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 }, sq: [{ id: 1, nm: 'Esquadra Urso', rank: 2, x: 5, z: 6, n: 4 }], vet: [{ who: 'T-90M', g: 'tank', rank: 3, xp: 40, x: 1, z: 2 }] } }); }
   });
 
@@ -123,6 +124,36 @@ function bridge(env) {
   const gm = (await b.call('get_state', { refresh_map: true })).json;
   ok(gm && gm.general.squads[0].name === 'Esquadra Urso' && gm.general.squads[0].rank === 'veteran' && gm.map.veterans[0].unit === 'T-90M' && gm.map.veterans[0].rank === 'elite', 'get_state with the map: each squad\'s name and rank, the veteran vehicles and aircraft');
   await new Promise(r => setTimeout(r, 1100)); const gb = await b.call('get_bridges'); ok(!gb.isError && seenAsk[seenAsk.length - 1].q.q === 'brg', 'get_bridges: the relay passes gask brg to the host');
+  /* MCP v2 (W13): the rest of the funnel, each tool to its command or question */
+  const v2 = [['create_campaign', { h_hour: 90, why: 'H' }, '{"c":"camp","H":90,"why":"H"}'], ['attach_operation', { campaign: 3, operation: 12, role: 'fnt' }, '{"c":"camp","id":3,"op":12,"role":"fnt"}'],
+    ['end_campaign', { campaign: 3 }, '{"c":"camp","id":3,"k":"end"}'], ['set_defence_policy', { point: 2, infantry: 3, reaction: 2 }, '{"c":"dpol","pi":2,"inf":3,"qrf":2}'],
+    ['set_defence_policy', { site: 40001, anti_air: 1 }, '{"c":"dpol","id":40001,"aa":1}'], ['triage_threat', { id: 5, priority: -1 }, '{"c":"triage","id":5,"p":-1}'],
+    ['send_qrf', { id: 5, ids: [3, 4] }, '{"c":"qrf","id":5,"ids":[3,4]}'], ['claim_deposit', { deposit: 6, infantry: 2 }, '{"c":"expand","id":6,"inf":2}'],
+    ['lay_minefield', { kind: 'ap', x: 10, z: 20, route: [{ x: 1, z: 2 }] }, '{"c":"fort","k":"mineap","x":10,"z":20,"rt":[1,2]}'], ['clear_mines', { x: 10, z: 20, ids: [7] }, '{"c":"clear","x":10,"z":20,"ids":[7]}'],
+    ['sabotage', { point: 4, why: 'cargas' }, '{"c":"sabot","pi":4,"why":"cargas"}'], ['arm_militia', { x: 5, z: 6 }, '{"c":"mil","x":5,"z":6}']];
+  const v2ok = []; for (const [nm, a, want] of v2) { const r = await b.call(nm, a); v2ok.push(!r.isError && lastC() === want || nm + ' sent ' + lastC()); }
+  ok(v2ok.every(x => x === true), 'MCP v2: create_campaign, attach_operation, end_campaign, set_defence_policy, triage_threat, send_qrf, claim_deposit, lay_minefield, clear_mines, sabotage, arm_militia map to camp, dpol, triage, qrf, expand, fort, clear, sabot, mil (' + v2ok.filter(x => x !== true).join('; ') + ')');
+  const v2n = seenCmd.length, v2bad = [await b.call('set_defence_policy', { point: 1, site: 2 }), await b.call('set_defence_policy', { infantry: 1 }), await b.call('triage_threat', { id: 1, priority: 4 }), await b.call('lay_minefield', { kind: 'nuke', x: 1, z: 1 }), await b.call('sabotage', {}), await b.call('attach_operation', { campaign: 1 })];
+  ok(v2bad.every(r => r.isError) && seenCmd.length === v2n, 'MCP v2: a policy for both or neither place, a priority out of range, a bad minefield, a sabotage without a target, an operation without its id: refused by the bridge');
+  const dr = await b.call('claim_deposit', { deposit: 9 }); ok(dr.isError && /hasmine \(Já temos uma mina nessa jazida\)/.test(dr.json.result), 'a refusal carries the page\'s Portuguese reason (hasmine: ' + (dr.json && dr.json.result) + ')');
+  const v2q = []; for (const [nm, a, q] of [['get_threats', {}, 'threats'], ['get_missions', {}, 'missions'], ['get_unit', { id: 42 }, 'unit'], ['get_lots', {}, 'lots'], ['get_mines', {}, 'mines']]) { await new Promise(r => setTimeout(r, 1100)); const r = await b.call(nm, a); v2q.push(!r.isError && seenAsk[seenAsk.length - 1].q.q === q && (q !== 'unit' || seenAsk[seenAsk.length - 1].q.id === 42) || nm); }
+  ok(v2q.every(x => x === true), 'MCP v2: get_threats, get_missions, get_unit (with the squad id), get_lots, get_mines reach the host as gask threats, missions, unit, lots, mines (' + v2q.filter(x => x !== true).join(', ') + ')');
+  /* parity with the page (W13): every command of its funnel goes through the bridge and the relay to the host, and every refusal code the page
+     names comes back with the page's own Portuguese reason (the oracle: the page's gNo, GEN.no else ECO.tx.why) */
+  const P = H.load({ eco: 1 }).$, ks = Object.keys(P('GC')), codes = [...new Set(Object.keys(P('GEN').no).concat(Object.keys(P('ECO').tx.why)))], pr = [];
+  for (let i = 0; i < Math.max(ks.length, codes.length); i++) {
+    const k = ks[i % ks.length], why = codes[i % codes.length], n0 = seenCmd.length; force.push(why);
+    const r = await b.call('send_command', { d: 'cmd', command: { c: k } });
+    if (seenCmd.length !== n0 + 1 || seenCmd[n0].c.c !== k) { force.length = 0; pr.push(k + ' not sent'); }
+    else if (!(r.isError && r.json && r.json.result.startsWith('refused: ' + why + ' (' + P('gNo')(why) + ')'))) pr.push(why + ': ' + (r.json ? r.json.result : r.text));
+  }
+  ok(!pr.length, 'every command of the funnel (' + ks.length + ') reaches the host from the model, and every refusal (' + codes.length + ' codes) reads as on the page (' + pr.slice(0, 6).join('; ') + ')');
+  const qk = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines'], qp = [];
+  for (const q of qk) { await new Promise(r => setTimeout(r, 1100)); const n0 = seenAsk.length, r = await b.call('send_command', { question: { q } }); if (r.isError || seenAsk.length !== n0 + 1 || seenAsk[n0].q.q !== q) qp.push(q); }
+  const qn = await b.call('send_command', { question: { q: 'nope' } });
+  ok(!qp.length && qn.isError, 'every question the host answers (§10 and W13: ' + qk.length + ') goes through the bridge and the relay to it, an unknown one does not (' + qp.join(', ') + ')');
+  const tl2 = (await b.rpc('tools/list')).result.tools.map(t => t.name), initV2 = await b.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
+  ok(['get_threats', 'get_missions', 'get_unit', 'get_lots', 'get_mines', 'create_campaign', 'attach_operation', 'end_campaign', 'set_defence_policy', 'triage_threat', 'send_qrf', 'claim_deposit', 'lay_minefield', 'clear_mines', 'sabotage', 'arm_militia'].every(x => tl2.includes(x)) && initV2.result.serverInfo.version === '2.0.0', 'tools/list has the MCP v2 tools and the server says version 2.0.0');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

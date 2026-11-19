@@ -34,7 +34,7 @@ Enquanto o P0 e o P1 não estiverem na main, **a partida não abre** (`Reference
 - **`planDue` em rodízio**: os N lados planejam em ordem, a cada `FIELD.every / N` s. Com dificuldades diferentes, cada lado segue a própria cadência. Com N = 2, as contas dão exatamente o que davam antes.
 - **Teto de população por facção** (D10: o dobro de infantaria e de veículos de solo, repartido entre os 3):
   - `GP.pop3` = EUA 143/34/7, Rússia 143/34/7 e Insurgentes 194/28/0 (soldados/veículos/aeronaves);
-  - `GP.cap` virou um getter: 240 com 2 lados e 480 com 3;
+  - o total é 480 soldados e 96 veículos, o mesmo de 2 lados depois da #77 (que dobrou o teto de 2 lados para 240/48 por lado); `GP.cap` fica 480 nos dois casos;
   - `MAXM` (instâncias de soldados, dimensionado ao carregar) usa `GP.capMax` = 480;
   - `sideMen` sem economia: `IAI.cap / N`;
   - `popOf` dá 0 num tipo que a facção não tem.
@@ -62,8 +62,7 @@ Enquanto o P0 e o P1 não estiverem na main, **a partida não abre** (`Reference
 - **`frontR()` sem argumento** continua a frente global da conquista (`S.cq.fr`). Quem a usa para um lado específico precisa passar a usar `frontR(t)`.
 - **`foeS` numa estrada da qual o lado não é ponta** devolve o meio da estrada; o comandante não deveria olhar para ela, mas um posto ou uma ordem do jogador podem cair ali.
 - **Peso do dobro de tropas:** 480 soldados e 96 veículos pesam no anfitrião. O medidor `popK` corta, mas o orçamento de 4 ms com 3 generais não foi medido.
-- **`MAXM` maior** (480 + …): mais memória nas instâncias de soldados, também com 2 lados.
-- **`GP.cap` como getter:** se algum teste atribuir `GP.cap = x`, a atribuição é ignorada em silêncio.
+- **Merge com a #77:** a #77 dobrou o teto de 2 lados e escala o mix do plano por `GP.scale` = 2. Com 3 lados, esse mesmo fator vale sobre um teto por lado menor (`pop3`), então o plano pode pedir mais do que cabe; o `fit` do `gpPlan` corta, mas não foi conferido.
 
 ## Como testar depois
 

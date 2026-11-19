@@ -4613,14 +4613,18 @@ function director(dt) {
      has ready for it goes at once (an event, not a clock). Aircraft one each GP.air s; ground vehicles and the squads they carry leave as a column:
      the first ready waits up to GP.form s for others (forming up), a side's columns GP.gap s apart (the road ahead clears). The base's AA at once.
    - the population budget (popOf): GP.pop a side, less GP.hum for each human on it (up to 3), times S.popK. The host's AI frame budget (AIB; a solo game is its own host)
-     moves S.popK: down by meter.dn while over budget, back up by meter.up while well under (avg under low of it), every meter.every s, never under
-     meter.min. popUse: what the side's AI has out (soldiers, cargo aboard included; ground vehicles but the fixed AA; aircraft and helicopters).
+     moves S.popK every meter.every s by the mean AI time a frame over those seconds (AIB.take), not by its worst frame: down by meter.dn while that mean is
+     over AIB.avg, back up by meter.up while it is under low of it, never under meter.min. A lone slow frame (a pause of the browser, a big look) weighs
+     its share of the period's frames and no more, so only a machine over budget on the whole sheds population, and it gets it back once it is not.
+     A cut takes nothing off the field, it only stops what would enter: while neither side is back within the budget the last cut set (gpFits), the
+     next one waits, so the floor is reached by cuts that bit and the cost stayed over, not by ten seconds of the same force still out.
+     popUse: what the side's AI has out (soldiers, cargo aboard included; ground vehicles but the fixed AA; aircraft and helicopters).
    - the safety floor: a side with no squad in its reserve, no unit order under way and fewer than floor.men soldiers out for floor.t s gets a squad from
      its HQ, free, to hold the base, and the general's log says why.
    With no economy (the demo, an older server, ECO.on 0) the classic director runs: DIR's caps and clocks, CQ.ai's waits, HDIR's and POOL's and RUNS's
    waits; these are no longer how a side with an economy fields anything. cap: IAI.cap while a side has an economy (two budgets), cap0: without */
 const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap: 240, cap0: IAI.cap, gnd: .75,
-  meter: { every: 10, min: .5, dn: .1, up: .05, low: .6 },
+  meter: { every: 10, min: .5, dn: .1, up: .05, low: .8 },
   mix: { tank: [5, 4, 3], lav: [2, 2, 1], aa: [2, 2, 3], art: [1, 1, 2], truck: [3, 2, 2], squad: [3, 2, 2], fighter: [2, 2, 2], cas: [3, 2, 1], heli: [2, 1, 1], lift: [1, 1, 0] },
   foe: { aa: 2, fighter: 1, arm: .5, armMax: 3, art: 1 }, max: 20,
   veh: ['tank', 'lav', 'aa', 'art', 'truck'], fly: ['fighter', 'cas', 'heli', 'lift'],
@@ -4686,14 +4690,18 @@ function gpView(t) {
   return { st: pp.st, stance: GP.st[pp.st] || '', pop: P, use: U, k: sim ? S.popK || 1 : d.pk || 1, on: sim ? gpOn() : !!d.pop,
     kinds: k0.map(k => ({ k, name: ECO.tx.u[k], field: pp.f[k], have: pp.h ? pp.h[k] || 0 : gpHave(t, k), res: (d.res[k] || []).length, q: d.q.filter(q => q.k === k).length, why: pp.why ? pp.why[k] || '' : '', set: !!(pp.set && pp.set[k]) })) };
 }
-/* the host's AI over its frame budget shrinks every side's budget; well under it, grows it back */
+/* side t's AI has out no more than its population budget: soldiers, vehicles and aircraft */
+const gpFits = t => { const U = popUse(t), P = popOf(t); return U.men <= P.men && U.veh <= P.veh && U.air <= P.air; };
+/* the host's AI over its frame budget on average over the last meter.every s shrinks every side's budget; well under it, grows it back */
 function gpMeter() {
   if ((S.net && !S.host) || S.t < (S.popT || 0)) return;
   S.popT = S.t + GP.meter.every;
-  const st = AIB.stat(), M = GP.meter, k = S.popK || 1; if (st.n < 60) return;
-  const k2 = !st.ok ? Math.max(M.min, k - M.dn) : st.avg < AIB.avg * M.low && st.worst <= AIB.worst ? Math.min(1, k + M.up) : k;
+  const st = AIB.take(), M = GP.meter, k = S.popK || 1; if (st.n < 60) return;
+  const k2 = Math.round((st.avg > AIB.avg ? (k < 1 && !gpFits(0) && !gpFits(1) ? k : Math.max(M.min, k - M.dn)) : st.avg < AIB.avg * M.low ? Math.min(1, k + M.up) : k) * 100) / 100;
   if (k2 === k) return;
-  S.popK = k2; for (const t of [0, 1]) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: o anfitrião está ' + (k2 < k ? 'acima' : 'folgado no') + ' orçamento de IA', null, 'pop');
+  S.popK = k2;
+  const ms = v => (+v.toFixed(2)).toString().replace('.', ','), why = 'IA do anfitrião em ' + ms(st.avg) + ' ms por quadro em média nos últimos ' + Math.round(st.s) + ' s (orçamento ' + ms(AIB.avg) + ' ms; pior quadro ' + ms(st.worst) + ' ms, comandante ' + ms(st.gen) + ' ms)';
+  for (const t of [0, 1]) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: ' + why);   // every step in the log (one a period at most), the last one too
 }
 /* the missions a Dispatch order fielded (its id) take what the order says beyond the birth: latitude, ROE, break-off, H-hour */
 function gpMis(id, c) {
@@ -8320,15 +8328,22 @@ function resupply(P, dt) {   // beside the home airfield, as planes do over it, 
    AIB, the meter: each step adds the time of the AI's parts of the frame, gen (the commander and its eyes: spot, plan, the squads' thinking,
    the director) and u (the units: planes, helicopters, vehicles and soldiers stepped, which is their AI and their movement), and closes the
    frame at the next step. stat(): over the last win frames, the mean and the worst of the total and of gen, against the budget: avg ms a
-   frame on average, worst ms in the worst frame, gen ms for the commander. Read only: nothing in the battle depends on it.
+   frame on average, worst ms in the worst frame, gen ms for the commander; a reading, nothing in the battle depends on it. take(): the same
+   since the last take (p: the period's sums), which the population meter (gpMeter) reads every GP.meter.every s and acts on by its mean.
    aiJob and aiDrain: a job is a generator that yields between pieces of work, and the step runs n pieces a frame (aiJob) or finishes it
    (aiDrain); spot and plan run so, a piece a frame, instead of whole in one */
 const AIB = { avg: 4, worst: 8, gen: 1, win: 300, S: null, g: 0, u: 0, n: 0, i: 0, tot: new Float32Array(300), gn: new Float32Array(300), max: 0, gmax: 0,
+  p: { n: 0, a: 0, g: 0, w: 0, t: 0 },
   now: () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()),
   tick() {   // closes the frame the last step measured: a new battle starts the count again
-    if (AIB.S !== S) { AIB.S = S; AIB.n = AIB.i = AIB.max = AIB.gmax = 0; AIB.g = AIB.u = 0; return; }
-    const g = AIB.g, a = g + AIB.u; AIB.tot[AIB.i] = a; AIB.gn[AIB.i] = g; AIB.i = (AIB.i + 1) % AIB.win; AIB.n++;
+    if (AIB.S !== S) { AIB.S = S; AIB.n = AIB.i = AIB.max = AIB.gmax = 0; AIB.g = AIB.u = 0; AIB.p = { n: 0, a: 0, g: 0, w: 0, t: S.t }; return; }
+    const g = AIB.g, a = g + AIB.u, p = AIB.p; AIB.tot[AIB.i] = a; AIB.gn[AIB.i] = g; AIB.i = (AIB.i + 1) % AIB.win; AIB.n++;
     if (a > AIB.max) AIB.max = a; if (g > AIB.gmax) AIB.gmax = g; AIB.g = AIB.u = 0;
+    p.n++; p.a += a; p.g += g; if (a > p.w) p.w = a;
+  },
+  take() {   // the frames since the last take: how many, over s seconds of battle, their mean, the commander's mean and the worst; and a new period
+    const p = AIB.p, n = p.n, r = { n, s: S.t - p.t, avg: n ? p.a / n : 0, gen: n ? p.g / n : 0, worst: p.w };
+    AIB.p = { n: 0, a: 0, g: 0, w: 0, t: S.t }; return r;
   },
   stat() {
     const n = Math.min(AIB.n, AIB.win), r = v => Math.round(v * 100) / 100; let a = 0, w = 0, g = 0, gw = 0, over = 0;

@@ -157,7 +157,7 @@ Cada veículo é feito de peças, e o tiro vale pelo lugar onde acerta: lagartas
 
 ## O mundo
 
-Casas, hangares, árvores e carcaças têm volume: param tiro, estilhaço e linha de visão, e podem ser destruídos. Nas vilas dá para entrar nos prédios pelas portas, janelas do térreo e buracos, subir pela escada e atirar das janelas; sem apoio as lajes caem. A mata densa esconde o soldado pela metade da distância; tanque e obuseiro derrubam árvores, veículo de rodas passa pelos vãos. Nenhum veículo de solo entra na água, a não ser o blindado anfíbio.
+Casas, hangares, árvores e carcaças têm volume: param tiro, estilhaço e linha de visão, e podem ser destruídos. Nas vilas dá para entrar nos prédios pelas portas, janelas do térreo e buracos, subir pela escada e atirar das janelas; sem apoio as lajes caem. A mata densa esconde o soldado pela metade da distância; tanque e obuseiro derrubam árvores, veículo de rodas passa pelos vãos. Nenhum veículo de solo entra na água, a não ser o blindado anfíbio. Míssil guiado (ar-solo, antitanque, antiaéreo) só trava, sai guiado e segue o alvo com linha de visada livre: atrás de morro, prédio, árvores ou fumaça o HUD avisa SEM LINHA DE VISADA.
 
 ## Civis e as regras da guerra
 

@@ -26282,6 +26282,8 @@ function fortBoxes(put) {
     const X = M.v.set(ux, sa, uz).normalize().clone(), Z = M.ax.set(fx0, sf, fz0).addScaledVector(X, -(fx0 * X.x + sf * X.y + fz0 * X.z)).normalize().clone(), Y = new THREE.Vector3().crossVectors(Z, X);
     M.mx.makeBasis(X, Y, Z); const q = new THREE.Quaternion().setFromRotationMatrix(M.mx);
     const box = (lx, ly, lz, sx, sy, sz, c) => put(M.mx.compose(M.v.set(f.x + X.x * lx + Y.x * ly + Z.x * lz, f.y + X.y * lx + Y.y * ly + Z.y * lz, f.z + X.z * lx + Y.z * ly + Z.z * lz), q, M.s.set(sx, sy, sz)), c, dk);
+    /* a prop of the models pack standing at (lx, ly, lz), sx by sy by sz m; false while it is not here (PACK, packProp), and the boxes are drawn */
+    box.prop = (id, lx, ly, lz, sx, sy, sz) => typeof packProp === 'function' && packProp(id, M.mx.compose(M.v.set(f.x + X.x * lx + Y.x * ly + Z.x * lz, f.y + X.y * lx + Y.y * ly + Z.y * lz, f.z + X.z * lx + Y.z * ly + Z.z * lz), q, M.s.set(sx, sy, sz)), dk);
     if (f.k === 1) {
       const w = TR.size[1], B = L.bank, hf = B[0] * p + .04, hb = B[1] * p + .04;
       box(0, .06, 0, hw * 2, .1, w * Math.max(.35, p), L.floor);
@@ -26291,7 +26293,7 @@ function fortBoxes(put) {
       if (f.br !== null) for (const e of [1, -1]) box(f.br + e * TR.plank[0] * .28, B[0] + .08, 0, TR.plank[0] * .3, .14, w + B[2] + B[3] + 1, L.plank);
     } else if (f.k === 2) {
       const n = [5, 4, 5], d = BG.size[1], h = BG.size[2] / 3, rows = st ? 2 : Math.max(1, Math.round(p * 3));
-      for (let r = 0; r < rows; r++) for (let i = 0; i < n[r]; i++) box((i - (n[r] - 1) / 2) * hw * 2 / 5, h * (r + .5), 0, hw * 2 / 5 - .08, h - .05, d * (1 - .13 * r), L.bag[(i + r) & 1]);
+      if (!box.prop('p_sandbags', 0, 0, 0, hw * 2, BG.size[2] * rows / 3, d)) for (let r = 0; r < rows; r++) for (let i = 0; i < n[r]; i++) box((i - (n[r] - 1) / 2) * hw * 2 / 5, h * (r + .5), 0, hw * 2 / 5 - .08, h - .05, d * (1 - .13 * r), L.bag[(i + r) & 1]);
     } else postBoxes(f, box, p, st);   // the posts and the dome (POSTS)
   }
 }
@@ -30958,7 +30960,8 @@ function postBoxes(f, box, p, st) {
   const F = f.F, L = FLOOK, hw = f.o.hw, hd = f.o.hd, rows = st ? .6 : Math.max(.25, p), dark = 0x2e3330, steel = 0x5c625c, wood = 0x6f5b3c, conc = 0x8d8a80;
   if (f.k === 3 || f.k === 4) {
     const h = F.size[2] * rows, d = .9;
-    box(0, h / 2, hd - d / 2, hw * 2, h, d, L.bag[0]); for (const e of [1, -1]) box(e * (hw - d / 2), h / 2, 0, d, h, hd * 2 - d, L.bag[1]);
+    if (!(box.prop && box.prop('p_nest', 0, 0, 0, hw * 2, h, hd * 2))) { box(0, h / 2, hd - d / 2, hw * 2, h, d, L.bag[0]); for (const e of [1, -1]) box(e * (hw - d / 2), h / 2, 0, d, h, hd * 2 - d, L.bag[1]); }
+    if (p >= 1 && f.k === 4 && box.prop) for (const e of [1, -1]) box.prop('p_hedgehog', e * hw * .75, 0, hd + 1.4, 1.7, 1.6, 1.7);   // the anti-tank post's hedgehogs, in front
     if (p >= 1 && f.k === 3) { box(0, .9, -.2, .5, .6, 1.4, dark); box(0, 1.15, .9, .16, .16, 1.6, steel); box(0, .6, -.2, 1.6, .12, .9, steel); }
     if (p >= 1 && f.k === 4) { box(0, 1.25, .2, .14, .14, 1.3, dark); box(0, 1.05, -.2, .3, .25, .6, dark); box(0, .55, -.2, .9, .1, .7, steel); }
   } else if (f.k === 5) {
@@ -32226,6 +32229,311 @@ function buildHangarFallback() {
   $('#briefing').textContent = 'Este navegador não conseguiu abrir o WebGL, que o jogo usa para desenhar em 3D. Abra a página em um navegador com aceleração gráfica ligada.';
   $('#btnLaunch').disabled = true;
 }
+/* ---------- the models pack (NOT TESTED; docs/nao-testado/cf-pack-modelos.md) ----------
+   Free low-poly models (CC0 / CC-BY, models/LICENSES.md) that tools/pack/build.js turns into models/pack/<id>.glb, all the same way: +x
+   forward, the ground at y 0, one node per part (hull, turret, gun, trackL, trackR, wheels) with its pivot as translation, each part two
+   primitives (material 0 "paint": grey shades the side's colour tints; 1 "fixed": the source's own colours) in vertex colours; the people a
+   skeleton, one skinned mesh and their clips. The server hands them out at /models/pack/ (an older one does not: 404, and nothing changes).
+   Fetched the first time something asks for one (packGet), never from file:// ; until then, and whenever one fails, the model of before
+   stays. When one arrives, what was built without it is built again (packDirty). Visual only: hit boxes, parts, pivots the sim uses
+   (d.mh, d.bl), the AI and the net do not change.
+   PACK.on: ?pack=0 or localStorage cf-pack 0 turn the whole pack off. PACK.q, the level (?packq= or localStorage cf-pack-q; 0 off, 1 low,
+   2 normal, 3 high; a graphics level of the page, window.GFX.level 0..3 if one exists, wins): how far and how many soldiers and civilians
+   are drawn animated (PACK.near m, PACK.max); the rest stay the instanced figures of before.
+   tank, trn: which pack model draws each vehicle (by its id); arm: which weapon each small arm or launcher is (SARMS keys) */
+const PACK = {
+  url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 40, 80, 130], max: [0, 12, 28, 48],
+  tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
+  trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
+    tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
+  civWreck: { suv: 1, sedan: 1, vbied: 1 },
+  arm: { k98: 'w_kar98', garand: 'w_kar98', m4: 'w_m4', ak: 'w_ak', mg42: 'w_smg', bar: 'w_smg', m249: 'w_m4', pkp: 'w_ak', pzf: 'w_bazooka', bazooka: 'w_bazooka',
+    javelin: 'w_launcher', rpg: 'w_rpg', stinger: 'w_launcher', igla: 'w_launcher' },
+  cred: 'Modelos 3D: Quaternius (CC0), Poly by Google, Alex Safayan, AdamKokrito, Zsky, J-Toastie, KolosStudios, PabloLuna57, Nico _, madtrollstudio, CreativeTrio, Pichuliru, austincford, Carwyn Pelley, sftwr314r8 (CC-BY 3.0). Lista em models/LICENSES.md.'
+};
+PACK.on = (() => { try { if (/[?&]pack=0/.test(location.search)) return false; if (localStorage.getItem('cf-pack') === '0') return false; } catch (e) {} return typeof location !== 'undefined' && /^https?:$/.test(location.protocol); })();
+PACK.lvl = () => {
+  try { if (typeof window !== 'undefined' && window.GFX && Number.isInteger(window.GFX.level)) return clamp(window.GFX.level, 0, 3); } catch (e) {}
+  try { const m = location.search.match(/[?&]packq=(\d)/), v = m ? +m[1] : localStorage.getItem('cf-pack-q'); if (v !== null && v !== undefined && v !== '') return clamp(+v, 0, 3); } catch (e) {}
+  return PACK.q;
+};
+const PACK_SARM = new Map(Object.keys(SARMS).map(k => [SARMS[k], k]));
+
+/* a GLB the pack wrote, as three objects: per node its name, TRS, children, mesh and skin; per mesh its primitives as BufferGeometries
+   (kept: every copy shares them) with their material (0 paint, 1 fixed); skins (joints, inverse binds) and clips. Only what build.js writes */
+function packRead(buf) {
+  const dv = new DataView(buf), jl = dv.getUint32(12, true), bin = 28 + jl;
+  if (dv.getUint32(0, true) !== 0x46546c67) throw new Error('not a GLB');
+  const J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl)));
+  const T = { 5126: Float32Array, 5125: Uint32Array, 5123: Uint16Array, 5121: Uint8Array }, N = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], C = T[a.componentType], n = N[a.type]; return { arr: new C(buf.slice(bin + (v.byteOffset || 0) + (a.byteOffset || 0), bin + (v.byteOffset || 0) + (a.byteOffset || 0) + a.count * n * C.BYTES_PER_ELEMENT)), n, norm: !!a.normalized }; };
+  const attr = i => { const a = acc(i); return new THREE.BufferAttribute(a.arr, a.n, a.norm); };
+  const meshes = (J.meshes || []).map(m => m.primitives.map(p => {
+    const g = new THREE.BufferGeometry(), A = p.attributes;
+    g.setAttribute('position', attr(A.POSITION)); if (A.COLOR_0 !== undefined) g.setAttribute('color', attr(A.COLOR_0));
+    if (A.JOINTS_0 !== undefined) { g.setAttribute('skinIndex', attr(A.JOINTS_0)); g.setAttribute('skinWeight', attr(A.WEIGHTS_0)); }
+    g.setIndex(attr(p.indices)); g.computeBoundingSphere(); g.computeBoundingBox(); g.userData.keep = true;
+    return { g, mat: p.material || 0 };
+  }));
+  const nodes = J.nodes.map(n => ({ name: n.name || '', t: n.translation || [0, 0, 0], r: n.rotation || [0, 0, 0, 1], s: n.scale || [1, 1, 1], ch: n.children || [], mesh: n.mesh, skin: n.skin }));
+  const skins = (J.skins || []).map(s => { const a = acc(s.inverseBindMatrices).arr; return { joints: s.joints, inv: s.joints.map((j, k) => new THREE.Matrix4().fromArray(a, k * 16)) }; });
+  const clips = (J.animations || []).map(an => new THREE.AnimationClip(an.name, -1, an.channels.map(ch => {
+    const sm = an.samplers[ch.sampler], nm = nodes[ch.target.node].name, inp = acc(sm.input).arr, out = acc(sm.output).arr, it = sm.interpolation === 'STEP' ? THREE.InterpolateDiscrete : THREE.InterpolateLinear;
+    return ch.target.path === 'rotation' ? new THREE.QuaternionKeyframeTrack(nm + '.quaternion', inp, out, it) : new THREE.VectorKeyframeTrack(nm + (ch.target.path === 'scale' ? '.scale' : '.position'), inp, out, it);
+  })));
+  const ex = (J.asset && J.asset.extras) || {};
+  return { nodes, meshes, skins, clips, dims: ex.dims || [1, 1, 1], parts: Object.fromEntries(nodes.map((n, i) => [n.name, i]).filter(([, i]) => nodes[i].mesh !== undefined && nodes[i].skin === undefined)) };
+}
+/* the model id, or null while it is not here (the first ask starts the fetch; a failure is remembered and never retried) */
+function packGet(id) {
+  if (!PACK.on || !id) return null;
+  const E = PACK.M[id];
+  if (E) return E.st === 1 ? E.d : null;
+  const e = (PACK.M[id] = { st: 0, d: null });
+  try {
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; })
+      .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
+  } catch (er) { e.st = -1; }
+  return null;
+}
+/* a phong material in the game's look over the vertex colours: paint takes the colour, fixed stays white; c is what damageLook goes back to */
+function packMat(paint, hex, o) { const m = mat(paint ? hex : 0xffffff, Object.assign({ vertexColors: true }, o || {})); m.userData.c = paint ? hex : 0xffffff; return m; }
+/* one part (node name) of a static model as a group of its meshes, the part's pivot at the group's origin; null when the model has none */
+function packPart(P, name, hex, fixedDk) {
+  const i = P.parts[name]; if (i === undefined) return null;
+  const g = new THREE.Group();
+  for (const p of P.meshes[P.nodes[i].mesh]) { const m = new THREE.Mesh(p.g, packMat(p.mat === 0, hex)); if (p.mat !== 0 && fixedDk) { m.material.color.setScalar(fixedDk); m.material.userData.c = m.material.color.getHex(); } g.add(m); }
+  return g;
+}
+const packPivot = (P, name) => { const i = P.parts[name]; return i === undefined ? null : P.nodes[i].t; };
+/* a whole static model in its own metres (a prop, a weapon): every part where it sits */
+function packWhole(P, hex, k, dk) {
+  const g = new THREE.Group();
+  for (const nm in P.parts) { const p = packPart(P, nm, hex, dk); if (!p) continue; p.position.fromArray(packPivot(P, nm)); g.add(p); }
+  g.scale.setScalar(k || 1); return g;
+}
+
+/* a vehicle model: the procedural body comes off and the pack's goes on, fitted to the vehicle's length and width (model units, as
+   buildUnit's). tur and gun stay the nodes the scene turns, moved to the pack's turret ring and trunnion; every pack mesh is filed under the
+   damage part it stands for (pm), so damageLook keeps darkening it. keepTur: a car's gun mount (TRN) stays the procedural one */
+function packSkin(g, P, d, col, wreck, keepTur) {
+  const U = g.userData, pm = U.pm || (U.pm = {}), keep = new Set();
+  for (const f of U.fig || []) if (f) f.traverse(c => keep.add(c));
+  if (U.mast) keep.add(U.mast);
+  if (keepTur && U.tur) U.tur.traverse(c => keep.add(c));
+  const off = [];
+  g.traverse(c => { if (c.isMesh && !keep.has(c)) off.push(c); });
+  const gone = new Set(off);
+  for (const k in pm) pm[k] = pm[k].filter(m => !gone.has(m));
+  for (const m of off) kill(m);
+  const [L, W] = P.dims, sx = d.l / L, sz = d.w / W, sy = (sx + sz) / 2, hex = wreck ? 0x2b2b28 : col, dk = wreck ? .3 : 0;
+  const tag = (pid, grp) => { if (!grp) return grp; grp.traverse(c => { if (c.isMesh) (pm[pid] || (pm[pid] = [])).push(c); }); return grp; };
+  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body);
+  for (const nm of ['hull', 'trackL', 'trackR', 'wheels']) {
+    const p = tag(nm === 'hull' ? 'hull' : nm, packPart(P, nm, hex, dk)); if (!p) continue;
+    p.position.fromArray(packPivot(P, nm)); body.add(p);
+  }
+  if (!keepTur && U.tur) {
+    const tp = packPivot(P, 'turret'), gp = packPivot(P, 'gun'), tur = U.tur, gun = U.gun;
+    if (tp) {
+      tur.position.set(tp[0] * sx, tp[1] * sy, tp[2] * sz);
+      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t);
+    }
+    if (gp && gun) {
+      const o = tp || [0, 0, 0]; gun.position.set((gp[0] - o[0]) * sx, (gp[1] - o[1]) * sy, (gp[2] - o[2]) * sz);
+      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm);
+    }
+  }
+  U.pack = 1; U.sig = undefined;
+  return g;
+}
+/* the debris of a wreck: a pile of rubble under it */
+function packDebris(g, d) { const P = packGet('p_debris'); if (!P) return; const m = packWhole(P, 0, d.l / P.dims[0] * .9, .45); m.position.y = .05; g.add(m); }
+buildUnit = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def;
+  if (d.trn || u.kind !== 'tank' || !PACK.tank[d.id]) return g;
+  const P = packGet(PACK.tank[d.id]); if (!P) return g;
+  try { packSkin(g, P, d, u.col[0], wreck, false); if (wreck) packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+  return g;
+})(buildUnit);
+buildTrn = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def, id = PACK.trn[d.id];
+  if (!id || d.svc || d.rad || d.kind === 'lav') return g;
+  if (wreck && PACK.civWreck[d.id]) {   // a burnt-out car is the pack's wreck, whatever it was
+    const P = packGet('p_wreck'); if (!P) return g;
+    try { packSkin(g, P, d, 0x2b2b28, true, true); packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+    return g;
+  }
+  const P = packGet(id); if (!P) return g;
+  try { packSkin(g, P, d, u.col[0], wreck, true); if (wreck) packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+  return g;
+})(buildTrn);
+
+/* ---------- props: the barricades, the posts and the mines, as instanced meshes of the pack's props (one per kind, its geometry fitted in a
+   unit box: x and z centred, y from 0 to 1), placed by fortBoxes through box.prop, which says false while the prop is not here (and the
+   boxes of before are drawn) ---------- */
+const PK = { inst: {}, n: {}, max: { p_sandbags: 64, p_nest: 16, p_hedgehog: 32 } };
+function packUnit(P) {   // the model's parts merged in one geometry, fitted to the unit box
+  const pos = [], col = [];
+  for (const nm in P.parts) {
+    const t = packPivot(P, nm);
+    for (const p of P.meshes[P.nodes[P.parts[nm]].mesh]) {
+      const q = p.g.toNonIndexed(), a = q.attributes.position.array, c = q.attributes.color ? q.attributes.color : null;
+      for (let i = 0; i < a.length; i += 3) pos.push(a[i] + t[0], a[i + 1] + t[1], a[i + 2] + t[2]);
+      for (let i = 0; i < a.length / 3; i++) col.push(c ? c.getX(i) : 1, c ? c.getY(i) : 1, c ? c.getZ(i) : 1);
+      q.dispose();
+    }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeBoundingBox(); const b = g.boundingBox, s = new THREE.Vector3(); b.getSize(s);
+  g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); g.scale(1 / (s.x || 1), 1 / (s.y || 1), 1 / (s.z || 1)); g.computeBoundingSphere(); g.userData.keep = true;
+  return g;
+}
+function packInst(id) {
+  if (PK.inst[id] && PK.inst[id].parent === scene) return PK.inst[id];
+  const P = packGet(id); if (!P) return null;
+  const me = new THREE.InstancedMesh(packUnit(P), new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, shininess: 4 }), PK.max[id] || 32);
+  me.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array((PK.max[id] || 32) * 3).fill(1), 3); me.frustumCulled = false; me.count = 0; scene.add(me);
+  return (PK.inst[id] = me);
+}
+const PKC = typeof THREE !== 'undefined' ? new THREE.Color() : null;
+function packProp(id, mx, dk) {
+  const me = packInst(id); if (!me) return false;
+  const n = PK.n[id] || 0; if (n >= me.instanceMatrix.count) return true;
+  me.setMatrixAt(n, mx); me.setColorAt(n, PKC.setScalar(dk || 1)); PK.n[id] = n + 1; return true;
+}
+fortBoxes = (g => put => {
+  PK.n = {}; g(put);
+  for (const id in PK.inst) { const me = PK.inst[id]; me.count = PK.n[id] || 0; me.instanceMatrix.needsUpdate = true; if (me.instanceColor) me.instanceColor.needsUpdate = true; }
+})(fortBoxes);
+/* the mines: the pack's mine, scaled to the disc of before, once it is here */
+fortScene = (g => () => {
+  g();
+  if (gMines && !gMines.userData.pack) { const P = packGet('p_mine'); if (P) { const u = packUnit(P); u.scale(MLOOK.r * 2.3, MLOOK.h * 1.6, MLOOK.r * 2.3); u.translate(0, -MLOOK.h * .8, 0); gMines.geometry.dispose(); gMines.geometry = u; gMines.material.vertexColors = true; gMines.material.needsUpdate = true; gMines.userData.pack = 1; } }
+})(fortScene);
+
+/* the supply base: its stores (crates, an ammunition box, drums, a tent, two barriers) and its sandbag walls from the pack, once every one
+   of them is here; lookSup shows them by the build and darkens them as before */
+buildSup = (f => b => {
+  const g = f(b), U = g.userData, ids = ['p_crate', 'p_ammo', 'p_drum', 'p_tent', 'p_barrier', 'p_sandbags'], Ps = ids.map(packGet);
+  if (Ps.some(p => !p)) return g;
+  try {
+    const [crate, ammo, drum, tent, bar, bags] = Ps, [w, d] = BLD.size, K = 1.7, put = (P, x, y, z, a, k) => { const m = packWhole(P, 0, (k || 1) * K); m.position.set(x, y, z); m.rotation.y = a || 0; g.add(m); return m; };
+    for (const o of U.stores.concat(U.bags)) kill(o);
+    U.stores = [put(crate, w / 2 + 2, 0, -1.6), put(crate, w / 2 + 2, 0, -.2, .4), put(crate, w / 2 + 2, crate.dims[2] * K, -.9, .2), put(ammo, w / 2 + 2.2, 0, 1.2, 1.2),
+      put(drum, -w / 2 - 2, 0, .6), put(drum, -w / 2 - 2, 0, -.5), put(drum, -w / 2 - 2.9, 0, 0), put(tent, -w / 2 - 6, 0, d / 2 + 6, Math.PI / 2, .8),
+      put(bar, 0, 0, d / 2 + 4.2), put(bar, w / 2 + 4, 0, d / 2 + 4.2)];
+    const bl = (w + 4) / (bags.dims[0] * K);
+    U.bags = [put(bags, 0, 0, d / 2 + 1.9, 0, bl), put(bags, 0, 0, -d / 2 - 1.9, Math.PI, bl)];
+  } catch (e) { console.warn('pack: base de suprimento', e); }
+  return g;
+})(buildSup);
+
+/* ---------- people: the nearest soldiers and civilians (PACK.near m, PACK.max of them) are drawn as the pack's animated models instead of
+   the instanced figure. Each has a slot from a pool: its own bones, skeleton, materials and mixer over the shared geometry and clips.
+   The clip by what it does: dead (death, held at its end), prone (aim, the body laid flat), crouched (aim, the hips lowered and the legs
+   bent at the bones), running (run, or runfire while it shoots), walking, firing (fire), aiming (aim), else idle; reloading shows idle,
+   the gun lowered. Its weapon (PACK.arm) sits in front of the chest along the aim, as the figure's did ---------- */
+const PM = { slots: [], want: null, by: new Map(), frame: -1, last: 0 };
+function packRig(id) {
+  const P = packGet(id); if (!P) return null;
+  const root = new THREE.Group(), tilt = new THREE.Group(), objs = P.nodes.map(n => (P.skins.some(s => s.joints.includes(P.nodes.indexOf(n))) ? new THREE.Bone() : new THREE.Object3D()));
+  P.nodes.forEach((n, i) => { const o = objs[i]; o.name = n.name; o.position.fromArray(n.t); o.quaternion.fromArray(n.r); o.scale.fromArray(n.s); });
+  P.nodes.forEach((n, i) => n.ch.forEach(c => objs[i].add(objs[c])));
+  const isChild = new Set(P.nodes.flatMap(n => n.ch)), mats = [];
+  root.add(tilt);
+  P.nodes.forEach((n, i) => {
+    if (n.mesh === undefined) { if (!isChild.has(i)) tilt.add(objs[i]); return; }
+    const sk = P.skins[n.skin], skel = new THREE.Skeleton(sk.joints.map(j => objs[j]), sk.inv);
+    for (const p of P.meshes[n.mesh]) {
+      const m = new THREE.SkinnedMesh(p.g, packMat(p.mat === 0, 0xffffff, { skinning: true })); m.frustumCulled = false; m.bind(skel, new THREE.Matrix4()); tilt.add(m); if (p.mat === 0) mats.push(m.material);
+    }
+  });
+  const mixer = new THREE.AnimationMixer(root), act = {};
+  for (const c of P.clips) act[c.name] = mixer.clipAction(c);
+  if (act.death) { act.death.setLoop(THREE.LoopOnce); act.death.clampWhenFinished = true; }
+  const bone = nm => objs.find(o => o.name === nm) || null;
+  return { id, root, tilt, mixer, act, mats, cur: null, m: null, seen: -1, h: P.dims[2] || 1.8, legs: ['UpperLeg_L', 'UpperLeg_R', 'LowerLeg_L', 'LowerLeg_R'].map(bone), wpn: null, wid: null, rest: null };
+}
+const PMQ = typeof THREE !== 'undefined' ? new THREE.Quaternion() : null, PMX = typeof THREE !== 'undefined' ? new THREE.Vector3(1, 0, 0) : null;
+function packPlay(s, nm, fade) {
+  const a = s.act[nm] || s.act.idle; if (!a || s.cur === a) return;
+  if (s.cur && fade) { a.reset().play(); a.crossFadeFrom(s.cur, fade, false); } else { if (s.cur) s.cur.stop(); a.reset().play(); }
+  s.cur = a;
+}
+function packWeapon(s, m) {
+  const a = m.arms && m.arms[m.w], key = a && PACK_SARM.get(a.d), wid = m.civ ? null : (key && PACK.arm[key]) || (a && a.d && a.d.k ? (a.d.k === 'sam' || a.d.k === 'atgm' ? 'w_launcher' : 'w_bazooka') : m.def.era === 'ww2' ? 'w_kar98' : m.def.side ? 'w_ak' : 'w_m4');
+  if (s.wid === wid && s.wpn) return s.wpn;
+  if (s.wpn) { kill(s.wpn); s.wpn = null; }
+  s.wid = wid; const P = wid && packGet(wid); if (!P) { s.wid = null; return null; }
+  s.wpn = packWhole(P, 0, 1); s.tilt.add(s.wpn); return s.wpn;
+}
+function packPose(s, m, dt, fresh) {
+  const st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.hypot(m.v.x, m.v.z), a = m.arms && m.arms[m.w], fire = !!a && S.t - a.t < .3, rl = !!a && a.rl > 0;
+  const nm = st === 3 ? 'death' : st === 2 ? 'aim' : mv > 3.2 || (m.run && mv > .5) ? (fire && s.act.runfire ? 'runfire' : 'run') : mv > .3 ? 'walk' : m.civ ? 'idle' : fire ? 'fire' : rl ? 'idle' : st === 1 || m.ap ? 'aim' : 'idle';
+  packPlay(s, nm, fresh ? 0 : .18);
+  if (fresh && nm === 'death' && s.act.death) s.act.death.time = s.act.death.getClip().duration;
+  if (!s.rest) s.rest = s.legs.map(b => b && b.quaternion.clone());
+  s.legs.forEach((b, i) => b && b.quaternion.copy(s.rest[i]));   // a bone no clip moves would keep the bend of the frame before
+  s.mixer.update(fresh ? 0 : dt);
+  const k = MAN.sc * 1.85 / s.h, R = s.root, T = s.tilt;
+  R.position.set(m.x, m.y, m.z); R.rotation.set(0, m.h, 0); R.scale.setScalar(k);
+  T.rotation.set(0, 0, st === 2 ? -Math.PI / 2 : 0); T.position.set(st === 2 ? -.95 : 0, st === 2 ? .18 : st === 1 ? -.42 : 0, 0);
+  if (st === 1) { const [ul, ur, ll, lr] = s.legs; for (const b of [ul, ur]) if (b) b.quaternion.multiply(PMQ.setFromAxisAngle(PMX, -1.25)); for (const b of [ll, lr]) if (b) b.quaternion.multiply(PMQ.setFromAxisAngle(PMX, 1.9)); }
+  const w = packWeapon(s, m);
+  if (w) {
+    const run = nm === 'run';
+    w.visible = st !== 3;
+    if (st === 2) { w.position.set(.05, 1.5, .12); w.rotation.set(0, 0, Math.PI / 2); }   // prone: along the ground, against the body's tilt
+    else { w.position.set(.32, run ? 1.05 : 1.28, .12); w.rotation.set(0, 0, run ? -.7 : clamp(m.ap || 0, -1, 1)); }
+  }
+}
+/* before the frame: the people to draw animated, nearest first */
+function packPre() {
+  PM.want = null; const L = PACK.lvl(), near = PACK.near[L], max = PACK.max[L];
+  if (!PACK.on || !max || typeof camera === 'undefined' || !camera || !packGet('soldier')) return;
+  packGet('civ_man'); packGet('civ_woman');
+  const c = camera.position, cand = [], fp = !!curSeat() && S.my && !S.my.dead;
+  const look = m => { if (m.in || m.gone) return; const d = Math.hypot(m.x - c.x, m.z - c.z); if (d < near) cand.push([d, m]); };
+  for (const m of S.men) if (!(m === S.my && fp)) look(m);
+  for (const m of S.civs || []) look(m);
+  cand.sort((a, b) => a[0] - b[0]); PM.want = new Set(cand.slice(0, max).map(x => x[1]));
+}
+function packManModel(m) { return m.civ ? ((m.id || 0) % 2 ? 'civ_woman' : 'civ_man') : 'soldier'; }
+function packMan(m) {
+  if (!PM.want || !PM.want.has(m)) return false;
+  const id = packManModel(m); if (!packGet(id)) return false;
+  let s = PM.by.get(m), fresh = false;
+  if (!s || s.id !== id) {
+    s = PM.slots.find(x => x.m === null && x.id === id) || null;
+    if (!s) { s = packRig(id); if (!s) return false; PM.slots.push(s); }
+    if (!s.root.parent) scene.add(s.root);
+    s.m = m; PM.by.set(m, s); s.cur = null; s.mixer.stopAllAction(); fresh = true;
+  }
+  const col = m.civ ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];
+  for (const mt of s.mats) if (mt.userData.c !== col) { mt.color.setHex(col); mt.userData.c = col; }
+  s.root.visible = true; s.seen = frameId; packPose(s, m, PM.dt || 0, fresh);
+  return true;
+}
+function packPost() {
+  for (const s of PM.slots) if (s.seen !== frameId && s.m) { PM.by.delete(s.m); s.m = null; s.root.visible = false; }
+  if (PM.slots.length > (PACK.max[3] + 8)) PM.slots = PM.slots.filter(s => { if (s.m) return true; kill(s.root); return false; });
+}
+poseMan = (f => (m, put) => { if (packMan(m)) return; f(m, put); })(poseMan);
+/* each frame: what came in is built again, the people chosen before and tidied after */
+syncScene = (g => dt => {
+  if (PACK.dirty) {
+    PACK.dirty = false;
+    for (const l of [S.units, S.wrecks, S.sup]) for (const o of l || []) if (o.m) { if (o.m.parent) o.m.parent.remove(o.m); kill(o.m); o.m = null; }
+  }
+  PM.dt = dt || 0; packPre(); g(dt); packPost();
+})(syncScene);
+/* the world is built again with each match: the pools and the instanced props go with the old scene */
+buildWorld = (g => () => { for (const s of PM.slots) kill(s.root); PM.slots = []; PM.by.clear(); for (const id in PK.inst) PK.inst[id] = null; g(); })(buildWorld);
+/* the credits, under the hangar's briefing */
+try { const b = document.getElementById('briefing'), dock = b && b.parentElement; if (dock && PACK.on) { const p = document.createElement('p'); p.className = 'hint'; p.id = 'packCred'; p.textContent = PACK.cred; p.style.cssText = 'grid-column:1/-1;font-size:11px;opacity:.6;margin:2px 0 0'; dock.appendChild(p); } } catch (e) {}
+/* the vehicles and the soldier are asked for a moment after the page opens, so the first battle already has them */
+if (PACK.on) setTimeout(() => { for (const id of new Set([...Object.values(PACK.tank), ...Object.values(PACK.trn), 'soldier', 'p_debris'])) packGet(id); }, 1500);
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

@@ -150,10 +150,11 @@ function assign(tris, o, dims) {
 
 /* paint: the materials named in o.paint (names or indices) become grey shades around the most used of them; the rest keep their colour */
 function shade(tris, o) {
-  const isP = t => (o.paint || []).some(p => (typeof p === 'number' ? t.m === p : new RegExp(p).test(t.mn)));
-  const use = new Map(); for (const t of tris) if (isP(t)) use.set(t.m, (use.get(t.m) || 0) + 1);
-  const main = [...use.entries()].sort((a, b) => b[1] - a[1])[0], ref = main ? lum(tris.find(t => t.m === main[0]).c) || .5 : 1;
-  for (const t of tris) { t.paint = isP(t); if (t.paint) { const s = clamp(.85 * lum(t.c) / ref, .4, 1); t.c = [s, s, s]; } }
+  const isP = t => (o.paint || []).some(p => (typeof p === 'number' ? t.m === p : new RegExp(p).test(t.mn))) || (!!o.paintLum && lum(t.c) >= o.paintLum[0] && lum(t.c) <= o.paintLum[1]);
+  const use = new Map(); for (const t of tris) if (isP(t) && !o.paintLum) use.set(t.m, (use.get(t.m) || 0) + 1);
+  const main = [...use.entries()].sort((a, b) => b[1] - a[1])[0], P = tris.filter(isP), ref = main ? lum(tris.find(t => t.m === main[0]).c) || .5 : P.length ? P.map(t => lum(t.c)).sort((a, b) => a - b)[P.length >> 1] || .5 : 1;
+  for (const t of tris) t.paint = isP(t);
+  for (const t of tris) { if (t.paint) { const s = clamp(.85 * lum(t.c) / ref, .4, 1); t.c = [s, s, s]; } }
 }
 
 /* ---------- writing ---------- */

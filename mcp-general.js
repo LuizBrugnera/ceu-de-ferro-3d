@@ -39,7 +39,8 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.1.0';   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.2.0';   // 2.2: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed)
+   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -215,6 +216,8 @@ const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 
   hasmine: 'Já temos uma mina nessa jazida', foemine: 'O inimigo tem uma mina nessa jazida', sap: 'Nenhuma esquadra com sapadores livre para isso', path: 'Nenhum caminho a pé seguro até lá',
   cd: 'Essa manobra ainda está em espera', n: 'Número de esquadras inválido', near: 'perto demais de outra instalação', lot: 'num lote da cidade-sede', front: 'à frente da linha',
   dep: 'mina só sobre jazida livre', rcap: 'Limite de 3 antenas de rádio do lado', nrad: 'Nenhum veículo-rádio ou operador de rádio livre para isso', crl: 'O servidor desta sala é antigo: sem antenas de rádio', fabroad: 'fábrica precisa de estrada a menos de 500 m', q: 'fila cheia', unknown: 'instalação inimiga não localizada', none: 'nada na reserva', en: 'Falta energia' };
+Object.assign(PT, { fac: 'Este lado não tem essa arma', scap: 'Limite de armas estratégicas desse tipo', slive: 'Já há um ataque estratégico desse tipo em curso',
+  ff: 'Tropas amigas na área do bombardeio', sdr: 'Drones indisponíveis nesta sala' });   // the strategic strike (2.2)
 const explain = r => (r.ok ? 'accepted' : 'refused: ' + (r.why || 'unspecified') + (PT[r.why] ? ' (' + PT[r.why] + ')' : '') + (WHY[r.why] ? ' - ' + WHY[r.why] : '') + (r.note ? ' - ' + r.note : ''));
 
 /* the host's answer to a command: text for the model */
@@ -307,7 +310,7 @@ const WHYP = { type: 'string', maxLength: 120, description: 'optional reason (ap
 
 /* ---------------------------------------------------------------- state view for the model */
 /* the page's index tables, mirrored: ecoI() = units then sites (ecs kinds), ESK (site kinds), EWHY, GEN.tag (squad jobs, +1), GEN.ord (+1), GOP (operation kinds) */
-const UNITS = ['squad', 'car', 'truck', 'lav', 'aa', 'art', 'tank', 'rad', 'aaf', 'fighter', 'cas', 'heli', 'lift', 'drone'], SITES = ['pow', 'mine', 'fab'], KINDS = UNITS.concat(SITES);
+const UNITS = ['squad', 'car', 'truck', 'lav', 'aa', 'art', 'tank', 'rad', 'aaf', 'fighter', 'cas', 'heli', 'lift', 'drone', 'strat', 'svbied', 'shahed'], SITES = ['pow', 'mine', 'fab'], KINDS = UNITS.concat(SITES);
 const EWHY = ['', 'en', 'mt', 'busy', 'none', 'full'], JOBS = ['eng', 'line', 'garr', 'mort', 'wood', 'road', 'base', 'push', 'amb', 'rec', 'lp', 'guard', 'held', 'col'];
 const ORDS = ['hold', 'assault', 'patrol', 'flank', 'withdraw', 'supply', 'build', 'ambush', 'escort', 'bait', 'overwatch', 'scout', 'mortar', 'observe', 'move'], OPS = ['', 'atk', 'amb', 'ctr', 'usr'];
 const kname = i => KINDS[i] || 'kind#' + i, sname = i => SITES[i] || 'site#' + i;
@@ -392,7 +395,7 @@ function stateView(logN) {
 const pickView = v => { if (!v) return null; const o = {}; for (const k of ['doc', 'post', 'gate', 'atkT', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'res', 'ev', 'mev', 'gue', 'per', 'dif', 'hab']) if (v[k] !== undefined && v[k] !== null && !(Array.isArray(v[k]) && v[k].length === 0)) o[k] = v[k]; return o; };
 
 /* ---------------------------------------------------------------- tools */
-const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone; ww2 has no lav/heli/lift/drone)' };
+const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone, and the strategic weapon of your side: strat (the bomber) or, for the Insurgents, svbied and shahed; ww2 has no lav/heli/lift/drone/svbied/shahed)' };
 const siteId = { type: 'integer', description: 'site id (from get_state or ask_view)' };
 const xz = { x: { type: 'number', description: 'map x, metres' }, z: { type: 'number', description: 'map z, metres' } };
 /* a route: 1-8 waypoints [{x, z}] the squads walk through, in order, before the target; flattened into rt */
@@ -502,6 +505,16 @@ const TOOLS = [
   { name: 'strike', description: 'Target a known enemy site (id from knownEnemySites, not dead, recently seen) for an artillery mission. Refused as unknown if the sighting is stale or never made.',
     inputSchema: { type: 'object', properties: { id: { type: 'integer', description: 'enemy site id from knownEnemySites' }, why: WHYP }, required: ['id'], additionalProperties: false },
     run: async a => { const e = need(a, { id: ['i', true], why: ['s', false] }); if (e) throw new Error(e); return runCmd(Object.assign({ c: 'strike' }, pick(a, ['id', 'why']))); } },
+  { name: 'strategic_strike', description: 'A strategic strike (very expensive, one at a time, a massive burst that destroys buildings and vehicles and harms your own troops nearby when friendly fire is on): your side\'s bomber (weapon strat: B-2 or Tu-160 today, He 177 or B-17 in 1944; it climbs, runs straight and high over the target and drops its stick, then flies home and is back in the reserve) or, for a side with no air force (the Insurgents), the heavy truck bomb (svbied: drives the roads to the target and goes off) or a salvo of 5 long-range one-way drones (shahed). The weapon must be in your reserve: produce it first (produce_unit kind strat, svbied or shahed; at most 2 owned and 1 out at a time). Target: an enemy site or supply base you know (site_id), a point index (point), or x, z. heading: the bomber\'s run, radians (default from your base to the target). weapon defaults to the first your reserve has. Accepted with the strike id (get_strikes follows it) or refused: fac (your side has no such weapon), res (none in the reserve), slive (one of that weapon already out), pop (over the population budget), id, map, sdr (no drones in this room), mv (the truck needs the road-network map). Unlike the AI, your order is not held back for friends or civilians under the pattern: look first.',
+    inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['strat', 'svbied', 'shahed'] }, site_id: { type: 'integer', description: 'enemy site or supply base id (knownEnemySites)' }, point: { type: 'integer', minimum: 0, description: 'point index from get_state map.points' }, ...xz, heading: { type: 'number', description: 'run heading of a bomber, radians (0 = toward +x)' }, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { weapon: ['w', false, ['strat', 'svbied', 'shahed']], site_id: ['i', false, 0, 999999], point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], heading: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.site_id === undefined && a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give site_id, point, or both x and z');
+      return runCmd(Object.assign({ c: 'bomb' }, pick(a, ['weapon', 'site_id', 'point', 'x', 'z', 'heading', 'why'], { weapon: 'k', site_id: 'id', point: 'pi', heading: 'a' })), 'cmd');
+    } },
+  { name: 'get_strikes', description: 'Ask the host for your side\'s strategic weapons: per weapon (strat, svbied, shahed) how many are in the reserve, queued and out, with the cost [energy, metal, seconds], the caps, and the last strikes (id, weapon, target x z, state in words, who ordered it, age in seconds, ended, result ok or lost). One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'stk' }) },
   { name: 'send_command', description: 'Send any command object to the host, or (with question instead of command) a raw question. command is {"c": name, ...params}; d is "eco" for the economy names (build, make, cancel, prio, scrap, def, keep, scout, strike: the dedicated tools are easier) and "cmd" for everything else (default eco; the host ignores d, it is only a hint).\n'
     + 'GENERAL COMMANDS (ids = squad ids from get_state general.squads, at most 24; pi = point index from get_state map.points; x, z in metres; why = short note for the log). Unless noted, the answer is accepted with an operation id or refused with a Portuguese reason:\n'
     + '- atk {pi | x,z (nearest point within 600 m) | ri,s; ids?: squads to use (omit for the AI\'s pick), sd?: 1 to split, H?: seconds to H-hour 20-300, smk?: 0 for no smoke, fx,fz?: fire-support point, x2,z2?: second approach} planned assault on a point; refused link (point not adjacent to one of ours), own, busy, max (at most the side\'s fronts: 3 cautious, 4 balanced, 5 aggressive), sq, tk.\n'

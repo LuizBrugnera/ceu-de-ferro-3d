@@ -36,9 +36,23 @@ Foi provado contra o jogo de verdade (anfitrião rodando a página, economia lig
    ```
 
    - `CEU_ROOM`: a época, `modern` ou `ww2`.
-   - `CEU_SIDE`: `0` ou `1`, o lado a comandar (um general por lado; humano ou ponte, quem pedir primeiro).
+   - `CEU_SIDE`: `0`, `1` ou `2`, o lado a comandar (um general por lado; humano ou ponte, quem pedir primeiro). O `2` (Insurgentes) só existe na Frente atual com 3 lados; veja a tabela abaixo.
    - `CEU_KEY`: igual ao `GENKEY` do servidor.
    - Opcionais: `CEU_SEAT=0` (não pega a cadeira ao conectar; o modelo chama `seat`) e `CEU_DOMAINS` (domínios tomados junto com a cadeira, padrão `eco`).
+
+## Lados e facções
+
+| `CEU_SIDE` | Frente atual (`modern`) | Frente de 1944 (`ww2`) |
+|---|---|---|
+| `0` | EUA (a antiga Força Azul) | Alemanha |
+| `1` | Rússia (a antiga Força Vermelha) | Aliados |
+| `2` | Insurgentes (só numa sala de 3 lados) | (não existe) |
+
+- O número de lados é da sala: quem entra primeiro diz (`ns` no `join`) e o `welcome` repete. Uma página de outra contagem é recusada (`sides`).
+- Com 3 lados é todos contra todos: os dois inimigos também lutam entre si. As instruções da ponte dizem a facção e os dois inimigos.
+- No `get_state`, `link` traz `faction`, `sides` e `enemies`. Com 3 lados, `holder` e `base` dos pontos dizem `ours`, `contested` ou o nome da facção (`USA`, `Russia`, `Insurgents`) em vez de `enemy`, e `tickets` vira um mapa por facção. Com 2 lados tudo continua como antes.
+- Uma ponte de lado 2 pode entrar numa sala vazia; se o primeiro jogador abrir a sala com 2 lados, o servidor a desconecta (`sides`) e ela tenta de novo depois.
+- **Não testado** (veja `docs/nao-testado/cf-3l-p5-servidor.md`).
 
 ## Primeiro prompt sugerido
 
@@ -69,7 +83,7 @@ Versão 2 (W13): o modelo tem as mesmas ferramentas que o general da IA e que o 
 
 ## O que não pode
 
-- Não vê o inimigo além do que o seu lado enxerga (névoa); não vê nem controla o outro lado.
+- Não vê o inimigo além do que o seu lado enxerga (névoa); não vê nem controla os outros lados.
 - Não pilota nem atira em primeira pessoa; não comanda unidades individuais, só esquadras por id e operações.
 - Não cria nem encerra partidas, não troca de sala ou de época, não escolhe o anfitrião.
 - Por padrão a IA segue decidindo defesa e apoio; o modelo só toma `def`/`sup` se pedir (`seat` com `domains`, ou `ctl`).

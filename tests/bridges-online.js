@@ -79,10 +79,10 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
 
   console.log('-- the fallen bridge built again --');
   await near(e.x, e.z);
-  g1.Net.fbuild({ k: 8, x: e.x, z: e.z, a: 0 });
-  const rf = c => c.S.forts.find(f => f.k === 8 && f.b === b.i);
+  g1.Net.fbuild({ k: 9, x: e.x, z: e.z, a: 0 });
+  const rf = c => c.S.forts.find(f => f.k === 9 && f.b === b.i);
   await until(() => C4.every(c => rf(c)));
-  ok(C4.every(c => rf(c) && rf(c).id === rf(host).id), 'the guest\'s request: the host starts the rebuild at the bank end, and every client has it (fort, kind 8)');
+  ok(C4.every(c => rf(c) && rf(c).id === rf(host).id), 'the guest\'s request: the host starts the rebuild at the bank end, and every client has it (fort, kind 9)');
   const r0 = rf(host).prog, rt0 = host.S.t; await run(6, () => { put(g1, e.x, e.z); });
   const rr = (rf(host).prog - r0) / (host.S.t - rt0);
   ok(rr > 0 && Math.abs(1 / rr - host.$('FORT').rebuild.time) < 40, 'the guest\'s sapper standing at it builds it on the host at one builder\'s pace (' + Math.round(1 / rr) + ' s for the whole)');

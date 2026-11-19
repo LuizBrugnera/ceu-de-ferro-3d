@@ -25,7 +25,7 @@ console.log('-- the kinds and where they may stand --');
 fresh('ww2');
 {
   const p = flat();
-  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length === 9 && FORT.K[7].span && FORT.K[8].span, 'four more kinds of work (and after them the pontoon, 7, and a bridge\'s rebuild, 8): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
+  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length === 10 && FORT.K[7].span && FORT.K[9].span, 'four more kinds of work (and after them the pontoon, 7, and the radio relay, 8, and a bridge\'s rebuild, 9): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
   ok(C.fortWhy(6, 0, p.x, p.z, 0) === 'era' && C.fortWhy(3, 0, p.x, p.z, 0) === '', 'the anti-rocket dome only in the modern era; the anti-tank post in both');
   for (const k of [3, 4, 5]) for (let i = 0; i < FORT.K[k].cap; i++) build(k, 0, p.x + 30 * i, p.z + 40 * k);
   ok([3, 4, 5].every(k => C.fortWhy(k, 0, p.x - 60, p.z + 40 * k, 0) === 'bcap'), 'a side has at most ' + [3, 4, 5].map(k => FORT.K[k].cap).join(', ') + ' of them');

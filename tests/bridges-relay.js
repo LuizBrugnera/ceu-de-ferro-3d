@@ -1,6 +1,6 @@
 'use strict';
 /* the relay and the bridges (welcome br: 1, brb: 1): a bridge's stage in obj like any object's (back to 0 when it is built again), the pontoon as
-   the work of kind 7 and the rebuild as kind 8 in fort and fbuild, and the question brg */
+   the work of kind 7 and the rebuild as kind 9 in fort and fbuild, and the question brg */
 const N = require('./net'), { ok, done } = require('./harness');
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER);
@@ -15,11 +15,11 @@ const N = require('./net'), { ok, done } = require('./harness');
   const row = [30520, 7, 0, 12000.5, -2600.2, 1.2, 35, 280, 0];
   h.send({ t: 'fort', i: 0, n: 1, e: [row] }); const f1 = await a.wait('fort'), f2 = await b.wait('fort');
   ok(f1 && f2 && f1.e[0].join() === row.join() && f2.e[0][1] === 7, 'a pontoon (kind 7) in the host\'s fort lines reaches the room');
-  h.send({ t: 'fort', i: 0, n: 1, e: [[30521, 8, ...row.slice(2)]] }); const f3 = await a.wait('fort'); ok(f3 && f3.e[0][1] === 8, 'a rebuild (kind 8) in the host\'s fort lines reaches the room');
-  h.send({ t: 'fort', i: 0, n: 1, e: [[30520, 9, ...row.slice(2)]] }); ok(await none(a, 'fort'), 'a kind after the rebuild is still none');
+  h.send({ t: 'fort', i: 0, n: 1, e: [[30521, 9, ...row.slice(2)]] }); const f3 = await a.wait('fort'); ok(f3 && f3.e[0][1] === 9, 'a rebuild (kind 9) in the host\'s fort lines reaches the room');
+  h.send({ t: 'fort', i: 0, n: 1, e: [[30520, 10, ...row.slice(2)]] }); ok(await none(a, 'fort'), 'a kind after the rebuild is still none');
   a.send({ t: 'fbuild', k: 7, p: [12000.5, -2600.2], a: 0 }); const fb = await h.wait('fbuild');
   ok(fb && fb.k === 7 && fb.from === a.id && await none(b, 'fbuild'), 'a soldier\'s request for a pontoon (fbuild k 7) goes to the host alone');
-  await N.sleep(720); a.send({ t: 'fbuild', k: 8, p: [12000.5, -2600.2], a: 0 }); const fb8 = await h.wait('fbuild'); ok(fb8 && fb8.k === 8 && await none(b, 'fbuild'), 'and for a rebuild (fbuild k 8)');
+  await N.sleep(720); a.send({ t: 'fbuild', k: 9, p: [12000.5, -2600.2], a: 0 }); const fb8 = await h.wait('fbuild'); ok(fb8 && fb8.k === 9 && await none(b, 'fbuild'), 'and for a rebuild (fbuild k 9)');
   a.send({ t: 'gclaim', on: 1 }); await a.wait('gctl');
   a.send({ t: 'gask', q: { q: 'brg' }, n: 1 }); const q1 = await h.wait('gask'); ok(q1 && q1.q.q === 'brg', 'the question brg reaches the host');
   await N.sleep(1020); a.send({ t: 'gcmd', d: 'cmd', c: { c: 'man', k: 'demolish', x: 12000, z: -2600, why: 'recuo' }, n: 2 }); const g1 = await h.wait('gcmd');

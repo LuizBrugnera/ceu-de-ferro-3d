@@ -14,14 +14,14 @@ const still = S => () => { for (const m of S.men) { m.v.x = m.v.z = 0; m.hitT = 
 console.log('-- rebuilding a fallen bridge --');
 {
   const S = g.sandbox('ww2'), L = $('brs()'), T = S.T, b = L[1], e = b.ends[0], tp0 = trip(S);
-  ok($('fortWhy')(8, 0, e.x, e.z, 0) === 'up', 'nothing to rebuild at a bridge that stands (up)');
-  ok($('fortWhy')(8, 0, e.x + 400, e.z + 400, 0) === 'nobr', 'nor away from a bridge (nobr)');
+  ok($('fortWhy')(9, 0, e.x, e.z, 0) === 'up', 'nothing to rebuild at a bridge that stands (up)');
+  ok($('fortWhy')(9, 0, e.x + 400, e.z + 400, 0) === 'nobr', 'nor away from a bridge (nobr)');
   for (const c of L) down(c); g.step(dt);
   ok(trip(S) === null, 'every bridge down: no way across');
-  ok($('fortWhy')(8, 0, e.x + 5, e.z, 0) === '', 'at the bank end of a fallen one: allowed');
-  const f = $('fortStart')(8, 0, e.x + 5, e.z, 0);
-  ok(f && f.b === b.i && $('hdist')(f, e) < 1 && f.F === FORT.rebuild && FORT.K[8] === FORT.rebuild, 'it starts at the bank end (the work of kind 8)');
-  ok($('fortWhy')(8, 1, b.ends[1].x, b.ends[1].z, 0) === 'reb', 'one rebuild a bridge');
+  ok($('fortWhy')(9, 0, e.x + 5, e.z, 0) === '', 'at the bank end of a fallen one: allowed');
+  const f = $('fortStart')(9, 0, e.x + 5, e.z, 0);
+  ok(f && f.b === b.i && $('hdist')(f, e) < 1 && f.F === FORT.rebuild && FORT.K[9] === FORT.rebuild, 'it starts at the bank end (the work of kind 9)');
+  ok($('fortWhy')(9, 1, b.ends[1].x, b.ends[1].z, 0) === 'reb', 'one rebuild a bridge');
   const sap = $('addMan')('pionier', 0, e.x - 2, e.z + 3), p0 = f.prog, t0 = S.t;
   g.run(10, still(S));
   const T1 = (S.t - t0) / (f.prog - p0);
@@ -37,7 +37,7 @@ console.log('-- rebuilding a fallen bridge --');
   ok(p.dead && !$('brPont')(b), 'its pontoon is taken up');
   ok($('brOpen')(b) && !S.brk.includes(b.i + 'x') && !S.brk.includes(b.i + 'p') && $('hgt')(b.x, b.z) > T.WL + 1, 'its crossing carries again and the road is over the river (S.brk ' + S.brk + ')');
   const tp = trip(S); ok(tp && uses(tp, b), 'base to base the network goes over it again (' + Math.round(tp.len) + ' m, ' + Math.round(tp0.len) + ' with all six standing)');
-  ok($('fortWhy')(8, 0, e.x, e.z, 0) === 'up' && $('fortWhy')(7, 0, e.x, e.z, 0) === 'whole', 'standing again: no rebuild, no pontoon');
+  ok($('fortWhy')(9, 0, e.x, e.z, 0) === 'up' && $('fortWhy')(7, 0, e.x, e.z, 0) === 'whole', 'standing again: no rebuild, no pontoon');
   $('brPlant')(Object.assign($('addMan')('schutze', 1, e.x + 1, e.z), { chg: 9 }), b); g.run(BLD.charge.fuse + .5);
   ok(S.oh[b.id] < BR.hp[b.c], 'and it can be blown again');
 }
@@ -47,8 +47,8 @@ console.log('-- rebuilding a fallen bridge --');
   const d = S.eco && S.eco.d[0];
   ok(!!d && $2('ecoSim')(), 'the economy is on in this match (side 0 has a stock)');
   const mt = d.mt; d.mt = 119;
-  ok($2('fortWhy')(8, 0, e.x + 5, e.z, 0) === 'cost', 'where the economy is on, the rebuild costs 120 metal: refused at 119');
-  d.mt = mt + 500; const m0 = d.mt, f = $2('fortStart')(8, 0, e.x + 5, e.z, 0);
+  ok($2('fortWhy')(9, 0, e.x + 5, e.z, 0) === 'cost', 'where the economy is on, the rebuild costs 120 metal: refused at 119');
+  d.mt = mt + 500; const m0 = d.mt, f = $2('fortStart')(9, 0, e.x + 5, e.z, 0);
   ok(f && d.mt === m0 - 120, 'and pays 120 when it starts (' + m0 + ' -> ' + d.mt + ' metal)');
 }
 

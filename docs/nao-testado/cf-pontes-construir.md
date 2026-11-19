@@ -1,7 +1,7 @@
 # Pontes: reconstruir e pontão fora das pontes (cf-pontes-construir)
 
 ## O que mudou
-- **Reconstruir ponte caída** (obra tipo 8, "Ponte"): na cabeceira, por sapadores ou qualquer soldado. 5 min com um construtor, 2 min no mínimo (até 4). Custa 40 de metal com a economia ligada, de graça sem ela. Pronta, a ponte volta inteira, a estrada volta a passar e o pontão dela é recolhido. Online: `obj` com estágio 0 e `fort` tipo 8 (servidor diz `brb: 1`).
+- **Reconstruir ponte caída** (obra tipo 9, "Ponte"; o tipo 8 ficou com a antena de rádio do main): na cabeceira, por sapadores ou qualquer soldado. 5 min com um construtor, 2 min no mínimo (até 4). Custa 40 de metal com a economia ligada, de graça sem ela. Pronta, a ponte volta inteira, a estrada volta a passar e o pontão dela é recolhido. Online: `obj` com estágio 0 e `fort` tipo 9 (servidor diz `brb: 1`; `FKINDS` 9).
 - **Pontão em outro ponto do rio**: trecho com até 280 m de água, margens baixas, a 300 m ou mais de uma ponte e com estrada ao alcance das duas margens. Abre uma travessia nova na rede de estradas (vão + ligações), que as rotas usam. Destruído, fecha de novo. Até 3 por lado.
 - **Construtor inteiro**: no pontão e na reconstrução, um soldado conta inteiro (e não meio) se a esquadra dele tem um sapador vivo ou se há um caminhão do lado a até 80 m da obra.
 - **General não trava** (`brUrgent`): a cada 15 s, para cada ponte caída que corta um eixo seu ou segura viaturas suas, o general da IA age já (acima do limite e da espera das manobras). Reconstrói se a cabeceira dele está livre de inimigo a 250 m e há metal; senão lança pontão na ponte; senão no trecho estreito mais perto. Viaturas paradas na margem procuram outro caminho a cada 8 s (antes 20 s).

@@ -248,7 +248,7 @@ for (const era of ['ww2', 'modern']) {
   ok(!err && pool >= 2 && snp >= 2 && (era === 'ww2' ? !lav : lav >= 1), era + ', 7 min solo: parked vehicles ' + pool + ', patrol cars now ' + pat + ', LAVs ' + lav + (lav ? ' (' + lavShots + ' rounds fired)' : '') + ', snipers alive ' + snp + (err ? ' ' + err : ''));
 }
 {
-  box('modern'); S.over = false; S.demo = false; S.waveTimer = 1e9; S.wave = 1; S.base[0].hp = 1e9;
+  C.seed(11); box('modern'); S.over = false; S.demo = false; S.waveTimer = 1e9;   // its own random stream: not what the battles above left S.wave = 1; S.base[0].hp = 1e9;
   const s0 = C.lineS(0, 0) + 2500, p = at(s0, 14), q = C.fieldSquad(0, 'line', 0, { k: 'hold', ri: 0, s: C.lineS(0, 0) }, p.x, p.z), n = q.live; let got = null, t = 0, full = 0, drop = null;
   C.run(600, () => { t += 1 / 30; for (const p of S.planes) p.gone = true; got = got || S.units.find(u => u.run && u.run.q === q); if (got && got.cargo) full = Math.max(full, got.cargo.length); if (got && full && !got.cargo) drop = got.s; return drop === null; }, 1 / 30);
   ok(got && full === n && Math.abs(drop - C.lineS(0, 0)) < 200, 'a squad 2,5 km short of its post is fetched by a ' + (got ? got.name : '?') + ': ' + full + ' of ' + n + ' aboard, let off ' + (drop === null ? '?' : Math.round(Math.abs(drop - C.lineS(0, 0)))) + ' m from the post after ' + f1(t / 60) + ' min (on foot: ' + f1(2500 / FIELD.pace / 60) + ' min)');

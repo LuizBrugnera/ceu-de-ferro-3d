@@ -466,7 +466,8 @@ RX.gen = (c, m) => {
     hit: rec(v.hit) ? v.hit : null, focus: rec(v.focus) ? v.focus : null, thr: rec(v.thr) ? v.thr : null, want: rec(v.want) ? v.want : null,
     gate: txt(v.gate, 8) ? v.gate : '', atkT: num(v.atkT) ? v.atkT : 0, ev: lst(v.ev, 8) ? v.ev : [], evT: num(v.evT) ? v.evT : -1,
     fb: lst(v.fb, 8) ? v.fb : null, res: rec(v.res) ? v.res : null, mev: lst(v.mev, 9) ? v.mev : [], gue: rec(v.gue) ? v.gue : null, kz: rec(v.kz) || lst(v.kz, 96) ? v.kz : null,
-    cn: rec(v.cn) && v.cn !== null ? v.cn : null };   // the command network as the side's general sees it (nodes, jammers, the HQ, squads without a link)
+    cn: rec(v.cn) && v.cn !== null ? v.cn : null,   // the command network as the side's general sees it (nodes, jammers, the HQ, squads without a link)
+    thb: lst(v.thb, 6) ? v.thb : [], camp: lst(v.camp, 4) ? v.camp : [] };   // the threat board's first rows and the campaigns (F4)
   castSide(c, { t: 'gen', s: m.s, T: m.T, v: o, q: m.q }, m.s);
 };
 RX.glog = (c, m) => {
@@ -488,7 +489,8 @@ const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', i
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
   mk: 'w', lat: 'i', roe: 'w', brk: 'n',   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
   nd: 'w',   // logistics (F2b): a supply node's key, b<base id> or p<point index> (conv, alift, sprio)
-  rt: 'P' };   // abstract orders (W21): a route, flat x z pairs (welcome rte: 1)
+  rt: 'P',   // abstract orders (W21): a route, flat x z pairs (welcome rte: 1)
+  role: 'w', qrf: 'i' };   // campaigns and the threat board (F4): an operation's role in a campaign (camp), a place's policy for the quick reaction force (dpol)
 function gcmdOf(c) {
   if (!c || !rec(c) || typeof c.c !== 'string' || !/^[a-z]{2,8}$/.test(c.c) || c.c === 'draw') return null;
   const o = { c: c.c };
@@ -512,7 +514,7 @@ RX.gcmd = (c, m) => {
 };
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });

@@ -10377,8 +10377,9 @@ const OPS = {
     if (op.st === 'prep' && op.walk) { op.st = 'screen'; op.T = S.t; return; }
     if (op.st === 'prep') {
       const hot = C.known.filter(o => !o.dead && Math.hypot(o.sx - O.x, o.sz - O.z) < 380 && S.t - o.moveT > 3).slice(0, 3);
-      for (const o of hot) cmdMission(C, 'he', o.sx, o.sz, Math.ceil(D.prep / 2), 90, op).he = 1;
-      if (!hot.length) cmdMission(C, 'he', O.x + op.ax * (O.tw ? 240 : 30), O.z + op.az * (O.tw ? 240 : 30), D.prep, 90, op).he = 1;
+      const np = op.cr === 'sec' ? Math.ceil(D.prep / 2) : D.prep;   // a campaign's secondary front: half the preparation (F4)
+      for (const o of hot) cmdMission(C, 'he', o.sx, o.sz, Math.ceil(np / 2), 90, op).he = 1;
+      if (!hot.length) cmdMission(C, 'he', O.x + op.ax * (O.tw ? 240 : 30), O.z + op.az * (O.tw ? 240 : 30), np, 90, op).he = 1;
       op.smk = !op.nosm && cmdSmokeSrc(t, op.scr[0].x, op.scr[0].z); op.st = 'screen'; op.T = S.t;
       if (op.smk) for (const p of op.scr) cmdMission(C, 'smk', p.x, p.z, 1, D.wait + 20, op).p = p;
       gLog(t, 'fire', 'Preparação sobre ' + gName(O) + ': ' + (hot.length || 1) + (hot.length > 1 ? ' missões' : ' missão') + ' de fogo' + (op.smk ? ' e cortina de fumaça' : ', sem fumaça disponível'), O);
@@ -10499,27 +10500,33 @@ function cmdAttack(C, sq) {
   const t = C.t, D = C.doc, ds = t ? 1 : -1, fr = frontR(), P0 = cmdObj(C), R = S.T.routes, Sc = CMD.screen, me = S.my, cand = [];
   C.want = null;
   if (P0 && !P0.tw && sq.some(q => q.ri === P0.ri && Math.abs(q.s - P0.s) < 150 && q.fd > 250)) { C.took[P0.ri] = S.t + CMD.took; C.gate = 'took'; gLog(t, 'atk', 'Linha inimiga ocupada na rota ' + (P0.ri + 1), routeAt(R[P0.ri], P0.s), 'took' + P0.ri); return; }   // a squad stands on the enemy's line and nobody is there: it is taken
-  if (!P0 || S.t < C.atkT || C.ops.filter(o => o.k === 'atk').length >= (S.cq ? Math.max(D.ops, R.length) : D.ops)) { C.gate = !P0 ? 'none' : S.t < C.atkT ? 'cool' : 'max'; return; }
+  const on = C.ops.filter(o => o.k === 'atk').length, room = S.cq ? campRoom(C, sq) : D.ops, go = [];   // with points: up to the side's fronts (F4, D12 A)
+  if (!P0 || S.t < C.atkT || on >= room) { C.gate = !P0 ? 'none' : S.t < C.atkT ? 'cool' : 'max'; return; }
   if (genBy(t, 'atk') !== 'ai') { C.gate = 'man'; return; }
-  C.gate = ''; const ev = (C.ev = []); C.evT = S.t;
+  C.gate = ''; const ev = (C.ev = []); C.evT = S.t; const camp = !!S.cq && room - on >= 2 && (C.camp || []).filter(K => !K.over).length < CAMP.max;
   if (S.cq) for (const p of cqTargets(t)) cand.push([cqObj(p), ds], [cqObj(p), -ds]);   // with points: every point it may take, from either side along its road
   else { cand.push([P0, ds]); if (P0.tw) cand.push([P0, -ds]); }
   if (!S.cq) for (const ri of axesFrom(fr)) if (ri !== P0.ri && R[ri] && !(S.t < (C.took[ri] || 0)) && (lineS(1 - t, ri) - lineS(t, ri)) * ds > 0) cand.push([{ ri, s: lineS(1 - t, ri) }, ds]);
   if (C.pref && S.t < C.pref.T) cand.sort((a, b) => (b[0].tw === C.pref.p) - (a[0].tw === C.pref.p));   // map version 4: the point a manoeuvre (cut) chose is looked at first
   for (const [P, sd] of cand) {
     const ri = P.ri, r = R[ri], o = P.x === undefined ? routeAt(r, clamp(P.s, 0, r.len)) : P;
-    if (C.post[ri] === 'def' || C.ops.some(o => o.k === 'atk' && o.ri === ri)) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: C.post[ri] === 'def' ? 'def' : 'busy' }); continue; }
-    let pool = sq.filter(q => q.ri === ri && !q.op && FREE[q.job] && (P.s - q.s) * sd > 200 && (P.s - q.s) * sd < CMD.reach && q.live >= 3 && q.ord.k !== 'supply' && q.ord.k !== 'build' && !q.ord.b && !q.ord.tw && !q.ord.T && !q.lift).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || Math.abs(a.s - P.s) - Math.abs(b.s - P.s)).slice(0, D.push + 1);
+    if (C.post[ri] === 'def' || C.ops.some(o => o.k === 'atk' && o.ri === ri) || go.some(g => g.P.ri === ri)) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: C.post[ri] === 'def' ? 'def' : 'busy' }); continue; }
+    let pool = sq.filter(q => atkFit(q, P, sd)).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || Math.abs(a.s - P.s) - Math.abs(b.s - P.s)).slice(0, D.push + 1);
     const kn = cmdKnown(C, o.x, o.z, 500), walk = !!S.cq && !kn && !P.tw.w[1 - t];
     if (C.gue && !walk) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: 'gue' }); continue; }   // map version 4: harassing, it only walks into empty points (gue)
     if (walk) pool = pool.filter(q => Math.abs(P.s - q.s) < CQ.walk).slice(0, 2);
     const foe = walk ? 3 : Math.max(CMD.guess, kn), n0 = pool.reduce((a, q) => a + q.live, 0);   // a point nobody stands in is walked into by whoever is at hand
     const own = n0 + S.units.reduce((a, u) => a + (u.kind === 'tank' && u.ai && !u.dead && u.team === t && u.ri === ri && (P.s - u.s) * sd > 0 && (P.s - u.s) * sd < 2500 ? CMD.val.tank : 0), 0) + (me && me.man && !me.dead && me.team === t && Math.hypot(me.x - o.x, me.z - o.z) < 1200 ? 2 : 0);   // a player on foot by the objective counts
-    const e = { x: o.x, z: o.z, ri, sd, nm: gName(P), n: pool.length, own, foe, need: D.atk, walk }; ev.push(e);
-    if (pool.length < (walk ? 1 : 2) || own / foe < D.atk) { e.why = pool.length < (walk ? 1 : 2) ? 'pool' : 'weak'; continue; }
+    const sec = camp && go.length > 0 && !walk, need = sec ? D.atk * CAMP.secK : D.atk, min = walk ? 1 : 2;   // a campaign's secondary front only has to fix the enemy (F4)
+    const e = { x: o.x, z: o.z, ri, sd, nm: gName(P), n: pool.length, own, foe, need, walk }; ev.push(e);
+    if (pool.length < min || own / foe < need) { e.why = pool.length < min ? 'pool' : 'weak'; continue; }
     e.why = 'go';
-    genCmd(t, Object.assign({ c: 'atk' }, P.tw ? { pi: gPts().indexOf(P.tw) } : { ri: P.ri, s: P.s }, { sd, ids: pool.map(q => q.id) }), 'ai', { P, sd, pool, walk, own, foe }); return;
+    if (walk && go.length) continue;   // a walk into an empty point is no front of a campaign: it goes on its own, the next turn
+    go.push({ P, sd, pool, walk, own, foe });
+    if (!camp || walk || go.length >= room - on) break;   // one assault a turn (a walk at once, as before), or with a campaign every front the side may hold
   }
+  if (go.length > 1) return campAI(C, sq, go);   // more than one front at once: a campaign with a common H-hour (F4)
+  if (go.length) { const g = go[0]; genCmd(t, Object.assign({ c: 'atk' }, g.P.tw ? { pi: gPts().indexOf(g.P.tw) } : { ri: g.P.ri, s: g.P.s }, { sd: g.sd, ids: g.pool.map(q => q.id) }), 'ai', g); return; }
   if (C.gue) return;   // map version 4: harassing (gue), it asks for no assault squads
   C.want = { ri: P0.ri, n: D.push }; gLog(t, 'rf', 'Sem força para atacar ' + gName(P0) + ': pede ' + D.push + ' esquadras', routeAt(R[P0.ri], P0.s), 'want' + P0.ri);
 }
@@ -10662,10 +10669,10 @@ const CUE = ['', 'COMANDO: reunir para o assalto', 'COMANDO: fumaça e preparaç
 for (let i = CUE.length; i < 14; i++) CUE[i] = ''; CUE[14] = 'COMANDO: o general marcou um objetivo';
 CUE[11] = 'COMANDO: incursão na retaguarda inimiga em curso'; CUE[12] = 'COMANDO: fustigar e evitar combate decisivo'; CUE[13] = 'COMANDO: defesa em profundidade, recuar para a linha de recuo';
 function cmdFires(C) {
-  const op = C.ops.find(o => o.k === 'atk' && !o.over), ctr = C.ops.find(o => o.k === 'ctr' && !o.over), m = [], r = n => Math.round(n);
+  const op = C.ops.find(o => o.k === 'atk' && !o.over && o.cr === 'main') || C.ops.find(o => o.k === 'atk' && !o.over), ctr = C.ops.find(o => o.k === 'ctr' && !o.over), m = [], r = n => Math.round(n), qf = C.thbF && S.t < C.thbF.T ? C.thbF : null;
   for (const M of C.fm) if (S.t > M.T) M.dead = true;
   C.fm = C.fm.filter(M => !M.dead);
-  C.focus = C.ufoc && S.t < C.ufoc.T ? { x: C.ufoc.x, z: C.ufoc.z, r: C.ufoc.r } : op && (op.st === 'go' || op.st === 'fight' || op.st === 'screen' || op.st === 'prep') ? { x: op.O.x, z: op.O.z, r: 450 } : C.hit ? { x: C.hit.x, z: C.hit.z, r: 300 } : C.thr > 2 && C.tx !== undefined ? { x: C.tx, z: C.tz, r: 400 } : null;
+  C.focus = C.ufoc && S.t < C.ufoc.T ? { x: C.ufoc.x, z: C.ufoc.z, r: C.ufoc.r } : op && (op.st === 'go' || op.st === 'fight' || op.st === 'screen' || op.st === 'prep') ? { x: op.O.x, z: op.O.z, r: 450 } : qf ? { x: qf.x, z: qf.z, r: qf.r } : C.hit ? { x: C.hit.x, z: C.hit.z, r: 300 } : C.thr > 2 && C.tx !== undefined ? { x: C.tx, z: C.tz, r: 400 } : null;
   let code = 0;
   if (op) { code = op.st === 'form' ? 1 : op.st === 'prep' || op.st === 'screen' ? 2 : op.st === 'go' ? (op.smk ? 3 : 4) : op.st === 'fight' ? 5 : op.st === 'cons' ? 10 : 6; m.push(r(op.O.x), r(op.O.z), 0); if (code < 3) op.fp.slice(0, 1).forEach(p => m.push(r(p.x), r(p.z), 4)); }
   else if (ctr) code = 8; else if (C.hit) code = 9; else if (C.thr > 2) code = 7;
@@ -11802,6 +11809,247 @@ OPS.gue = (C, op) => {
 MANE.gue = (C, op) => { if (C.gue && C.gue.op === op) C.gue = null; C.gueLo = null; };
 /* ===== end gue ===== */
 
+/* ---------- campaigns and the threat board (F4 of the General's design: D12 A, D14 A) ----------
+   A campaign (C.camp): operations of one side with a common H-hour, each with a role (CAMP.role): main, the main effort (the most squads,
+   CAMP.main more than its pool, and the whole preparation); sec, a secondary front that fixes the enemy (CAMP.sec squads, half the
+   preparation); fnt, a feint (MANO.fnt: its fire is timed on the campaign's main assault); raid, a raid on the enemy's economy (MANO.raid).
+   The AI opens one when, in one plan turn, more than one front may be assaulted (cmdAttack): once one front has the odds and the squads of an
+   assault, another may join it as a secondary with CAMP.secK of the odds (it only has to fix); the best odds is the main effort. Its H-hour
+   is when the slowest squad is at its start (CAMP.pace m/s, clamped to CAMP.H); a front still forming then moves it back CAMP.step s at a
+   time, CAMP.slip s at most, so that the fronts go together. Simultaneous assaults: up to the side's fronts (campN, D12 A): CAMP.fronts by
+   doctrine (4 balanced), and for the AI no more than its free squads fill (campRoom, CAMP.sq each). At most CAMP.max campaigns a side, each
+   ended after CAMP.life s or with its last operation.
+   The threat board (C.thb): a side's incidents, each a place of its own the enemy is at (key, k): a point it holds (pt: being taken, its
+   bar moving away, or known enemy strength over THB.min within CMD.thr m), an economy site (site: hit lately, THB.hit s, or enemy within
+   THB.r m), a supply base (sup), a column hit (col) and enemy aircraft within THB.air m of a site or the base (air). Each has a value
+   (THB.val; a site's is its tickets, ECO.site[k].tk), the enemy strength estimated from what the side knows (C.known only: the fog), what
+   the side has there (own), an urgency (enemy against own, +1 when being taken or hit) and a score (value × urgency, × 1 + p for a priority
+   set by triage). Triage, every plan turn, the highest score first (D14 A): one under THB.ign is ignored on purpose and the log says why;
+   one with a priority (triage p 1-3) or a policy dpol qrf 2 is never ignored, p -1 or qrf 0 always is. The rest are answered while there
+   are responders, at most THB.max at once: the quick reaction force (the base's reserve squad, within THB.qrf m) first, then free squads within THB.far m,
+   THB.n by urgency (dpol inf caps it). A response is an operation (qrf) with one H-hour: the first squad fixes the enemy from the defended
+   place, the others go round a flank and assault at H, the artillery puts THB.fire rounds on the enemy at H and the air focus goes there.
+   Air over a site asks the economy for its fixed AA. An incident with no enemy known and nothing moving for THB.calm s is over; its
+   responders go back to their posts. The AI decides in the def domain (atk for campaigns); a person or the MCP has the same through the
+   funnel: camp, dpol, triage, qrf and the question threats. No random number is drawn here */
+const CAMP = { fronts: { cautious: 3, balanced: 4, aggressive: 5 }, sq: 2, max: 2, H: [60, 240], pace: 2.4, slip: 90, step: 10, sec: 2, secK: .6, main: 2, life: 1200,
+  role: { main: 'esforço principal', sec: 'frente secundária', fnt: 'finta', raid: 'incursão' } };
+const THB = { min: 2, r: 450, hit: 20, calm: 40, keep: 10, ign: 6, air: 1200, val: { base: 12, town: 6, pt: 4, sup: 5, col: 3, air: 4 },
+  far: 2600, qrf: 4500, n: [2, 3], max: 3, try: 6, stage: 120, flank: 260, H: [25, 600], pace: 3, fire: 4, life: 900, fail: .4, again: 20, quiet: 20,
+  job: { base: 1, held: 1, road: 1, push: 1, wood: 1 } };
+const campN = C => CAMP.fronts[C.dk || CMD.use[C.t]] || CAMP.fronts.balanced;
+/* the fronts side C's AI may hold now: its doctrine's, and no more than the assaults it has on plus what its free squads fill */
+function campRoom(C, sq) {
+  const on = C.ops.filter(o => o.k === 'atk' && !o.over).length, free = sq.filter(q => !q.op && FREE[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && q.ord.k !== 'supply' && q.ord.k !== 'build').length;
+  return Math.max(1, Math.min(campN(C), on + Math.ceil(free / CAMP.sq)));
+}
+/* a squad cmdAttack may take for an assault on P from side sd (its road, free, between 200 m and CMD.reach short of it) */
+const atkFit = (q, P, sd) => q.ri === P.ri && !q.op && FREE[q.job] && (P.s - q.s) * sd > 200 && (P.s - q.s) * sd < CMD.reach && q.live >= 3 && q.ord.k !== 'supply' && q.ord.k !== 'build' && !q.ord.b && !q.ord.tw && !q.ord.T && !q.lift;
+/* the AI's campaign: go, the fronts cmdAttack found it may assault in this turn ({ P, sd, pool, walk, own, foe }, on different roads). The best odds is the main
+   effort and takes more squads of its road; a secondary keeps CAMP.sec; one H-hour for all, opened and attached through the funnel */
+function campAI(C, sq, go) {
+  const t = C.t, R = S.T.routes, used = new Set(), nm = g => gName(g.P.tw || g.P), atk = g => Object.assign({ c: 'atk' }, g.P.tw ? { pi: gPts().indexOf(g.P.tw) } : { ri: g.P.ri, s: g.P.s }, { sd: g.sd, ids: g.pool.map(q => q.id) });
+  for (const g of go) for (const q of g.pool) used.add(q);
+  const main = go.reduce((b, g) => (g.own / g.foe > b.own / b.foe ? g : b), go[0]);
+  main.pool = main.pool.concat(sq.filter(q => !used.has(q) && atkFit(q, main.P, main.sd)).sort((a, b) => Math.abs(a.s - main.P.s) - Math.abs(b.s - main.P.s)).slice(0, CAMP.main));
+  let far = 0;
+  for (const g of go) {
+    if (g !== main && !g.walk) g.pool = g.pool.slice(0, CAMP.sec);
+    Object.assign(g, atkOdds(C, g.P, g.sd, g.pool));
+    const r = R[g.P.ri], f = routeAt(r, clamp(g.P.s - g.sd * (g.walk ? INC.op.walk : CMD.fup), 0, r.len));
+    for (const q of g.pool) { const L = q.men.find(m => !m.dead); if (L) far = Math.max(far, hdist(L, f)); }
+  }
+  const H = Math.round(clamp(far / CAMP.pace + INC.op.h[1], CAMP.H[0], CAMP.H[1])), sec = go.filter(g => g !== main);
+  const K = genCmd(t, { c: 'camp', H, why: go.length + ' frentes, principal em ' + nm(main) }, 'ai');
+  if (!K.ok) { genCmd(t, atk(main), 'ai', { P: main.P, sd: main.sd, pool: main.pool, walk: main.walk, own: main.own, foe: main.foe }); return; }
+  for (const g of [main].concat(sec)) {
+    const a = genCmd(t, atk(g), 'ai', { P: g.P, sd: g.sd, pool: g.pool, walk: g.walk, own: g.own, foe: g.foe });
+    if (a.ok) genCmd(t, { c: 'camp', id: K.id, op: a.id, role: g === main ? 'main' : 'sec' }, 'ai');
+  }
+  gLog(t, 'atk', 'Campanha: ' + go.length + ' frentes ao mesmo tempo, hora H em ' + H + ' s — esforço principal em ' + nm(main) + ' (força ' + gN(main.own) + ' contra ' + gN(main.foe) + '), secundárias em ' + sec.map(nm).join(', '), main.P.tw || null, 'campai');
+}
+/* op joins campaign K as role: an assault's H-hour is the campaign's; a feint fires for its main assault */
+function campAdd(C, K, op, role) {
+  op.cp = K; op.cr = role; if (!K.ops.includes(op)) K.ops.push(op);
+  if (op.k === 'fnt') { const M = K.ops.find(o => o.cr === 'main' && o.k === 'atk' && !o.over); if (M) op.main = M; }
+  campSync(K, op);
+}
+function campSync(K, op) {
+  if (op.k !== 'atk' || op.over) return;
+  op.Hu = K.H;
+  if ((op.st === 'prep' || op.st === 'screen') && op.H) op.H = Math.max(op.H, K.H);
+}
+function campEnd(C, K, why) {
+  K.over = true;
+  for (const op of K.ops) if (op.cp === K) op.cp = null;
+  const n = K.res.length, won = K.res.filter(r => r[2]).length;
+  gLog(C.t, 'atk', 'Campanha encerrada' + (why ? ' (' + why + ')' : '') + ': ' + won + ' de ' + n + (n === 1 ? ' objetivo tomado' : ' objetivos tomados'), null, 'campend' + K.id);
+}
+/* each plan turn: what has ended is counted, the AI's feints and raids made while it forms join it, the H-hour waits for a front still forming */
+function campTick(C) {
+  const t = C.t, L = C.camp; if (!L || !L.length) return;
+  for (const K of L) {
+    if (K.over) continue;
+    for (const op of K.ops) if (op.over && !op.cpR) { op.cpR = 1; if (op.k === 'atk') K.res.push([gName(op.O), op.cr, !!(op.O.tw && op.O.tw.hold === t)]); }
+    if (K.by === 'ai' && K.st === 'form') for (const op of C.ops) if (!op.over && !op.cp && ((op.k === 'fnt' && K.ops.includes(op.main)) || (op.k === 'raid' && op.T0 >= K.T0))) {
+      campAdd(C, K, op, op.k); gLog(t, 'atk', GEN.man[op.k] + ' entra na campanha como ' + CAMP.role[op.k], op.kz || null);
+    }
+    const live = K.ops.filter(o => !o.over);
+    if (!live.length) { campEnd(C, K, ''); continue; }
+    if (S.t - K.T0 > CAMP.life) { campEnd(C, K, 'tempo esgotado'); continue; }
+    if (K.st !== 'form') continue;
+    const late = live.filter(o => o.k === 'atk' && o.st === 'form').length;
+    if (late && S.t >= K.H - CAMP.step / 2 && (K.sl || 0) < CAMP.slip / CAMP.step) {
+      K.H += CAMP.step; K.sl = (K.sl || 0) + 1; for (const o of live) campSync(K, o);
+      gLog(t, 'atk', 'Hora H da campanha adiada ' + CAMP.step + ' s: ' + late + (late > 1 ? ' frentes ainda em reunião' : ' frente ainda em reunião'), null, 'camph' + K.id);
+    } else if (S.t >= K.H) { K.st = 'go'; gLog(t, 'atk', 'HORA H DA CAMPANHA: ' + live.length + (live.length > 1 ? ' operações ao mesmo tempo' : ' operação'), null, 'campgo' + K.id); }
+  }
+  C.camp = L.filter(K => !K.over);
+}
+/* what side t has within r m of x z, in CMD.val (its own: no fog) */
+function thbOwn(t, x, z, r) {
+  let v = 0;
+  for (const m of S.men) if (!m.dead && m.team === t && Math.abs(m.x - x) < r && Math.abs(m.z - z) < r) v += CMD.val.inf;
+  for (const u of S.units) if (!u.dead && u.team === t && Math.abs(u.x - x) < r && Math.abs(u.z - z) < r) v += CMD.val[tk(u)] || 1;
+  return v;
+}
+/* the incidents side C knows of now: new ones open, the known ones are brought up to date, those quiet for THB.calm s are over */
+function thbSense(C) {
+  const t = C.t, Q = S.cq, L = C.thb || (C.thb = []), pc = C.pc || (C.pc = []), own = t ? 1 : -1, b = S.base[t];
+  const see = (key, k, at, nm, val, foe, ex, kx, kz, pk) => {
+    let I = L.find(I => I.key === key && !I.over);
+    if (!I) { I = { key, k, pk, id: genOid(C), T0: S.t, p: 0, st: 'open', why: '', op: null, nT: 0, own: 0, urg: 0, sc: 0 }; L.push(I); }
+    Object.assign(I, { x: at.x, z: at.z, nm, val, foe, ex, kx, kz });
+    if (foe > 0 || ex) I.quiet = S.t;
+  };
+  if (Q) Q.p.forEach((p, i) => {
+    const was = pc[i] === undefined ? p.c : pc[i]; pc[i] = p.c;
+    if (p.hold !== t) return;
+    const E = cmdKnown(C, p.x, p.z, CMD.thr), kx = KN.n ? KN.x : p.x, kz = KN.n ? KN.z : p.z, ex = (p.c - was) * own < -1e-4;   // its bar moving away from this side: being taken
+    if (E > THB.min || ex) see('p' + i, 'pt', p, gName(p), p.base >= 0 ? THB.val.base : p.tw ? THB.val.town : THB.val.pt, E, ex, kx, kz, 'p' + i);
+  });
+  const hit = id => S.ot[id] !== undefined && S.t - S.ot[id] < THB.hit;
+  for (const e of S.eco ? S.eco.l : []) {
+    if (e.team !== t || e.dead) continue;
+    const E = cmdKnown(C, e.x, e.z, THB.r), kx = KN.n ? KN.x : e.x, kz = KN.n ? KN.z : e.z, h = hit(e.id);
+    if (E > THB.min || h) see('s' + e.id, 'site', e, e.name + ' ' + gNear(e.x, e.z), ECO.site[e.k].tk, E, h, kx, kz, 's' + e.id);
+  }
+  for (const s of S.sup) {
+    if (s.team !== t || s.dead) continue;
+    const E = cmdKnown(C, s.x, s.z, THB.r), kx = KN.n ? KN.x : s.x, kz = KN.n ? KN.z : s.z, h = hit(s.id);
+    if (E > THB.min || h) see('b' + s.id, 'sup', s, 'base de suprimento ' + gNear(s.x, s.z), THB.val.sup, E, h, kx, kz, 'b' + s.id);
+  }
+  if (C.hit && S.t < C.hit.T) { const E = cmdKnown(C, C.hit.x, C.hit.z, THB.r); see('c' + C.hit.ri, 'col', C.hit, 'coluna atacada na rota ' + (C.hit.ri + 1), THB.val.col, E, true, KN.n ? KN.x : C.hit.x, KN.n ? KN.z : C.hit.z, ''); }
+  const air = S.planes.filter(p => !p.dead && p.team !== t);
+  if (air.length) for (const o of [b].concat(S.eco ? S.eco.l.filter(e => e.team === t && !e.dead) : [])) {   // what flies over a site or the base is seen from it
+    const n = air.filter(p => hdist(p, o) < THB.air).length; if (!n) continue;
+    see('a' + (o.id || 'hq'), 'air', o, 'aviação inimiga sobre ' + (o.id ? o.name.toLowerCase() + ' ' + gNear(o.x, o.z) : 'a base'), o.id ? ECO.site[o.k].tk : THB.val.air, n * 2, true, o.x, o.z, o.id ? 's' + o.id : '');
+  }
+  for (const I of L) {
+    if (I.over || S.t - I.quiet <= (I.k === 'air' ? THB.quiet : THB.calm)) continue;
+    I.over = true;
+    if (I.op && !I.op.over) { gLog(t, 'def', 'Reação a ' + I.nm + ' cumprida: sem inimigo conhecido há ' + Math.round(S.t - I.quiet) + ' s', I, 'thd' + I.key); opEnd(C, I.op); }
+  }
+  C.thb = L.filter(I => !I.over);
+  for (const I of C.thb) thbScore(C, I);
+}
+function thbScore(C, I) {
+  I.own = I.k === 'air' ? S.units.reduce((a, u) => a + (!u.dead && u.team === C.t && u.kind === 'aa' && hdist(u, I) < THB.air ? CMD.val.aa : 0), 0) : thbOwn(C.t, I.x, I.z, THB.r);   // against aircraft only the AA counts
+  I.urg = Math.min(3, I.foe / Math.max(2, I.own)) + (I.ex ? 1 : 0);
+  I.sc = I.val * I.urg * (I.p > 0 ? 1 + I.p : 1);
+}
+/* a squad that may answer incident I: free (no operation, no build or supply, not the reserve cmdDefend moved), of a job that may leave, not
+   holding a point that is itself an incident */
+function thbCan(C, q, I) {
+  if (q.team !== C.t || q.net || !(q.live >= 3) || q.state || q.op || q.lift || !THB.job[q.job] || q.ord.b || q.ord.res || q.ord.T || q.ord.k === 'supply' || q.ord.k === 'build') return false;
+  const w = q.ord.tw; if (!w || w.hold !== C.t) return true;
+  const pk = 'p' + gPts().indexOf(w); return !(C.thb || []).some(J => J !== I && !J.over && J.pk === pk);
+}
+/* the responders of I, n at most: the base's reserve (the QRF) first, then the nearest; within THB.far m, not already at the place, able to get there */
+function thbPick(C, I, n) {
+  const p = railOf(I.x, I.z), c = [], out = [];
+  for (const q of S.squads) {
+    if (!thbCan(C, q, I)) continue;
+    const L = q.men.find(m => !m.dead), d = L ? hdist(L, I) : 1e9;
+    if (d >= THB.r && d <= (q.job === 'base' ? THB.qrf : THB.far)) c.push([q, d - (q.job === 'base' ? THB.qrf : 0)]);
+  }
+  c.sort((a, b) => a[1] - b[1]);
+  let k = 0;
+  for (const [q] of c) { if (out.length >= n || k++ >= THB.try) break; if (q.ri === p.ri || gOrdOk(q, p.ri) || (S.T.mv >= 4 && tripSq(q, I))) out.push(q); }
+  return out;
+}
+/* the response to I with squads qs: the first fixes from the place (overwatch toward the enemy), the others wait out on a flank until H */
+function thbOpen(C, I, qs, by) {
+  const t = C.t, b = S.base[t];
+  let ux = I.x - I.kx, uz = I.z - I.kz, d = Math.hypot(ux, uz);
+  if (d < 60) { ux = b.x - I.x; uz = b.z - I.z; d = Math.hypot(ux, uz) || 1; }
+  ux /= d; uz /= d;
+  const at = (x, z) => { const c = gMapOk(x, z) ? { x, z } : { x: I.x, z: I.z }, p = railOf(c.x, c.z); return { ri: p.ri, s: p.s, x: c.x, z: c.z }; };
+  const op = { k: 'qrf', id: genOid(C), I, by: by || 'ai', team: t, T0: S.t, T: S.t, st: 'go', H: 0, sq: [], veh: [], n0: 0, over: false, kx: I.kx, kz: I.kz, x: I.x, z: I.z };
+  let far = 0;
+  qs.forEach((q, i) => {
+    const flk = i > 0, sd = i % 2 ? 1 : -1, f = flk ? at(I.kx + ux * THB.stage - uz * sd * THB.flank, I.kz + uz * THB.stage + ux * sd * THB.flank) : at(I.x + ux * THB.stage / 2, I.z + uz * THB.stage / 2);
+    const L = q.men.find(m => !m.dead); if (L) far = Math.max(far, hdist(L, f));
+    q.qr = flk ? 'flk' : 'fix'; op.n0 += q.live;
+    opTake(op, q, flk ? { k: 'hold', ri: f.ri, s: f.s, x: f.x, z: f.z, R: 12 } : { k: 'overwatch', ri: f.ri, s: f.s, x: f.x, z: f.z, R: 12, ax: I.kx, az: I.kz });
+  });
+  op.H = S.t + Math.round(clamp(far / THB.pace + 10, THB.H[0], THB.H[1]));
+  I.op = op; I.st = 'resp'; I.why = ''; C.ops.push(op);
+  gLog(t, 'def', 'Força de reação para ' + I.nm + ': ' + qs.length + (qs.length > 1 ? ' esquadras' : ' esquadra') + (qs.some(q => q.job === 'base') ? ' (com a QRF da base)' : '') + ', hora H em ' + Math.round(op.H - S.t) + ' s' + (qs.length > 1 ? ': uma fixa o inimigo, as outras flanqueiam' : ': fixar o inimigo'), I, 0, { x: I.kx, z: I.kz });
+  return op;
+}
+OPS.qrf = (C, op) => {
+  const t = C.t, I = op.I, l = opLive(op), live = l.reduce((a, q) => a + q.live, 0);
+  if (!l.length || live <= op.n0 * THB.fail) { gLog(t, 'def', 'Força de reação para ' + I.nm + (l.length ? ' recua: perdas pesadas' : ' perdida'), I); I.nT = S.t + THB.again * 3; return opEnd(C, op); }
+  if (I.over) return opEnd(C, op);
+  if (S.t - op.T0 > THB.life) { gLog(t, 'def', 'Força de reação para ' + I.nm + ' encerrada: tempo esgotado', I); I.nT = S.t + THB.again; return opEnd(C, op); }
+  if (cmdKnown(C, I.x, I.z, CMD.thr) > 0) { op.kx = KN.x; op.kz = KN.z; }
+  if (op.st === 'go' && S.t >= op.H) {   // H-hour: the flanks go in, the guns and the aircraft on the enemy
+    const p = railOf(op.kx, op.kz), fire = gFireSrc(t, 'he', op.kx, op.kz) && C.fm.filter(M => !M.dead && S.t < M.T).length < GENC.fm;
+    op.st = 'hit'; op.T = S.t;
+    for (const q of l) if (q.qr === 'flk') opTake(op, q, { k: 'assault', ri: p.ri, s: p.s, x: op.kx, z: op.kz, R: 12, rush: 1, ax: op.kx, az: op.kz });
+    if (fire) cmdMission(C, 'he', op.kx, op.kz, THB.fire, 60, op);
+    C.thbF = { x: op.kx, z: op.kz, r: 400, T: S.t + 60 };
+    gLog(t, 'def', 'HORA H da reação em ' + I.nm + ': ' + (l.some(q => q.qr === 'flk') ? 'fixar e flanquear' : 'fixar') + (fire ? ', com fogo de apoio' : '') + ' e foco aéreo', I, 0, { x: op.kx, z: op.kz });
+    return;
+  }
+  if (op.st === 'hit' && S.t - op.T > 20) for (const q of l) {   // a flank that has got there and is quiet holds what it took
+    const O = q.ord; if (q.qr === 'flk' && O.k === 'assault' && q.at && q.fd > 250) opTake(op, q, { k: 'hold', ri: O.ri, s: O.s, x: O.x, z: O.z, R: 12 });
+  }
+};
+/* triage, the highest score first: ignored on purpose (and why), already answered, or answered now through the funnel while responders last */
+function thbTriage(C) {
+  const t = C.t, pol = C.dpol || {}, ai = genBy(t, 'def') === 'ai', L = (C.thb || []).filter(I => !I.over).sort((a, b) => b.sc - a.sc);
+  for (const I of L) {
+    const P = pol[I.pk] || null, exp = I.p < 0 ? 'ordem do general' : P && P.qrf === 0 ? 'política de defesa: sem reação' : '';
+    if (I.op && I.op.over) { I.op = null; I.nT = Math.max(I.nT, S.t + THB.again); }
+    if (I.op) {
+      if (!exp) { I.st = 'resp'; continue; }
+      gLog(t, 'def', 'Reação a ' + I.nm + ' suspensa: ' + exp, I); opEnd(C, I.op); I.op = null;
+    }
+    const ign = exp || (I.p <= 0 && !(P && P.qrf === 2) && I.sc < THB.ign ? (I.foe <= 0 ? 'inimigo não localizado' : I.own >= I.foe ? (I.k === 'air' ? 'a antiaérea local basta' : 'a guarda local basta') + ' (força ' + gN(I.own) + ' contra ' + gN(I.foe) + ')' : 'valor baixo (' + gN(I.val) + ', urgência ' + gN(I.urg) + ')') : '');
+    if (ign) { if (I.st !== 'ign' && ai) gLog(t, 'def', 'Ameaça ignorada de propósito: ' + I.nm + ' — ' + ign, I, 'thi' + I.key); I.st = 'ign'; I.why = ign; continue; }
+    I.st = 'open';
+    if (!ai || S.t < I.nT) continue;
+    if (I.k === 'air') {
+      const e = I.pk && S.eco ? S.eco.l.find(e => !e.dead && 's' + e.id === I.pk) : null;
+      if (e && !e.gd.aa) { const r = genCmd(t, { c: 'dpol', id: e.id, aa: 1, why: 'aviação inimiga sobre a instalação' }, 'ai'); I.why = r.ok ? 'antiaérea fixa pedida' : gNo(r.why); if (!r.ok) I.nT = S.t + THB.again; }
+      else if (!e) I.why = 'sem resposta em terra: a antiaérea da base';
+      continue;
+    }
+    const r = genCmd(t, { c: 'qrf', id: I.id }, 'ai');
+    if (!r.ok) { I.why = r.why === 'max' ? 'todas as forças de reação empenhadas' : gNo(r.why); I.nT = S.t + (r.why === 'max' ? 0 : THB.again); }
+  }
+}
+function thbTick(C) {
+  if (!S.cq || S.cq.ph) return;
+  thbSense(C); thbTriage(C);
+}
+/* what the view, the question threats and the MCP show: the incidents by score, the campaigns */
+const thbView = C => (C.thb || []).filter(I => !I.over).sort((a, b) => b.sc - a.sc).slice(0, THB.keep).map(I => ({ id: I.id, k: I.k, x: I.x, z: I.z, kx: I.kx, kz: I.kz, nm: I.nm, val: I.val, urg: I.urg, foe: I.foe, own: I.own, sc: I.sc, st: I.st, p: I.p, why: I.why,
+  n: I.op && !I.op.over ? opLive(I.op).length : 0, H: I.op && !I.op.over && I.op.st === 'go' ? I.op.H - S.t : null }));
+const campView = C => (C.camp || []).filter(K => !K.over).map(K => ({ id: K.id, st: K.st, H: K.H - S.t, why: K.why, by: K.by, ops: K.ops.filter(o => !o.over).map(o => ({ id: o.id, k: o.k, r: o.cr, nm: o.k === 'atk' ? gName(o.O) : GEN.man[o.k] || o.k })) }));
+
 /* the posts a side keeps, by its doctrine and by what it needs now, the most urgent first */
 function cmdPosts(C, sq, have) {
   const t = C.t, D = C.doc, P = [], G = have.guard || [];
@@ -11858,7 +12106,7 @@ function* planJob(t) {
   cmdAttack(C, sq);
   yield; live();
   yield* cmdManJob(C, sq);
-  live(); cmdDefend(C, sq); cmdPoints(C, sq); cmdColumns(C, sq); cmdFires(C);
+  live(); campTick(C); cmdDefend(C, sq); cmdPoints(C, sq); cmdColumns(C, sq); thbTick(C); cmdFires(C);
   yield; live();
   trnPlan(t, sq);
   planSup(t, sq, F);
@@ -13604,11 +13852,12 @@ function genVM(t, all) {
     for (const op of C.ops) {
       if (op.over) continue;
       if (op.k === 'atk') ops.push({ k: 'atk', id: op.id || 0, st: op.st, ri: op.ri, walk: !!op.walk, O: { x: op.O.x, z: op.O.z, nm: gName(op.O) }, fp: (op.fp || []).map(p => ({ x: p.x, z: p.z })), fs: op.fs !== undefined ? routeAt(R[op.ri], op.fs) : null,
-        scr: op.scr || [], smk: !!op.smk, a2: op.a2 ? { x: op.a2.x, z: op.a2.z } : null, fl: op.fl, H: op.H ? op.H - S.t : null, n: opLive(op).length, live: opLive(op).reduce((a, q) => a + q.live, 0), why: op.why || '' });
+        scr: op.scr || [], smk: !!op.smk, a2: op.a2 ? { x: op.a2.x, z: op.a2.z } : null, fl: op.fl, H: op.H ? op.H - S.t : null, n: opLive(op).length, live: opLive(op).reduce((a, q) => a + q.live, 0), why: op.why || '', cr: op.cr || '' });
       else if (op.k === 'amb') ops.push(ambOf(op));
       else if (op.k === 'usr') ops.push({ k: 'usr', id: op.id, o: op.o, x: op.x, z: op.z, n: opLive(op).length, v: op.v, rt: op.rt ? op.rt.map(p => [Math.round(p.x), Math.round(p.z)]) : undefined });   // W21: the verb and the route of an abstract order
       else if (op.man) ops.push(genManOp(C, op));
       else if (op.k === 'ctr') { const q = op.sq[0]; ops.push({ k: 'ctr', id: op.id || 0, n: op.sq.length, from: lead(q), to: q && q.ord && q.ord.x !== undefined ? { x: q.ord.x, z: q.ord.z } : null }); }
+      else if (op.k === 'qrf') { const l = opLive(op); ops.push({ k: 'qrf', id: op.id, st: op.st, nm: op.I.nm, n: l.length, from: lead(l.find(q => q.qr === 'fix') || l[0]), to: { x: op.kx, z: op.kz }, H: op.st === 'go' ? op.H - S.t : null }); }
     }
     for (const k in C.amb) { const op = C.amb[k]; if (op && !op.over && !C.ops.includes(op)) { const e = ambOf(op); e.st = 'plan'; ops.push(e); } }
   }
@@ -13636,7 +13885,7 @@ function genVM(t, all) {
     post: C ? genPostMan(C, genPosture(C)) : { k: 'Comando', s: (cu && cu[0] ? CUE[cu[0]].replace('COMANDO: ', '') : 'Sem ordem do comando no momento') + '.' },
     cue: C ? null : cu,
     log: S.glog ? S.glog.l[t] : [],
-    eco: ecoVM(t, all), ctl: S.gctl ? Object.assign({}, S.gctl[t]) : null }, t);
+    eco: ecoVM(t, all), ctl: S.gctl ? Object.assign({}, S.gctl[t]) : null, thb: C ? thbView(C) : [], camp: C ? campView(C) : [] }, t);
 }
 
 /* ---------- the economy and the general's view online (ENET) ----------
@@ -13657,7 +13906,7 @@ const mclock = () => S.t + (S.t0 || 0);
 /* seconds between messages (eco: rows rebuilt; live: sent anyway; ecs, gen, glog, keep), log: entries a side in the backup, stale: a gen older than
    this is not shown, wait: how long an unanswered gcmd or gask callback is kept */
 const ENET = { eco: 1, live: 5, ecs: 1, gen: 2, glog: 1, keep: 5, stale: 10, log: 20, wait: 10 };
-const GENK = ['doc', 'post', 'road', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'gate', 'atkT', 'ev', 'evT', 'fb', 'res', 'mev', 'gue', 'kz'];
+const GENK = ['doc', 'post', 'road', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'gate', 'atkT', 'ev', 'evT', 'fb', 'res', 'mev', 'gue', 'kz', 'thb', 'camp'];
 const enetR1 = v => Math.round(v * 10) / 10, enetCtl = ['ai', 'me', 'mcp'];
 Net.eco = Net.gen = false; Net.kept = null; Net.eq = false; Net.eacc = Net.eT = 0; Net.ej = ''; Net.en = { ecs: 0, gen: 0, glog: 0, keep: 0 }; Net.gl = [null, null]; Net.glS = null;
 Net.gq = new Map(); Net.gseq = 0; Net.gn = [0, 0]; Net.gk = [0, 0];
@@ -13697,6 +13946,7 @@ function genPick(V) {
   const o = {}; for (const k of GENK) o[k] = V[k];
   if (Array.isArray(o.mev)) o.mev = o.mev.slice(0, 5);   // the manoeuvres' rows, shortened to keep the message small
   if (o.kz && Array.isArray(o.kz.a)) o.kz = { c: o.kz.c, a: o.kz.a.slice(0, 48) };
+  if (Array.isArray(o.thb)) o.thb = o.thb.slice(0, 6).map(I => Object.assign({}, I, { why: String(I.why || '').slice(0, 60) }));   // the threat board's first rows (F4)
   return JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
 }
 /* side t's squads: [id, job, order, op, dx, dz]; the destination rule is genVM's (ln), repeated here */
@@ -13925,6 +14175,7 @@ function genNet(V, t) {
   const a = S.t - G.rx, v = JSON.parse(JSON.stringify(G.v)), left = l => { if (Array.isArray(l)) for (const o of l) if (o && typeof o.left === 'number') o.left -= a; };
   if (Array.isArray(v.ops)) for (const o of v.ops) if (o && typeof o.H === 'number') o.H -= a;
   left(v.fm); left(v.sc); if (v.hit && typeof v.hit.left === 'number') v.hit.left -= a;
+  for (const l of [v.camp, v.thb]) if (Array.isArray(l)) for (const o of l) if (o && typeof o.H === 'number') o.H -= a;
   if (typeof v.atkT === 'number') v.atkT -= a;
   if (typeof v.evT === 'number' && v.evT >= 0) v.evT += a;
   for (const k of GENK) if (Object.prototype.hasOwnProperty.call(v, k)) V[k] = v[k];   // only the known keys: never a raw key of the wire onto V
@@ -14047,9 +14298,9 @@ Object.assign(GEN, { mst: { walk: 'EM MARCHA', go: 'A CAMINHO', hit: 'ATAQUE', h
   mlg: { flk: 'seta tracejada curva pela estrada secundária', inf: 'linha pontilhada a pé até o ponto', raid: 'seta até o alvo, mira vermelha', cut: 'anéis vermelhos nos pontos isolados, anel fechando em torno do ponto a tomar',
     blk: 'barra cruzando a estrada, com X', dep: 'barra dupla cruzando a rota', fnt: 'seta oca até o ponto da finta', mres: 'círculo de alcance em torno do posto', gue: 'marcas pulsantes nas equipes, zigue-zague até o alvo' } });
 GEN.gate.gue = 'fustigamento: sem assaltos';
-/* ids: squads an order may name; atk, amb: live operations of a kind; fm: live fire missions; life: s a fire mission lasts; H: s of H-hour the general may ask; Hdef: s a held point is kept
+/* ids: squads an order may name; amb: live ambushes (live assaults: the side's fronts, campN); fm: live fire missions; life: s a fire mission lasts; H: s of H-hour the general may ask; Hdef: s a held point is kept
    thinking so; pos, focus, mark: s an override lasts; site: m from the click to the nearest ambush site; road: m from the road an ambush may lie; q: s between two commands sent on */
-const GENC = { ids: 12, atk: 3, amb: 3, fm: 6, life: 90, H: [20, 300], Hdef: 60, pos: 300, focus: 120, mark: 180, site: 500, road: 400, q: .26 };
+const GENC = { ids: 12, amb: 3, fm: 6, life: 90, H: [20, 300], Hdef: 60, pos: 300, focus: 120, mark: 180, site: 500, road: 400, q: .26 };
 const gNo = k => GEN.no[k] || (ECO.tx.why || {})[k] || k;
 const genSeat = t => (S.gctl ? S.gctl[t].seat : 'ai'), genBy = (t, d) => (S.gctl ? S.gctl[t][d] : 'ai');
 /* who holds a side's chair and which domains the AI keeps (asst: 1 the AI also decides there); S.gctl stays null while everything is the AI */
@@ -14144,7 +14395,7 @@ function gAtkPlan(t, c) {
   if (p && p.hold === t) return { why: 'own' };
   if (p && S.cq && !cqTargets(t).includes(p)) return { why: 'link' };
   if (C.ops.some(o => o.k === 'atk' && !o.over && o.ri === P.ri)) return { why: 'busy' };
-  if (C.ops.filter(o => o.k === 'atk' && !o.over).length >= GENC.atk) return { why: 'max' };
+  if (C.ops.filter(o => o.k === 'atk' && !o.over).length >= campN(C)) return { why: 'max' };   // up to the side's fronts by doctrine (F4, D12 A)
   const named = Array.isArray(c.ids) && c.ids.length > 0;
   let pool = named ? gSqs(t, c.ids) : null, sd = c.sd === 1 || c.sd === -1 ? c.sd : t ? 1 : -1;
   if (named) {
@@ -15266,6 +15517,71 @@ Object.assign(GEN.cn, { recv: 'recuperar veículo', medv: 'evacuação médica' 
 Object.assign(GEN.no, { tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais, à frente da linha', hurt: 'Nenhum ferido para evacuar ali' });
 genQuery = (f => (t, q) => (q && q.q === 'rec' && (t === 0 || t === 1) ? recView(t) : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => (q && q.q === 'rec' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: recView(s) } : f(s, q)))(genAnswer);
+/* ---- campaigns and the threat board (F4) in the funnel: camp, dpol, triage, qrf; the question threats ----
+   camp { H: s to its H-hour (GENC.H), why } opens a campaign (its id); { id, op, role?: main sec fnt raid } attaches an operation (an assault's H-hour becomes
+   the campaign's; the role by default: the first assault main, the next sec, a feint fnt, a raid raid); { id, k: 'end' } ends it (its operations go on) (atk).
+   dpol { pi | id: a site or supply base of the side, inf: 0-3 squads at most to answer there (a site: also its guard, 0-2), aa: 0-1 the site's fixed AA,
+   qrf: 0 never answer, 1 by the board's triage, 2 always } the defence policy of a place (def).
+   triage { id: an incident, p: -1 ignore, 0 the board's own, 1-3 priority } (def). qrf { id: an incident, ids?: the squads } answers it now (def) */
+GC.camp = { d: 'atk', f(t, c, by) {
+  if (!S.cq) return gBad('off');
+  const C = cmdOf(t), L = C.camp || (C.camp = []);
+  if (c.id === undefined) {
+    if (L.filter(K => !K.over).length >= CAMP.max) return gBad('max');
+    const H = Number.isFinite(c.H) ? clamp(c.H, GENC.H[0], GENC.H[1]) : GENC.Hdef, K = { id: genOid(C), H: S.t + H, H0: S.t + H, why: c.why || '', by, T0: S.t, st: 'form', ops: [], res: [], over: false };
+    L.push(K); gLog(t, 'atk', 'Campanha aberta: hora H em ' + Math.round(H) + ' s' + (c.why ? ' (' + c.why + ')' : ''), null, 'campo' + K.id);
+    return gYes(K.id);
+  }
+  const K = L.find(K => K.id === c.id && !K.over); if (!K) return gBad('id');
+  if (c.k === 'end') { campEnd(C, K, by === 'ai' ? '' : 'ordem do general'); C.camp = L.filter(K => !K.over); return gYes(K.id); }
+  const op = Number.isInteger(c.op) ? C.ops.find(o => o.id === c.op && !o.over) : null; if (!op) return gBad('id');
+  if (op.cp && op.cp !== K) return gBad('busy');
+  const role = c.role !== undefined ? c.role : op.k === 'atk' ? (K.ops.some(o => o !== op && o.cr === 'main' && !o.over) ? 'sec' : 'main') : op.k === 'fnt' || op.k === 'raid' ? op.k : 'sec';
+  if (!Object.hasOwn(CAMP.role, role) || ((role === 'main' || role === 'sec') && op.k !== 'atk' && !op.man) || (role === 'fnt' && op.k !== 'fnt') || (role === 'raid' && op.k !== 'raid' && op.k !== 'inf')) return gBad('kind');
+  if (role === 'main' && K.ops.some(o => o !== op && o.cr === 'main' && !o.over)) return gBad('busy');
+  campAdd(C, K, op, role);
+  if (by !== 'ai') gLog(t, 'atk', (op.k === 'atk' ? 'Assalto a ' + gName(op.O) : GEN.man[op.k] || 'Operação') + ' entra na campanha como ' + CAMP.role[role], op.O || op.kz || null);
+  return gYes(K.id);
+} };
+GC.dpol = { d: 'def', f(t, c, by) {
+  const C = cmdOf(t), pol = C.dpol || (C.dpol = {}), ok = (v, a, b) => v === undefined || (Number.isInteger(v) && v >= a && v <= b);
+  if (!ok(c.inf, 0, 3) || !ok(c.aa, 0, 1) || !ok(c.qrf, 0, 2)) return gBad('shape');
+  let key = '', nm = '', site = null;
+  if (Number.isInteger(c.pi)) { const p = gPts()[c.pi]; if (!p) return gBad('at'); key = 'p' + c.pi; nm = gName(p); }
+  else if (Number.isInteger(c.id)) {
+    site = S.eco ? S.eco.l.find(e => e.id === c.id && e.team === t && !e.dead) || null : null;
+    const b = site ? null : S.sup.find(b => b.id === c.id && b.team === t && !b.dead); if (!site && !b) return gBad('id');
+    key = (site ? 's' : 'b') + c.id; nm = site ? site.name.toLowerCase() + ' ' + gNear(site.x, site.z) : 'base de suprimento ' + gNear(b.x, b.z);
+  } else return gBad('at');
+  if (site && (c.inf !== undefined || c.aa !== undefined)) {   // a site's own guard is the economy's (def): asked for through it
+    const r = gEcoCmd(t, { c: 'def', id: c.id, inf: c.inf === undefined ? site.gd.inf : Math.min(2, c.inf), aa: c.aa === undefined ? site.gd.aa : c.aa, why: c.why }, by); if (!r.ok) return gBad(r.why || 'ctl');
+  }
+  const P = pol[key] || (pol[key] = {});
+  if (c.inf !== undefined) P.inf = c.inf; if (c.qrf !== undefined) P.qrf = c.qrf;
+  gLog(t, 'def', 'Política de defesa de ' + nm + ': ' + [P.qrf !== undefined ? ['nunca reagir', 'reação pela triagem', 'reagir sempre'][P.qrf] : '', P.inf !== undefined ? 'até ' + P.inf + (P.inf === 1 ? ' esquadra' : ' esquadras') : '', site && c.aa !== undefined ? (c.aa ? 'com antiaérea fixa' : 'sem antiaérea fixa') : ''].filter(Boolean).join(', ') + (c.why ? ' (' + c.why + ')' : ''), site || null, 'dpol' + key);
+  return gYes();
+} };
+GC.triage = { d: 'def', f(t, c) {
+  const C = cmdOf(t), I = (C.thb || []).find(I => I.id === c.id && !I.over); if (!I) return gBad('id');
+  if (!Number.isInteger(c.p) || c.p < -1 || c.p > 3) return gBad('shape');
+  I.p = c.p; thbScore(C, I);
+  if (c.p < 0 && I.op && !I.op.over) { opEnd(C, I.op); I.op = null; }
+  gLog(t, 'def', 'Triagem: ' + I.nm + (c.p < 0 ? ' — ignorar' : c.p ? ' — prioridade ' + c.p : ' — a critério do quadro'), I, 'tri' + I.id);
+  return gYes(I.id);
+} };
+GC.qrf = { d: 'def', f(t, c, by) {
+  if (!S.cq) return gBad('off');
+  const C = cmdOf(t), I = (C.thb || []).find(I => I.id === c.id && !I.over); if (!I) return gBad('id');
+  if (I.op && !I.op.over) return gBad('busy');
+  if (I.k === 'air') return gBad('kind');
+  if (C.ops.filter(o => o.k === 'qrf' && !o.over).length >= THB.max) return gBad('max');
+  const P = (C.dpol || {})[I.pk], named = Array.isArray(c.ids) && c.ids.length > 0, n = Math.min(I.urg >= 2 ? THB.n[1] : THB.n[0], P && P.inf !== undefined ? P.inf : THB.n[1]);
+  const qs = named ? gSqs(t, c.ids).filter(q => !q.op || q.op.k === 'usr') : n > 0 ? thbPick(C, I, n) : [];
+  if (!qs.length) return gBad(named && gSqs(t, c.ids).length ? 'busy' : 'sq');
+  for (const q of qs) if (q.op) { gDrop(q); q.op = null; q.back = null; }
+  return gYes(thbOpen(C, I, qs, by).id);
+} };
+Object.assign(GEN.cn, { camp: 'campanha', dpol: 'política de defesa', triage: 'triagem de ameaça', qrf: 'força de reação' });
 /* the journal and the side effects of a command's end */
 function gDone(t, c, by, G, r) {
   if (GEN.jr) {
@@ -15302,6 +15618,10 @@ function genQuery(t, q) {
   if (q.q === 'state') return genState(t);
   if (q.q === 'spots' || q.q === 'why') return ecoAsk(t, q);
   if (q.q === 'plan') return gpView(t) || { off: 1 };
+  if (q.q === 'threats') {   // the threat board and the campaigns (F4)
+    const C = S.cmd && S.cmd[t]; if (!C) return { ok: false, why: 'off' };
+    return JSON.parse(JSON.stringify({ ok: true, why: '', fronts: campN(C), atk: C.ops.filter(o => o.k === 'atk' && !o.over).length, l: thbView(C), camp: campView(C), pol: C.dpol || {} }, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
+  }
   if (q.q === 'pool') {
     const A = gAtkPlan(t, { x: q.x, z: q.z });
     if (A.why) return { ok: false, why: A.why };
@@ -15335,7 +15655,7 @@ function genState(t) {
   const o = { t, T: S.t, ctl: V.ctl || { seat: 'ai', eco: 'ai', atk: 'ai', def: 'ai', sup: 'ai' }, doc: V.doc, over: V.over, res: V.res, tk: V.tk, clock: V.clock,
     pts: V.pts.map((p, i) => ({ i, L: p.L, name: p.name, x: p.x, z: p.z, hold: p.hold, c: p.c, base: p.base })),
     roads: V.road ? V.road.map((r, ri) => ({ ri, own: r.own, foe: r.foe, k: r.k, post: r.post })) : null,
-    sq, veh, foe, ops: V.ops, fm: V.fm, post: V.post, want: V.want, gate: V.gate, eco: S.eco ? ecoView(t) : null, log };
+    sq, veh, foe, ops: V.ops, fm: V.fm, post: V.post, want: V.want, gate: V.gate, eco: S.eco ? ecoView(t) : null, log, thb: V.thb || [], camp: V.camp || [] };
   return JSON.parse(JSON.stringify(o, (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v)));
 }
 
@@ -21105,6 +21425,7 @@ function gOps(g, V, P, now) {
       gRing(g, ox, oy, R, own, 2); gRing(g, ox, oy, R + 5, own, 1);
       for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { gLine(g, ox + a * (R + 9), oy + b * (R + 9), ox + a * (R + 9), oy + b * (R + 3), own, 1.6); gLine(g, ox + a * (R + 9), oy + b * (R + 9), ox + a * (R + 3), oy + b * (R + 9), own, 1.6); }
       gTxt(g, 'OBJ ' + o.O.nm, ox, oy - R - 14, 11 * k, own, 'center');
+      if (o.cr) gTxt(g, o.cr === 'main' ? 'ESFORÇO PRINCIPAL' : 'FRENTE SECUNDÁRIA', ox, oy + R + 16, 10 * k, own, 'center');   // a campaign's role (F4)
       let ax = 0, ay = 0, have = false;
       if (o.fp.length) {
         let mx = 0, mz = 0; for (const p of o.fp) { mx += p.x; mz += p.z; } mx /= o.fp.length; mz /= o.fp.length;
@@ -21127,7 +21448,14 @@ function gOps(g, V, P, now) {
       if (o.sprung) gRing(g, X(kz.x), Y(kz.z), kr * (1 + .15 * pul) + 3, FOE, 2.2);
     } else if (o.k === 'ctr' && o.from && o.to) {
       gArrow(g, X(o.from.x), Y(o.from.z), X(o.to.x), Y(o.to.z), own, k * .9, now, true); gTxt(g, 'CONTRA-ATAQUE', X(o.to.x), Y(o.to.z) - 16, 11 * k, own, 'center');
+    } else if (o.k === 'qrf' && o.from && o.to) {
+      gArrow(g, X(o.from.x), Y(o.from.z), X(o.to.x), Y(o.to.z), own, k * .9, now, true); gTxt(g, 'REAÇÃO' + (o.H !== null && o.H > 0 ? ' · H−' + Math.ceil(o.H) : ''), X(o.to.x), Y(o.to.z) - 16, 11 * k, own, 'center');
     } else if (o && Object.hasOwn(GEN.man, o.k)) gManOp(g, V, P, o, now);
+  }
+  for (const I of V.thb || []) {   // the threat board (F4): a ring at each incident, dashed and grey when ignored on purpose
+    const x = X(I.x), y = Y(I.z), r = Math.max(10, 90 * P.s), c = I.st === 'ign' ? '#9aa39a' : FOE;
+    if (I.st === 'ign') g.setLineDash([3, 4]); gRing(g, x, y, r, c, 1.6); g.setLineDash([]);
+    gTxt(g, (I.st === 'ign' ? 'IGNORADA' : I.st === 'resp' ? 'EM REAÇÃO' : 'AMEAÇA') + ' · ' + gN(I.sc), x, y + r + 12 * k, 10 * k, c, 'center');
   }
   gManV(g, V, P, now);
   for (const M of V.fm) {
@@ -21305,10 +21633,17 @@ function genPanels(V) {
   if (!V.cmd) ops.push(V.net ? 'Ordem atual: ' + V.post.s : 'Sem operações.');
   else {
     for (const o of V.ops) {
-      if (o.k === 'atk') ops.push('ASSALTO · ' + o.O.nm + ' — ' + (GEN.st[o.st] || o.st) + ' · ' + o.n + ' esq. · ' + o.live + ' homens' + (o.H !== null && o.H > 0 && (o.st === 'prep' || o.st === 'screen') ? ' · H−' + mmss(o.H) : ''));
+      if (o.k === 'atk') ops.push('ASSALTO · ' + o.O.nm + ' — ' + (GEN.st[o.st] || o.st) + ' · ' + o.n + ' esq. · ' + o.live + ' homens' + (o.H !== null && o.H > 0 && (o.st === 'prep' || o.st === 'screen') ? ' · H−' + mmss(o.H) : '') + (o.cr ? ' · ' + (CAMP.role[o.cr] || o.cr) : ''));
+      else if (o.k === 'qrf') ops.push('REAÇÃO · ' + o.nm + ' — ' + o.n + ' esq.' + (o.H !== null && o.H > 0 ? ' · H−' + mmss(o.H) : ' · em ação'));
       else if (o.k === 'amb') ops.push('EMBOSCADA · rota ' + (o.ri + 1) + ' — ' + (GEN.st[o.st] || o.st) + (o.tank ? ' · com carro' : '') + (o.bait ? ' · isca' : ''));
       else if (o.k === 'ctr') ops.push('CONTRA-ATAQUE da reserva');
       else if (o && Object.hasOwn(GEN.man, o.k)) ops.push(genManTxt(o));
+    }
+    for (const K of V.camp || []) ops.push('CAMPANHA · ' + K.ops.length + (K.ops.length === 1 ? ' operação' : ' operações') + ' — ' + (K.st === 'form' && K.H > 0 ? 'hora H em ' + mmss(K.H) : 'em curso') + (K.why ? ' · ' + K.why : ''));
+    const th = V.thb || [];   // the threat board (F4): how many of each, and the first ones
+    if (th.length) {
+      ops.push('AMEAÇAS: ' + th.filter(I => I.st === 'resp').length + ' em reação, ' + th.filter(I => I.st === 'open').length + ' abertas, ' + th.filter(I => I.st === 'ign').length + ' ignoradas');
+      for (const I of th.slice(0, 4)) ops.push('· ' + I.nm + ' — valor ' + gN(I.val) + ', força inimiga ' + gN(I.foe) + (I.st === 'ign' ? ' · ignorada: ' + I.why : I.st === 'resp' ? ' · reação com ' + I.n + ' esq.' : I.why ? ' · ' + I.why : ''));
     }
     if (Array.isArray(V.mev) && V.mev.length) ops.push('Manobras avaliadas: ' + V.mev.slice(0, 5).map(m => (GEN.man[m.k] || m.k) + ' ' + gN(m.sc)).join(', '));
     const he = V.fm.filter(M => M.k !== 'smk').length, sm = V.fm.length - he; if (V.fm.length) ops.push('FOGO: ' + he + ' explosivas, ' + sm + ' de fumaça');
@@ -21799,7 +22134,7 @@ function gorPanel(V) {
 /* the Comando tab: production and the queue, the sites to build, the reserve, requisitions, doctrine, posts, operations. Rebuilt only when its facts change */
 function gorCmdPanel(V) {
   let E = null; if (S.eco) { try { E = ecoView(S.me); } catch (x) { E = null; } }
-  const tac = gorTac(), ops = (V.ops || []).filter(o => o.id && (o.k === 'atk' || o.k === 'amb' || o.k === 'ctr' || o.k === 'usr' || Object.hasOwn(GEN.man, o.k)));
+  const tac = gorTac(), ops = (V.ops || []).filter(o => o.id && (o.k === 'atk' || o.k === 'amb' || o.k === 'ctr' || o.k === 'usr' || o.k === 'qrf' || Object.hasOwn(GEN.man, o.k)));
   const sg = JSON.stringify([!!E, E && [E.q.map(q => [q.id, q.k, q.why, Math.floor(q.p * 10)]), E.res, E.keep, Math.floor(E.stock.en / 10), Math.floor(E.stock.mt / 10)], V.doc, GOR.bk, GOR.mode, GOR.pn, GOR.opSel, ops.map(o => [o.k, o.id, o.st, o.o, o.n]), tac, S.era]);
   if (GOR.sig.cmd === sg) return; GOR.sig.cmd = sg;
   const btn = (parts, d, title, on, off) => {
@@ -21833,7 +22168,7 @@ function gorCmdPanel(V) {
     bt.append(btn('−', { a: 'posts', k, n: Math.max(0, (n === undefined ? 1 : n) - 1) }, 'Uma esquadra a menos neste posto', undefined, !tac), gE('b', '', n === undefined ? 'auto' : String(n)), btn('+', { a: 'posts', k, n: Math.min(6, (n === undefined ? 0 : n) + 1) }, 'Uma esquadra a mais neste posto', undefined, !tac), btn('auto', { a: 'posts', k, n: -1 }, 'Voltar ao número da doutrina', undefined, !tac || n === undefined));
     li.append(gE('span', '', t), bt); return li;
   }));
-  const OP = { atk: o => 'Assalto · ' + (o.O ? o.O.nm : '') + ' — ' + (GEN.st[o.st] || o.st), amb: o => 'Emboscada · rota ' + (o.ri + 1) + ' — ' + (GEN.st[o.st] || o.st), ctr: () => 'Contra-ataque da reserva', usr: o => (o.v ? 'Ordem ampla: ' + (W21.vn[o.v] || o.v) + (o.rt ? ' · rota de ' + o.rt.length + ' pts' : '') : 'Ordem: ' + (GORU[o.o] || o.o)) + ' · ' + o.n + ' esq.' };
+  const OP = { atk: o => 'Assalto · ' + (o.O ? o.O.nm : '') + ' — ' + (GEN.st[o.st] || o.st), amb: o => 'Emboscada · rota ' + (o.ri + 1) + ' — ' + (GEN.st[o.st] || o.st), ctr: () => 'Contra-ataque da reserva', usr: o => (o.v ? 'Ordem ampla: ' + (W21.vn[o.v] || o.v) + (o.rt ? ' · rota de ' + o.rt.length + ' pts' : '') : 'Ordem: ' + (GORU[o.o] || o.o)) + ' · ' + o.n + ' esq.', qrf: o => 'Reação · ' + o.nm + ' · ' + o.n + ' esq.' };
   fill('#gcOpsL', ops.length ? ops.map(o => {
     const li = gE('li', o.id === GOR.opSel ? 'on' : ''), sp = gE('span', '', OP[o.k] ? OP[o.k](o) : genManTxt(o)), bt = gE('span', 'gc-btns');
     sp.title = sp.textContent; sp.dataset.a = 'opsel'; sp.dataset.id = o.id; sp.style.cursor = 'pointer';

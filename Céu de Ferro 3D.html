@@ -37332,7 +37332,7 @@ function buildHangarFallback() {
    are drawn animated (PACK.near m, PACK.max); the rest stay the instanced figures of before.
    tank, trn: which pack model draws each vehicle (by its id); arm: which weapon each small arm or launcher is (SARMS keys) */
 const PACK = {
-  url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 40, 80, 130], max: [0, 12, 28, 48],
+  url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 90, 120, 160], max: [0, 16, 28, 48],
   tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
   trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
     tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
@@ -37348,6 +37348,9 @@ PACK.lvl = () => {
   return PACK.q;
 };
 const PACK_SARM = new Map(Object.keys(SARMS).map(k => [SARMS[k], k]));
+/* the TANKS defs carry no id (TRNS ones do): the key of each, by the def itself or the def it was copied from */
+const PACK_TID = new Map(Object.keys(TANKS).map(k => [TANKS[k], k]));
+const packTid = d => d.id || PACK_TID.get(d) || PACK_TID.get(Object.getPrototypeOf(d)) || null;
 
 /* a GLB the pack wrote, as three objects: per node its name, TRS, children, mesh and skin; per mesh its primitives as BufferGeometries
    (kept: every copy shares them) with their material (0 paint, 1 fixed); skins (joints, inverse binds) and clips. Only what build.js writes */
@@ -37381,10 +37384,18 @@ function packGet(id) {
   if (E) return E.st === 1 ? E.d : null;
   const e = (PACK.M[id] = { st: 0, d: null });
   try {
-    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; })
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; packHangar(); })
       .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
   } catch (er) { e.st = -1; }
   return null;
+}
+/* the hangar's carousels keep each model from the first time they drew it, mostly before the pack came in: when a model arrives, they
+   drop what they kept (once, a moment after the last of a burst) and draw it again */
+function packHangar() {
+  clearTimeout(PACK.ht);
+  PACK.ht = setTimeout(() => {
+    try { for (const b of [$('#planes'), $('#swapList')]) { const F = b && b._f; if (!F) continue; for (const v of F.m.values()) kill(v.m); F.m.clear(); F.dirty = true; } ttKick(); } catch (e) {}
+  }, 250);
 }
 /* a phong material in the game's look over the vertex colours: paint takes the colour, fixed stays white; c is what damageLook goes back to */
 function packMat(paint, hex, o) { const m = mat(paint ? hex : 0xffffff, Object.assign({ vertexColors: true }, o || {})); m.userData.c = paint ? hex : 0xffffff; return m; }
@@ -37441,8 +37452,9 @@ function packSkin(g, P, d, col, wreck, keepTur) {
 function packDebris(g, d) { const P = packGet('p_debris'); if (!P) return; const m = packWhole(P, 0, d.l / P.dims[0] * .9, .45); m.position.y = .05; g.add(m); }
 buildUnit = (f => (u, wreck) => {
   const g = f(u, wreck), d = u.def;
-  if (d.trn || u.kind !== 'tank' || !PACK.tank[d.id]) return g;
-  const P = packGet(PACK.tank[d.id]); if (!P) return g;
+  const tid = d.trn || u.kind !== 'tank' ? null : PACK.tank[packTid(d)];
+  if (!tid) return g;
+  const P = packGet(tid); if (!P) return g;
   try { packSkin(g, P, d, u.col[0], wreck, false); if (wreck) packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
   return g;
 })(buildUnit);
@@ -37610,6 +37622,19 @@ function packPost() {
   if (PM.slots.length > (PACK.max[3] + 8)) PM.slots = PM.slots.filter(s => { if (s.m) return true; kill(s.root); return false; });
 }
 poseMan = (f => (m, put) => { if (packMan(m)) return; f(m, put); })(poseMan);
+/* the hangar's soldier (the infantry cards): the pack's, standing with the weapon up, once it is here and the level is not off */
+manModel = (f => d => {
+  if (!PACK.on || !PACK.max[PACK.lvl()] || !packGet('soldier')) return f(d);
+  try {
+    const s = packRig('soldier'), m = { x: 0, y: -1.55, z: 0, h: -.55, ap: 0, st: 0, w: d.arms[1] ? 1 : 0, arms: d.arms.map(a => ({ d: a, t: -9, rl: 0 })), v: ZERO, step: 0, def: d, dead: false, run: false };
+    const col = (MCOL[d.era] && MCOL[d.era][d.side] || [0x6b6b5a])[0];
+    for (const mt of s.mats) { mt.color.setHex(col); mt.userData.c = col; }
+    packPlay(s, s.act.aim ? 'aim' : 'idle', 0); s.mixer.update(0);
+    const k = MAN.sc * 1.85 / s.h; s.root.position.set(m.x, m.y, m.z); s.root.rotation.set(0, m.h, 0); s.root.scale.setScalar(k);
+    const w = packWeapon(s, m); if (w) { w.position.set(.32, 1.28, .12); w.rotation.set(0, 0, 0); }
+    const g = new THREE.Group(); g.add(s.root); return g;
+  } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
+})(manModel);
 /* each frame: what came in is built again, the people chosen before and tidied after */
 syncScene = (g => dt => {
   if (PACK.dirty) {

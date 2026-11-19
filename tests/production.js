@@ -147,6 +147,7 @@ console.log('-- tickets are morale where the economy pays (D25 A) --');
 {
   const dome = eco => {
     const C = H.load({ seed: 6, eco, mapv: 4 }), S = solo(C, 'modern'); C.run(2, () => park(S));
+    if (S.eco) { S.eco.d[1].en = S.eco.d[1].mt = 5000; }   // the AI may have spent on posts already
     const p = (() => { for (let z = -S.HW + 900; z < S.HW - 900; z += 173) for (let x = 2500; x < S.W - 2500; x += 211) if (C.fortWhy(6, 1, x, z, 0) === '') return { x, z }; })();
     if (S.eco) { S.eco.d[1].en = S.eco.d[1].mt = 5000; }
     const f = C.fortStart(6, 1, p.x, p.z, 0); C.fortAt(f, 1); const t0 = S.cq.tk[1];

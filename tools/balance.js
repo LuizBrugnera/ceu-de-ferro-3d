@@ -12,7 +12,8 @@
    doctrines on both sides in turn (one doctrine: mirror matches), seeds seed, seed + 1..., saves each match as the server does
    (<folder>/<era>/<date>-<id>.ndjson.gz and its summary) and then aggregates the tournament's matches.
      node tools/balance.js --torneio N [--era ww2|modern|all] [--docs cautious,balanced,aggressive] [--min minutes] [--len 0|1|2]
-       [--eco] [--mapv V] [--seed S] [--jobs J] [--save folder] [--json file]
+       [--eco] [--mapv V] [--seed S] [--jobs J] [--save folder] [--json file] [--pers ret,blz,gue,art,log] [--dif normal | facil,dificil]
+   --pers pairs the AI general's personalities (W17) instead of the doctrines; --dif the difficulty of both sides, or of side 0 and side 1.
    A Curta match (30 min) takes some 6 minutes of one core; --min shortens the clock for a quick look. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), crypto = require('crypto'), { fork } = require('child_process'), os = require('os');
 const H = require(path.join(__dirname, '..', 'tests', 'harness.js'));
@@ -26,6 +27,8 @@ function args(a) {
     if (k === '--torneio' || k === '--tourney') o.n = +v();
     else if (k === '--era') o.era = v();
     else if (k === '--docs') o.docs = v().split(',').filter(Boolean);
+    else if (k === '--pers') o.pers = v().split(',').filter(Boolean);
+    else if (k === '--dif') { const d = v().split(',').filter(Boolean); o.dif = [d[0], d[1] || d[0]]; }
     else if (k === '--min') o.min = +v();
     else if (k === '--len') o.len = +v();
     else if (k === '--eco') o.eco = true;
@@ -64,7 +67,7 @@ function save(dir, era, ev, src) {
 }
 /* one tournament match, in this process */
 function playOne(m) {
-  const C = H.load({ seed: m.seed, eco: !!m.eco, mapv: m.mapv || 4, ana: true }), S = C.watch(m.era, { doc: m.doc, len: m.len || 0, min: m.min });
+  const C = H.load({ seed: m.seed, eco: !!m.eco, mapv: m.mapv || 4, ana: true }), S = C.watch(m.era, { doc: m.doc, per: m.per, dif: m.dif, len: m.len || 0, min: m.min });
   const lim = S.cq.T0 + 120, t0 = Date.now();
   C.run(lim, () => !S.over);
   const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr');
@@ -72,11 +75,11 @@ function playOne(m) {
   return { file: save(m.save, m.era, ev, 'tourney'), over: S.over, t: Math.round(S.t), wall: Math.round((Date.now() - t0) / 1000) };
 }
 function plan(o) {
-  const docs = o.docs && o.docs.length ? o.docs : DOCS, eras = !o.era || o.era === 'all' ? ERAS : [o.era], pairs = [];
+  const docs = o.pers && o.pers.length ? o.pers : o.docs && o.docs.length ? o.docs : DOCS, eras = !o.era || o.era === 'all' ? ERAS : [o.era], pairs = [];
   if (docs.length === 1) pairs.push([docs[0], docs[0]]);
   else for (const a of docs) for (const b of docs) if (a !== b) pairs.push([a, b]);
   const tour = crypto.randomBytes(4).toString('hex'), out = [];
-  for (let i = 0; i < o.n; i++) out.push({ tour, era: eras[Math.floor(i / pairs.length) % eras.length], doc: pairs[i % pairs.length], seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, mapv: o.mapv, save: o.save || DIR });
+  for (let i = 0; i < o.n; i++) out.push({ tour, era: eras[Math.floor(i / pairs.length) % eras.length], doc: o.pers ? null : pairs[i % pairs.length], per: o.pers ? pairs[i % pairs.length] : null, dif: o.dif || null, seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, mapv: o.mapv, save: o.save || DIR });
   return out;
 }
 async function tourney(o) {
@@ -87,7 +90,7 @@ async function tourney(o) {
     const go = () => {
       if (next >= P.length) return res();
       const m = P[next++], k = fork(__filename, ['--one', JSON.stringify(m)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'] });
-      k.on('message', r => { made.push(r.file); console.log('  ' + String(made.length).padStart(3) + '/' + P.length + '  ' + m.era + ' ' + m.doc.join(' × ') + ' seed ' + m.seed + (r.over ? '' : ' (sem fim)') + ', ' + Math.round(r.t / 60) + ' min de partida em ' + r.wall + ' s'); });
+      k.on('message', r => { made.push(r.file); console.log('  ' + String(made.length).padStart(3) + '/' + P.length + '  ' + m.era + ' ' + (m.per || m.doc).join(' × ') + (m.dif ? ' (' + m.dif.join(' × ') + ')' : '') + ' seed ' + m.seed + (r.over ? '' : ' (sem fim)') + ', ' + Math.round(r.t / 60) + ' min de partida em ' + r.wall + ' s'); });
       k.on('exit', go);
     };
     go();
@@ -98,17 +101,18 @@ async function tourney(o) {
 /* the numbers of many reviews */
 function aggregate(reps) {
   const n = reps.length, done = reps.filter(r => r.over), dec = done.filter(r => r.win >= 0), w = [0, 1].map(s => dec.filter(r => r.win === s).length);
-  const why = {}, docs = {}, kinds = {}, tk = { loss: 0, bleed: 0, pt: 0, civ: 0, other: 0 }, cv = { n: 0, dead: 0, evac: 0, turned: 0, roe: 0 }, durs = done.map(r => r.dur / 60).sort((a, b) => a - b);
+  const why = {}, docs = {}, pers = {}, kinds = {}, tk = { loss: 0, bleed: 0, pt: 0, civ: 0, other: 0 }, cv = { n: 0, dead: 0, evac: 0, turned: 0, roe: 0 }, durs = done.map(r => r.dur / 60).sort((a, b) => a - b);
   for (const r of done) why[r.whyTxt || r.why] = (why[r.whyTxt || r.why] || 0) + 1;
   for (const r of done) for (const s of [0, 1]) {
     const d = r.doc[s] || '?', o = docs[d] || (docs[d] = { w: 0, d: 0, l: 0, n: 0 }); o.n++; if (r.win < 0) o.d++; else if (r.win === s) o.w++; else o.l++;
+    if (r.per && r.per[s]) { const k = r.per[s] + (r.dif && r.dif[s] && r.dif[s] !== 'normal' ? ' (' + r.dif[s] + ')' : ''), p = pers[k] || (pers[k] = { w: 0, d: 0, l: 0, n: 0 }); p.n++; if (r.win < 0) p.d++; else if (r.win === s) p.w++; else p.l++; }
     const x = r.tickets[s]; if (x) { tk.loss += x.loss; tk.bleed += x.bleed; tk.pt += x.ptLost - x.ptTook; tk.civ += x.civ || 0; tk.other += x.other; }
   }
   for (const r of done) if (r.civ) { cv.n++; cv.dead += r.civ.dead; cv.evac += r.civ.evac; cv.turned += r.civ.turned.length; for (const x of r.civ.side) if (x) cv.roe += x.roe; }
   for (const r of reps) for (const e of r.eff) { const k = kinds[e.u] || (kinds[e.u] = { made: 0, lost: 0, kills: 0, paid: 0, value: 0, life: 0, ln: 0 }); k.made += e.made; k.lost += e.lost; k.kills += e.kills; k.paid += e.paid; k.value += e.value; if (e.life !== null) { k.life += e.life * e.lost; k.ln += e.lost; } }
   const all = tk.loss + tk.bleed + tk.pt + tk.civ + tk.other || 1, share = dec.length ? Math.max(w[0], w[1]) / dec.length : 0;
   return { n, over: done.length, draws: done.length - dec.length, wins: w, side0: dec.length ? w[0] / dec.length : null, alert: dec.length >= ALERT.n && share > ALERT.share, few: dec.length < ALERT.n,
-    why, docs, dur: durs.length ? { mean: durs.reduce((a, b) => a + b, 0) / durs.length, median: durs[durs.length >> 1], min: durs[0], max: durs[durs.length - 1] } : null,
+    why, docs, pers, dur: durs.length ? { mean: durs.reduce((a, b) => a + b, 0) / durs.length, median: durs[durs.length >> 1], min: durs[0], max: durs[durs.length - 1] } : null,
     tickets: { loss: tk.loss / all, bleed: tk.bleed / all, pt: tk.pt / all, civ: tk.civ / all, other: tk.other / all }, kinds,
     civ: cv.n ? { dead: cv.dead / cv.n, evac: cv.evac / cv.n, turned: cv.turned / cv.n, roe: cv.roe / cv.n } : null,
     dry: null, missions: null };
@@ -121,6 +125,7 @@ function print(A, title) {
     A.alert ? 'ALERTA: um lado venceu mais de ' + pc(ALERT.share) + ' em ' + (A.wins[0] + A.wins[1]) + ' partidas decididas.' : A.few ? 'Menos de ' + ALERT.n + ' partidas decididas: cedo para alarme.' : 'Dentro da faixa (nenhum lado acima de ' + pc(ALERT.share) + ').');
   L.push('', '## Por doutrina', '', '| Doutrina | Partidas | V | E | D |', '| --- | --- | --- | --- | --- |');
   for (const [d, o] of Object.entries(A.docs)) L.push('| ' + d + ' | ' + o.n + ' | ' + o.w + ' | ' + o.d + ' | ' + o.l + ' |');
+  if (A.pers && Object.keys(A.pers).length) { L.push('', '## Por personalidade do general', '', '| Personalidade | Partidas | V | E | D |', '| --- | --- | --- | --- | --- |'); for (const [d, o] of Object.entries(A.pers)) L.push('| ' + d + ' | ' + o.n + ' | ' + o.w + ' | ' + o.d + ' | ' + o.l + ' |'); }
   L.push('', '## Fim e duração', '', Object.entries(A.why).map(([k, v]) => k + ': ' + v).join(', ') || '—',
     A.dur ? 'Duração: média ' + f1(A.dur.mean) + ' min, mediana ' + f1(A.dur.median) + ', de ' + f1(A.dur.min) + ' a ' + f1(A.dur.max) + '.' : 'Duração: —');
   L.push('', '## Para onde foram os tíquetes', '', 'Perdas ' + pc(A.tickets.loss) + ', sangria ' + pc(A.tickets.bleed) + ', pontos ' + pc(A.tickets.pt) + ', civis ' + pc(A.tickets.civ) + ', outros (requisições, instalações) ' + pc(A.tickets.other) + '.');

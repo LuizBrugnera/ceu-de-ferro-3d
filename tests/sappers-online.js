@@ -5,8 +5,12 @@
    every mine (the other side's hidden ones too) and never reuses an id */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const all = [], dt = 1 / 60;
-async function client(name, cls, model) {
-  const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5 }), $ = c.$, Net = $('Net');
+/* an instance of the page with its map already made. The map takes seconds (a good deal more on a loaded machine), and made on the
+   welcome it holds up the one thread every client of the test shares: the server's ping goes unanswered, it drops them all after 10 to
+   20 s, and every one plays on alone as its own host. So every instance is made, map and all, before the first of them connects */
+const make = name => { const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5 }); c.genTerrain('modern', c.$('MAPV')); return c; };
+async function client(name, cls, model, c) {
+  c = c || make(name); const $ = c.$, Net = $('Net');
   c.name = name; c.$ = $; c.Net = Net; c.on = true;
   await new Promise((res, rej) => {
     Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); res(); };
@@ -22,13 +26,29 @@ async function run(secs, each) {
   }
   await N.sleep(40); return true;
 }
-const until = async (f, ms) => { for (let t = Date.now(); !f() && Date.now() - t < (ms || 4000);) { await run(.1); await N.sleep(25); } return f(); };
+/* run(secs, each), but the match stands still while pend(): a word of the host's is on its way and has to land before the match goes on
+   (for up to 3 s of the clock). The wire takes a few ms, the margins it is held to are in seconds of the match, and the test runs through
+   those many times faster than the clock, faster still or slower on a loaded machine: without the wait it is the race that is tested */
+async function held(secs, pend, each) {
+  for (let n = Math.round(secs / dt); n > 0;) {
+    let k = 0, stop = false; const r = await run(n * dt, () => { k++; if (each && each() === false) { stop = true; return false; } if (pend()) return false; });
+    if (r || stop) return r; n -= k;
+    for (const t = Date.now(); pend() && Date.now() - t < 3000;) await N.sleep(10);
+  }
+  return true;
+}
+/* f() true, or given up after ms of the clock and as long of the match: a loaded machine slows the steps and the wire alike, so neither
+   alone bounds the wait */
+const until = async (f, ms) => { ms = ms || 4000; for (let t = Date.now(), n = 0; !f() && (Date.now() - t < ms || n < ms / 100); n++) { await run(.1); await N.sleep(25); } return f(); };
+/* a guest set down somewhere: the host has to see him there before it grants what he asks for by his position (lay, lift) */
+const there = c => until(() => { const g = all[0].Net.ghosts.get(c.id); return !!g && Math.hypot(g.x - c.S.my.x, g.z - c.S.my.z) < 1; });
 const put = (c, x, z, h) => { const P = c.S.my; P.x = x; P.z = z; P.y = c.hgt(x, z); P.inv = 1e9; c.S.aim.h = h || 0; c.S.aim.p = -.25; };
 const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] = false; await run(.06); };
 
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER + '\npage:   ' + H.PAGE);
-  const host = await client('Host', 'tank', 'abrams'), g1 = await client('Azul', 'inf', 'blueEng'), g2 = await client('Verm', 'inf', 'redEng'), g3 = await client('Fuzil', 'inf', 'redRifle');
+  const pre = ['Host', 'Azul', 'Verm', 'Fuzil', 'Novo'].map(make);
+  const host = await client('Host', 'tank', 'abrams', pre[0]), g1 = await client('Azul', 'inf', 'blueEng', pre[1]), g2 = await client('Verm', 'inf', 'redEng', pre[2]), g3 = await client('Fuzil', 'inf', 'redRifle', pre[3]);
   const T = host.S.T, hd = host.$('hdist'), SAP = host.$('SAP'), FORT = host.$('FORT');
   await run(1);
   ok([host, g1, g2, g3].every(c => c.Net.sap) && host.S.host, 'the server knows the sappers (sap)');
@@ -43,7 +63,7 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   for (const c of [g1, g2, g3]) away(c);
   put(host, p.x - 900, p.z);
   /* g1 lays an AT mine through its own hands: N past the last work to the AT mine, then the trigger */
-  put(g1, p.x, p.z, 0); await run(.3);
+  put(g1, p.x, p.z, 0); await run(.3); await there(g1);
   g1.S.fm = { k: FORT.K.length - 1, P: g1.S.my }; await tap(g1, 'build'); await run(.2); await tap(g1, 'fire');
   const laid = await until(() => host.S.mines && host.S.mines.length === 1 && g1.S.mines && g1.S.mines.length === 1);
   const m0 = host.S.mines && host.S.mines[0];
@@ -54,13 +74,13 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   put(g2, m0.x + 15, m0.z + 2, Math.PI);
   const found = await until(() => (g2.S.mines || []).some(o => o.id === m0.id));
   ok(found && (m0.kn & 2), 'the other side\'s sapper comes within ' + SAP.det + ' m: the host marks it known to his side, and it reaches him');
-  put(g2, m0.x + 1.5, m0.z, Math.PI); await run(.3); await tap(g2, 'ordB');
+  put(g2, m0.x + 1.5, m0.z, Math.PI); await run(.3); await there(g2); await tap(g2, 'ordB');
   const lifting = !!g2.S.ml; await run(SAP.clear + .5);
   const gone = await until(() => !host.S.mines.length && !g1.S.mines.length);
   ok(lifting && gone, 'V by it lifts it: after ' + SAP.clear + ' s it is gone on the host and on its own side too');
   away(g2);
   /* an AP mine g3 does not know: the host sets it off under his body, and the burst is his own */
-  put(g1, p.x + 200, p.z, 0); await run(.3); g1.S.mm = null; g1.S.fm = { k: FORT.K.length - 1, P: g1.S.my }; await tap(g1, 'build'); await tap(g1, 'build'); await run(.2); await tap(g1, 'fire');
+  put(g1, p.x + 200, p.z, 0); await run(.3); await there(g1); g1.S.mm = null; g1.S.fm = { k: FORT.K.length - 1, P: g1.S.my }; await tap(g1, 'build'); await tap(g1, 'build'); await run(.2); await tap(g1, 'fire');
   await until(() => host.S.mines.some(o => o.k === 1));
   const ap = host.S.mines.find(o => o.k === 1); away(g1); await run(SAP.arm + .5);
   const P3 = g3.S.my, hp0 = P3.hp; P3.inv = 0; put(g3, ap.x + 6, ap.z, Math.PI); P3.inv = 0;
@@ -82,20 +102,23 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
      alone engages and rolls, and the guest stops the very same rounds */
   const POSTS = host.$('POSTS'); let dome = null;
   for (const [dx, dz] of [[-200, 300], [-300, 400], [-100, 500], [-400, 250], [-250, -400]]) if (!dome) dome = host.fortStart(6, 0, p.x + dx, p.z + dz, 0);
-  if (dome) host.fortAt(dome, 1);
+  /* what gets through the salvo bursts on the dome and how much does is the luck of each run: as much again would bring it down and leave
+     nothing to engage the rounds that come after, so here it takes no harm (the test is of what it stops, not of what it stands) */
+  if (dome) { host.fortAt(dome, 1); host.S.oh[dome.id] = 1e9; }
   const built = !!dome && await until(() => g1.S.forts.some(q => q.id === dome.id && q.prog >= 1), 8000);
   const sg = p.x + 6000 < host.S.W - 200 ? 1 : -1, lx = dome.x + sg * 6000, ly = host.hgt(lx, dome.z) + 4, R = n => Math.round(n * 10) / 10;
   const bm = host.addUnit('art', 1, lx, dome.z, 'bm21', true); bm.ai = null;
-  const stub = { team: 1, x: lx, y: ly, z: dome.z }, w = bm.arms[0].d, HL = [], GL = [];
+  const stub = { team: 1, x: lx, y: ly, z: dome.z }, w = bm.arms[0].d, HL = [], GL = [], word = () => HL.some((b, i) => b.dj && GL[i] && !GL[i].dj && !GL[i].gone);
   for (let i = 0; i < 40; i++) {
     const a = [R(lx), R(ly), R(dome.z), R(-sg * 6000 / 52 + (i % 7) * .3 - 1), 255, R((i % 5 - 2) * .3)];
-    HL.push(host.lob(bm, w, ...a)); await run(.15 + (i % 3) * .05); GL.push(g1.lob(stub, w, ...a)); await run(.35 - (i % 3) * .05);
+    HL.push(host.lob(bm, w, ...a)); await held(.15 + (i % 3) * .05, word); GL.push(g1.lob(stub, w, ...a)); await held(.35 - (i % 3) * .05, word);
   }
-  await run(40);
+  /* each round is some 52 s in the air: wait for every one to come down or be stopped on both */
+  const fell = !await held(60, word, () => !(HL.every(b => b.gone) && GL.every(b => b.gone)));
   const stopped = (c, b) => b.dj && b.gone && b.y - c.hgt(b.x, b.z) > POSTS.dome.low / 2, set = (c, L) => L.map((b, i) => (stopped(c, b) ? i : -1)).filter(i => i >= 0).join();
   const hs = set(host, HL), gs = set(g1, GL), n = hs ? hs.split(',').length : 0;
-  console.log('   the dome stopped ' + n + ' of 40 on the host (' + dome.ds + ' engaged); the guest stopped [' + gs + '], the host [' + hs + ']');
-  ok(built && n >= 10 && n < 40 && gs === hs, 'a BM-21 salvo of 40 at a dome with a magazine of ' + POSTS.dome.mag + ': it is saturated, and the guest stops the very same rounds the host does');
+  console.log('   the dome stopped ' + n + ' of 40 on the host (' + dome.ds + ' engaged, at stage ' + host.S.os[dome.id] + '); the guest stopped [' + gs + '], the host [' + hs + ']');
+  ok(built && fell && !host.S.os[dome.id] && n >= 10 && n < 40 && gs === hs, 'a BM-21 salvo of 40 at a dome with a magazine of ' + POSTS.dome.mag + ': it is saturated, and the guest stops the very same rounds the host does');
   /* a round a guest (side 1) fires flies on his client ahead of the host's copy: the dome engages it only with time left for its word to
      reach him first; with its one interceptor held back to the last 0.6 s it lets the round fall everywhere, at 1.5 s it stops it everywhere */
   await run(15); POSTS.dome.pk = 1;
@@ -103,7 +126,9 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
     const lx2 = dome.x + sg * 3000, ly2 = host.hgt(lx2, dome.z) + 4, a = [R(lx2), R(ly2), R(dome.z), R(-sg * 3000 / 24.5), 120, 0], by = { team: 1, x: lx2, y: ly2, z: dome.z };
     const b2 = g2.lob(by, w, ...a); await run(lead); const bh = host.lob(by, w, ...a), b1 = g1.lob(by, w, ...a);
     let rel = false;
-    await run(bh.T + 2, () => { if (!rel && bh.T - bh.t <= at) { rel = true; dome.dm = 1; dome.dn = 0; } else if (!rel) { dome.dm = 0; dome.dl = 0; } });
+    const free = () => { for (const f of host.S.forts) if (f.k === 6 && f !== dome) { f.dm = 0; f.dl = 0; }   // only this dome: the side's AI may have raised one of its own nearby
+      if (!rel && bh.T - bh.t <= at) { rel = true; dome.dm = 1; dome.dn = 0; } else if (!rel) { dome.dm = 0; dome.dl = 0; } };
+    await held(bh.T + 2, () => bh.dj && !((b1.dj || b1.gone) && (b2.dj || b2.gone)), free);
     return [host, g1, g2].map((c, i) => stopped(c, [bh, b1, b2][i]));
   };
   const L1 = await late(.7, .6), L2 = await late(.3, 1.5);
@@ -116,7 +141,7 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   host.Net.close(); host.on = false;
   const took = await until(() => g1.S.host, 6000); await run(2);
   ok(took && has(g1, hid) && has(g2, hid) && has(g3, hid), 'the host leaves: the next host (side 0) has the other side\'s hidden mine, and that side still has it from him');
-  const g4 = await client('Novo', 'inf', 'blueRifle'); away(g4);
+  const g4 = await client('Novo', 'inf', 'blueRifle', pre[4]); away(g4);
   const nm = g1.$('mineLay')(0, 0, p.x - 40, p.z + 60);
   const got = await until(() => has(g4, nm)); await run(1);
   console.log('   the new host\'s first mine: id ' + (nm && nm.id) + ' (ids used before: up to ' + used + ')');

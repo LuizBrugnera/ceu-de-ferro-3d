@@ -1,5 +1,11 @@
 # cf-recursos-vermelho: recursos do general vermelho na Visão de General
 
+## Testado em 1cedd86 e 806508d: ok (parte)
+- Navegador (1cedd86), Assistir sem ninguém na sala: a faixa mostra "Economia do general · Força Azul" e, com `genSide(1)`, "Economia do general · Força Vermelha", com energia, metal e renda por minuto. A Visão de General ocupa a largura toda em 1280 e 1920 px.
+- Solo (anfitrião sozinho), Visão de General: no próprio lado a faixa aparece sem nome de lado. Trocando a visão para o inimigo (`GV.t = 1`), `gorEconSide()` dá -1 e a faixa some (névoa ok).
+- Suítes: `tests/w13.js`, `tests/w13-online.js`, `tests/eco-online.js` e `tests/spec-online.js` passam (806508d). `spec-online` e `w13-online` falhavam nesta máquina carregada porque o relay derrubava as páginas pelo heartbeat. Isso foi corrigido nos testes no #96 e no #99, e não é um defeito do jogo.
+- **Continua sem teste:** com dois navegadores, o jogador vermelho (convidado e anfitrião) e a cadeira de General vermelha; um terceiro navegador como espectador online; `CEU_SIDE=1 node mcp-general.js` numa sala real.
+
 ## O que mudou
 - A faixa "Economia do general" (`gorEcon`, `#genEcon`) só aparecia quando o lado mostrado no mapa (`GV.t`) era o lado da página (`S.me`) e lia sempre `ecoView(S.me)`. No modo Assistir (IA × IA local) e como espectador online, `S.me` é 0: ao trocar a visão para o lado 1 (vermelho), a faixa sumia.
 - Agora `gorEconSide()` escolhe o lado: o próprio lado sempre; qualquer lado em Assistir/espectador (`S.watch` ou `S.spec`); nunca o lado inimigo numa partida normal (névoa de guerra). A faixa lê `ecoView(lado)` e o log de despachos desse lado.

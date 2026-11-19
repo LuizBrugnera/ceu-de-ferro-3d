@@ -19,13 +19,16 @@
    the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape)
    and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
    at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10).
-   rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
+   rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas).
+   ns (3 sides, cf-3-lados P5; NOT TESTED, see docs/nao-testado/cf-3l-p5-servidor.md): the number of sides of the room, 2 or 3 (3 only in modern:
+   0 the USA, 1 Russia, 2 the Insurgents). The first player's join says it (ns, as mv), welcome tells it, and a page of another count is refused
+   (error sides). A model's side is MSIDE's, no longer the half of its list; every side check, the general's seats, cmd and cq v2 take N sides. */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 
 const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Ferro 3D.html'), MAXLEN = 2048, MAXAI = 16384, AICAP = 64, CAP = 16;
-/* valid models per room and class, the first half of each list on side 0 and the second on side 1; the page's PLANES, TANKS, AAS, ARTS and
-   INF tables are the other copy. inf: the infantry kits, in the order an AI soldier's snapshot row names them by index */
+/* valid models per room and class (a model's side is MSIDE's, below); the page's PLANES, TANKS, AAS, ARTS and INF tables are the other copy.
+   inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size */
 const MODELS = {
   ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
   modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
@@ -53,17 +56,25 @@ const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 8
 const NST = Object.keys(STW).length;
 const FKINDS = 10;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb; 10: a new bridge, bnb)
 const rooms = { ww2: new Map(), modern: new Map() };
-for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
+/* the most sides a room of the era may have; room.ns, the sides of the match in the room (its first player's), 2 until one says 3. The general's
+   seats are kept for the most (gen, genk), and a player is told those of the room's sides (gview) */
+const MAXN = { ww2: 2, modern: 3 };
+for (const era in MODELS) { const m = MODELS[era]; rooms[era].ns = 2; rooms[era].gen = Array(MAXN[era]).fill(0); rooms[era].genk = Array(MAXN[era]).fill(0); rooms[era].host = null; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
 /* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
-   the repair trucks are a player's too, so they are also in the trn lists above, each in its side's half */
+   the repair trucks are a player's too, so they are also in the trn lists above, each on its side in MSIDE */
 const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54', 'opelw', 'gmcw'], modern: ['m88a2', 'brem1', 'm997', 'uaz452', 'm1089', 'mtoub'] };
 for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);
 let nextId = 1;
 
 const model = (era, cls, id) => typeof cls === 'string' && Object.hasOwn(era, cls) && era[cls].includes(id);
-const side = (era, cls, id) => +(era[cls].indexOf(id) >= era[cls].length / 2), pside = (era, p) => side(era, p.cls, p.model) ^ (p.cap ? 1 : 0);
+/* a model's side in the room's era (MSIDE), -1 for none; a player's own side is c.side, fixed at join (a captured vehicle keeps it: p.cap, p.cs) */
+const side = (room, id) => (Object.hasOwn(room.ms, id) ? room.ms[id] : -1);
+/* a side of the room (0 to its ns - 1), and the bits of all of them */
+const ts = (room, v) => Number.isInteger(v) && v >= 0 && v < room.ns, ALL = room => (1 << room.ns) - 1;
+/* the general's seats a member is told: the room's sides, and a bridge's own side even before the room says 3 */
+const gview = (room, o, l) => l.slice(0, Math.max(room.ns, o && o.gen ? o.player.side + 1 : 0));
 const num = v => typeof v === 'number' && Number.isFinite(v);
 const vec = (v, n) => Array.isArray(v) && v.length === n && v.every(num);
 const pid = v => Number.isInteger(v) && v > 0, aid = v => Number.isInteger(v) && v < 0;
@@ -101,7 +112,7 @@ const host = c => c.room.host === c, toss = m => Number.isInteger(m.k) && m.k >=
 const scores = c => cast(c, { t: 'scores', players: [...c.room.values()].map(o => ({ id: o.player.id, kills: o.player.kills, deaths: o.player.deaths, ai: o.player.ai })) }, true);
 /* one AI entity of a snapshot: [id, model, team, hp, flags, then 10 numbers for a plane (p, q, v) or 8 for a vehicle (p, heading, turret, pitch, vx, vz), then its part states].
    A soldier's row (k 2) is shorter: [id, kit index, team, hp, flags, x, z, heading, stance and weapon and squad packed in one integer] */
-const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && (e[2] === 0 || e[2] === 1) && (k === 2 ? e.length === 9 && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
+const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && ts(room, e[2]) && (k === 2 ? e.length === 9 && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
   : e.length === (k ? (room.gnd.has(e[1]) ? 14 : 0) : room.air.has(e[1]) ? 16 : 0) && e.every((v, i) => i === 1 || num(v)) && bits(e[e.length - 1]));
 const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
 const cast = (c, m, all) => { snapIn(c, m); for (const o of c.room.values()) if (all || o !== c) send(o.ws, m); for (const o of c.room.specs || []) if (o !== c) sendSpec(o, m); };
@@ -115,9 +126,11 @@ const RX = {
     if (m.cls === 'gen') {   // an MCP bridge: no body, not in the roster, never host; one a side, with the server's key
       const room = rooms[m.room];
       if (!GENKEY || m.key !== GENKEY) { send(c.ws, { t: 'error', code: 'gen' }); return c.ws.close(); }   // one guess a connection
-      if ((m.side !== 0 && m.side !== 1) || [...room.gens].some(o => o.player.side === m.side)) return send(c.ws, { t: 'error', code: 'taken' });
+      // a side of the room; in an empty room any side of the era (the first player then says how many there are, and a bridge past them goes)
+      if (!int(m.side, 0, MAXN[m.room] - 1) || [...room.gens].some(o => o.player.side === m.side)) return send(c.ws, { t: 'error', code: 'taken' });
+      if (room.size && m.side >= room.ns) { send(c.ws, { t: 'error', code: 'sides' }); return c.ws.close(); }   // the room's match has fewer sides: the bridge tries again later
       c.player = { id: nextId++, name: 'MCP', cls: 'gen', model: '', side: m.side, kills: 0, deaths: 0, ai: 0 }; c.gen = 1; c.room = room; room.gens.add(c);
-      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1, gq: 1, man2: 1 });
+      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, ns: room.ns, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1, gq: 1, man2: 1 });
     }
     if (m.cls === 'spec') {   // a spectator: no body, not in the roster, never host; it is sent everything and can send nothing
       const room = rooms[m.room];
@@ -125,9 +138,10 @@ const RX = {
       if (room.specs.size >= SPECMAX) return send(c.ws, { t: 'error', code: 'full' });
       const mv = int(m.mv, 1, 99) ? m.mv : 1;
       if (room.size > 0 && mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });   // the map-version gate, as for a player
+      if (room.size > 0 && m.ns !== undefined && m.ns !== room.ns) return send(c.ws, { t: 'error', code: 'sides' });   // and the sides', when the page says its own
       const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Espectador';
       c.player = { id: nextId++, name, cls: 'spec', model: '', side: -1, kills: 0, deaths: 0, ai: 0 }; c.spec = 1; c.room = room; room.specs.add(c);
-      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, players: [...room.values()].map(o => o.player) }));
+      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, players: [...room.values()].map(o => o.player) }));
       send(c.ws, { t: 'fcap', v: 1 }); send(c.ws, { t: 'dcap', v: 1 });
       if (room.host) send(room.host.ws, { t: 'sjoin', id: c.player.id });
       return;
@@ -138,13 +152,17 @@ const RX = {
     const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Piloto';
     c.player = { id: nextId++, name, cls: m.cls, model: m.model, lo: load(m.cls, m.model, m.lo), kills: 0, deaths: 0, ai: 0 };
     const mv = int(m.mv, 1, 99) ? m.mv : 1;   // the map version of the page; the first player's is the room's
-    const sus = room.size === 0 && room.sus > Date.now() && m.fresh !== 1 && mv === room.snap.mv;   // a suspended match, taken up again
+    const ns = m.ns === 3 && MAXN[m.room] >= 3 ? 3 : 2;   // and its sides: a page that does not say is of 2
+    const sus = room.size === 0 && room.sus > Date.now() && m.fresh !== 1 && mv === room.snap.mv && ns === (room.snap.ns || 2);   // a suspended match, taken up again
     if (room.size === 0 && room.sus > 0 && !sus) snapDrop(room);   // or left for a new one ("Nova partida", or another map)
-    if (room.size === 0) room.mv = mv;
+    if (room.size === 0) { room.mv = mv; setNs(room, ns); }
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
+    else if (ns !== room.ns) return send(c.ws, { t: 'error', code: 'sides' });
+    c.side = side(room, m.model);
+    if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -154,8 +172,8 @@ const RX = {
      Anything else is refused to the sender alone (no: 1), with the vehicle it keeps. The score and the host are not touched */
   swap(c, m) {
     const era = c.room.models, p = c.player;
-    if (!model(era, m.cls, m.model) || side(era, m.cls, m.model) !== pside(era, p)) return send(c.ws, { t: 'swap', id: p.id, cls: p.cls, model: p.model, no: 1 });
-    p.cls = m.cls; p.model = m.model; p.cap = 0; p.lo = load(m.cls, m.model, m.lo);
+    if (!model(era, m.cls, m.model) || side(c.room, m.model) !== c.side) return send(c.ws, { t: 'swap', id: p.id, cls: p.cls, model: p.model, no: 1 });
+    p.cls = m.cls; p.model = m.model; p.cap = 0; delete p.cs; p.lo = load(m.cls, m.model, m.lo);
     cast(c, Object.assign({ t: 'swap', id: p.id, cls: p.cls, model: p.model, lo: p.lo }, m.rq === 1 && { rq: 1 }), true);   // rq: a requisition at a depot, no loss
   },
   /* another loadout on the plane the player has: over its airfield, or chosen for the next one. A refused one is the plane's own load */
@@ -175,10 +193,10 @@ const RX = {
   },
   /* what a soldier throws or launches unguided, from p at v: k 0 its rocket, 1 a hand grenade, 2 a smoke grenade, 3 a mortar bomb, 4 a
      mortar smoke bomb. A guided one goes as ord. shot and aishot: s 1, a howitzer's smoke round; h 1, a tank's high-explosive round (welcome says she: 1).
-     cmd: the host's word on what each side's commander is at, for the players' maps: c, per side, [what, then x, z, kind of each mark] */
+     cmd: the host's word on what each side's commander is at, for the players' maps: c, per side of the room (ns), [what, then x, z, kind of each mark] */
   cmd(c, m) {
-    if (!host(c) || !Array.isArray(m.c) || m.c.length !== 2 || !m.c.every(l => Array.isArray(l) && l.length <= 100 && l.every(num))) return;
-    for (const o of c.room.values()) if (o !== c) send(o.ws, { t: 'cmd', c: sideOf(o) ? [[0], m.c[1]] : [m.c[0], [0]] });   // a side sees its own commander only
+    if (!host(c) || !Array.isArray(m.c) || m.c.length !== c.room.ns || !m.c.every(l => Array.isArray(l) && l.length <= 100 && l.every(num))) return;
+    for (const o of c.room.values()) if (o !== c) { const s = sideOf(o); send(o.ws, { t: 'cmd', c: m.c.map((l, i) => (i === s ? l : [0])) }); }   // a side sees its own commander only
     for (const o of c.room.specs) send(o.ws, { t: 'cmd', c: m.c });   // a spectator sees both
   },
   toss(c, m) { if (c.player.cls === 'inf' && toss(m)) cast(c, { t: 'toss', from: c.player.id, k: m.k, p: m.p, v: m.v }); },
@@ -208,7 +226,7 @@ const RX = {
   down(c, m) {
     if (!ref(m.by)) return;
     const k = c.room.get(m.by), by = aid(m.by) ? m.by : k && k !== c ? m.by : null;
-    c.player.deaths++; if (k && k !== c && pside(c.room.models, k.player) !== pside(c.room.models, c.player)) k.player.kills++;   // a team kill is no one's credit
+    c.player.deaths++; if (k && k !== c && k.side !== c.side) k.player.kills++;   // a team kill is no one's credit
     cast(c, Object.assign({ t: 'down', id: c.player.id, by, det: m.det === 1 ? 1 : 0 }, m.left === 1 && { left: 1 }), true); scores(c);   // left: the vehicle was abandoned for another
   },
   /* the AI battle: snapshots and events come from the host only, and damage to an AI entity goes to the host only */
@@ -262,7 +280,7 @@ const RX = {
   /* supply bases are world objects too, with a life of their own: the host lists them all, a row each, [id, side, x, z, heading, percent
      built, hp, stage] and with lg the crates in it (0-999); a soldier's request to start one goes to the host alone, once a second at most */
   base(c, m) {
-    if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => (vec(e, 8) || (vec(e, 9) && Number.isInteger(e[8]) && e[8] >= 0 && e[8] <= 999)) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && e[5] >= 0 && e[5] <= 100 && (e[7] === 0 || e[7] === 1 || e[7] === 2))) cast(c, { t: 'base', e: m.e });
+    if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => (vec(e, 8) || (vec(e, 9) && Number.isInteger(e[8]) && e[8] >= 0 && e[8] <= 999)) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && ts(c.room, e[1]) && e[5] >= 0 && e[5] <= 100 && (e[7] === 0 || e[7] === 1 || e[7] === 2))) cast(c, { t: 'base', e: m.e });
   },
   build(c, m) {
     const h = c.room.host, now = Date.now();
@@ -273,7 +291,7 @@ const RX = {
      2 sandbags, and with sap: 1 the posts, 3 anti-tank, 4 machine gun, 5 sniper tower, 6 anti-rocket dome), side, x, z, facing, percent
      built, hp, stage]; a soldier's request for one goes to the host alone, 700 ms apart at least */
   fort(c, m) {
-    if (host(c) && Number.isInteger(m.i) && Number.isInteger(m.n) && m.i >= 0 && m.i < m.n && m.n <= 8 && Array.isArray(m.e) && m.e.length <= 40 && m.e.every(e => vec(e, 9) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && Number.isInteger(e[1]) && e[1] >= 1 && e[1] <= FKINDS && (e[2] === 0 || e[2] === 1) && e[6] >= 0 && e[6] <= 100 && (e[8] === 0 || e[8] === 1 || e[8] === 2))) cast(c, { t: 'fort', i: m.i, n: m.n, e: m.e });
+    if (host(c) && Number.isInteger(m.i) && Number.isInteger(m.n) && m.i >= 0 && m.i < m.n && m.n <= 8 && Array.isArray(m.e) && m.e.length <= 40 && m.e.every(e => vec(e, 9) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && Number.isInteger(e[1]) && e[1] >= 1 && e[1] <= FKINDS && ts(c.room, e[2]) && e[6] >= 0 && e[6] <= 100 && (e[8] === 0 || e[8] === 1 || e[8] === 2))) cast(c, { t: 'fort', i: m.i, n: m.n, e: m.e });
   },
   fbuild(c, m) {
     const h = c.room.host, now = Date.now();
@@ -332,22 +350,27 @@ RX.lift = (c, m) => {
 /* conquest: the match is the host's. cq: n the match number, ph 0 play 1 over, T s left, k and k0 the tickets, len the preset, p four
    numbers a point (side or -1, progress in hundredths, the weights in tenths), l the losses, r [winner or -1, why] and w s to the next
    match once it is over. A new n is a new match: the room's scores start again. welcome says cq: 1 and cqn, the match the room is in.
+   cq v 2 (N sides, the room's ns; the plan's section 4.3): p is 3 + N numbers a point [owner or -1, progress 0-100 in hundredths, the side
+   taking it or -1, then the N weights in tenths], k the N sides' tickets, l 3 N losses, r [winner or -1, why, placing: N integers, sides
+   from first to last] (the placing may be left out). Without v the message is the old one of 2 sides, 4 numbers a point
    req: a soldier asks the host for a vehicle at the depot it stands in; reqa: the host's answer to it alone, why '' for yes */
 const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
 /* friendly fire is the room's rule, the host's to set (ff 0 or 1); welcome says what it is, and a room without a host that said so has none */
 RX.ff = (c, m) => { if (!host(c) || (m.v !== 0 && m.v !== 1)) return; c.room.ff = m.v; cast(c, { t: 'ff', v: m.v }); };
+const cqv2 = (N, p) => { for (let i = 0; i < p.length; i += 3 + N) if (!int(p[i], -1, N - 1) || !int(p[i + 1], 0, 100) || !int(p[i + 2], -1, N - 1)) return false; return true; };
+const cqr = (N, r) => Array.isArray(r) && (r.length === 2 || (r.length === 3 && vec(r[2], N) && r[2].every(v => int(v, -1, N)))) && int(r[0], -1, N - 1) && int(r[1], 0, 9);
 RX.cq = (c, m) => {
-  const room = c.room;
-  if (!host(c) || !int(m.n, 0, 1e6) || (m.ph !== 0 && m.ph !== 1) || !num(m.T) || !vec(m.k, 2) || !num(m.k0) || !int(m.len, 0, 2) || !Array.isArray(m.p) || m.p.length > 64 || m.p.length % 4 || !m.p.every(v => int(v, -1000, 1000)) || !vec(m.l, 6)) return;
-  const o = { t: 'cq', n: m.n, ph: m.ph, T: m.T, k: m.k, k0: m.k0, len: m.len, p: m.p, l: m.l };
-  if (Array.isArray(m.sk) && m.sk.length === m.p.length / 4 && m.sk.every(v => int(v, -1, 999))) o.sk = m.sk;   // logistics (lg): the crates of each point, -1 none
-  if (m.ph === 1 && vec(m.r, 2) && int(m.r[0], -1, 1) && int(m.r[1], 0, 3)) { o.r = m.r; o.w = num(m.w) ? m.w : 0; }
+  const room = c.room, v2 = m.v === 2, N = v2 ? room.ns : 2, st = v2 ? 3 + N : 4;
+  if (!host(c) || (m.v !== undefined && !v2) || !int(m.n, 0, 1e6) || (m.ph !== 0 && m.ph !== 1) || !num(m.T) || !vec(m.k, N) || !num(m.k0) || !int(m.len, 0, 2) || !Array.isArray(m.p) || m.p.length > 24 * st || m.p.length % st || !m.p.every(v => int(v, -1000, 1000)) || (v2 && !cqv2(N, m.p)) || !vec(m.l, 3 * N)) return;
+  const o = Object.assign({ t: 'cq' }, v2 && { v: 2 }, { n: m.n, ph: m.ph, T: m.T, k: m.k, k0: m.k0, len: m.len, p: m.p, l: m.l });
+  if (Array.isArray(m.sk) && m.sk.length === m.p.length / st && m.sk.every(v => int(v, -1, 999))) o.sk = m.sk;   // logistics (lg): the crates of each point, -1 none
+  if (m.ph === 1 && (v2 ? cqr(N, m.r) : vec(m.r, 2) && int(m.r[0], -1, 1) && int(m.r[1], 0, 3))) { o.r = m.r; o.w = num(m.w) ? m.w : 0; }
   if (m.n !== (room.cqn || 0)) { room.cqn = m.n; room.keep = room.mines = null; room.snap = snapNew(); for (const q of room.values()) q.player.kills = q.player.deaths = q.player.ai = 0; scores(c); }
   cast(c, o);
 };
 RX.req = (c, m) => {
   const h = c.room.host, era = c.room.models, p = c.player, now = Date.now();
-  if (h === c || p.cls !== 'inf' || !model(era, m.cls, m.model) || m.cls === 'inf' || side(era, m.cls, m.model) !== side(era, p.cls, p.model) || now - (c.rt || 0) < 500) return;
+  if (h === c || p.cls !== 'inf' || !model(era, m.cls, m.model) || m.cls === 'inf' || side(c.room, m.model) !== c.side || now - (c.rt || 0) < 500) return;
   c.rt = now; send(h.ws, { t: 'req', from: p.id, cls: m.cls, model: m.model });
 };
 RX.reqa = (c, m) => {
@@ -357,7 +380,7 @@ RX.reqa = (c, m) => {
 /* radios, places where infantry enters: rad, the host's list, a row each [id, kind 0 operator 1 set down 2 vehicle, side, x, z, entries
    left, why not]; rsp: a guest entered by radio id, to the host; rbe: a guest's operator set its radio down or took it up (k 1), or its
    radio vehicle raised or lowered the mast (k 2), to the host */
-RX.rad = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 24 && m.e.every(e => vec(e, 7) && int(e[0], 1, 1e6) && int(e[1], 0, 2) && int(e[2], 0, 1) && int(e[5], -1, 99) && int(e[6], 0, 5))) cast(c, { t: 'rad', e: m.e }); };
+RX.rad = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 24 && m.e.every(e => vec(e, 7) && int(e[0], 1, 1e6) && int(e[1], 0, 2) && ts(c.room, e[2]) && int(e[5], -1, 99) && int(e[6], 0, 5))) cast(c, { t: 'rad', e: m.e }); };
 RX.rsp = (c, m) => { const h = c.room.host; if (h !== c && c.player.cls === 'inf' && int(m.id, 1, 1e6)) send(h.ws, { t: 'rsp', from: c.player.id, id: m.id }); };
 /* logistics (welcome lg: 1). lsp: a guest's entry, rearm or return took n crates (k 0 a supply base, 1 a point by index) or gave them back
    (k 2, 3), to the host; lgx: a guest at the wheel of a truck or in a transport helicopter loads by its main base (k 0) or unloads into a
@@ -375,14 +398,14 @@ RX.lgx = (c, m) => {
 };
 RX.rbe = (c, m) => { const h = c.room.host, k = c.player.cls; if (h !== c && ((m.k === 1 && k === 'inf') || (m.k === 2 && k === 'trn')) && (m.on === 0 || m.on === 1)) send(h.ws, { t: 'rbe', from: c.player.id, k: m.k, on: m.on }); };
 const two = cls => cls === 'inf' || cls === 'trn', vst = v => vec(v, 12) && bits(v[7]);
-/* capture (welcome says cap: 1): crew to trn with cap 1 names a transport of the other side, taken from it; the record carries cap while
-   the player sits in one, and its side is still its own (pside) */
+/* capture (welcome says cap: 1): crew to trn with cap 1 names a transport of another side, taken from it; the record carries cap while
+   the player sits in one, and cs, the side that took it, which is still the player's own (c.side; with 3 sides the model's side no longer says it) */
 RX.crew = (c, m) => {
-  const era = c.room.models, p = c.player, cap = m.cls === 'trn' && m.cap === 1 ? 1 : 0;
-  if (!two(p.cls) || !two(m.cls) || !model(era, m.cls, m.model) || (side(era, m.cls, m.model) ^ cap) !== pside(era, p)) return;
+  const era = c.room.models, p = c.player, cap = m.cls === 'trn' && m.cap === 1 ? 1 : 0, ms = side(c.room, m.model);
+  if (!two(p.cls) || !two(m.cls) || !model(era, m.cls, m.model) || !ts(c.room, ms) || (cap ? ms === c.side : ms !== c.side)) return;
   const o = { t: 'crew', id: p.id, cls: m.cls, model: m.model };
-  if (cap) o.cap = 1;
-  p.cap = cap;
+  if (cap) o.cap = 1, o.cs = c.side;
+  p.cap = cap; if (cap) p.cs = c.side; else delete p.cs;
   const k = c.room.get(m.by), lost = m.cls === 'inf' && vst(m.st) && (m.x === 1 || m.x === 2);
   if (m.cls === 'inf' && vst(m.st)) o.st = m.st;
   if (lost) { o.x = m.x; o.by = aid(m.by) ? m.by : k && k !== c ? m.by : null; }
@@ -410,11 +433,12 @@ RX.grant = (c, m) => {
   if (m.includes(kits[0])) throw new Error('drone kits already there');
   m.splice(m.length / 2, 0, kits[0]); m.push(kits[1]); for (const k of kits) rooms.modern.inf.add(k);
   const dk = v => Number.isInteger(v) && v >= 0 && v < 8, sl = v => v === 0 || v === 1;
+  const ops = kits.concat('insDrone');   // the Insurgents' operator too (its kit is added with their models, below)
   RX.dstate = (c, m) => {
-    if (c.player.cls !== 'inf' || !kits.includes(c.player.model) || !sl(m.i) || !dk(m.k) || !vec(m.p, 3) || !vec(m.q, 4) || !vec(m.v, 3) || !Number.isInteger(m.f)) return;
+    if (c.player.cls !== 'inf' || !ops.includes(c.player.model) || !sl(m.i) || !dk(m.k) || !vec(m.p, 3) || !vec(m.q, 4) || !vec(m.v, 3) || !Number.isInteger(m.f)) return;
     cast(c, { t: 'dstate', from: c.player.id, i: m.i, k: m.k, p: m.p, q: m.q, v: m.v, f: m.f & 15 });
   };
-  RX.dai = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => vec(e, 14) && aid(e[0]) && dk(e[1]) && (e[2] === 0 || e[2] === 1))) cast(c, { t: 'dai', e: m.e }); };
+  RX.dai = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => vec(e, 14) && aid(e[0]) && dk(e[1]) && ts(c.room, e[2]))) cast(c, { t: 'dai', e: m.e }); };
   RX.dhit = (c, m) => {
     if (!num(m.dmg) || m.dmg <= 0 || m.dmg > 1000) return;
     if (aid(m.to)) { const h = c.room.host; if (h !== c) send(h.ws, { t: 'dhit', from: c.player.id, to: m.to, dmg: m.dmg }); return; }
@@ -432,7 +456,7 @@ RX.grant = (c, m) => {
     if (!host(c) || !Array.isArray(m.e)) return;
     if (m.k === 0 && m.e.length <= 40 && m.e.every(row)) cast(c, { t: 'civ', k: 0, e: m.e });
     else if (m.k === 1 && m.e.length <= 90 && m.e.length % 3 === 0 && m.e.every((v, i) => (i % 3 ? Number.isInteger(v) && v >= 0 && v < 1e6 : aid(v)))) cast(c, { t: 'civ', k: 1, e: m.e });
-    else if (m.k === 2 && vec(m.e, 5) && m.e.every(Number.isInteger) && m.e[0] >= -1 && m.e[0] <= 1 && m.e[1] >= 0 && m.e[1] < 1000 && m.e[2] >= -1 && m.e[2] < 1000 && m.e[3] >= 0 && m.e[3] < 4 && m.e[4] >= 0 && m.e[4] < 100000) cast(c, { t: 'civ', k: 2, e: m.e });
+    else if (m.k === 2 && vec(m.e, 5) && m.e.every(Number.isInteger) && m.e[0] >= -1 && m.e[0] < c.room.ns && m.e[1] >= 0 && m.e[1] < 1000 && m.e[2] >= -1 && m.e[2] < 1000 && m.e[3] >= 0 && m.e[3] <= ALL(c.room) && m.e[4] >= 0 && m.e[4] < 100000) cast(c, { t: 'civ', k: 2, e: m.e });
   };
   RX.civhit = (c, m) => {
     const h = c.room.host;
@@ -448,19 +472,19 @@ RX.grant = (c, m) => {
 const SPEC = process.env.SPEC === undefined ? 1 : Math.max(0, +process.env.SPEC || 0), SPECMAX = 8, sendSpec = (o, m) => send(o.ws, m);
 const GENKEY = process.env.GENKEY || '', GENRX = new Set(['gclaim', 'gcmd', 'gask']);
 const BIG = { ai: MAXAI, gen: 8192, glog: MAXAI, keep: MAXAI, gres: MAXAI, ana: MAXAI };
-const sideOf = o => (o.spec ? -1 : o.gen ? o.player.side : pside(o.room.models, o.player)), sd = v => v === 0 || v === 1;
+const sideOf = o => (o.spec ? -1 : o.gen ? o.player.side : o.side);
 const ints = (l, n, k) => Array.isArray(l) && l.length <= n && l.length % k === 0 && l.every(v => Number.isInteger(v) && Math.abs(v) < 1e6);
 const txt = (v, n) => typeof v === 'string' && v.length <= n, rec = v => v === null || (typeof v === 'object' && !Array.isArray(v)), lst = (v, n) => Array.isArray(v) && v.length <= n;
 const members = room => [...room.values(), ...room.gens, ...room.specs];
 const castSide = (c, m, s, to) => { snapIn(c, m); for (const o of members(c.room)) if (o !== c && (sideOf(o) === s || o.spec) && (!to || o.player.id === to)) send(o.ws, m); };   // a spectator is sent both sides
-const gctl = room => { for (const o of members(room)) send(o.ws, { t: 'gctl', g: room.gen, k: room.genk }); };
-const genFree = (room, c) => { let ch = false; for (const s of [0, 1]) if (room.gen[s] === c.player.id) { room.gen[s] = room.genk[s] = 0; ch = true; } if (ch) gctl(room); };
+const gctl = room => { for (const o of members(room)) send(o.ws, { t: 'gctl', g: gview(room, o, room.gen), k: gview(room, o, room.genk) }); };
+const genFree = (room, c) => { let ch = false; for (let s = 0; s < room.gen.length; s++) if (room.gen[s] === c.player.id) { room.gen[s] = room.genk[s] = 0; ch = true; } if (ch) gctl(room); };
 RX.eco = (c, m) => {
-  const row = e => Array.isArray(e) && (e.length === 9 || (e.length === 10 && int(e[9], 0, 255))) && e.every(num) && int(e[0], 0, 65535) && sd(e[1]) && int(e[2], 0, 7) && e[6] >= 0 && e[6] <= 100 && int(e[8], 0, 2);
+  const row = e => Array.isArray(e) && (e.length === 9 || (e.length === 10 && int(e[9], 0, 255))) && e.every(num) && int(e[0], 0, 65535) && ts(c.room, e[1]) && int(e[2], 0, 7) && e[6] >= 0 && e[6] <= 100 && int(e[8], 0, 2);
   if (host(c) && lst(m.e, 48) && m.e.every(row)) { const o = { t: 'eco', e: m.e }; cast(c, o); for (const g of c.room.gens) send(g.ws, o); }   // the bridges too: the sites are everyone's
 };
 RX.ecs = (c, m) => {
-  if (!host(c) || !sd(m.s) || !num(m.T) || !vec(m.v, 8) || !int(m.c, 0, 2) || !ints(m.q, 60, 5) || ![m.r, m.kp, m.ms, m.ls].every(l => ints(l, 40, 2)) || !ints(m.sl, 40, 4)
+  if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !vec(m.v, 8) || !int(m.c, 0, 2) || !ints(m.q, 60, 5) || ![m.r, m.kp, m.ms, m.ls].every(l => ints(l, 40, 2)) || !ints(m.sl, 40, 4)
     || !ints(m.kn, 144, 6) || !ints(m.gd, 72, 3) || !(Array.isArray(m.sc) && (m.sc.length === 0 || vec(m.sc, 3))) || !int(m.tg, 0, 1e6)) return;
   const pl = ints(m.pp, 60, 3) && vec(m.po, 8);   // the production plan (F2), optional: [kind, field, out] each and [posture, budget, out, scale %]
   const wk = ints(m.wk, 9, 1) && m.wk.length === 9;   // the works (BMR), optional: [en, mt spent the last minute, crates, en, mt spent in all, supply bases, their cap, field works, their cap]
@@ -469,7 +493,7 @@ RX.ecs = (c, m) => {
 /* the commander's view of side s: top-level fields checked, their insides are the host's (it is trusted with the whole battle) */
 RX.gen = (c, m) => {
   const v = m.v;
-  if (!host(c) || !sd(m.s) || !num(m.T) || !v || !rec(v) || !ints(m.q, 192, 6)) return;
+  if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !v || !rec(v) || !ints(m.q, 192, 6)) return;
   const o = { doc: txt(v.doc, 24) ? v.doc : '', post: rec(v.post) && v.post && txt(v.post.k, 40) && txt(v.post.s, 240) ? { k: v.post.k, s: v.post.s } : null,
     road: lst(v.road, 8) ? v.road : null, ops: lst(v.ops, 16) ? v.ops : [], fm: lst(v.fm, 40) ? v.fm : [], sc: lst(v.sc, 8) ? v.sc : [],
     hit: rec(v.hit) ? v.hit : null, focus: rec(v.focus) ? v.focus : null, thr: rec(v.thr) ? v.thr : null, want: rec(v.want) ? v.want : null,
@@ -482,7 +506,7 @@ RX.gen = (c, m) => {
 };
 RX.glog = (c, m) => {
   const opt = v => v === null || num(v), row = r => Array.isArray(r) && r.length === 7 && num(r[0]) && typeof r[1] === 'string' && /^[a-z]{1,6}$/.test(r[1]) && txt(r[2], 240) && r.slice(3).every(opt);
-  if (!host(c) || !sd(m.s) || !num(m.T) || !lst(m.e, 80) || !m.e.every(row) || (m.to !== undefined && !pid(m.to))) return;
+  if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !lst(m.e, 80) || !m.e.every(row) || (m.to !== undefined && !pid(m.to))) return;
   castSide(c, Object.assign({ t: 'glog', s: m.s, T: m.T, e: m.e }, m.full === 1 && { full: 1 }), m.s, m.to);
 };
 RX.keep = (c, m) => { if (host(c) && m.e && rec(m.e)) c.room.keep = m.e; };
@@ -492,7 +516,7 @@ RX.gclaim = (c, m) => {
   c.gl = now;
   if (m.on && (!held || !members(room).some(o => o.player.id === held))) { room.gen[s] = id; room.genk[s] = c.gen ? 2 : 1; }
   else if (!m.on && held === id) room.gen[s] = room.genk[s] = 0;
-  else return send(c.ws, { t: 'gctl', g: room.gen, k: room.genk });   // refused: the sender is told who holds it
+  else return send(c.ws, { t: 'gctl', g: gview(room, c, room.gen), k: gview(room, c, room.genk) });   // refused: the sender is told who holds it
   gctl(room);
 };
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
@@ -540,7 +564,7 @@ RX.gres = (c, m) => {
   if (o && o !== c && int(m.n, 0, 1e9) && typeof m.ok === 'boolean' && txt(m.why, 12) && Number.isInteger(m.id)) send(o.ws, Object.assign({ t: 'gres', n: m.n, ok: m.ok, why: m.why, id: m.id }, m.r !== undefined && (rec(m.r) || Array.isArray(m.r)) && { r: m.r }));
 };
 /* sappers (welcome says sap: 1): the sapper kits, and three messages. mine: the host's list of the mines, in parts i of n of list q, a row
-   each, [id, kind (0 AT, 1 AP), side, x, z, known (bit s: side s knows it)]; each player is passed only the rows of its side's mines and of
+   each, [id, kind (0 AT, 1 AP), side, x, z, known (bit s: side s knows it, as many bits as the room has sides)]; each player is passed only the rows of its side's mines and of
    those its side knows, a spectator all of them. The server keeps the host's last whole list, and s its last mine id, and hands them to
    the next host alone, before it is named, so that no side's hidden mines are lost with the old host. mboom: the host says mine id (kind k, side s) went off at p, to the room. mreq: a soldier
    to the host, k 0 or 1 lay one at p, 2 lift id, 3 its own body or vehicle set id off; 300 ms apart at least. dint: the host says its
@@ -552,9 +576,9 @@ RX.gres = (c, m) => {
     if (m.includes(k[0])) throw new Error('sapper kits already there');
     m.splice(m.length / 2, 0, k[0]); m.push(k[1]); for (const id of k) rooms[era].inf.add(id);
   }
-  const row = e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && (e[2] === 0 || e[2] === 1) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] < 4;
+  const row = room => e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && ts(room, e[2]) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] <= ALL(room);
   RX.mine = (c, m) => {
-    if (!host(c) || !Number.isInteger(m.q) || m.q < 0 || m.q >= 1e6 || !Number.isInteger(m.i) || !Number.isInteger(m.n) || m.i < 0 || m.i >= m.n || m.n > 4 || !Array.isArray(m.e) || m.e.length > 40 || !m.e.every(row)) return;
+    if (!host(c) || !Number.isInteger(m.q) || m.q < 0 || m.q >= 1e6 || !Number.isInteger(m.i) || !Number.isInteger(m.n) || m.i < 0 || m.i >= m.n || m.n > 4 || !Array.isArray(m.e) || m.e.length > 40 || !m.e.every(row(c.room))) return;
     const r = c.room, b = m.i && r.mbuf && r.mbuf.q === m.q ? r.mbuf : (r.mbuf = { q: m.q, n: m.n, s: 0, e: [] });
     b.e.push(...m.e); if (Number.isInteger(m.s) && m.s >= 0 && m.s < 65536) b.s = m.s;
     if (m.i === m.n - 1) { r.mines = b; r.mbuf = null; }
@@ -565,12 +589,46 @@ RX.gres = (c, m) => {
     }
   };
   RX.dint = (c, m) => { if (host(c) && Number.isInteger(m.f) && m.f >= 0 && m.f < 65536 && Number.isInteger(m.k) && m.k >= 0 && m.k < 4294967296 && (m.s === 0 || m.s === 1)) cast(c, { t: 'dint', f: m.f, k: m.k, s: m.s }); };
-  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1) && (m.s === 0 || m.s === 1) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
+  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1) && ts(c.room, m.s) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
   RX.mreq = (c, m) => {
     const h = c.room.host, now = Date.now(), lay = (m.k === 0 || m.k === 1) && vec(m.p, 2), id = (m.k === 2 || m.k === 3) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536;
     if (!h || h === c || (c.player.cls !== 'inf' && !(m.k === 3 && id)) || !(lay || id) || now - (c.mrq || 0) < 300) return;
     c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : { id: m.id }));
   };
+}
+/* the side of every model a player or an AI row may have (MSIDE), era by era, in place of the half of each list: 0 the Blue force (in modern
+   the USA), 1 the Red (Russia), 2 the Insurgents (modern only, FACTIONS.modern.insurgentes on the page). The Insurgents' models join MODELS
+   here, at the end of their lists, so that no older index moves; they field only in a room of 3 sides (join refuses one in a room of 2) */
+const MSIDE = {
+  ww2: [
+    ['stuka', 'bf109', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
+    ['spit', 'p47', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
+  modern: [
+    ['f22', 'a10', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
+      'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60'],
+    ['su57', 'su25', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
+      'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
+    ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
+      'tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
+{
+  const m = MODELS.modern, R = rooms.modern, add = (cls, ids) => { for (const id of ids) { if (m[cls].includes(id)) throw new Error('insurgent model already there: ' + id); m[cls].push(id); } };
+  add('tank', ['t55', 't62']); add('art', ['tec107']);
+  add('inf', ['insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber']);
+  add('trn', ['tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']);
+  for (const id of [...m.tank, ...m.art, ...m.trn]) R.gnd.add(id);
+  for (const id of m.inf) R.inf.add(id);
+  for (const era in MSIDE) {
+    const o = rooms[era].ms = Object.create(null);
+    MSIDE[era].forEach((l, s) => { for (const id of l) { if (id in o) throw new Error('MSIDE: ' + id + ' on two sides'); o[id] = s; } });
+    for (const cls in MODELS[era]) for (const id of MODELS[era][cls]) if (!(id in o)) throw new Error('MSIDE: no side for ' + era + ' ' + id);   // a model added without its side
+  }
+}
+/* the room's sides, said by its first player: the general's seats past them are free again, and a bridge of such a side is told and let go */
+function setNs(room, ns) {
+  if (room.ns === ns) return;
+  room.ns = ns;
+  for (let s = ns; s < room.gen.length; s++) room.gen[s] = room.genk[s] = 0;
+  for (const g of [...room.gens]) if (g.player.side >= ns) { send(g.ws, { t: 'error', code: 'sides' }); room.gens.delete(g); g.ws.close(); }
 }
 /* day, night and weather (welcome says sky: 1). sky: the host's light clock and weather, to the room: h the hour now (0 to 24), rt s of day a
    second, p and w the presets' indices, r rain and f low fog (0 to 1), wx wz the wind m/s. ill: a light anyone put up, k 0 a hand flare 1 an
@@ -589,7 +647,7 @@ RX.ill = (c, m) => {
    from p [x, z] for q [x, z], to the host, 1 s apart at least; hacc: a guest answers call id, to the host */
 {
   const hrow = r => Array.isArray(r) && r.length === 6 && int(r[0], 1, 1e9) && int(r[1], 0, 6) && num(r[2]) && num(r[3]) && int(r[4], 0, 2) && int(r[5], 0, 1e9);
-  RX.hlp = (c, m) => { if (host(c) && (m.s === 0 || m.s === 1) && lst(m.e, 24) && m.e.every(hrow)) castSide(c, { t: 'hlp', s: m.s, e: m.e }, m.s); };
+  RX.hlp = (c, m) => { if (host(c) && ts(c.room, m.s) && lst(m.e, 24) && m.e.every(hrow)) castSide(c, { t: 'hlp', s: m.s, e: m.e }, m.s); };
   RX.hask = (c, m) => {
     const h = c.room.host, now = Date.now();
     if (!h || h === c || c.spec || !int(m.k, 0, 6) || !vec(m.p, 2) || !vec(m.q, 2) || now - (c.hkt || 0) < 1000) return;
@@ -604,9 +662,10 @@ function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) |
    host, nothing simulates) and the copy is kept SUSPEND s (default 900; 0 ends the match as before). A player who joins the empty room
    in that time, with the same map and without fresh: 1 ("Nova partida"), is welcomed with host 0 and sus 1, is sent the copy as a guest
    is sent the host's word (snapOut), then keep, the mines and host: the page adopts it, as when a host leaves. A new match (another cq n) or a
-   dropped copy starts it again. GET /partidas says, by era, what is suspended: { s: s left to resume, T: s on the match clock, n } or null */
+   dropped copy starts it again (and so does a page of another count of sides, P.ns). GET /partidas says, by era, what is suspended: { s: s left to resume, T: s on the match clock, n, ph, ns } or null */
 const SUSPEND = process.env.SUSPEND === undefined ? 900 : Math.max(0, +process.env.SUSPEND || 0), SNAPMEN = 4096, SNAPBLD = 1 << 18;
-function snapNew() { return { ai: [null, null], men: new Map(), menT: 0, menP: 0, cq: null, obj: new Map(), be: new Map(), bf: new Set(), bs: new Map(), bm: null, base: null, fort: [], fn: 0, eco: null, ecs: [null, null], gen: [null, null], glog: [[], []], gT: [0, 0], rad: null, mv: 0 }; }
+/* ai: by kind of row (air, ground), not by side; ecs, gen, glog and gT: by side, for the most sides of any room (3) */
+function snapNew() { return { ai: [null, null], men: new Map(), menT: 0, menP: 0, cq: null, obj: new Map(), be: new Map(), bf: new Set(), bs: new Map(), bm: null, base: null, fort: [], fn: 0, eco: null, ecs: [null, null, null], gen: [null, null, null], glog: [[], [], []], gT: [0, 0, 0], rad: null, mv: 0, ns: 2 }; }
 for (const era in rooms) Object.assign(rooms[era], { snap: snapNew(), sus: 0, sut: null });
 function snapIn(c, m) {
   if (!c.room || !c.room.snap || c.room.host !== c) return;
@@ -660,7 +719,7 @@ function snapOut(c) {
 function suspend(room) {
   const P = room.snap;
   if (!SUSPEND || !(P.cq || P.ai[0] || P.ai[1] || P.men.size || room.keep || room.mines)) return snapDrop(room);
-  P.mv = room.mv; room.sus = Date.now() + SUSPEND * 1000; clearTimeout(room.sut);
+  P.mv = room.mv; P.ns = room.ns; room.sus = Date.now() + SUSPEND * 1000; clearTimeout(room.sut);
   room.sut = setTimeout(() => { if (!room.size) snapDrop(room); }, SUSPEND * 1000); if (room.sut.unref) room.sut.unref();
 }
 /* the match is over for good: whoever comes next starts a new one, under a new number */
@@ -671,7 +730,7 @@ function snapDrop(room) {
 }
 const partidas = () => {
   const o = {}, now = Date.now();
-  for (const era in rooms) { const r = rooms[era], q = r.snap.cq; o[era] = r.sus > now && !r.size ? { s: Math.ceil((r.sus - now) / 1000), T: q ? q.T : 0, n: r.cqn || 0, ph: q ? q.ph : 0 } : null; }
+  for (const era in rooms) { const r = rooms[era], q = r.snap.cq; o[era] = r.sus > now && !r.size ? { s: Math.ceil((r.sus - now) / 1000), T: q ? q.T : 0, n: r.cqn || 0, ph: q ? q.ph : 0, ns: r.snap.ns || 2 } : null; }
   return o;
 };
 /* analytics (welcome ana: 1): the page that simulates a match (the host online; a solo or watch page by POST /ana) sends its events in

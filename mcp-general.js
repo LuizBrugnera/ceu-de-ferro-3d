@@ -14,7 +14,7 @@
    Environment:
      CEU_URL   relay address, default ws://localhost:8080 (the path is not used)
      CEU_ROOM  the room = the era, as the page names it: modern (default) or ww2
-     CEU_SIDE  0 or 1, the side to command (default 0)
+     CEU_SIDE  0, 1 or 2, the side to command (default 0). modern: 0 the USA, 1 Russia, 2 the Insurgents (2 only in a room of 3 sides); ww2: 0 Germany, 1 the Allies
      CEU_KEY   the relay's GENKEY (required)
      CEU_NAME  a name for the log lines this process writes (default Claude)
      CEU_SEAT  set to 0 to NOT claim the seat on connect (the model then calls the `seat` tool)
@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.1.0';   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.2.0';   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -48,10 +48,14 @@ const now = () => Date.now(), sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------------------------------------------------------------- relay link */
 const R = {
-  ws: null, up: false, fatal: '', id: 0, w: null, host: 0, gn: [0, 0], gk: [0, 0], wantSeat: AUTOSEAT, tries: 0,
+  ws: null, up: false, fatal: '', id: 0, w: null, host: 0, gn: [0, 0, 0], gk: [0, 0, 0], wantSeat: AUTOSEAT, tries: 0,
   gen: null, ecs: null, ecoAsked: 0, eco: null, pic: null, T: 0, Tat: 0, ev: [], evSeq: 0, picBusy: false, glog: [], logAt: 0, n: 0, pend: new Map(), lastCmd: 0, lastAsk: 0, lastClaim: 0, chain: Promise.resolve(), gctlWait: [],
 };
-if (SIDE !== 0 && SIDE !== 1) { log('CEU_SIDE must be 0 or 1'); R.fatal = 'CEU_SIDE must be 0 or 1'; }
+/* the factions by side, and the room's sides (welcome ns; a relay that does not say has 2) */
+const FACS = { modern: ['USA', 'Russia', 'Insurgents'], ww2: ['Germany', 'the Allies'] }, FAC = FACS[ROOM] || FACS.modern;
+const NS = () => (SIDE === 2 || (R.w && R.w.ns === 3) ? 3 : 2), facName = s => FAC[s] || 'side ' + s;
+const foesOf = () => [...Array(NS()).keys()].filter(s => s !== SIDE);
+if (!Number.isInteger(SIDE) || SIDE < 0 || SIDE >= FAC.length) { const e = 'CEU_SIDE must be ' + (FAC.length === 3 ? '0, 1 or 2' : '0 or 1') + ' in room ' + ROOM; log(e); R.fatal = e; }
 if (!KEY) { log('CEU_KEY is not set: the relay will refuse this bridge'); }
 
 function connect() {
@@ -76,13 +80,13 @@ function connect() {
 function onRelay(m) {
   switch (m.t) {
     case 'welcome':
-      R.w = m; R.id = m.id; R.host = m.host || 0; R.gn = m.gn || [0, 0]; R.gk = m.gk || [0, 0]; R.up = true; R.tries = 0;
+      R.w = m; R.id = m.id; R.host = m.host || 0; R.gn = m.gn || [0, 0, 0]; R.gk = m.gk || [0, 0, 0]; R.up = true; R.tries = 0;
       R.gen = null; R.ecs = null; R.eco = null; R.pic = null; R.glog = [];   // a fresh stream follows a join
-      log('joined room ' + ROOM + ' side ' + SIDE + ' as player ' + R.id + ' (eco ' + (m.eco ? 1 : 0) + ', gen ' + (m.gen ? 1 : 0) + ')');
+      log('joined room ' + ROOM + ' (' + NS() + ' sides) side ' + SIDE + ' (' + facName(SIDE) + ') as player ' + R.id + ' (eco ' + (m.eco ? 1 : 0) + ', gen ' + (m.gen ? 1 : 0) + ')');
       if (m.eco && m.gen && R.wantSeat) R.claimP = claim(1).catch(() => {});   // ready() waits for its gctl, so the first tool call sees the seat
       break;
     case 'error': {
-      const why = { gen: 'the relay refused the key (CEU_KEY must equal the relay\'s GENKEY, and the relay needs GENKEY set)', room: 'unknown room ' + ROOM, taken: 'another bridge already holds side ' + SIDE + ' (or CEU_SIDE is invalid)' }[m.code] || ('relay error ' + m.code);
+      const why = { gen: 'the relay refused the key (CEU_KEY must equal the relay\'s GENKEY, and the relay needs GENKEY set)', room: 'unknown room ' + ROOM, taken: 'another bridge already holds side ' + SIDE + ' (or CEU_SIDE is invalid)', sides: 'the match in room ' + ROOM + ' has fewer sides than side ' + SIDE + ' needs (side 2 needs a room of 3 sides); retrying' }[m.code] || ('relay error ' + m.code);
       log(why);
       if (m.code === 'gen' || m.code === 'room') { R.fatal = why; try { R.ws.close(); } catch (e) { /* closing */ } }
       else R.lastErr = why;
@@ -328,7 +332,8 @@ function onOps(a, b) {
   for (const [id, o] of is) if (id !== undefined && !was.has(id) && a) event('op_started', 'operation ' + id + ' (' + (o.k || '?') + (o.nm ? ' ' + o.nm : '') + ') started');
   for (const [id, o] of was) if (id !== undefined && !is.has(id)) event('op_ended', 'operation ' + id + ' (' + (o.k || '?') + (o.nm ? ' ' + o.nm : '') + ') ended');
 }
-const holder = h => (h === -1 ? 'contested' : h === SIDE ? 'ours' : 'enemy');
+/* who holds a point or a base: ours, contested, or with 3 sides the enemy faction by name (the two enemies are not allies) */
+const holder = h => (h === -1 || h === undefined ? 'contested' : h === SIDE ? 'ours' : NS() === 3 ? facName(h) : 'enemy');
 function onPic(prev, d) {   // a point that changed hands since the last picture
   if (!prev || !Array.isArray(prev.pts) || !Array.isArray(d.pts)) return;
   for (const p of d.pts) { const o = prev.pts[p.i]; if (o && o.hold !== p.hold) event('point', p.L + ' ' + p.name + ' (point ' + p.i + '): ' + holder(o.hold) + ' -> ' + holder(p.hold), d.T); }
@@ -359,7 +364,7 @@ function stateView(logN) {
   const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, name: p.nm, rank: RANKS[p.rank], job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null, radio: LINK[p.link], orderArrivesInS: p.eta }; })
     : ((pd && pd.sq) || []).map(p => ({ id: p.id, name: p.nm, rank: RANKS[p.rank], job: p.job, at: pos(p.x, p.z), men: p.n }));
   const out = {
-    link: { connected: R.up, room: ROOM, side: SIDE, playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
+    link: { connected: R.up, room: ROOM, side: SIDE, faction: facName(SIDE), sides: NS(), enemies: foesOf().map(facName), playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
     matchClockT: R.T, clockAgeSeconds: age(R.Tat),
     economy: e ? {
       ageSeconds: age(R.ecs.at), controller: ['ai', 'me', 'mcp'][e.c],
@@ -382,8 +387,9 @@ function stateView(logN) {
   };
   if (pd) out.map = {
     ageSeconds: age(R.pic.at),
-    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? (p.base === SIDE ? 'ours' : 'enemy') : undefined })),
-    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
+    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? holder(p.base) : undefined })),
+    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: NS() === 3 && Array.isArray(pd.tk) ? Object.fromEntries(pd.tk.map((n, s) => [s === SIDE ? 'ours (' + facName(s) + ')' : facName(s), n])) : pd.tk,
+    ticketsNote: NS() === 3 ? 'by faction; a side with no tickets or without its main base is out, and the match goes on until one is left' : 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
     commandNet: pd.cn || undefined,
     personality: pd.per || undefined, difficulty: pd.dif || undefined, enemyHabits: pd.hab && pd.hab.length ? pd.hab : undefined,   // W17: the side's AI general, and the roads the enemy is seen to use again and again
@@ -660,7 +666,7 @@ const TOOLS = [
   { name: 'ask_view', description: 'Ask the host for the complete fog-limited view of your side right now: economy (stock, caps, sites with output and guards, deposits, queue, costs per unit kind with names), commander fields and the last 20 log lines. Bigger and slower than get_state (one question per second); use it for the cost table by unit and site kind, the resource deposits (dep: position, rich, own) and the production slots.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'view' }) },
-  { name: 'get_match_report', description: 'The after-action review of a match. match "current" (default) asks the host about the match on: while it runs, your side only (tickets and where they went, losses by kind, cost-effectiveness, the decisions that weighed most with how much they moved the margin, a ticket curve); once it is over, both sides. match "list" lists the matches the server keeps (newest first, kept 90 days; played and AI x AI tournaments); match "<era>/<name>" from that list returns that match\'s review. One host question a second, like the other asks.',
+  { name: 'get_match_report', description: 'The after-action review of a match. match "current" (default) asks the host about the match on: while it runs, your side only (tickets and where they went, losses by kind, cost-effectiveness, the decisions that weighed most with how much they moved the margin, a ticket curve); once it is over, every side. match "list" lists the matches the server keeps (newest first, kept 90 days; played and AI x AI tournaments); match "<era>/<name>" from that list returns that match\'s review. One host question a second, like the other asks.',
     inputSchema: { type: 'object', properties: { match: { type: 'string', description: 'current (default), list, or era/name from the list' } }, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: matchReport },
   { name: 'seat', description: 'Claim or release the general\'s seat of your side, or just report who holds it. Commands are refused unless this bridge holds the seat; one general per side (a human or this bridge), first come first served. A claim also takes over the domains you list (default ["eco"]: the economy; the attack is yours with the seat; defence and support stay with the AI unless you list "def" and "sup", and the AI then no longer decides there). Release hands every domain back to the AI at once.',
@@ -679,7 +685,14 @@ const TOOL = new Map(TOOLS.map(t => [t.name, t]));
 const listing = () => TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, ...(t.annotations ? { annotations: t.annotations } : {}) }));
 
 /* ---------------------------------------------------------------- MCP over stdio */
-const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. The same tools a person has on the general\'s view: campaigns (create_campaign, attach_operation), the threat board (get_threats, triage_threat, send_qrf, set_defence_policy), deposits and mines (claim_deposit, lay_minefield, clear_mines, sabotage), and a squad\'s card (get_missions, get_unit: what it sees and what it decides). The manoeuvre tools: get_tactical_map (a layer of what your side knows: enemy sight, traffic, choke points), plan_approaches (three ways to an objective with time and exposure), order_maneuver (fix and flank by an approach, envelop, turn, penetrate), plan_ambush (on any road) and guard_route (a junction or bridge on your flank). You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+const INSTRUCTIONS_ = 'You are the general of side ' + SIDE + ' (' + facName(SIDE) + ') in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. The same tools a person has on the general\'s view: campaigns (create_campaign, attach_operation), the threat board (get_threats, triage_threat, send_qrf, set_defence_policy), deposits and mines (claim_deposit, lay_minefield, clear_mines, sabotage), and a squad\'s card (get_missions, get_unit: what it sees and what it decides). The manoeuvre tools: get_tactical_map (a layer of what your side knows: enemy sight, traffic, choke points), plan_approaches (three ways to an objective with time and exposure), order_maneuver (fix and flank by an approach, envelop, turn, penetrate), plan_ambush (on any road) and guard_route (a junction or bridge on your flank). You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+/* the instructions name the faction and, with 3 sides, both enemies; before the welcome the count is unknown in modern, so they say both cases */
+const INSTRUCTIONS = () => {
+  const three = SIDE === 2 || NS() === 3, sure = SIDE === 2 || !!R.w, foes = [0, 1, 2].filter(s => s !== SIDE).map(facName);
+  if (ROOM !== 'modern') return INSTRUCTIONS_;
+  if (three && sure) return INSTRUCTIONS_ + ' This match has three sides (0 USA, 1 Russia, 2 Insurgents), all against all: your enemies are ' + foes.join(' and ') + ', and they also fight each other. Points, bases and tickets name the faction that holds them; a side with no tickets or without its main base is out, and the match goes on until one side is left. Pick which enemy to press by value and local chance, and do not let the leader in tickets run away.';
+  return INSTRUCTIONS_ + ' The modern front may have three sides (0 USA, 1 Russia, 2 Insurgents, all against all): get_state link.sides and link.enemies say which; with three, your two enemies also fight each other.';
+};
 const out = o => process.stdout.write(JSON.stringify(o) + '\n');
 const ok = (id, result) => out({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message, data) => out({ jsonrpc: '2.0', id, error: Object.assign({ code, message }, data !== undefined ? { data } : {}) });
@@ -698,11 +711,11 @@ async function handle(msg) {
       case 'initialize': {
         const want = params.protocolVersion;
         legacyVersion = LEGACY.includes(want) ? want : LEGACY[0];
-        return ok(id, { protocolVersion: legacyVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'ceu-general', version: VERSION }, instructions: INSTRUCTIONS });
+        return ok(id, { protocolVersion: legacyVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'ceu-general', version: VERSION }, instructions: INSTRUCTIONS() });
       }
       case 'ping': return ok(id, {});
       case 'server/discover':
-        return ok(id, { resultType: 'complete', supportedVersions: MODERN.concat(LEGACY), capabilities: { tools: { listChanged: false } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'ceu-general', version: VERSION } }, instructions: INSTRUCTIONS });
+        return ok(id, { resultType: 'complete', supportedVersions: MODERN.concat(LEGACY), capabilities: { tools: { listChanged: false } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'ceu-general', version: VERSION } }, instructions: INSTRUCTIONS() });
       case 'tools/list': return ok(id, Object.assign({ tools: listing() }, extra));
       case 'tools/call': {
         const t = typeof params.name === 'string' && TOOL.get(params.name);

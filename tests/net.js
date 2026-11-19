@@ -6,7 +6,10 @@ const SERVER = process.env.SERVER ? path.resolve(process.env.SERVER) : path.join
 let child = null;
 function start() {
   return new Promise((res, rej) => {
-    child = spawn(process.execPath, [SERVER], { env: Object.assign({ HOST: '127.0.0.1' }, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
+    /* BEAT: a page's first newState holds this one process for seconds (tens on a loaded machine), longer than the relay's 10 s heartbeat, which
+       then drops every page already in the room (1006) and empties it before the test begins; the test server's heartbeat is 2 min (an old
+       server.js ignores it) */
+    child = spawn(process.execPath, [SERVER], { env: Object.assign({ HOST: '127.0.0.1', BEAT: '120000' }, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
     child.stdout.on('data', d => { if (String(d).includes('no ar')) res(); }); child.on('error', rej); setTimeout(() => rej(new Error('server did not start')), 5000);
   });
 }

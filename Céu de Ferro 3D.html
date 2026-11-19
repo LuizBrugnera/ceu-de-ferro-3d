@@ -2108,7 +2108,7 @@ function director(dt) {
    - Dispatch (gpStep, every GP.dt s): a mission is open while a kind has fewer in the field than the plan and the budget has room; what the reserve
      has ready for it goes at once (an event, not a clock). Aircraft one each GP.air s; ground vehicles and the squads they carry leave as a column:
      the first ready waits up to GP.form s for others (forming up), a side's columns GP.gap s apart (the road ahead clears). The base's AA at once.
-   - the population budget (popOf): GP.pop a side, less GP.hum for each human on it (up to 3), times S.popK. Online the host's AI frame budget (AIB)
+   - the population budget (popOf): GP.pop a side, less GP.hum for each human on it (up to 3), times S.popK. The host's AI frame budget (AIB; a solo game is its own host)
      moves S.popK: down by meter.dn while over budget, back up by meter.up while well under (avg under low of it), every meter.every s, never under
      meter.min. popUse: what the side's AI has out (soldiers, cargo aboard included; ground vehicles but the fixed AA; aircraft and helicopters).
    - the safety floor: a side with no squad in its reserve, no unit order under way and fewer than floor.men soldiers out for floor.t s gets a squad from
@@ -2183,7 +2183,7 @@ function gpView(t) {
 }
 /* the host's AI over its frame budget shrinks every side's budget; well under it, grows it back */
 function gpMeter() {
-  if (!(S.net && S.host) || S.t < (S.popT || 0)) return;
+  if ((S.net && !S.host) || S.t < (S.popT || 0)) return;
   S.popT = S.t + GP.meter.every;
   const st = AIB.stat(), M = GP.meter, k = S.popK || 1; if (st.n < 60) return;
   const k2 = !st.ok ? Math.max(M.min, k - M.dn) : st.avg < AIB.avg * M.low && st.worst <= AIB.worst ? Math.min(1, k + M.up) : k;
@@ -5092,7 +5092,7 @@ function startSite(t, x, z, a) {
 }
 /* it is destroyed: the ammunition in it goes up, on every client for what is its own */
 function supDown(b, by, quiet) {
-  if (b.prog >= 1 && !b.dead && cqSim() && !S.cq.ph) S.cq.tk[b.team] -= CQ.sup;   // a finished base lost costs its side's morale (D25 A)
+  if (b.prog >= 1 && !b.dead && cqSim() && ecoSim() && !S.cq.ph) S.cq.tk[b.team] -= CQ.sup;   // a finished base lost costs its side's morale (D25 A)
   b.dead = true; b.deadT = S.t; dropObj(b.o); S.fld[b.team].bT = S.t + BLD.ai.again; S.fld[b.team].bk = Math.min(450, (S.fld[b.team].bk || 0) + 150);
   if (quiet) return;
   explode(b.x, b.y + 1.5, b.z, BLD.boom[0], BLD.boom[1] * (b.prog < 1 ? .3 : 1), by, -1, false, 0);
@@ -8803,7 +8803,7 @@ function fortStep(dt) {
   const sim = !S.net || S.host, T = S.T;
   while (S.flog < S.olog.length) { const id = S.olog[S.flog++], o = T.byId[id]; if (o && o.k === 'tree' && id >= 30300 && S.os[id] > 1) S.wcut[nodeAt(T, o.x, o.z)]++; }
   for (const f of S.forts) {
-    if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
+    if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && ecoSim() && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
     if (!sim || f.prog >= 1) continue;
     let n = 0; for (const m of S.men) if (builds(m, f)) n++;
     f.n = n = Math.min(n, BLD.max);
@@ -11624,7 +11624,7 @@ const cueOf = t => (S.net && !S.host ? S.cue && S.cue[t] : S.cmd && S.cmd[t] && 
    len: the presets, [name, minutes on the clock, tickets a side, times era for the larger map]. cost: tickets a loss costs, by kind (tk: a radio vehicle is rad, not the car it is built as),
    times lk where the economy runs. Tickets are morale (D25 A): a lost unit is paid for by the economy that made it, so lk is 0 and a loss costs none
    (1: the old rule, which also holds with no economy);
-   what moves them is the bleed, the points, a site, a finished supply base or a dome lost (ECO.site[k].tk, sup, dome). bleed: tickets a minute the side
+   what moves them is the bleed, the points, and where the economy runs a site, a finished supply base or a dome lost (ECO.site[k].tk, sup, dome). bleed: tickets a minute the side
    with fewer points loses, by the margin. low: the share of its tickets under which a side's players wait longer to come back, wait
    [s always, s more at none]. cd: s before the player may have again what was lost, by kind, times k of the preset; ai: s before the
    director replaces a loss of that kind. next: online, s from the result to the next match. safe, spawn: a held point is a place to
@@ -17638,7 +17638,7 @@ function buildHangar() {
   $('#classes').hidden = coarse; $('#ctrls').hidden = coarse || !air; $('#netBox').hidden = !pvp; $('#btnLaunch').textContent = pvp ? 'Entrar na sala' : GO[k] || 'Avançar';
   fleet({ tabs: $('#classes'), box: $('#planes'), cls: k, model: id, pre: 'plane-', pick(c, m) { if (m) { if (c === k && m === id) return; sel[era][c] = m; } else { if (c === cls) return; cls = c; netStatus(''); } Net.close(); buildHangar(); }, again: buildHangar });
   const o = { pvp, aim: mouseAim(), side: ERAS[era].sides[d.side].name, k, id,
-    swap: ['H', 'Trocar de avião, ' + (fleetIds('heli').length ? 'helicóptero, ' : '') + 'tanque, antiaérea, artilharia, transporte ou soldado sem sair da partida, entre os do seu lado. ' + (pvp ? 'Abandonar um veículo inteiro conta como uma queda, e a batalha não para enquanto você escolhe' : 'Abandonar um veículo inteiro conta como uma perda') + '. O que foi perdido só volta depois da sua contagem: um soldado em ' + CQ.cd.inf + ' s, um tanque em ' + CQ.cd.tank + ' s, um avião de ataque em ' + CQ.cd.cas + ' s'],
+    swap: ['H', 'Trocar de avião, ' + (fleetIds('heli').length ? 'helicóptero, ' : '') + 'tanque, antiaérea, artilharia, transporte ou soldado sem sair da partida, entre os do seu lado. ' + (pvp ? 'Abandonar um veículo inteiro conta como uma queda, e a batalha não para enquanto você escolhe' : (ECO.on ? 'Abandonar um veículo inteiro conta como uma perda' : 'Abandonar um veículo inteiro custa os tíquetes de uma perda')) + '. O que foi perdido só volta depois da sua contagem: um soldado em ' + CQ.cd.inf + ' s, um tanque em ' + CQ.cd.tank + ' s, um avião de ataque em ' + CQ.cd.cas + ' s'],
     rad: k === 'inf' ? ['O', 'Pousar o rádio onde você está, ou recolher a menos de 4 m dele. Com ele nas costas você mesmo é o ponto de entrada da infantaria do seu lado; pousado, ele continua valendo enquanto você estiver a menos de ' + RAD.range + ' m e nenhum inimigo chegar a ' + RAD.near + ' m dele'] : ['O', 'Parado: levantar a antena (' + RAD.deploy + ' s) e virar ponto de entrada da infantaria, com ' + RAD.cap[2] + ' entradas e reabastecimento para quem está ao lado. Com a antena no alto o veículo não anda; O de novo recolhe'],
     req: ['U', 'A pé dentro de um depósito (a base principal, uma base de suprimento pronta ou um ponto seu com base de suprimento): requisitar um veículo ali mesmo. Custa tíquetes, menos do que perdê-lo, tem estoque por depósito e um intervalo de ' + RQ.cool + ' s; aeronaves só na base principal'],
     esc: ['Esc', 'Soltar o mouse' + (pvp ? '' : ' e pausar') + '. Clique no jogo para voltar'],
@@ -17646,7 +17646,7 @@ function buildHangar() {
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
   for (const [key, v] of (LEGEND[k] || LEGEND.plane)(d, o).concat(d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], skyKeys(), helpKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
-  $('#briefing').textContent = text.slice(0, cut); $('#mission').textContent = text.slice(cut).trim() + ' ' + CQBRIEF(pvp);
+  $('#briefing').textContent = text.slice(0, cut); $('#mission').textContent = text.slice(cut).trim() + ' ' + CQBRIEF(pvp, ECO.on);
   $('#btnInv').textContent = (k === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa'); ffChip();
   for (const b of document.querySelectorAll('#ctrls .tab')) b.lastChild.textContent = CTRLTXT[k === 'heli' ? 1 : 0][b.dataset.ctrl === 'mouse' ? 1 : 0];
   susFill(); if (!(Date.now() - (Net.susAt || 0) < 2000)) susPoll();
@@ -17797,7 +17797,7 @@ function swapNote() {
   if (!P.dead && P.def.lo && (sw.cls === 'plane' || sw.cls === 'heli') && sw.sel[sw.cls] === S.model && !LO.off(P.id) && LO.key(LO.mine(P.id)) !== LO.key(P.def.lo)) return 'Carga nova escolhida para ' + P.def.name + ': ela entra quando você rearmar, ' + (P.heli ? 'pousado e parado ao lado da sua base' : 'baixo sobre a sua pista') + '. Não é preciso trocar de aeronave.';
   if (cd > 0) return DEFS[k][id].name + ' foi perdido há pouco e volta em ' + Math.ceil(cd) + ' s. ' + (P.dead ? 'Confirme para esperar por ele, ou entre agora com outro.' : 'Escolha outro.') + wait;
   if (P.dead) return (S.hold ? 'A volta espera a sua escolha. ' : 'Sem mexer aqui, você volta em ' + Math.max(1, Math.ceil(Math.max(S.respawn, cdLeft(S.cls, S.model)))) + ' s com ' + DEFS[S.cls][S.model].name + '. ') + 'Escolha outro da ' + S.E.sides[S.fac[S.me]].name + ' e confirme.' + wait;
-  return (S.net ? 'A batalha continua e você está exposto. ' : 'Jogo pausado. ') + 'Trocar abandona ' + it + ': conta como uma perda' + (S.net ? ', conta como uma queda, e o abate vai para quem acertou você nos últimos ' + DMG.credit + ' s.' : ', e o que foi abandonado entra em contagem.') + wait;
+  return (S.net ? 'A batalha continua e você está exposto. ' : 'Jogo pausado. ') + 'Trocar abandona ' + it + (S.eco ? ': conta como uma perda' : ': custa os tíquetes de uma perda') + (S.net ? ', conta como uma queda, e o abate vai para quem acertou você nos últimos ' + DMG.credit + ' s.' : ', e o que foi abandonado entra em contagem.') + wait;
 }
 function drawSwap() {
   const P = S.my, side = S.fac[S.me], dep = sw.rq && P.man && !P.dead ? rqDepot(P) : null, cs = fleetCls(side).filter(c => swapIds(c).length && !(sw.rq && (c === 'inf' || ((c === 'plane' || c === 'heli') && !(dep && dep.k === 1))))), why = swapWhy(), note = $('#swapNote');
@@ -17966,7 +17966,7 @@ function aarShow(R, sub) {
   b.append(aarChart(R));
   const tk = [0, 1].filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.other), Math.round(x.end)], { cls: s ? 'e' : 'f' }); });
   b.append(aarTable(tk, ['Lado', 'Início', 'Perdas', 'Sangria', 'Pontos', 'Outros', 'Fim']));
-  b.append(aarEl('p', 'aar-note', 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: instalações, bases de suprimento, requisições e o resto.'));
+  b.append(aarEl('p', 'aar-note', R.eco ? 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: instalações, bases de suprimento, requisições e o resto.' : 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: requisições, instalações e o resto.'));
   b.append(aarEl('h3', '', 'Decisões que mais pesaram'));
   if (!R.dec.length) b.append(aarEl('p', 'aar-note', 'Nenhuma decisão do general registrada.'));
   else { const ol = aarEl('ol', 'aar-dec'); for (const d of R.dec) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s) + ' · ' + (AARD[d.c] || d.c) + ' · ' + (d.swing > 0 ? '+' : '') + Math.round(d.swing))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); } b.append(ol);
@@ -18095,7 +18095,7 @@ function openReq() {
 }
 Net.ui.req = why => { if (!sw.on || !sw.rq) { if (why) S.banner = { text: 'Requisição recusada', sub: RQ.why[why], life: 3 }; return; } if (why) { sw.msg = RQ.why[why]; drawSwap(); } else closeSwap(); };
 Net.ui.rematch = () => { if (playMode === 'play' && S && S.net) launch(true); };
-const CQBRIEF = pvp => 'A partida é de conquista: ' + 'os dois lados disputam uma cadeia de pontos entre as bases. Fica com o ponto quem tem mais gente dentro dele (soldados a pé contam mais, veículos de solo contam, aeronaves não capturam), e só se toma um ponto ligado a outro que já é seu. Os tíquetes são o moral do lado: perder unidades não os gasta, mas ter menos pontos faz os tíquetes escorrerem, e perder pontos, instalações e bases de suprimento custa tíquetes, e perde quem ficar sem tíquetes, quem perder a base principal ou quem tiver menos pontos quando o relógio de ' + CQ.len[matchLen][1] + ' min acabar. Pontos seus sem disputa também são lugar de entrada para as classes de solo' + (pvp ? '. Ao fim, a sala começa outra partida sozinha.' : '.');
+const CQBRIEF = (pvp, eco) => 'A partida é de conquista: ' + 'os dois lados disputam uma cadeia de pontos entre as bases. Fica com o ponto quem tem mais gente dentro dele (soldados a pé contam mais, veículos de solo contam, aeronaves não capturam), e só se toma um ponto ligado a outro que já é seu. ' + (eco ? 'Os tíquetes são o moral do lado: perder unidades não os gasta, mas ter menos pontos faz os tíquetes escorrerem, e perder pontos, instalações e bases de suprimento custa tíquetes' : 'Cada perda custa tíquetes do lado, ter menos pontos faz os tíquetes escorrerem') + ', e perde quem ficar sem tíquetes, quem perder a base principal ou quem tiver menos pontos quando o relógio de ' + CQ.len[matchLen][1] + ' min acabar. Pontos seus sem disputa também são lugar de entrada para as classes de solo' + (pvp ? '. Ao fim, a sala começa outra partida sozinha.' : '.');
 /* radios on the screen: a mark with the entries left over each of my side's within 1500 m, and the state of the one I carry or drive */
 function radHud(P, u, ink, acc, y0) {
   for (const r of S.rl || []) {

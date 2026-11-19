@@ -136,11 +136,38 @@ console.log('-- tickets are morale where the economy pays (D25 A) --');
   const C2 = H.load({ seed: 6, mapv: 4 }), S2 = solo(C2, 'ww2'); C2.run(5, () => park(S2));
   const v = S2.units.find(u => u.team === 1 && !u.dead && u.kind === 'tank'), k2 = S2.cq.tk[1]; C2.killUnit(v); C2.step(1 / 60);
   ok(S2.cq.tk[1] === k2 - C2.$('CQ').cost.tank, 'with no economy a loss costs its tickets as before (' + C2.$('CQ').cost.tank + ' for a tank)');
+  const b2 = { team: 1, prog: 1, dead: false, x: 0, y: 0, z: 0, o: { id: -1 }, name: 'x' }, k3 = S2.cq.tk[1];
+  try { C2.$('supDown')(b2, null, true); } catch (e) {}
+  ok(S2.cq.tk[1] === k3, 'with no economy a finished supply base lost costs no tickets (' + k3 + ' → ' + S2.cq.tk[1] + ')');
+}
+{
+  const dome = eco => {
+    const C = H.load({ seed: 6, eco, mapv: 4 }), S = solo(C, 'modern'); C.run(2, () => park(S));
+    const p = (() => { for (let z = -S.HW + 900; z < S.HW - 900; z += 173) for (let x = 2500; x < S.W - 2500; x += 211) if (C.fortWhy(6, 1, x, z, 0) === '') return { x, z }; })();
+    if (S.eco) { S.eco.d[1].en = S.eco.d[1].mt = 5000; }
+    const f = C.fortStart(6, 1, p.x, p.z, 0); C.fortAt(f, 1); const t0 = S.cq.tk[1];
+    S.os[f.id] = 2; C.$('fortStep')(0);
+    return { f, d: t0 - S.cq.tk[1], dome: C.$('CQ').dome };
+  };
+  const a = dome(1), b = dome(0);
+  ok(a.f.dead && a.d === a.dome, 'with the economy a dome lost costs ' + a.dome + ' tickets (' + a.d + ')');
+  ok(b.f.dead && b.d === 0, 'with no economy a dome lost costs none (' + b.d + ')');
+}
+
+console.log('-- a solo game is its own host: the frame meter calibrates the budget offline (D6) --');
+{
+  const C = H.load({ seed: 4, eco: 1, mapv: 4 }), $ = C.$, S = solo(C, 'ww2'), GP = $('GP'), AIB = $('AIB');
+  C.run(2, () => park(S));
+  const stat = AIB.stat; AIB.stat = () => ({ n: 300, ok: false, avg: AIB.avg * 2, worst: AIB.worst * 2 });
+  S.popT = 0; $('gpMeter')(); AIB.stat = stat;
+  const P = $('popOf')(1);
+  ok(!S.net && S.popK === 1 - GP.meter.dn && P.men < GP.pop.men, 'offline, frames over the AI budget: the budget shrinks to ' + Math.round(S.popK * 100) + '% (' + P.men + ' soldiers of ' + GP.pop.men + ')');
 }
 
 console.log('-- an AI × AI match with the economy: everything by order, nothing dead --');
 {
-  const C = H.load({ seed: 21, eco: 1, mapv: 4 }), $ = C.$, S = C.watch('modern', { min: 30 }), seen = new Set(), free = [];
+  const C = H.load({ seed: 21, eco: 1, mapv: 4 }), $ = C.$, S = C.watch('modern', { min: 30 }), seen = new Set(), free = [], AIB = $('AIB');
+  AIB.stat = () => ({ n: 300, ok: true, avg: AIB.avg, worst: AIB.worst });   // the frame meter on a steady reading: the budget whole, whatever this machine's speed
   C.run(150, () => { for (const l of [S.units, S.planes, S.squads]) for (const o of l) if (!seen.has(o)) { seen.add(o); if ((o.ai || o.men) && o.mis && !o.mis.d) free.push(o.kind || o.role || o.job); } });
   const P = [0, 1].map(t => $('popOf')(t)), U = [0, 1].map(t => $('popUse')(t));
   ok(!free.length && !H.nan(S), 'modern, 150 s: ' + seen.size + ' units and squads, every AI one by a Dispatch order' + (free.length ? ' (not: ' + free.slice(0, 6).join(', ') + ')' : ''));

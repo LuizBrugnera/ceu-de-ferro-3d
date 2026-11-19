@@ -56,7 +56,26 @@ console.log('-- the view and the posture name them --');
   }
 }
 
-/* the 1944 map, side 0 holding Travessia, three free squads of another road 1.5 to 4.2 km from Vila do Moinho (as tests/approaches.js) */
+console.log('-- p1\'s gate (cf-manobra-fix): 45° off the axis, exposure up to .8 x the axis\' + 15 points, up to 2.2 x its length --');
+{
+  const PR = $('PR'), okF = $('prFlankOk'), ax = { ang: 11, exp: 17, len: 1200 };
+  ok(PR.flank === 45 && PR.expK === .8 && PR.expAdd === 15 && PR.long === 2.2, 'the table: flank ' + PR.flank + '°, exposure ' + PR.expK + ' x + ' + PR.expAdd + ', length ' + PR.long + ' x');
+  ok(okF({ ang: 72, exp: 15, len: 1900 }, ax), '  the flank the measurement saw (72°, 15% in sight, 1.9 km against the axis at 11°, 17%, 1.2 km) passes');
+  ok(okF({ ang: 50, exp: 28, len: 2500 }, ax), '  a short map\'s flank: 50°, 28% in sight (the old gate: 20%), 2.08 x the axis\' length (the old: 1.8 x) passes now');
+  ok(!okF({ ang: 40, exp: 10, len: 1300 }, ax), '  40° off the axis is no flank');
+  ok(!okF({ ang: 90, exp: 30, len: 1300 }, ax), '  more in sight than .8 x the axis\' + 15 (' + (PR.expK * ax.exp + PR.expAdd).toFixed(1) + '%) is refused');
+  ok(!okF({ ang: 90, exp: 10, len: 2700 }, ax), '  longer than 2.2 x the axis is refused');
+  /* prPick with such a plan: p1 is a candidate, by that gate */
+  const C = S.cmd[0], q2 = S.squads.filter(q => q.team === 0 && q.live >= 3).slice(0, 2), o = { x: q2[0].men[0].x + 1500, z: q2[0].men[0].z };
+  const ap = (ang, exp, len, s) => ({ ang, exp, len, min: len / 1000 * 12, cost: len, s, br: ang * Math.PI / 180, axis: ang < 30 ? 80 : 10, wood: 0, cells: [], asm: { x: o.x - 800, z: o.z + s * 100, i: 0 }, pos: { x: o.x - 400, z: o.z + s * 100, v: 0 } });
+  const keep = [PR.front, PR.pen.r, PR.rec.n, PR.rec.foe, PR.env.r]; PR.front = 99; PR.pen.r = 99; PR.rec.n = 99; PR.rec.foe = 99; PR.env.r = 99;
+  let ev = null;
+  try { $('prPick')(C, { ri: 0, s: 100, x: o.x, z: o.z }, 1, q2, 20, 10, { A: [ap(11, 17, 1200, 0), ap(50, 28, 2500, 3)], o, nm: 'teste' }); ev = C.prEv; }
+  finally { [PR.front, PR.pen.r, PR.rec.n, PR.rec.foe, PR.env.r] = keep; }
+  ok(ev && ev.some(x => x.k === 'p1') && !ev.some(x => x.k === 'p6'), 'prPick: the 50° flank of a short map makes fix and flank a candidate, no "sem abordagem de flanco" frontal (' + (ev || []).map(x => x.k).join(', ') + ')');
+}
+
+/* the 1944 map, side 0 holding Travessia, three free squads of another road 1.5 to 2.6 km from Vila do Moinho (as tests/approaches.js) */
 function field() {
   const C = H.load({ seed: 9, eco: 1, mapv: 6 }), $ = C.$; C.$('globalThis').performance = performance;
   const S = C.watch('ww2', { len: 0 }), nm = p => $('gName')(p), tg = S.cq.p.find(p => /Moinho/.test(nm(p))), st = S.cq.p.find(p => /Travessia/.test(nm(p))); st.hold = 0;
@@ -65,7 +84,11 @@ function field() {
   for (const q of S.squads.filter(q => q.team === 0)) for (const m of q.men) m.dead = true;
   S.squads = S.squads.filter(q => q.team !== 0); S.men = S.men.filter(m => !m.dead);
   const R = S.T.routes; let at = null;
-  for (let ri = 0; ri < R.length && !at; ri++) if (ri !== tg.ri) for (let s = 0; s <= R[ri].len; s += 50) { const p = $('routeAt')(R[ri], s), d = Math.hypot(p.x - tg.x, p.z - tg.z); if (d > 1500 && d < 4200 && p.x < tg.x && $('hgt')(p.x, p.z) > S.T.WL + 2) { at = { ri, s, x: p.x, z: p.z }; break; } }
+  /* the place of another road nearest an assembly of the plan, and out in the field toward it to .85 x AP.pool from it when farther: an assault takes squads within AP.pool m of an assembly */
+  const A = $('apNow')(Cm, $('cqObj')(tg), -1).A, AP = $('AP'); let bd = 1e9;
+  for (let ri = 0; ri < R.length; ri++) if (ri !== tg.ri) for (let s = 0; s <= R[ri].len; s += 50) { const p = $('routeAt')(R[ri], s), a = A.reduce((b, x) => (Math.hypot(p.x - x.asm.x, p.z - x.asm.z) < Math.hypot(p.x - b.asm.x, p.z - b.asm.z) ? x : b)), d = Math.hypot(p.x - a.asm.x, p.z - a.asm.z); if (d < bd && p.x < tg.x && $('hgt')(p.x, p.z) > S.T.WL + 2) { bd = d; at = { ri, s, x: p.x, z: p.z, a: a.asm }; } }
+  if (bd > AP.pool * .85) { const k = 1 - AP.pool * .85 / bd; at.x += (at.a.x - at.x) * k; at.z += (at.a.z - at.z) * k; }
+  Cm.apc = null;
   const mk = (k, dx) => { const q = $('addSquad')(0, at.x + dx, at.z, at.ri, at.s); q.job = 'road'; q.jk = k; $('setOrd')(q, { k: 'hold', ri: at.ri, s: at.s, x: at.x + dx, z: at.z, R: 9 }); q.live = q.men.length; return q; };
   Cm.atkT = 0; Cm.ops = Cm.ops.filter(op => op.k !== 'atk'); Cm.apc = null; Cm.apQ = [];
   const sq = [mk(0, 0), mk(1, 40), mk(2, 80)], live = () => S.squads.filter(q => q.team === 0 && q.live > 0 && !q.state);

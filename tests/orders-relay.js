@@ -1,6 +1,6 @@
 'use strict';
 /* the relay and the abstract orders and routes (W21): welcome says rte 1; a gcmd may carry rt, a route of 1 to 8 x z pairs (flat numbers), passed to the
-   host as sent; a ragged, a long, a non-numeric or a nested route is shape and never reaches the host. The MCP bridge's own check mirrors the relay's */
+   host as sent; a ragged, a long, a non-numeric or a nested route is shape and never reaches the host (tests/mcp-general.js drives the bridge's own check) */
 const N = require('./net'), { ok, done } = require('./harness');
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER);
@@ -30,9 +30,5 @@ const N = require('./net'), { ok, done } = require('./harness');
   ok(shape === bad.length && await none(h, 'gcmd'), 'every bad route is shape and never reaches the host: ragged, empty, nine points, text, nested, too far, not a list, null, infinite (' + shape + '/' + bad.length + ')');
   seen(); b.send({ t: 'gcmd', d: 'cmd', c: { c: 'ord', k: 'def', x: 1, z: 1, rt: [1, 2] }, n: 300 }); const x = await b.wait('gres');
   ok(x && x.why === 'ctl' && await none(h, 'gcmd'), 'the other side cannot send one either: ctl');
-  /* the MCP bridge mirrors the check before it sends */
-  const src = require('fs').readFileSync(require('path').join(__dirname, '..', 'mcp-general.js'), 'utf8'), vm = require('vm');
-  const ctx = vm.createContext({}); vm.runInContext(src.slice(src.indexOf('const GK = {'), src.indexOf('function rawAsk')) + ';globalThis.rawCmd = rawCmd;', ctx);
-  ok(good.every(c => ctx.rawCmd(c) === null) && bad.every(rt => ctx.rawCmd({ c: 'move', rt }) !== null), 'mcp-general.js accepts the same routes and refuses the same bad ones');
   for (const c of [h, a, b]) c.close(); N.stop(); done();
 })().catch(e => { console.error(e); N.stop(); process.exit(1); });

@@ -1,10 +1,11 @@
 'use strict';
 /* Abstract orders and routes (W21), through the one funnel genCmd, for the person at the chair, the AI general and the MCP model alike:
-   ord (a verb and a target: the squads decide how; named squads or N the general picks), fort (the general picks the builder), the support
-   requests (req fire, smoke, recon, cas, lift: the general picks who answers) and rt, a route of waypoints on every order that sends squads
-   to a place, walked in order and carried by the squad's mission (mis.route). Refusals keep their reasons, and nothing here draws from the
-   sim's random stream or changes a battle no one commands. BEFORE=<an older page>: the same seeded AI battle there and here (SECS, default 90) */
-const fs = require('fs'), path = require('path');
+   ord (a verb and a target: the squads decide how; named squads, N the general picks, or N new units it creates), fort (trench, sandbag,
+   bunker, anti-tank post, observation post, AA position, minefields, supply base: the general picks the builder), the support requests
+   (req fire, recon, cas, lift: the general picks who answers) and rt, a route of waypoints on every order that sends squads to a place,
+   walked in order and carried by the squad's mission (mis.route); the AI's flanks carry the composite route they walk. Refusals keep their
+   reasons. The same seeded AI battle is compared with the page before W21 (BEFORE=<page>, else that page from git history; SECS, default 90) */
+const fs = require('fs'), path = require('path'), os = require('os'), { execFileSync } = require('child_process');
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 90;
 const solo = (C, era) => C.newState(era, C.$('ERAS')[era].sides[0].fighter, { cls: 'plane' });
 const park = S => { const P = S.my; if (P) { P.inv = 9; P.dead = false; P.y = 3000; P.v.y = 0; P.hp = P.def.hp; } S.lives = 9; };
@@ -18,6 +19,17 @@ const world = () => {
   return { C, S, $: C.$, cmd: (c, by, t) => C.genCmd(t || 0, c, by || 'me') };
 };
 const free = (S, t) => S.squads.filter(q => q.team === (t || 0) && !q.net && q.live >= 2 && !q.state && !q.op && !q.lift && !q.rd && lead(q));
+/* an empty battlefield with the points (map v5): nothing spawns, no manoeuvre or assault of the AI's; squads put down by hand; the planner each second */
+const fresh = (era, eco) => {
+  const C = H.load({ seed: 5, mapv: 5, eco }), $ = C.$; C.seed(7);
+  const S = C.newState(era, $('ERAS')[era].sides[0].fighter, { cls: 'plane' }); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; for (const f of S.fld) f.next = 1e9;
+  for (const t of [0, 1]) { const Cm = $('cmdOf')(t); Cm.mnT = 1e9; Cm.atkT = 1e9; }
+  return { C, S, $ };
+};
+const sq = (C, t, x, z, job) => { const $ = C.$, p = $('railOf')(x, z), q = C.addSquad(t, x, z, p.ri, p.s); q.job = job || 'held'; q.jk = 0; q.col = false; $('setOrd')(q, { k: 'hold', ri: p.ri, s: p.s, x, z, R: 12 }); return q; };
+const tick = (C, S, secs) => { for (let i = 0; i < secs; i++) { C.run(1, null, 1 / 20); for (const t of [0, 1]) C.$('plan')(t); } };
+/* a dry, open place on side 0's half, 2 km from its base toward the middle */
+const spot = (C, S) => { const b = S.base[0]; for (let d = 2000; d < 5000; d += 100) { const x = b.x + d, z = b.z * .5; if (C.$('gMapOk')(x, z) && C.$('gMapOk')(x + 600, z + 300) && C.$('gMapOk')(x - 300, z - 300)) return { x, z }; } return { x: b.x + 2000, z: b.z * .5 }; };
 
 console.log('-- refusals --');
 {
@@ -31,10 +43,14 @@ console.log('-- refusals --');
   let wet = null; for (let i = 0; i < 4000 && !wet; i++) { const px = (i % 80) * S.W / 80, pz = ((i / 80 | 0) - 25) * S.HW / 25; if (Math.abs(pz) < S.HW - 60 && px > 60 && px < S.W - 60 && C.hgt(px, pz) < S.T.WL - 1) wet = { x: px, z: pz }; }
   ok(!wet || cmd({ c: 'move', x, z, ids: [free(S)[0].id], rt: [wet.x, wet.z] }).why === 'rt', 'a route point in the water: rt' + (wet ? '' : ' (no water found: skipped)'));
   ok(cmd({ c: 'ord', k: 'atk', pi: 99 }).why === 'at' && cmd({ c: 'ord', k: 'def', x: -5000, z: 0 }).why === 'map', 'no such point: at; off the map: map');
-  ok(cmd({ c: 'ord', k: 'atk', pi: S.cq.p.findIndex(p => p.hold === 0) }).why === 'own', 'an attack on a point of ours: own');
+  const mine = S.cq.p.find(p => p.hold === 0 && p.base < 0) || S.cq.p.find(p => p.hold === 0);
+  ok(cmd({ c: 'ord', k: 'atk', pi: S.cq.p.indexOf(mine) }).why === 'own', 'an attack on a point of ours named by its index: own');
+  ok(cmd({ c: 'ord', k: 'atk', x: mine.x + 150, z: mine.z, n: 1 }).why !== 'own', 'an attack on a place 150 m from a point of ours is not taken for that point (no own)');
   const e = S.base[1];
   ok(cmd({ c: 'ord', k: 'def', x: e.x - 300, z: e.z, n: 2 }).why === 'way' && cmd({ c: 'ord', k: 'def', x, z, ids: [9999] }).why === 'sq', 'too far on foot for all of them: way; no such squad: sq');
   ok(cmd({ c: 'ord', k: 'amb', x, z, rt: [x, z] }).why === 'rt' && cmd({ c: 'req', k: 'cas', x, z, rt: [x, z] }).why === 'rt' && cmd({ c: 'fort', k: 'sup', x, z, rt: [x, z] }).why === 'rt', 'a route where it has no meaning (ambush, air support, supply base): rt');
+  ok(cmd({ c: 'req', k: 'smoke', x, z }).why !== '' && !cmd({ c: 'req', k: 'smoke', x, z }).ok, 'there is no smoke request (smoke is the fire mission\'s own)');
+  ok(cmd({ c: 'ord', k: 'esc', x: 60, z: S.HW - 60 }).why === 'esc', 'an escort with no own vehicle near: esc');
   const C2 = H.load({ seed: 7, mapv: 3 }), S2 = solo(C2, 'modern'); C2.run(30); C2.genCtl(0, 'me', { eco: 1, atk: 0, def: 1, sup: 1 });
   const q2 = S2.squads.find(q => q.team === 0 && q.live > 0 && lead(q)), L2 = q2 && lead(q2);
   ok(!!L2 && C2.genCmd(0, { c: 'ord', k: 'def', x: L2.x + 50, z: L2.z }, 'me').why === 'mv' && C2.genCmd(0, { c: 'move', x: L2.x + 50, z: L2.z, ids: [q2.id], rt: [L2.x + 20, L2.z] }, 'me').why === 'mv', 'before the road network (map v3): mv');
@@ -114,16 +130,99 @@ console.log('-- the same funnel for the AI general --');
   C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
   ok(cmd({ c: 'ord', k: 'def', x: L.x + 100, z: L.z, n: 1 }, 'ai').why === 'ctl' && cmd({ c: 'fort', k: 'trench', x: L.x + 100, z: L.z }, 'ai').why === 'ctl', 'with attack and defence the person\'s, the AI is told ctl');
   ok(cmd({ c: 'req', k: 'cas', x: L.x + 100, z: L.z }, 'ai').why !== 'ctl', 'support it still keeps: its requests are not ctl');
+  const b = C.$('S').sup.find(o => !o.dead) || { kind: 'sup', sup: 1, name: 'Base de suprimento' };
+  ok(C.$('helpWho')(b) === 'Base de suprimento', 'a supply base that answers a call for help is named, not a crash (helpWho: kind sup, no def)');
+}
+
+console.log('-- escort: the squads keep around a vehicle of ours --');
+{
+  const { C, S, $ } = fresh('modern'), cmd = c => C.genCmd(0, c, 'me');
+  C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
+  const A = spot(C, S), q1 = sq(C, 0, A.x, A.z), q2 = sq(C, 0, A.x + 30, A.z + 20), u = C.addUnit('tank', 0, A.x + 120, A.z + 40, $('S').E.sides[$('S').fac[0]].tanks[0], false);
+  u.ai = null; u.x = A.x + 120; u.z = A.z + 40; u.y = C.hgt(u.x, u.z);   // a tank of ours parked there (addUnit puts a mobile one on its road)
+  const r = cmd({ c: 'ord', k: 'esc', x: u.x + 30, z: u.z, n: 2 }), op = S.cmd[0].ops.find(o => o.id === r.id);
+  ok(r.ok && op && op.esc === u && op.sq.length === 2 && op.sq.every(q => q.ord.k === 'hold' && q.mis.kind === 'escort' && near(q.ord, u) < 40), 'ord esc: two squads take places beside the tank, their mission escort (' + (r.why || r.id) + ')');
+  const to = { x: u.x + 250, z: u.z + 60 };
+  for (let i = 0; i < 10; i++) { C.run(1, () => { u.x = to.x; u.z = to.z; }, 1 / 20); for (const t of [0, 1]) $('plan')(t); }   // it drives 250 m on (held there: no driver)
+  ok(op.sq.every(q => near(q.ord, u) < 40), 'the tank moves 250 m: within a few seconds their places follow it');
+  u.dead = true; tick(C, S, 4);
+  ok(op.over && S.glog.l[0].some(e => /Escolta encerrada/.test(e.s)), 'the tank is lost: the escort ends and the log says so');
+}
+
+console.log('-- create N: the general dispatches new units and hands them the order --');
+{
+  const { C, S, $ } = fresh('modern', true), cmd = c => C.genCmd(0, c, 'me');
+  C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
+  const P = S.cq.p.find(p => p.hold === 0 && p.base < 0), pi = S.cq.p.indexOf(P);
+  for (const k of ['squad', 'tank']) { const d = S.eco.d[0]; (d.res[k] || (d.res[k] = [])).push('hq', 'hq'); }
+  const r = cmd({ c: 'ord', k: 'def', pi, k2: 'squad', n: 1, why: 'reforçar' }), op = S.cmd[0].ops.find(o => o.k === 'w21p' && o.d === r.id);
+  ok(r.ok && op && S.dsp.log[0].some(o => o.id === r.id), 'ord def with k2 squad: the General\'s dispatch fields a new squad from the reserve (order ' + (r.why || r.id) + '), and a pending op waits for it');
+  const A = spot(C, S), q = sq(C, 0, A.x, A.z); q.mis.d = r.id;   // the squad that dispatch brings, on foot
+  $('OPS').w21p(S.cmd[0], op);
+  ok(q.op && q.op.k === 'usr' && q.op.v === 'def' && q.mis.kind === 'defend' && q.ord.k === 'hold' && near(q.ord, P) < 120, 'once on foot it is handed the defence of the point');
+  const r2 = cmd({ c: 'ord', k: 'atk', x: S.base[1].x - 400, z: S.base[1].z, k2: 'tank', n: 1 });
+  ok(r2.ok && S.units.some(u => u.mis && u.mis.d === r2.id && u.mis.kind === 'attack'), 'k2 tank: a new tank comes with an attack mission there (' + (r2.why || r2.id) + ')');
+  ok(cmd({ c: 'ord', k: 'def', pi, k2: 'castle', n: 1 }).why === 'kind' && cmd({ c: 'ord', k: 'def', pi, k2: 'squad', ids: [1] }).why === 'shape', 'an unknown kind: kind; named squads and create together: shape');
+  const C2 = fresh('modern').C; C2.genCtl(0, 'me');
+  ok(C2.genCmd(0, { c: 'ord', k: 'def', x: 3000, z: 0, k2: 'squad', n: 1 }, 'me').why === 'off', 'with the economy off there is nothing to create: off');
+}
+
+console.log('-- fortify: every kind, the general picks the builder --');
+{
+  const { C, S, $ } = fresh('modern'), cmd = c => C.genCmd(0, c, 'me');
+  C.genCtl(0, 'me', { eco: 1, atk: 0, def: 0, sup: 1 });
+  const K = { bunker: 4, atpost: 3, post: 5 }, A = spot(C, S), done = {};
+  let i = 0;
+  for (const k of Object.keys(K)) { const B = { x: A.x + 200 * i, z: A.z + 120 }, q = sq(C, 0, B.x - 60, B.z - 40, i ? 'held' : 'eng'); const r = cmd({ c: 'fort', k, x: B.x, z: B.z }); done[k] = { r, B, q }; i++; }
+  ok(Object.values(done).every(d => d.r.ok && d.q.ord.dig && d.q.mis.kind === 'build'), 'bunker, anti-tank post, observation post: each builder walks out to dig (' + Object.values(done).map(d => d.r.why || 'ok') + ')');
+  const AA = { x: A.x - 200, z: A.z + 300 }, qa = sq(C, 0, AA.x - 50, AA.z, 'held'), ra = cmd({ c: 'fort', k: 'aapos', x: AA.x, z: AA.z });
+  const M = { x: A.x + 100, z: A.z - 300 }, qm = sq(C, 0, M.x - 50, M.z, 'eng'), rm = cmd({ c: 'fort', k: 'mineat', x: M.x, z: M.z, ids: [qm.id] });
+  ok(ra.ok && rm.ok, 'an AA position and an anti-tank minefield are accepted (' + (ra.why || 'ok') + ', ' + (rm.why || 'ok') + ')');
+  tick(C, S, 150);
+  for (const k of Object.keys(K)) ok(S.forts.some(f => f.team === 0 && f.k === K[k] && near(f, done[k].B) < 40), k + ': the work (FORT kind ' + K[k] + ') is started at the place');
+  ok(S.units.some(u => u.w21 && u.fixed && u.kind === 'aa' && u.team === 0 && near(u, AA) < 25), 'aapos: a fixed AA gun stands at the place');
+  const ms = (S.mines || []).filter(o => o.team === 0 && !o.gone && near(o, M) < 30);
+  ok(ms.length === $('W21').mf && ms.every(o => o.k === 0), 'mineat: a field of ' + $('W21').mf + ' anti-tank mines across the way (' + ms.length + ')');
+  sq(C, 0, AA.x + 250, AA.z, 'held'); sq(C, 0, AA.x + 550, AA.z, 'held');
+  ok(cmd({ c: 'fort', k: 'aapos', x: AA.x + 300, z: AA.z }).ok && cmd({ c: 'fort', k: 'aapos', x: AA.x + 600, z: AA.z }).why === 'max', 'with the economy off, at most ' + $('W21').aaCap + ' AA positions a side by order, those on their way counted: max');
+  const C2 = fresh('modern', true), S2 = C2.S; C2.C.genCtl(0, 'me'); const d = S2.eco.d[0]; d.res.aaf = [];
+  ok(C2.C.genCmd(0, { c: 'fort', k: 'aapos', x: AA.x, z: AA.z }, 'me').why === 'res', 'with the economy on and no fixed AA in the reserve: res');
+}
+
+console.log('-- the AI general\'s flank walks a composite route; a person\'s flank walks his own --');
+{
+  const C = H.load({ seed: 5, mapv: 4 }), $ = C.$, S = (() => { C.seed(7); const S = C.newState('ww2', $('ERAS').ww2.sides[0].fighter, { cls: 'plane' }); S.demo = false; S.over = true; S.units = []; S.planes = []; S.men = []; S.squads = []; for (const f of S.fld) f.next = 1e9; return S; })();
+  const P = S.cq.p, F = P.find(p => p.k === 'x'), W = S.T.net.n.find(n => n.id === 'W'), Cm = $('cmdOf')(0);
+  const pool = [sq(C, 0, W.x - 40, W.z + 60, 'push'), sq(C, 0, W.x + 20, W.z + 90, 'push')], fr = [sq(C, 0, W.x - 80, W.z - 40), sq(C, 0, W.x - 60, W.z + 20), sq(C, 0, W.x - 30, W.z - 30), sq(C, 0, W.x + 30, W.z - 60)];
+  const ax = $('routeAt')(S.T.routes[0], 6253), foe = [0, 1, 2].map(i => sq(C, 1, ax.x + i * 40, ax.z));
+  for (const q of foe) for (const m of q.men) { m.seenT = S.t; m.sx = m.x; m.sz = m.z; }
+  $('cmdSense')(Cm, S.squads.filter(q => q.team === 0));
+  const host = $('atkOpen')(Cm, { ri: F.ri, s: F.s, x: F.x, z: F.z, tw: F }, -1, pool, false, 16, 10); host.ri = 0;
+  const X = { t: 0, C: Cm, sq: fr, free: fr, room: fr.length - $('MAN').keep, doc: 'balanced', ds: -1, live: Cm.man }, g = $('MANG').flk(Cm, X)[0];
+  ok(!!g && Array.isArray(g.spec.rt) && g.spec.rt.length >= 1, 'the AI\'s flank plan names its route: ' + (g && g.spec.rt ? g.spec.rt.length + ' turning point(s)' : 'none'));
+  const r = C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: g.spec.n, rt: $('gRtFlat')(g.spec.rt) }, 'ai', { spec: g.spec, res: g.res }), op = Cm.ops.find(o => o.id === r.id);
+  ok(r.ok && op && op.sq.every(q => q.ord.k === 'flank' && Array.isArray(q.ord.rt) && q.ord.rt.length >= 1 && q.mis.route && q.mis.route.length === q.ord.rt.length && q.ord.rt.every(p => via(q.ord.wp, p, 1))), 'its squads walk that composite way, and their orders and missions carry its turning points as the route');
+  ok(S.gj.some(e => e.by === 'ai' && e.c.c === 'man' && Array.isArray(e.c.rt) && e.c.rt.length >= 2), 'the AI\'s command in the journal carries the route (rt)');
+  $('opEnd')(Cm, op); Cm.mcd = {};
+  C.genCtl(0, 'me');
+  const w = { x: W.x + 300, z: W.z - 400 }, r2 = C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: 1, rt: [w.x, w.z] }, 'me'), op2 = Cm.ops.find(o => o.id === r2.id);
+  ok(r2.ok && op2 && op2.sq.length === 1 && via(op2.sq[0].ord.wp, w, 1) && op2.sq[0].mis.route[0].x === w.x, 'a person\'s flank with a route: the squad walks through his point (' + (r2.why || r2.id) + ')');
+  if (op2) $('opEnd')(Cm, op2); Cm.mcd = {};
+  ok(C.genCmd(0, { c: 'man', k: 'flank', pi: F.i, n: 1, rt: [1, 2, 3] }, 'me').why === 'rt', 'and a malformed route there: rt');
 }
 
 console.log('-- nothing changes a battle no one commands --');
 {
   const print = (C, S) => { let s = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) s += o.x * 1.3 + o.z + (o.hp || 0); return [S.men.length, S.units.length, S.squads.length, s.toFixed(6), C.$('Math').random().toFixed(12)].join(' '); };
   const run = page => { const C = H.load({ seed: 23, mapv: 5, page }), S = solo(C, 'modern'); C.run(SECS, () => park(S)); return print(C, S); };
-  const A = run(), B = run();
-  ok(A === B, 'the same seeded battle twice, ' + SECS + ' s: ' + A);
-  const BEFORE = process.env.BEFORE ? path.resolve(process.env.BEFORE) : '';
-  if (BEFORE && fs.existsSync(BEFORE)) ok(run(BEFORE) === A, 'and the same as on ' + path.basename(BEFORE));
-  else console.log('  skip  BEFORE=<an older page>: the comparison with the page before the abstract orders');
+  /* the oracle: the page before W21, BEFORE=<page>, else from git (the parent of the commit that brought the abstract orders) */
+  let BEFORE = process.env.BEFORE ? path.resolve(process.env.BEFORE) : '';
+  if (!BEFORE) try {
+    const git = a => execFileSync('git', a, { cwd: H.ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20 });
+    const c = git(['log', '-n', '1', '--format=%H', '--grep=abstract orders and multi-waypoint routes', 'HEAD']).trim();
+    if (c) { BEFORE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'w21-')), 'before.html'); fs.writeFileSync(BEFORE, git(['show', c + '^:Céu de Ferro 3D.html'])); }
+  } catch (e) { BEFORE = ''; }
+  if (BEFORE && fs.existsSync(BEFORE)) { const A = run(), B = run(BEFORE); ok(A === B, 'the same seeded AI battle, ' + SECS + ' s, as on the page before the abstract orders: ' + A); }
+  else console.log('  skip  no page before the abstract orders (BEFORE=<page>, or git history with its commit)');
 }
 H.done();

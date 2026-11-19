@@ -22,6 +22,15 @@ Com 2 lados nada muda.
 
 Não são do P0, e sim do P1 (o mapa, ainda em curso): `dsOf`, `foeOn`, `myRoutes` e `R.ends`.
 
+**As cópias dos outros pacotes agora usam estes ajudantes.** Cada pacote tinha escrito a sua versão da mesma regra, e agora todas chamam o P0. O resultado é igual com 2 lados:
+- P3: `sdsOf` chama `SIDES()`;
+- P6b: `mnFoe` chama `isSide` e `foeSide`, e `mnFoes` chama `foes`;
+- P6c: `lsN` chama `SIDES()` (antes tinha a guarda `typeof SIDES`), `lsSide` chama `isSide`, `lsFoe` chama `foeSide` e `lsFoes` chama `foes`;
+- P8: `civFoes` chama `foes`;
+- P7: `insFoe` chama `foeSide`.
+
+Uma tabela `S.rel` com aliados, então, vale igual para todos eles.
+
 ## O que foi alargado (mecânico)
 
 - **Pares → `bySide`:**
@@ -36,7 +45,7 @@ Não são do P0, e sim do P1 (o mapa, ainda em curso): `dsOf`, `foeOn`, `myRoute
 - **"É um lado":** 18 testes `=== 0 || === 1` com time viraram `isSide`. Entre eles: as linhas de IA e de obra da rede, o contador de drones, `gBad`, as perguntas `brg`, `w13`, `tmap` e `ap`, o `ecs` recebido e o M6.
 
 **O que ficou de fora, de propósito, para não brigar com pacotes em curso:**
-- os civis e o W14: `civD`, `civPlan`, `civLook`, `civFight`, `civHit`, `civTurn`, `civRevolt`, `roeHeld` e o `hate` do `civState` são do P8;
+- os civis e o W14 (`civD`, `civPlan`, `civLook`, `civFight`, `civHit`, `civTurn`, `civRevolt`, `roeHeld` e o `hate` do `civState`) são do P8, que entrou no `main` enquanto o P0 estava em curso;
 - as obras pré-cavadas por estrada (`fortInit` com `lineS`/`endS`) são do P1;
 - as jazidas pela metade do mapa (`half`) são do P1;
 - as armas e os assentos (`crewSt`, `drive`), o controle (`PAD`) e o tipo de mina não são lados.
@@ -52,6 +61,7 @@ O servidor, o MCP e os testes de relay já foram alargados pelo P5 (`ts(room, s)
   - mesma soma das posições dos soldados.
 
   Nada mudou com 2 lados. Também deu `S.N = 2`, `SIDES() = [0, 1]`, `ALL() = 3`, `foes(0) = [1]` e `foeBase(0) = S.base[1]`, sem NaN.
+- Partida de 3 lados: não começa no `main` de agora. O mapa (versão 8) ainda tem 2 bases, e o `sidesOf` do P4 só dá 3 lados com a terceira base, que vem do P1. Pedir `N: 3` dá `S.N = 2`, e a partida roda normalmente com 2 lados (testado: 3 s sem erro, `S.rel` 2 × 2).
 - `tests/all.sh` não rodou: o capitão voltou à regra de sem testes neste pacote.
 - O Chrome (chrome-devtools-axi) não abriu nesta máquina ("socket hang up").
 

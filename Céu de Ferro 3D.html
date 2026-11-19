@@ -9102,7 +9102,7 @@ function shelled(x, z, team) {
    sighting by any other side (with 2 sides the same thing), for the HUD and a reader with no side. A reader that acts for side t asks sT/sX/sZ(u, t):
    with 2 sides, or for t's own unit, they read seenT/sx/sz as before, so a battle of 2 sides goes as it did. seeBy(u, t, x, z, T) notes that side t
    saw u at T (now if left out) at x, z (where it was last noted if left out); sdsOf(): the sides of the battle */
-const NSD = () => S.N || 2, sdsOf = () => [...Array(NSD()).keys()];
+const NSD = () => S.N || 2, sdsOf = () => SIDES();   // P0's SIDES()
 const perSd = (u, t) => NSD() > 2 && t >= 0 && t !== u.team;
 const sT = (u, t) => (perSd(u, t) ? (u.sn && u.sn[t] ? u.sn[t][0] : -1e9) : u.seenT);
 const sX = (u, t) => (perSd(u, t) && u.sn && u.sn[t] ? u.sn[t][1] : u.sx);
@@ -12550,7 +12550,7 @@ const civD = () => S.civD || (S.civD = { n: sdsOf().map(() => 0), tk: sdsOf().ma
 /* t is one of the match's sides (0 .. NSD() - 1) */
 const civT = t => Number.isInteger(t) && t >= 0 && t < NSD();
 /* the sides at war with t (P8): every other side, unless a table of relations (S.rel[t][s] === 'ally', P0) says it is a friend */
-const civFoes = t => sdsOf().filter(s => s !== t && !(S.rel && S.rel[t] && S.rel[t][s] === 'ally'));
+const civFoes = t => foes(t);   // P0's foes
 /* the town a civilian belongs to (its index in S.T.burgs, -1 none): its group's, else (a copy of the host's) where it stands */
 function civBi(c) {
   const B = S.T.burgs, b = (c.g && c.g.b) || B.find(b => hdist(b, c) < b.ru + 30);
@@ -15822,8 +15822,8 @@ function fortPose(m) {
    mnFoe(t, s): s is a side and an enemy of t; mnFoes(t): t's enemies; mnBase(t, x, z): the enemy base nearest x z (nearest t's own base without x z);
    mnDs(t, ri): t's way forward along road ri (the map's dsOf when there is one, else the 2-side t ? 1 : -1); mnLead(t): the enemy ahead, by points then
    tickets, among those still in the match: { e, h its points, k its tickets }. With N = 2 every one of them is the old 1 - t */
-const mnFoe = (t, s) => Number.isInteger(s) && s >= 0 && s < (S.N || 2) && s !== t && !(S.rel && S.rel[t] && S.rel[t][s] === 'ally');
-const mnFoes = t => { const o = []; for (let s = 0; s < (S.N || 2); s++) if (mnFoe(t, s)) o.push(s); return o; };
+const mnFoe = (t, s) => isSide(s) && foeSide(t, s);   // P0's isSide and foe
+const mnFoes = t => foes(t);   // P0's foes
 const mnBase = (t, x, z) => {
   const o = x === undefined && S.base[t] ? S.base[t] : { x, z }; let b = null, bd = Infinity;
   for (const s of mnFoes(t)) { const B = S.base[s]; if (!B) continue; const d = (B.x - o.x) ** 2 + (B.z - o.z) ** 2; if (!(d >= bd)) { bd = d; b = B; } }
@@ -19935,10 +19935,10 @@ Net.rx.msl = m => { const o = Net.msl.get(m.id); if (o && !o.gone && o.by.net) M
    The plan's helpers (section 4: SIDES, S.rel, foes; 4.2: R.ends, dsOf, foeOn, myRoutes; P3's sdsOf) when the foundation and map version 7 define them,
    else the same rule read from the data (S.N, S.rel, R.ends), else today's two sides. With two sides every one gives today's answer:
    lsN [0, 1], lsFoes(t) [1 - t], lsFoeOn 1 - t, lsDs t ? 1 : -1, lsEndS endS, lsRail railOf, lsFoeBase S.base[1 - t] */
-const lsN = () => (typeof SIDES === 'function' ? SIDES() : typeof sdsOf === 'function' ? sdsOf() : [...Array(S && S.N > 2 ? S.N : 2).keys()]);
-const lsSide = t => Number.isInteger(t) && t >= 0 && t < lsN().length;
-const lsFoe = (a, b) => a !== b && !(S.rel && S.rel[a] && S.rel[a][b] === 'ally');
-const lsFoes = t => lsN().filter(s => lsFoe(t, s));
+const lsN = () => SIDES();   // P0's SIDES()
+const lsSide = t => isSide(t);
+const lsFoe = (a, b) => foeSide(a, b);
+const lsFoes = t => foes(t);
 const lsEnds = ri => { const r = S.T.routes[ri]; return r && Array.isArray(r.ends) ? r.ends : [0, 1]; };   // [the side at s = len, the side at s = 0]
 const lsFoeOn = (t, ri) => { if (typeof foeOn === 'function') return foeOn(t, ri); const e = lsEnds(ri); return e[0] === t ? e[1] : e[1] === t ? e[0] : -1; };
 const lsDs = (t, ri) => (typeof dsOf === 'function' ? dsOf(t, ri) : lsEnds(ri)[1] === t ? 1 : -1);
@@ -26290,7 +26290,7 @@ Object.defineProperty(PERS, 'ins', { enumerable: false, value: { nm: 'Insurgente
   w: { gue: 2.6, raid: 2.2, blk: 1.5, cut: 1.4, inf: 1, flk: .7, fnt: .6, mres: .6, dep: .4 }, mix: { squad: 2, car: 1, truck: 1, tank: -2, aa: -1, art: -1, lav: -1 } } });   // not enumerable: 'sort' never draws it, so a match of two sides draws as before
 const insT = t => !!S && S.era === 'modern' && !!S.fac && t >= 0 && S.fac[t] === 2;
 const insSides = () => (S && S.fac && S.era === 'modern' ? S.fac.map((f, t) => t).filter(insT) : []);
-const insFoe = (t, o) => !!o && o.team !== t && o.team >= 0 && !(S.rel && S.rel[t] && S.rel[t][o.team] === 'ally');   // all against all (D7) unless a table says otherwise
+const insFoe = (t, o) => !!o && o.team >= 0 && foeSide(t, o.team);   // all against all (D7) unless a table says otherwise
 const insAI = (t, d) => !S.net || S.host ? genBy(t, d || 'atk') === 'ai' : false;
 /* the personality: the Insurgents' own unless the match named one */
 perSet = (g => o => {

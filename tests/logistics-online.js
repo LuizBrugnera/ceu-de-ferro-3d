@@ -41,10 +41,12 @@ async function run(secs, each) {
   await run(1); ok(gp(p.i).lc === p.lc, 'and the guest sees ' + gp(p.i).lc);
 
   console.log('-- a guest\'s truck: loads by its base, unloads into a point --');
-  const T = tr.S.my, d = host.S.eco.d[0]; d.mt = 200; T.inv = 1e9;
+  const T = tr.S.my, d = host.S.eco.d[T.team]; host.S.eco.ctl[T.team] = 'me'; d.mt = 200; T.inv = 1e9;   // the host's AI economy spends no metal meanwhile
+  T.lgc = 0; T.lgD = ''; host.Net.lgCar.delete(tr.id);   // empty: it stood by its base since it entered, and loaded there
   const bx = tr.S.base[0], at = (x, z, go) => { T.x = x; T.z = z; T.y = tr.$('hgt')(x, z); T.v = { x: 0, y: 0, z: 0 }; T.sp = 0; if (go) T.lgT = 0; };   // go: it has just arrived (a stop begins)
-  at(bx.x + 300, bx.z + 300, 1); await run(LG.load + 2, () => { T.v = { x: 0, y: 0, z: 0 }; T.sp = 0; });
-  ok(T.lgc === LG.truck && Math.abs(d.mt - (200 - LG.mt)) < 5, 'standing by its main base it loaded ' + T.lgc + ' crates; the host took ' + LG.mt + ' metal');
+  let m0 = d.mt, drop = 0;   // the metal income goes on: the load is the one drop in a step
+  at(bx.x + 300, bx.z + 300, 1); await run(LG.load + 2, () => { T.v = { x: 0, y: 0, z: 0 }; T.sp = 0; drop = Math.max(drop, m0 - d.mt); m0 = d.mt; });
+  ok(T.lgc === LG.truck && Math.abs(drop - LG.mt) < 1, 'standing by its main base it loaded ' + T.lgc + ' crates; the host took ' + LG.mt + ' metal (' + Math.round(drop) + ')');
   const p2 = own[1]; at(p2.x + 5, p2.z + 5, 1); await run(LG.load + 2, () => { at(p2.x + 5, p2.z + 5); });
   ok(T.lgc === 0 && p2.lc === 4 + LG.truck, 'standing in ' + p2.L + ' it unloaded into it: ' + p2.lc + ' crates on the host');
 

@@ -143,8 +143,10 @@ console.log('-- the player\'s own truck --');
 {
   load(); S = C.newState('ww2', 'opel', { cls: 'trn', mouse: true }); C.plan = () => {}; C.director = () => {};
   const P = S.my, d = S.eco.d[0], p = S.cq.p.filter(p => p.hold === 0 && p.base < 0).sort((a, b) => hd(a, S.base[0]) - hd(b, S.base[0]))[0];
-  const B = S.base[0]; S.eco.ctl[0] = 'me'; d.mt = 100; P.inv = 1e9;   // the side's AI economy spends no metal meanwhile P.x = B.x + 400; P.z = B.z + 300; P.v = { x: 0, y: 0, z: 0 }; P.lgT = 0; C.run(LG.load + 1);
-  ok(P.lgc === LG.truck && Math.abs(d.mt - (100 - LG.mt)) < 8, 'a truck standing ' + LG.load + ' s by the main base loads ' + LG.truck + ' crates for ' + LG.mt + ' metal');
+  const B = S.base[0]; S.eco.ctl[0] = 'me'; d.mt = 100; P.inv = 1e9;   // the side's AI economy spends no metal meanwhile
+  P.x = B.x + 400; P.z = B.z + 300; P.v = { x: 0, y: 0, z: 0 }; P.lgT = 0;
+  let m0 = d.mt, drop = 0; for (let i = 0; i < (LG.load + 1) * 60; i++) { C.step(1 / 60); drop = Math.max(drop, m0 - d.mt); m0 = d.mt; }   // the income goes on: the load is the one drop in a step
+  ok(P.lgc === LG.truck && Math.abs(drop - LG.mt) < 1, 'a truck standing ' + LG.load + ' s by the main base loads ' + LG.truck + ' crates for ' + LG.mt + ' metal');
   p.lc = 10; P.x = p.x + 5; P.z = p.z + 5; P.v = { x: 0, y: 0, z: 0 }; P.lgT = 0; C.run(LG.load + 1);
   ok(P.lgc === 0 && p.lc === 10 + LG.truck, 'driven to ' + p.L + ' and standing there: it unloads into it (' + p.lc + ')');
   P.lgc = 30; const k0 = tk(0); C.killUnit(P); C.run(1); ok(Math.round(k0 - tk(0)) === LG.lost, 'lost with crates aboard: ' + LG.lost + ' tickets');
@@ -152,8 +154,9 @@ console.log('-- the player\'s own truck --');
 
 console.log('-- a whole match: the battle goes on, nothing breaks --');
 {
-  load({ seed: 33 }); watch('modern', true); C.run(240);
-  const v = [0, 1].map(t => C.lgView(t)), sent = [0, 1].map(t => S.glog.l[t].filter(e => /Comboio com|Ponte aérea com/.test(e.s)).length), got = [0, 1].map(t => S.glog.l[t].filter(e => /entregou/.test(e.s)).length);
+  load({ seed: 33 }); watch('modern', true); const cvs = new Set();   // every convoy seen on its way (the general's log keeps only its last entries)
+  for (let i = 0; i < 240; i++) { C.run(1); for (const c of S.lg.cv) cvs.add(c); }
+  const v = [0, 1].map(t => C.lgView(t)), sent = [0, 1].map(t => [...cvs].filter(c => c.t === t).length), got = [0, 1].map(t => S.glog.l[t].filter(e => /entregou/.test(e.s)).length);
   ok(!H.nan(S) && S.units.length && sent[0] && sent[1] && got[0] + got[1] > 0, 'four minutes of AI against AI: convoys sent ' + sent.join('/') + ', delivered ' + got.join('/') + ', nodes ' + v.map(o => o.nodes.map(n => n.crates).join(',')).join(' | '));
 }
 H.done();

@@ -233,7 +233,7 @@ async function matchReport(a) {
   if (m === 'list') {
     const r = await httpGet('/ana/list');
     if (!r.ok) return { text: JSON.stringify({ answered: false, result: r.code === 404 ? 'the server keeps no matches (ANALYTICS=0 or an older server)' : 'could not read the list: ' + (r.why || r.code) }), error: true };
-    return { text: JSON.stringify({ answered: true, matches: r.j.m.slice(0, 30).map(o => ({ match: o.era + '/' + o.id, src: o.sum && o.sum.src, sides: o.sum && o.sum.fac, doctrines: o.sum && o.sum.doc, winner: o.sum && o.sum.end ? o.sum.end.win : null, why: o.sum && o.sum.end ? o.sum.end.why : null, seconds: o.sum && o.sum.end ? o.sum.end.t : null })) }) };
+    return { text: JSON.stringify({ answered: true, matches: r.j.m.slice(0, 30).map(o => ({ match: o.era + '/' + o.id, src: o.sum && o.sum.src, sides: o.sum && o.sum.fac, doctrines: o.sum && o.sum.doc, personalities: o.sum && o.sum.per, difficulties: o.sum && o.sum.dif, winner: o.sum && o.sum.end ? o.sum.end.win : null, why: o.sum && o.sum.end ? o.sum.end.why : null, seconds: o.sum && o.sum.end ? o.sum.end.t : null })) }) };
   }
   if (!/^(ww2|modern)\/\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/.test(m)) throw new Error('match must be "current", "list" or an era/name from the list');
   const r = await httpGet('/ana/r/' + m);
@@ -374,11 +374,12 @@ function stateView(logN) {
     roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
     commandNet: pd.cn || undefined,
+    personality: pd.per || undefined, difficulty: pd.dif || undefined, enemyHabits: pd.hab && pd.hab.length ? pd.hab : undefined,   // W17: the side's AI general, and the roads the enemy is seen to use again and again
   };
   if (!e || !g) out.hint = 'parts that are null have not arrived yet: the host streams ecs about once a second and gen every two seconds';
   return out;
 }
-const pickView = v => { if (!v) return null; const o = {}; for (const k of ['doc', 'post', 'gate', 'atkT', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'res', 'ev', 'mev', 'gue']) if (v[k] !== undefined && v[k] !== null && !(Array.isArray(v[k]) && v[k].length === 0)) o[k] = v[k]; return o; };
+const pickView = v => { if (!v) return null; const o = {}; for (const k of ['doc', 'post', 'gate', 'atkT', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'res', 'ev', 'mev', 'gue', 'per', 'dif', 'hab']) if (v[k] !== undefined && v[k] !== null && !(Array.isArray(v[k]) && v[k].length === 0)) o[k] = v[k]; return o; };
 
 /* ---------------------------------------------------------------- tools */
 const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone; ww2 has no lav/heli/lift/drone)' };

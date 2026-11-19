@@ -467,7 +467,8 @@ RX.gen = (c, m) => {
     gate: txt(v.gate, 8) ? v.gate : '', atkT: num(v.atkT) ? v.atkT : 0, ev: lst(v.ev, 8) ? v.ev : [], evT: num(v.evT) ? v.evT : -1,
     fb: lst(v.fb, 8) ? v.fb : null, res: rec(v.res) ? v.res : null, mev: lst(v.mev, 9) ? v.mev : [], gue: rec(v.gue) ? v.gue : null, kz: rec(v.kz) || lst(v.kz, 96) ? v.kz : null,
     cn: rec(v.cn) && v.cn !== null ? v.cn : null,   // the command network as the side's general sees it (nodes, jammers, the HQ, squads without a link)
-    thb: lst(v.thb, 6) ? v.thb : [], camp: lst(v.camp, 4) ? v.camp : [] };   // the threat board's first rows and the campaigns (F4)
+    thb: lst(v.thb, 6) ? v.thb : [], camp: lst(v.camp, 4) ? v.camp : [],   // the threat board's first rows and the campaigns (F4)
+    per: rec(v.per) ? v.per : null, dif: rec(v.dif) ? v.dif : null, hab: lst(v.hab, 4) ? v.hab : [] };   // the AI general's personality, difficulty and the enemy's habits it knows (W17)
   castSide(c, { t: 'gen', s: m.s, T: m.T, v: o, q: m.q }, m.s);
 };
 RX.glog = (c, m) => {
@@ -751,7 +752,7 @@ function anaHttp(req, res) {
       if (!fs.existsSync(anaFile(o.era, o.id, '.json'))) continue;
       o.size = 0; o.sum = null;
       try { o.size = fs.statSync(anaFile(o.era, o.id, '.ndjson.gz')).size; } catch (e) {}
-      try { const j = JSON.parse(fs.readFileSync(anaFile(o.era, o.id, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net }; } catch (e) {}
+      try { const j = JSON.parse(fs.readFileSync(anaFile(o.era, o.id, '.json'), 'utf8')); o.sum = { src: j.src, end: j.end, fac: j.hdr && j.hdr.fac, doc: j.hdr && j.hdr.doc, watch: j.hdr && j.hdr.watch, net: j.hdr && j.hdr.net, per: j.hdr && j.hdr.per, dif: j.hdr && j.hdr.dif }; } catch (e) {}
       l.push(o);
     }
     return out(200, { on: 1, m: l.map(o => ({ id: o.id, era: o.era, size: o.size, sum: o.sum })) });

@@ -28,10 +28,10 @@ function load(o) {
   if (o.seed) ctx.seed(o.seed);
   ctx.run = (secs, each, dt) => { dt = dt || 1 / 60; for (let n = Math.round(secs / dt); n-- > 0;) { ctx.step(dt); if (each && each(dt) === false) break; } };
   /* an AI × AI conquest match (the hangar's "Assistir" with nobody in the room): w.len the preset (0 Curta), w.doc the doctrines of side 0 and 1,
-     w.min the clock in minutes (default the preset's) */
+     w.per and w.dif the personalities and difficulties of side 0 and 1 (W17: a key of PERS, 'sort' or null; a key of DIF), w.min the clock in minutes (default the preset's) */
   ctx.watch = (era, w) => {
     w = w || {}; const CMD = ctx.$('CMD'); if (w.doc) CMD.use = w.doc.slice();
-    const S = ctx.newState(era, null, { watch: 1, len: w.len || 0 });
+    const S = ctx.newState(era, null, { watch: 1, len: w.len || 0, per: w.per, dif: w.dif });
     if (w.min) S.cq.T = S.cq.T0 = w.min * 60;
     return S;
   };

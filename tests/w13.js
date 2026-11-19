@@ -64,6 +64,10 @@ console.log('-- the questions: missions, unit (the card), lots, mines, threats -
   ok(Lt.ok && lots.length > 0 && Lt.r.lots.length === lots.length && Lt.r.lots.some(l => !l.free) && Lt.r.lots.every(l => typeof l.free === 'boolean'), 'lots: the seat town\'s lots of the side (map version 5), free or built (' + Lt.r.lots.filter(l => l.free).length + ' of ' + lots.length + ' free)');
   const m = $('mineLay')(0, t, P.x + 40, P.z + 40), Mn = A({ q: 'mines' });
   ok(m && Mn.ok && Mn.r.own.length === Mn.r.n && Mn.r.n >= 1 && Mn.r.cap > 0 && Array.isArray(Mn.r.foe) && Array.isArray(Mn.r.sus), 'mines: the side\'s own (one just laid), the enemy mines it knows, its suspect fields, its limit');
+  const big = $('genMissions')(t), e = big.sq[0], w = 'x'.repeat(120), fill = o => Array.from({ length: 40 }, () => Object.assign({}, o, { why: w }));
+  $('genMissions = () => ({ ok: true, why: "", sq: BIG.sq, veh: BIG.veh, air: BIG.air })'); C.BIG = { sq: fill(e), veh: fill(Object.assign({ k: 'tank' }, e)), air: fill(Object.assign({ k: 'cas' }, e)) };
+  const Mb = A({ q: 'missions' }), mb = JSON.stringify(Object.assign({ t: 'gres', to: 1, n: 1 }, Mb)).length;
+  ok(Mb.ok && mb < 16384 && Mb.r.cut === 1 && Mb.r.sq.length === 40 && Mb.r.air.length < 40, 'missions of 40 squads, 40 vehicles and 40 aircraft with long words: cut to fit the relay\'s 16 KB gres (' + mb + ' bytes; the squads kept, ' + (Mb.r.veh.length + Mb.r.air.length) + ' vehicles and aircraft)');
   const Th = A({ q: 'threats' }); ok(Th.ok && Th.r.fronts > 0 && Array.isArray(Th.r.l) && Array.isArray(Th.r.camp) && typeof Th.r.pol === 'object', 'threats: answered to a guest and a bridge too (the host alone could ask it before)');
 }
 

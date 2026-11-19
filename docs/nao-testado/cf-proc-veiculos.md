@@ -16,18 +16,23 @@ Pedido do capitão: "vamos colocar algumas situações alguns padrões nos npcs,
 - `drOf(id, cls)`: um mesmo id pode ter uma entrada por classe (`drFor`); `drEnd`, `drStep`, `sqMan`, `drOnce` e o `unload` passam a classe.
 - README (parágrafo "Procedimentos") e `tests/README.md`; `tests/veh-drills.js` na lista do `tests/all.sh`.
 
-## O que foi e o que NÃO foi testado
+## Testado em bbd5085: ok (tarefa cf-testar-mundo)
 
-Antes da regra nova do capitão (entregar sem testes), passaram nesta branch, depois do merge de main com linha de visada, cobertura e veterania: `veh-drills`, `drills` (com e sem as batalhas de 120 s), `cover`, `missile-los`, `perception`, `online`, `world-online`, `cover-online`, `seat`, `loadout`, `loadout-more`, `loadout-stores`, `transport`, `sky`, `sky-online`, `comms`, `logistics`, `logistics-online`, `civ`, `civ-online`, `civ-war`, `rec`, `rec-online`, `orders-online`, `bridges-online`, `world`, `frame-budget`, `campaign`, `personality` e os `*-relay`. `help` e `vet` passaram em partes isoladas depois das correções.
+- `tests/veh-drills.js` inteiro, com as batalhas de 120 s: passa (60 ok). `tests/help.js` passa, e `tests/drills.js` também, salvo dois procedimentos da **infantaria** (contato depois de silêncio, esperando a carona), fora deste pacote.
+- `tests/bridges.js` passa (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/113).
+- `orders`, `field`, `bases`, `transport` e `vet` têm falhas que não são dos procedimentos de veículo. Com uma cópia da página com `DRILL.on = 0`, as mesmas falhas de `orders.js` e `field.js` aparecem:
+  - `orders`: rotas com pontos de passagem e `fcap`;
+  - `field`: patrulha e ponto de conquista;
+  - a falha a mais de `field` com os procedimentos ligados é uma esquadra a 86–116 m do posto sem procedimento ativo (`dr` vazio);
+  - `transport`: a lista de veículos mudou;
+  - `bases`: limite e IA que constrói;
+  - `vet` quebra com `dsOf`/`.ends` de rota inexistente (`post` → `myRoutes`), código dos 3 lados.
+- `tests/bases.js` roda em ~15 min com a máquina pouco carregada.
 
-**Não verificado** (os últimos merges de main, com #38, #41, #42, #43 e #46, não foram testados; só o smoke):
-- `tests/orders.js`: falhou 2× nesta branch (rodando com a máquina carregada): "fort trench: the general picks the nearest free squad [...] who go to dig (fcap)" e "they reach the place and a trench is started there". Não comparado com main; pode ser um procedimento (ex.: `perimetro`, `area-batida`) atrasando a esquadra que vai cavar, ou carga da máquina.
-- `tests/bases.js`: estourou o tempo (1500 s) com a máquina carregada; não se sabe se passa.
-- `tests/bridges.js`: o teste "demolish again: refused (down)" falhava aqui pelo cool-down do primeiro comando; main (#41) trouxe o mesmo ajuste, mantido no merge. A suíte não foi rodada de novo.
-- `tests/field.js`: o teste do ponto de conquista foi ajustado (tira os jatos inimigos, como `calm`); só aquele bloco foi rodado, não a suíte inteira.
-- `tests/help.js` e `tests/vet.js` não foram rodados inteiros depois das correções.
-- Custo: o código dos procedimentos mede ~0,05 ms do quadro de IA de ~5,9 ms (< 1%); as médias de batalhas com e sem procedimentos variam de −6% a +9% entre sementes (as partidas divergem). Sem medição longa online.
-- Comportamento visto só nos testes: ninguém olhou uma partida para ver se o carro parado na borda da vila esperando infantaria (`cidade`) ou o caminhão parando antes da área batida ficam estranhos ou travam a frente.
+## O que NÃO foi testado
+
+- Partida assistida no navegador: carros chegando a uma vila (`cidade`), comboio sob avião, antiaérea com caça longe e avião sob míssil.
+- Custo de uma partida longa online.
 
 ## Riscos
 

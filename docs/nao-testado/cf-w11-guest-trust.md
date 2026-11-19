@@ -13,16 +13,19 @@ Tudo em `Céu de Ferro 3D.html`, no bloco de logística (`LG`, perto de `Net.rx.
 - Trocar de corpo por outro caminho (`swap` sem `rq`) apaga o registro; fim da logística limpa tudo.
 - Retiradas (`k` 0/1) continuam como antes (só prejudicam o próprio lado; fora do escopo).
 
+## Testado em bbd5085: corrigido (tarefa cf-testar-mundo)
+
+`tests/logistics-online.js`, pelo servidor de verdade (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/120): o convidado requisita um caminhão numa base de suprimento, e o anfitrião tira 5 caixas e anota (`Net.lgRq`).
+- **Bug corrigido:** o reembolso honesto nunca chegava. O `crew` (inf) acaba o fantasma do veículo, o do soldado só vem no estado seguinte, e o `lsp` que vem logo atrás era descartado no `Net.rx.lsp` por falta de fantasma (sem lado). Agora o anfitrião guarda o lado na requisição.
+- Volta inteiro e sai na base: +2 no anfitrião, uma vez.
+- Recusados: o mesmo `lsp` de novo; `lsp {k: 2, n: 20}` repetido sem requisição; o reembolso de dentro do caminhão; o caminhão deixado com metade do hp.
+- `logistics-relay` passa. Em `logistics`, uma falha também no main e fora deste doc (caixas tomadas do caminhão parado por um soldado inimigo).
+
 ## O que NÃO foi testado
 
-Nenhum teste, suíte ou partida (regra do capitão). Só o smoke: a página abre servida pelo `server.js`, o script faz parse e `lgBack`, `Net.lgRq` existem.
-
-Sem verificação:
-- reembolso honesto online ainda chega ao anfitrião (convidado requisita caminhão num depósito com caixas, dirige, volta inteiro a um depósito e sai: o depósito ganha as caixas);
-- a ordem `crew` (inf) antes do `lsp` sempre vale na prática (as duas saem do mesmo `alight`, pelo mesmo WebSocket);
-- `lsp` forjado (n errado, sem requisição, repetido, nó errado) é recusado;
-- ponto de captura como depósito (`k` 3) e base de suprimento (`k` 2);
-- troca de anfitrião no meio (o registro do anfitrião antigo se perde: o próximo reembolso é recusado).
+- Ponto de captura como depósito (`k` 3).
+- Troca de anfitrião no meio de uma requisição.
+- Dois navegadores de verdade (os passos 1 a 6 abaixo à mão).
 
 ## Riscos
 

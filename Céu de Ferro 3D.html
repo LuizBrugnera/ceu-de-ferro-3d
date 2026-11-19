@@ -12100,7 +12100,8 @@ genState = (g => t => {
    the road, both sides), FIELD.base m out of each main base, on an arc r m from the middle of each town over arc rad either side of the way
    to the enemy, a group every gap m, and two walls at each garrison post. slots: ids kept for all of it, after the trees.
    ai: a squad at its post mans what is within post m of it; a soldier under fire looks seek m around its place (rush: on an assault or an
-   escort); a squad holding a post with no enemy within quiet m digs in, `again` s apart, up to cap works a side; an assaulting soldier
+   escort); a squad holding a post with no enemy within quiet m digs in, `again` s apart, up to cap trenches and walls a side (a post
+   has its own cap); a work the general ordered (O.dig) is begun with no enemy within oq m; an assaulting soldier
    with grenades closes on a dug-in enemy within close m to throw m and lobs one in from inside nade m, every `gap` s; art: what an
    occupied trench is worth to a battery (GAI.art.val.trench) */
 const WOODS = { open: 6, per: 400, max: 33000, ww2: { th: .62 }, modern: { th: .675 }, far: .09, reach: 1800, edge: 60, road: 110, tree: 60, town: 560, base: 1600,
@@ -12109,7 +12110,7 @@ const FORT = { slots: 192, pre: 112, slope: .4, foe: 25, lap: .6, cool: 1.5,
   trench: { k: 1, name: 'Trincheira', obj: 'trench', size: [14, 2.6], depth: 2.35, par: .25, time: 40, cap: 12, put: [5, 9], pad: 1.2, road: 11, min: .3, climb: 4, slow: .3, plank: [4.5, .6], conceal: .5, pitch: 2.6, blast: { in: 1.6, out: .1 } },
   bags: { k: 2, name: 'Sacos de areia', obj: 'bags', size: [7, 1.3, 1.4], time: 12, cap: 16, put: [3, 6], pad: .4, road: 9, min: .5, near: 2.6, back: 1.8, conceal: .3, pitch: 2.2, shield: .3 },
   dig: { line: 2, off: 30, town: { r: 240, arc: 1.75, gap: 84 }, garr: 130 },
-  ai: { post: 40, seek: 90, rush: 30, quiet: 500, again: 20, cap: 6, nade: 27, throw: 20, close: 150, gap: 4, art: 1, rise: .5, look: .25 } };
+  ai: { post: 40, seek: 90, rush: 30, quiet: 500, oq: 150, again: 20, cap: 6, nade: 27, throw: 20, close: 150, gap: 4, art: 1, rise: .5, look: .25 } };
 FORT.K = [null, FORT.trench, FORT.bags];
 OBJ.trench = { hp: [150, 0], take: [0, 0, .35], dug: 1.5, veh: trenchBump };
 OBJ.bags = { hp: [36, 0], take: [1, 1, 1], crush: .7 };
@@ -12539,14 +12540,15 @@ function fortPose(m) {
 function fortPlan(t, sq) {
   const A = FORT.ai, e = S.base[1 - t]; let n = 0;
   if (S.net && !Net.ft) return;
-  for (const f of S.forts) if (f.team === t && !f.pre) n++;
+  for (const f of S.forts) if (f.team === t && !f.pre && f.k <= 2) n++;   // the cap is the trenches' and walls'; a post has its own (F.cap)
   for (const q of sq) {
-    const O = q.ord, L = q.men.find(m => !m.dead);
-    if (n >= A.cap || !L || O.k !== 'hold' || !q.at || O.x === undefined || q.fd < A.quiet || S.t < (q.digT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, A.quiet)) continue;
+    const O = q.ord, L = q.men.find(m => !m.dead), qd = O && O.dig ? A.oq : A.quiet;   // a work the general ordered there is dug with the enemy nearer
+    if (!L || O.k !== 'hold' || !q.at || O.x === undefined || q.fd < qd || S.t < (q.digT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, qd)) continue;
     const k = O.dig ? O.dig.k : O.tw || O.b ? 2 : 1, a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
+    if (k <= 2 && n >= A.cap) continue;
     if (S.forts.some(f => f.k === k && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;
     q.digT = S.t + A.again;
-    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * R + ux * s * 9, z = O.z - Math.sin(a) * R + uz * s * 9; if (fortStart(k, t, x, z, a)) { n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
+    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * R + ux * s * 9, z = O.z - Math.sin(a) * R + uz * s * 9; if (fortStart(k, t, x, z, a)) { if (k <= 2) n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
   }
 }
 /* a battery's list: each trench with enemy soldiers in it that have been spotted */
@@ -19335,7 +19337,7 @@ const W21 = { wp: 8, max: 9000, nmax: 6, live: 2, ring: 230, off: [0, .95, -.95]
   rq: { fire: 'fogo de artilharia', recon: 'reconhecimento', cas: 'apoio aéreo', lift: 'transporte' },
   jobs: { push: 1, held: 1, road: 1, line: 1, wood: 1, rec: 1, lp: 1, eng: 1 } };
 Object.assign(GEN.no, { mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até ' + W21.wp + ' pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até ' + W21.max / 1000 + ' km)',
-  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de ' + FORT.ai.cap + ' obras de campanha do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
+  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de ' + FORT.ai.cap + ' trincheiras e parapeitos do lado', pcap: 'Limite de postos deste tipo do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
   mcap: 'Limite de minas do lado', mkn: 'No máximo ' + GPC.n + ' unidades novas por ordem' });   // (SAP comes after this block)
 Object.assign(GEN.cn, { ord: 'ordem ampla', fort: 'fortificar' });
 Net.rx.welcome = (old => m => { Net.rte = m.rte === 1; old(m); })(Net.rx.welcome);   // the relay passes rt (welcome rte: 1)
@@ -19543,8 +19545,9 @@ GC.fort = { d: 'def', f(t, c, by) {
   if (F) {
     if (F.era && F.era !== S.era) return gBad('kind');
     if (K >= 3 && S.net && !Net.sap) return gBad('off');
-    const go = cmdOf(t).ops.filter(o => o.k === 'usr' && !o.over && o.v === 'fort' && opLive(o).some(q => q.ord && q.ord.dig && !S.forts.some(f => f.k === q.ord.dig.k && Math.abs(f.x - q.ord.x) < FORT.ai.post && Math.abs(f.z - q.ord.z) < FORT.ai.post))).length;
-    if (S.forts.reduce((n, f) => n + (f.team === t && !f.pre ? 1 : 0), go) >= FORT.ai.cap) return gBad('fcap');   // the planner starts no more (fortPlan): said now, not left undone
+    const same = j => (K <= 2 ? j <= 2 : j === K);   // trenches and walls share the field works' cap; a post kind has its own (F.cap)
+    const go = cmdOf(t).ops.filter(o => o.k === 'usr' && !o.over && o.v === 'fort' && opLive(o).some(q => q.ord && q.ord.dig && same(q.ord.dig.k) && !S.forts.some(f => f.k === q.ord.dig.k && Math.abs(f.x - q.ord.x) < FORT.ai.post && Math.abs(f.z - q.ord.z) < FORT.ai.post))).length;
+    if (S.forts.reduce((n, f) => n + (f.team === t && !f.pre && !f.gone && same(f.k) ? 1 : 0), go) >= (K <= 2 ? FORT.ai.cap : F.cap)) return gBad(K <= 2 ? 'fcap' : 'pcap');   // the planner starts no more (fortPlan): said now, not left undone
     if (F.cost && ecoSim() && S.eco.d[t] && (S.eco.d[t].en < F.cost[0] || S.eco.d[t].mt < F.cost[1])) return gBad('cost');
   } else if (k === 'aapos') {
     if (ecoSim() ? ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length : S.units.filter(u => u.w21 && u.team === t && !u.dead).length + cmdOf(t).ops.filter(o => !o.over && o.bk === 'aapos').length >= W21.aaCap) return gBad(ecoSim() ? 'res' : 'max');   // those on their way count
@@ -21582,8 +21585,8 @@ anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) 
    bridge falls or a pontoon goes up); the rest is a job of pieces (tmJob) for each side every TM.every s, the sides TM.every / 2 apart,
    TM.per pieces a frame inside the commanders' share of the AI's frame (AIB.g), built aside and swapped in whole. TMB: the job's own time,
    per frame and per refresh, read only. TM.on 0 leaves it out (a measurement's control). Until the
-   commander's first look (cmdSense) C.known is empty and so are the enemy's layers. Nothing the commander chooses reads the map yet (M2
-   will). gask tmap: one layer at TM.ask m */
+   commander's first look (cmdSense) C.known is empty and so are the enemy's layers. Of what the commander chooses, only the fortification
+   plan reads the map yet (AFP: its traffic t and choke points k; M2 will read more). gask tmap: one layer at TM.ask m */
 const TM = { on: 1, cell: 200, every: 4, per: 1, losN: 2, step: 100, ask: 1000, half: 210, hide: .6, far: .4, scr: .5, tgt: 2, max: 64, fold: 8,
   obs: { pt: [1500, 12], base: [1500, 12], fort: [900, 2.5], man: [900, 2], veh: [1500, 3], fix: [1500, 3] },
   reach: { inf: 300, tank: 1000, lav: 700, aa: 600, art: 400, truck: 200, car: 300, rad: 300 },
@@ -21760,6 +21763,218 @@ function tmAsk(t, k) {
 genQuery = (f => (t, q) => (q && q.q === 'tmap' && (t === 0 || t === 1) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && (s === 0 || s === 1))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
+/* ---------- the general's fortification plan (AFP): what an AI general orders built to cover its economy and its seat town ----------
+   Before it, the AI general's works were only what a quiet squad digs where it stands (fortPlan, aidPosts), the sappers' fields and the dome
+   when rounds come down: it never gave a fortify order (W21 fort) of its own, so no AA position, no nest on the approaches, no minefield on
+   the enemy's routes. Every AFP.every s (after AFP.start s), for a side whose defence (def) the AI leads, on a map with the road network
+   (S.T.mv >= 4), where the match is simulated and not over (nor the hangar's demo, nor online with a server without works and sappers):
+   its places are its seat town (else its factory) and its main base, and the plan wants, the first missing one first:
+   - an AA umbrella: a fixed AA within AFP.aa.r m of each place (W21 aapos). With the economy on and no fixed AA in the reserve it records
+     the miss (d.miss.aaf, as a refused entry does) so that the economy makes one, and waits;
+   - on each approach to a place (a road that enters it, at AFP.post.out m outside it), the most exposed first: a threatened approach (the
+     side's known enemy within AFP.thr.r m worth AFP.thr.v or more, or an incident of its threat board there) gets an anti-tank post
+     (atpost), a minefield further out (mineat with armour known, else mineap) and a machine-gun nest (bunker); the AFP.apr[tier] most
+     exposed get the nest, and the anti-tank post too while the side knows enemy armour;
+   - at tier 1, a tower (W21 post, the observation post) at the seat town's edge toward the enemy, and a minefield (mineat) on the road cell
+     of the side's enemy-traffic layer (the tactical map, M1 t) the busiest in its own ground (AFP.mine.min to max m behind its line), up to
+     AFP.trf of them; at tier 2, a nest at the strongest choke point (M1 k) AFP.choke.back m behind its line.
+   tier, the economy's size: 0 with fewer than AFP.tier[0] finished sites, 1 below AFP.tier[1], 2 above; without the economy, 1.
+   At most one order a plan, AFP.ops under way, each through genCmd (the funnel, its refusals and reasons, as a person's), with the builder
+   the plan names: the squad nearest the site within AFP.reach m, by AFP.by (the m added for its job: engineers first, never an assault,
+   a reconnaissance or a post's garrison; the sappers only for a minefield). A paid work goes only when the economy keeps its own reserve
+   after it (aidPay); short of it the plan has the economy save for it (ecoAI holds the make orders that only fill the reserve) for
+   AFP.save s, then lets it go AFP.cool s. The builder goes back to its post when its work is up (AFP.T s at most), with its mission's
+   words back. A work lost is rebuilt AFP.redo s later with no known enemy within AFP.calm m of it; a refusal or a work given up waits
+   AFP.again s. Each decision and refusal goes to the general's log (eng, "Plano de fortificação") and to C.afp.fl (the last AFP.log).
+   No random number is drawn here */
+const AFP = { every: 15, start: 90, ops: 2, look: 24, reach: 2500, T: 480, redo: 120, again: 90, calm: 400, save: 90, cool: 120, log: 40, tries: 3,
+  tier: [3, 6], apr: [1, 2, 3], trf: 2, aa: { r: 700 }, near: 70,
+  post: { out: 90, ahead: 300, off: [24, 34, 44], slide: [0, 15, -15] }, mine: { out: 260, step: 200, far: 1400, min: -200, max: 2500, road: 60, apart: 200 },
+  thr: { r: 900, v: 3 }, choke: { min: .5, back: [300, 2500] },
+  by: { eng: 0, base: 300, egd: 300, guard: 300, held: 500, road: 500, line: 700, wood: 700, garr: 900, sap: 900 } };
+const afpOf = C => C.afp || (C.afp = { T: 0, fo: [], fn: {}, have: {}, lost: {}, save: null, saveC: 0, fl: [], ap: null, apK: '', tier: 0 });
+const afpOn = t => !!S.cmd && !S.over && !(S.demo && !S.watch) && (!S.net || (S.host && Net.ft && Net.sap)) && S.T.mv >= 4 && genBy(t, 'def') === 'ai';
+const afpMine = k => k === 'mineat' || k === 'mineap';
+/* side t's places: its seat town (else its factory) and its main base */
+function afpPlaces(t) {
+  const out = [], w = aidSeat(t), b = S.base[t];
+  if (w) out.push({ id: 'seat', x: w.x, z: w.z, ru: w.ru, nm: 'a cidade-sede' });
+  else { const f = aidSites(t).find(e => e.k === 'fab'); if (f) out.push({ id: 'fab' + f.id, x: f.x, z: f.z, ru: 120, nm: 'a ' + f.name.toLowerCase() }); }
+  out.push({ id: 'base', x: b.x, z: b.z, ru: 260, nm: 'a base' });
+  return out;
+}
+/* the roads into those places, AFP.post.out m outside each, the nearest to the enemy's base first (kept while the places stay) */
+function afpApproaches(C, A, P) {
+  const t = C.t, key = P.map(p => p.id + ':' + Math.round(p.x) + ':' + Math.round(p.z)).join();
+  if (A.ap && A.apK === key) return A.ap;
+  const ds = t ? 1 : -1, e = S.base[1 - t], out = [];
+  for (const p of P) S.T.routes.forEach((r, ri) => {
+    let bs = 0, bd = 1e9; for (let s = 0; s <= r.len; s += 25) { const q = routeAt(r, s), d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; bs = s; } }
+    if (bd > p.ru + 150) return;
+    const s = bs + ds * (p.ru + AFP.post.out); if (s < 0 || s > r.len) return;
+    const q = routeAt(r, s), f = routeAt(r, clamp(s + ds * AFP.post.ahead, 0, r.len));
+    if (out.some(o => Math.hypot(o.x - q.x, o.z - q.z) < 150)) return;
+    out.push({ id: p.id + 'r' + ri, ri, s, x: q.x, z: q.z, dx: q.dx, dz: q.dz, a: headTo(q.x, q.z, f.x, f.z), p, ex: Math.hypot(q.x - e.x, q.z - e.z), nm: 'na entrada de ' + p.nm.replace(/^a /, '') + ' pela rota ' + (ri + 1) });
+  });
+  out.sort((a, b) => a.ex - b.ex);
+  A.apK = key; return (A.ap = out);
+}
+/* a place for work K (a FORT kind) facing a, the first of the candidates [x, z] where it may lie (its cost aside): the builder holds at it and
+   digs 5 m ahead (fortPlan) */
+function afpSpot(t, K, a, cands) {
+  for (const [x, z] of cands) { const w = fortWhy(K, t, x + Math.cos(a) * 5, z - Math.sin(a) * 5, a); if (!w || w === 'cost') return { x, z }; }
+  return null;
+}
+const afpBeside = (o, sides) => { const l = []; for (const sd of sides) for (const off of AFP.post.off) for (const sl of AFP.post.slide) l.push([o.x - o.dz * off * sd + o.dx * sl, o.z + o.dx * off * sd + o.dz * sl]); return l; };
+const afpRing = (x, z) => { const l = [[x, z]]; for (const R of [15, 30, 45]) for (let i = 0; i < 8; i++) l.push([x + Math.cos(i * TAU / 8) * R, z + Math.sin(i * TAU / 8) * R]); return l; };
+/* a minefield across road ri from s outward (ds), at the first point where its middle may lie, within ecoDepth AFP.mine.min..max */
+function afpMineAt(t, ri, s0, k) {
+  const r = S.T.routes[ri], ds = t ? 1 : -1;
+  for (let s = s0; Math.abs(s - s0) <= AFP.mine.far; s += ds * AFP.mine.step) {
+    if (s < 0 || s > r.len) return null;
+    const p = routeAt(r, s), dep = ecoDepth(t, p.x, p.z); if (dep < AFP.mine.min) return null;
+    if (dep > AFP.mine.max || mineWhy(k === 'mineat' ? 0 : 1, t, p.x, p.z)) continue;
+    const f = routeAt(r, clamp(s + ds * 50, 0, r.len)); return { x: p.x, z: p.z, a: headTo(p.x, p.z, f.x, f.z) };
+  }
+  return null;
+}
+/* is it there: a fixed AA over the place, three own mines at the field, or the work of its kind (begun or up) at the site */
+function afpHas(t, it) {
+  if (it.k === 'aapos') return S.units.some(u => !u.dead && u.team === t && u.fixed && u.kind === 'aa' && Math.hypot(u.x - it.cx, u.z - it.cz) < AFP.aa.r);
+  if (afpMine(it.k)) return mines().filter(o => !o.gone && o.team === t && Math.hypot(o.x - it.x, o.z - it.z) < 40).length >= 3;
+  const K = W21.dig[it.k]; return S.forts.some(f => f.team === t && f.k === K && !f.gone && Math.hypot(f.x - it.x, f.z - it.z) < AFP.near);
+}
+/* what side t wants, the first first: { key, k (a W21.fort kind), x z (where it is judged), cx cz (the place, for the AA), why, nm, spot() } */
+function afpWant(C, A) {
+  const t = C.t, ds = t ? 1 : -1, e = S.base[1 - t], P = afpPlaces(t), out = [], arm = aidArmour(C);
+  const tier = !ecoSim() ? 1 : (n => (n < AFP.tier[0] ? 0 : n < AFP.tier[1] ? 1 : 2))(aidSites(t).length);
+  for (const p of P) {   // the AA umbrella
+    const d = Math.hypot(e.x - p.x, e.z - p.z) || 1, c = clearOf(p.x + (e.x - p.x) / d * 40, p.z + (e.z - p.z) / d * 40, 3, {});
+    out.push({ key: 'aa' + p.id, k: 'aapos', x: c.x, z: c.z, cx: p.x, cz: p.z, a: headTo(c.x, c.z, e.x, e.z), nm: 'sobre ' + p.nm, why: 'guarda-chuva antiaéreo sobre ' + p.nm, spot: () => c });
+  }
+  const ap = afpApproaches(C, A, P), thr = [], calm = [];
+  ap.forEach((o, i) => {
+    const v = cmdKnown(C, o.x, o.z, AFP.thr.r), inc = (C.thb || []).some(I => !I.over && Math.hypot(I.x - o.x, I.z - o.z) < AFP.thr.r);
+    const ax = C.known.some(k => !k.dead && !k.man && (tk(k) === 'tank' || tk(k) === 'lav') && Math.abs(k.sx - o.x) < AFP.thr.r && Math.abs(k.sz - o.z) < AFP.thr.r);
+    const hot = v >= AFP.thr.v || inc, L = hot ? thr : calm, why = s => s + ' ' + o.nm + (hot ? ' (ameaça nesse eixo)' : '');
+    if (hot || arm) L.push({ key: 'at' + o.id, k: 'atpost', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('posto anticarro'), spot: () => afpSpot(t, 3, o.a, afpBeside(o, [-1, 1])) });
+    if (hot && sapOn()) { const k = ax || arm ? 'mineat' : 'mineap', m = afpMineAt(t, o.ri, o.s + ds * (AFP.mine.out - AFP.post.out), k); if (m) L.push({ key: 'mf' + o.id, k, x: m.x, z: m.z, a: m.a, nm: o.nm, why: why('campo minado'), spot: () => m }); }
+    if (hot || i < AFP.apr[tier]) L.push({ key: 'mg' + o.id, k: 'bunker', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('ninho de metralhadora'), spot: () => afpSpot(t, 4, o.a, afpBeside(o, [1, -1])) });
+  });
+  out.push(...thr, ...calm);
+  const w = aidSeat(t);
+  if (tier >= 1 && w) {   // the tower at the seat town's edge toward the enemy
+    const d = Math.hypot(e.x - w.x, e.z - w.z) || 1, x = w.x + (e.x - w.x) / d * w.ru * .7, z = w.z + (e.z - w.z) / d * w.ru * .7, a = headTo(x, z, e.x, e.z);
+    out.push({ key: 'twr', k: 'post', x, z, a, nm: 'junto à cidade-sede', why: 'posto de observação na borda da cidade-sede voltada para o inimigo', spot: () => afpSpot(t, 5, a, afpRing(x, z)) });
+  }
+  const M = C.tm, c = M && M.c;
+  if (tier >= 1 && M && M.t && sapOn()) {   // the enemy's habits (M1 t): fields on the busiest road cells of its own ground
+    let n = 0;
+    for (const key in A.have) if (key.startsWith('tr')) n++;
+    const cand = [];
+    for (let q = 0; q < M.t.length; q++) if (M.t[q] > 0) cand.push(q);
+    cand.sort((a, b) => M.t[b] - M.t[a] || a - b);
+    for (const q of cand.slice(0, AFP.look)) {   // the busiest first, a few looked at a plan
+      if (n >= AFP.trf) break;
+      const x = (q % M.nx + .5) * c, z = -S.HW + (((q / M.nx) | 0) + .5) * c, p = railOf(x, z); if (p.d > AFP.mine.road) continue;
+      const dep = ecoDepth(t, x, z); if (dep < AFP.mine.min || dep > AFP.mine.max) continue;
+      const m = afpMineAt(t, p.ri, p.s, 'mineat'); if (!m || mines().some(o => !o.gone && o.team === t && Math.hypot(o.x - m.x, o.z - m.z) < AFP.mine.apart)) continue;
+      out.push({ key: 'tr' + aidKey(m.x, m.z), k: 'mineat', x: m.x, z: m.z, a: m.a, nm: ecoNear(m.x, m.z), why: 'campo minado na rota habitual do inimigo ' + ecoNear(m.x, m.z), spot: () => m }); n++;
+    }
+  }
+  const Kk = M && M.k;
+  if (tier >= 2 && Kk) {   // the choke point (M1 k) behind the line
+    let best = null; const cand = [];
+    for (let q = 0; q < Kk.length; q++) if (Kk[q] >= AFP.choke.min) cand.push(q);
+    cand.sort((a, b) => Kk[b] - Kk[a] || a - b);
+    for (const q of cand.slice(0, AFP.look)) {   // the strongest first, a few looked at a plan
+      const x = (q % M.nx + .5) * c, z = -S.HW + (((q / M.nx) | 0) + .5) * c, p = railOf(x, z); if (p.d > AFP.mine.road) continue;
+      const dep = ecoDepth(t, x, z); if (dep < AFP.choke.back[0] || dep > AFP.choke.back[1]) continue;
+      const r = S.T.routes[p.ri], o = routeAt(r, p.s), f = routeAt(r, clamp(p.s + ds * AFP.post.ahead, 0, r.len));
+      best = { x: o.x, z: o.z, dx: o.dx, dz: o.dz, a: headTo(o.x, o.z, f.x, f.z) }; break;
+    }
+    if (best) out.push({ key: 'ck' + aidKey(best.x, best.z), k: 'bunker', x: best.x, z: best.z, a: best.a, nm: ecoNear(best.x, best.z), why: 'ninho de metralhadora no gargalo ' + ecoNear(best.x, best.z), spot: () => afpSpot(t, 4, best.a, afpBeside(best, [1, -1])) });
+  }
+  return { out, tier };
+}
+/* the builder: the squad nearest the site within AFP.reach m, with what its job weighs (AFP.by), free of every other task */
+function afpBuilder(t, x, z, mine) {
+  let best = null, bd = AFP.reach;
+  for (const q of S.squads) {
+    if (q.team !== t || q.net || !(q.live >= W21.live) || q.state || q.op || q.lift || q.rd || q.qrf || q.sapT || q.dome || (q.aidP && !q.aidP.gone && q.aidP.prog < 1) || aidRide(q)) continue;
+    const pen = mine && q.job === 'sap' ? 0 : AFP.by[q.job]; if (pen === undefined || (q.job === 'sap' && !mine)) continue;
+    const O = q.ord, L = gLead(q); if (!O || !L || O.k === 'supply' || O.k === 'build' || O.b || O.T || O.tw) continue;
+    const d = hdist(L, { x, z }) + pen; if (d < bd) { bd = d; best = q; }
+  }
+  return best;
+}
+function afpSay(C, A, it, ok, s) {
+  A.fl.push({ t: Math.round(S.t), key: it.key, k: it.k, ok: ok ? 1 : 0, why: s }); if (A.fl.length > AFP.log) A.fl.shift();
+  gLog(C.t, 'eng', 'Plano de fortificação: ' + W21.fort[it.k] + ' ' + it.nm + ': ' + s, { x: it.x, z: it.z }, 'afp' + it.key + (ok ? 1 : 0) + s.slice(0, 12));
+}
+/* one item: true when its order went */
+function afpTry(C, A, it) {
+  const t = C.t, K = W21.dig[it.k], F = K ? FORT.K[K] : null, no = s => { A.fn[it.key] = S.t + AFP.again; afpSay(C, A, it, 0, s); return false; };
+  if (it.k === 'aapos' && ecoSim() && ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length) {   // none in the reserve: the economy is told it is short of one
+    const d = S.eco.d[t], m = d.miss.aaf || (d.miss.aaf = []); if (!m.length || S.t - m[m.length - 1] >= ECO.miss) m.push(S.t);
+    A.fn[it.key] = S.t + AFP.every * 2; afpSay(C, A, it, 0, 'aguarda uma antiaérea fixa da produção'); return false;
+  }
+  if (afpMine(it.k) && (!sapOn() || mines().filter(o => !o.gone && o.team === t).length > SAP.cap - W21.mf)) return no('limite de minas do lado');
+  if (F && F.cost && !aidPay(t, F.cost)) {   // the economy saves for it a while, then lets it go a while
+    if (!A.save && S.t >= A.saveC) { const k = ECO.ai.keep; A.save = { en: F.cost[0] + k.en, mt: F.cost[1] + k.mt, T: S.t + AFP.save, key: it.key }; afpSay(C, A, it, 0, 'a economia poupa ' + F.cost[0] + ' de energia e ' + F.cost[1] + ' de metal para a obra'); }
+    A.fn[it.key] = S.t + AFP.every; return false;
+  }
+  const sp = it.spot(); if (!sp) return no('nenhum lugar livre ali');
+  const q = afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + AFP.reach / 1000 + ' km');
+  const mw = q.mis ? q.mis.why : undefined, r = genCmd(t, { c: 'fort', k: it.k, x: sp.x, z: sp.z, a: it.a, ids: [q.id], why: 'plano de fortificação: ' + it.why }, 'ai');
+  if (!r.ok) return no('recusado, ' + gNo(r.why).toLowerCase());
+  const op = C.ops.find(o => o.k === 'usr' && o.id === r.id) || null;
+  A.fo.push({ op, key: it.key, k: it.k, x: sp.x, z: sp.z, cx: it.cx, cz: it.cz, T0: S.t, q, mw, it });
+  if (A.save && A.save.key === it.key) A.save = null;
+  afpSay(C, A, it, 1, 'ordenado (' + (GEN.job[q.job] || q.job).toLowerCase() + ' a ' + Math.round(hdist(gLead(q), sp)) + ' m)');
+  return true;
+}
+/* the orders under way: the builder goes back when its work is up, or the order is given up */
+function afpKeep(C, A) {
+  const t = C.t;
+  for (const o of A.fo.slice()) {
+    const op = o.op, at = { k: o.k, x: o.x, z: o.z, cx: o.cx, cz: o.cz }, has = afpHas(t, at), K = W21.dig[o.k];
+    const up = has && (!K || S.forts.some(f => f.team === t && f.k === K && !f.gone && f.prog >= 1 && Math.hypot(f.x - o.x, f.z - o.z) < AFP.near));
+    const end = !op || op.over ? 'sem construtores' : up && (K || !op.bk) ? 'done' : !K && !op.bk ? 'não foi possível' : S.t - o.T0 > AFP.T ? 'tempo esgotado' : '';
+    if (!end) continue;
+    if (op && !op.over) opEnd(C, op);
+    if (o.q && o.q.mis && o.mw !== undefined && o.q.live > 0 && !o.q.op) o.q.mis.why = o.mw;
+    A.fo.splice(A.fo.indexOf(o), 1);
+    if (end === 'done') { A.have[o.key] = 1; afpSay(C, A, o.it, 1, 'pronto'); }
+    else { A.fn[o.key] = S.t + AFP.again; afpSay(C, A, o.it, 0, 'desiste: ' + end); }
+  }
+}
+function afpPlan(t) {
+  if (!afpOn(t)) return;
+  const C = cmdOf(t), A = afpOf(C);
+  afpKeep(C, A);
+  if (A.save && S.t > A.save.T) { A.save = null; A.saveC = S.t + AFP.cool; }
+  if (S.t < Math.max(A.T, AFP.start)) return;
+  A.T = S.t + AFP.every;
+  const W = afpWant(C, A); A.tier = W.tier;
+  for (const it of W.out) if (A.have[it.key] && !afpHas(t, it) && !A.fo.some(o => o.key === it.key)) { delete A.have[it.key]; A.lost[it.key] = S.t; afpSay(C, A, it, 0, 'perdido; refazer quando o lugar estiver calmo'); }
+  let n = AFP.tries;
+  for (const it of W.out) {
+    if (A.fo.length >= AFP.ops) return;
+    if (A.fo.some(o => o.key === it.key)) continue;
+    if (afpHas(t, it)) { A.have[it.key] = 1; continue; }
+    if (S.t < (A.fn[it.key] || 0)) continue;
+    if (A.lost[it.key] !== undefined && (S.t - A.lost[it.key] < AFP.redo || cmdKnown(C, it.x, it.z, AFP.calm) > 0)) continue;
+    if (afpTry(C, A, it) || --n <= 0) return;   // one order a plan
+  }
+}
+fortPlan = (g => (t, sq) => { g(t, sq); afpPlan(t); })(fortPlan);
+/* the economy saves for a work the plan wants: the make orders that only fill the reserve wait (a reinforcement asked for does not) */
+ecoAI = (g => (t, V) => {
+  const out = g(t, V), C = S.cmd && S.cmd[t], w = C && C.afp && C.afp.save;
+  if (!w || S.t > w.T || (V.stock.en >= w.en && V.stock.mt >= w.mt)) return out;
+  return out.filter(o => o.c !== 'make' || /reforços pedidos/.test(o.why || ''));
+})(ecoAI);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

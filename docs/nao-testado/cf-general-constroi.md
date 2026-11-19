@@ -1,0 +1,85 @@
+# cf-general-constroi: o general da IA fortifica a economia e a cidade-sede (não testado)
+
+Entregue sem testes, pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado").
+
+## O que mudou
+
+Causas encontradas lendo o código (não houve medição antes/depois):
+
+1. **O general da IA nunca dava ordem de fortificar.** A ordem `fort` (W21: posição antiaérea, casamata, posto anticarro, posto de observação, campo minado) só era dada pela pessoa ou pelo modelo (MCP). Sozinha, a IA só tinha a trincheira que uma esquadra quieta cava onde está (`fortPlan`), o posto que ela ergue onde está (`aidPosts`), os campos dos sapadores na entrada da cidade-sede e a cúpula quando caem granadas.
+2. **As trincheiras gastavam o limite dos postos.** `FORT.ai.cap` (6) contava toda obra do lado. As trincheiras que `fortPlan` cava sozinho enchiam esse limite, e daí `fortPlan` não começava mais nenhuma obra, nem um posto ordenado, e `GC.fort` recusava a casamata ou o posto com `fcap`.
+3. **A obra ordenada só começava com o inimigo a mais de 500 m** (`FORT.ai.quiet`) do construtor. Perto da frente, nunca.
+
+Correções em `Céu de Ferro 3D.html`:
+
+- `fortPlan`: o limite de 6 (`FORT.ai.cap`) vale só para trincheiras e parapeitos (k 1 e 2). Os postos ficam com o limite de cada tipo (`F.cap`: anticarro 3, ninho 4, torre 2). A obra ordenada (`O.dig`) começa sem inimigo a 150 m (`FORT.ai.oq`).
+- `GC.fort`: o limite é contado por grupo, com trincheiras e parapeitos juntos e cada tipo de posto à parte. O posto acima do limite é recusado com o motivo novo `pcap` (`GEN.no.pcap`, e também em `mcp-general.js`).
+- **Plano de fortificação (`AFP`, bloco novo no fim da simulação, antes da cena 3D)**, ligado em `fortPlan`. A cada 15 s, a partir de 90 s, num lado com a defesa nas mãos da IA, num mapa com rede de estradas, sem ser a demonstração do hangar nem a partida terminada:
+  - antiaérea fixa sobre a cidade-sede (ou a fábrica) e sobre a base. Sem antiaérea fixa na reserva, registra a falta em `d.miss.aaf` para a produção fazer uma, e espera;
+  - nas entradas mais expostas (estrada que entra no lugar, 90 m fora dele): ninho de metralhadora, e posto anticarro quando o lado conhece blindados. Quantas entradas: 1, 2 ou 3, conforme o nível da economia (`AFP.tier`, contado pelas instalações prontas);
+  - numa entrada ameaçada (inimigo conhecido valendo 3 ou mais a 900 m, ou um incidente do quadro de ameaças): posto anticarro, campo minado mais à frente e ninho, em qualquer nível;
+  - no nível 1: torre de observação na borda da cidade-sede voltada para o inimigo, e até 2 campos minados nas células de maior tráfego inimigo do mapa tático (M1 `t`) no próprio terreno;
+  - no nível 2: ninho no gargalo mais forte (M1 `k`) atrás da linha;
+  - uma ordem por plano e no máximo 2 em andamento, sempre pelo `genCmd` (as mesmas recusas do jogador). O construtor é a esquadra livre mais perto, a até 2,5 km, com engenharia primeiro e nunca assalto, reconhecimento ou guarnição de posto. Ele volta ao seu lugar quando a obra fica pronta (ou depois de 480 s), com o "porquê" da missão de volta;
+  - obra paga só sai se sobrar a reserva da economia (`aidPay`). Faltando, a economia poupa para ela por 90 s (o `ecoAI` segura as ordens `make` que só enchem a reserva, mas não os reforços pedidos) e depois a deixa por 120 s;
+  - obra perdida é refeita 120 s depois, com nenhum inimigo conhecido a 400 m. Recusa ou desistência espera 90 s;
+  - cada decisão e cada recusa vão para o diário (`eng`, "Plano de fortificação: ...") e para `C.afp.fl` (as últimas 40).
+- Documentação: o README ganhou o parágrafo "Fortificação" e a frase do mapa tático, e o comentário do TM foi atualizado ("só o plano de fortificação lê o mapa").
+
+## O que foi verificado
+
+Só a checagem de fumaça (cerca de 1 min):
+
+- a página carrega no harness. Nas duas épocas, num mapa v6 com economia e o planejador forçado a começar em 0 s a cada 2 s, 25 s de partida rodaram sem erro e sem NaN, e o diário mostra decisões (o ninho na entrada da cidade-sede ordenado, a antiaérea esperando a produção, "nenhuma esquadra livre" na base);
+- o servidor sobe e devolve 200 na página.
+
+## O que NÃO foi testado
+
+- Nenhuma suíte (`tests/*.js`) rodou depois da mudança, nem `tests/all.sh`.
+- Não houve medição antes/depois numa partida IA × IA de 15 min ou mais. **Não há números** de quantas obras cada general constrói, nem de quantas ficam prontas.
+- Não foi verificado que o construtor chega, constrói e volta: o fim da operação `usr`, o "porquê" restaurado, a guarnição do posto que chega.
+- Não foram verificados: a posição antiaérea saindo da reserva depois da falta registrada; os campos minados pelo tráfego (dependem de hábitos inimigos, que levam minutos para aparecer); o ninho no gargalo (nível 2); a reconstrução de obra perdida; a poupança da economia (efeito sobre a produção e o equilíbrio).
+- Online (anfitrião com servidor novo): não testado.
+- O custo por quadro do plano: a varredura de entradas é guardada em cache, e as do tráfego e dos gargalos olham no máximo 24 células por plano, mas nada disso foi medido.
+
+## Riscos
+
+- **Suítes que podem quebrar:**
+  - `tests/aid.js`: a partida IA × IA do fim e as cenas com `S.over` falso. O plano pode tirar a esquadra `base` (a reserva) para construir.
+  - `tests/orders.js` e `tests/w13.js`: o lado 1 da IA pode pegar esquadras criadas pelo teste depois de 90 s.
+  - `tests/tmap.js`, "a partida igual com e sem o mapa": deve continuar igual, porque o tráfego e os gargalos só entram no nível 1 ou 2 e com hábitos vistos, mas pode divergir.
+  - As comparações de paridade (`PARITY=`, `BEFORE=`) mudam de propósito: a IA agora constrói.
+- **Mudança de regra:** `fcap` agora vale só para trincheiras e parapeitos. Um teste que esperava `fcap` para um posto vai receber `pcap`, ou `ok`.
+- **Equilíbrio:**
+  - tirar esquadras de linha ou de guarda por até 8 min pode enfraquecer a defesa dos pontos;
+  - a poupança da economia pode atrasar a reserva;
+  - postos e minas podem frear os ataques do outro lado.
+- **Recusas no diário:** a "posição antiaérea aguarda produção" se repete a cada 30 s (o diário corta a repetição com `GEN.dup`).
+- **Minas perto da base:** um campo minado não fica na estrada a menos de 1350 m da própria base (`SAP.base`), então a entrada da base raramente ganha um.
+
+## Como testar depois
+
+1. As suítes que tocam a região:
+   ```
+   SECS=240 node tests/aid.js
+   node tests/orders.js
+   node tests/w13.js
+   SECS=60 node tests/tmap.js
+   node tests/forts.js
+   node tests/posts.js
+   node tests/sappers.js
+   node tests/production.js
+   SECS=300 node tests/campaign.js
+   node tests/eco-war.js
+   ```
+   E as online: `node tests/forts-online.js`, `node tests/sappers-online.js`, `node tests/orders-online.js`.
+2. Medição antes/depois (o pedido original): uma partida IA × IA por época, mapa v6, economia ligada, 15 min ou mais, contando por minuto e por lado as obras por tipo (`S.forts` com k 3, 4, 5 e 6, sem `pre`), as minas (`mines()`), as antiaéreas fixas (`u.fixed && u.kind === 'aa'`) e as linhas "Plano de fortificação" do diário (`S.glog.l[t]`). Rode com a página de `main` antes deste PR (`PAGE=<cópia antiga>`) e com esta. Um roteiro pronto está no histórico da tarefa (`measure.js`): `H.load({ seed, mapv: 6, eco: true, lg: 1, rec: 1 })`, `C.watch(era, {})`, `C.run(60)` por minuto. O que esperar:
+   - em até 5 min, cada lado tem um ninho na entrada da cidade-sede e uma antiaérea sobre ela;
+   - um inimigo conhecido numa entrada traz o posto anticarro e o campo minado nesse eixo.
+3. Testes a escrever (sugestão, em `tests/aid.js` ou uma suíte nova `tests/afp.js`):
+   - num campo vazio do mapa v6 (`field`), com uma esquadra `eng` perto da cidade-sede, `afpPlan(0)` ordena o ninho na entrada e ele fica pronto;
+   - inimigo blindado conhecido na entrada: posto anticarro e `mineat` nesse eixo;
+   - obra destruída: refeita depois de `AFP.redo` com o lugar calmo;
+   - economia sem reserva: `C.afp.save` aparece e o `ecoAI` segura o `make`;
+   - `GC.fort` com um posto acima do limite responde `pcap`, e 6 trincheiras não impedem um ninho.
+4. No jogo: "Assistir" no hangar, Tab, diário do general. Procure "Plano de fortificação" e veja no mapa as obras perto da cidade-sede.

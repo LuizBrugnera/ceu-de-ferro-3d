@@ -5924,7 +5924,8 @@ const SQUAD = { ww2: [0, 0, 0, 1, 2], modern: [0, 0, 0, 1, 2, 3] };
 const MAN = { hp: 22, sc: 1.7, r: .42, walk: 2.7, run: 5.6, stam: 9, rest: 14, wind: .3, turn: 7, stT: .45, swap: .7, zone: [1, 3, .6, .5], band: [.45, .86], armP: .2, limp: [.07, .6], shake: .12,
   move: 1.9, ads: { sp: .4, fov: 34, spd: .55 }, see: 1100, air: 2.5, flash: 1.5, body: 25, over: 2, reach: 14, fill: 3,
   nade: { n: 2, dmg: 60, r: 11, spd: 17, cool: 1.6 }, smk: { n: 1, r: 15, h: 8, spd: 15 } };
-const ROADH = 2.2;   // the scene's road deck above the ground it follows
+const ROADH = .35;   // the scene's road deck above the ground it follows (was 2.2, which showed as a floating ribbon from the side; the depth bias polygonOffset does the rest)
+const BRDH = 2.2;   // a bridge's deck above the ground (bridges keep their old height)
 const ZONE = ['tronco', 'cabeça', 'pernas', 'braços'];
 /* stances: h body height and eye, m; spd of the walk; sp of the spread; vis of the distance it is seen at; blast: what a burst leaves */
 const STANCE = [{ name: 'Em pé', h: 1.75, eye: 1.62, spd: 1, sp: 1, vis: 1, blast: 1 }, { name: 'Agachado', h: 1.15, eye: 1.05, spd: .5, sp: .6, vis: .6, blast: .8 }, { name: 'Deitado', h: .45, eye: .32, spd: .22, sp: .35, vis: .3, blast: .3 }];
@@ -6917,9 +6918,9 @@ function spawnPlayer() {
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
-  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s);
+  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s) + (u.cox || 0);
   u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * L; u.z = p.z + p.dx * L; u.y = hgt(u.x, u.z);
-  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
+  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2) + (u.cox || 0); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
 }
 /* one ground vehicle whoever drives it: h hull heading, ty turret yaw from the hull, tp gun pitch, f the gun line.
    ctl is all a controller (AI, player input) may touch: aim is the direction the turret slews to, aim2 a free gun's own line,
@@ -8846,6 +8847,113 @@ function bump(u, x, z, cx, cz) {
   if (slow < 1) u.sp = clamp(u.sp, -u.def.spd * slow, u.def.spd * slow);
   return BUMP;
 }
+/* ---------- hull against hull (VCOL) ----------
+   After every vehicle has moved, each ground vehicle is a capsule (the segment between its fore and aft circles of its half width) and two
+   that overlap are pushed apart by weight (ramW; m0 for a hull with none): the lighter is shoved further, a fixed one (an emplaced gun) does
+   not move, nor does one another client drives (u.net: it gives its own share on its own client, so the room settles as one). A hull on its
+   rail is pushed along its rail (s) and to its side (u.cox, which place and tripMove add to its lane and which eases back at `back` m/s); one
+   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow: each hull takes hit of its hp times its blow squared, its blow
+   2 * (the other's weight share) * closing speed / v[1], so a car that rams a tank pays for it and a tank barely feels a car; a heavy tracked
+   hull (tank) closing at crush.v on a hull of crush.w weight or less drives over it (crush.dmg of its hp more, and the tank slows). Every
+   client deals only its own hulls' blows and pushes (rx), as RAM does; no message. cd: s between two blows of one hull. A rail hull with a
+   hull ahead in contact is held (its brain's rest, rest s); held jam s in a row it sidesteps side m round it (ease m/s), as the off-rail
+   brains already do by jammed. cell: the broad phase's grid, m; dy: two hulls further apart in height do not touch (a bridge and the road under) */
+const VCOL = { on: 1, cell: 16, dy: 4, m0: .3, v: [2.5, 20], hit: .25, e: .2, cd: .6, crush: { w: .2, v: 4, dmg: .5, slow: .7 }, rest: .6, jam: 2, side: 4.5, ease: 1.5, back: .5 };
+const VG = new Map(), VB = [], VP = [], SS = { s: 0, t: 0 };
+/* the closest points of segments a-b and c-d: their parameters s (on a-b) and t (on c-d), in SS */
+function segSeg(ax, az, bx, bz, cx, cz, dx, dz) {
+  const ux = bx - ax, uz = bz - az, vx = dx - cx, vz = dz - cz, rx = ax - cx, rz = az - cz, a = ux * ux + uz * uz, e = vx * vx + vz * vz, f = vx * rx + vz * rz;
+  let s = 0, t = 0;
+  if (a < 1e-9 && e < 1e-9) { SS.s = SS.t = 0; return SS; }
+  if (a < 1e-9) t = clamp(f / e, 0, 1);
+  else {
+    const c = ux * rx + uz * rz;
+    if (e < 1e-9) s = clamp(-c / a, 0, 1);
+    else {
+      const b = ux * vx + uz * vz, den = a * e - b * b;
+      s = den > 1e-9 ? clamp((b * f - c * e) / den, 0, 1) : 0; t = (b * s + f) / e;
+      if (t < 0) { t = 0; s = clamp(-c / a, 0, 1); } else if (t > 1) { t = 1; s = clamp((b - c) / a, 0, 1); }
+    }
+  }
+  SS.s = s; SS.t = t; return SS;
+}
+const vcolIm = u => (u.fixed ? 0 : 1 / (ramW(u) || VCOL.m0));   // the inverse of its weight: 0, it does not move
+/* moves hull u by px pz: along and beside its rail on one, over the ground off one (not into the water or off the map) */
+function vcolMove(u, px, pz) {
+  const fx = Math.cos(u.h), fz = -Math.sin(u.h), al = px * fx + pz * fz, la = px * -fz + pz * fx;
+  if (u.rail) {
+    const T = u.trip;
+    if (T) T.s = clamp(T.s + al, 0, T.p.len);
+    else u.s = clamp(u.s + al * u.ds, 0, S.T.routes[u.ri].len);
+    u.cox = clamp((u.cox || 0) + la * (T ? 1 : u.ds), -VCOL.side * 1.5, VCOL.side * 1.5);
+  } else {
+    const x = u.x + px, z = u.z + pz, y = hgt(x, z);
+    if (y <= S.T.WL + .3 && !u.def.swim || x < 0 || x > S.W || Math.abs(z) > S.HW) return;
+    u.y = y;
+  }
+  u.x += px; u.z += pz;
+}
+/* one blow of hull u, closing at v m/s, of weight share k (2 * the other's share): it pays hit of its hp times its blow squared */
+function vcolHit(u, o, v, k, x, z, crush) {
+  if (u.net || u.dead || S.t < (u.vcT || 0)) return;
+  u.vcT = S.t + VCOL.cd;
+  const imp = k * v / VCOL.v[1], by = o.team !== u.team ? o : null, h = { k: HK.blast, pt: 0 };
+  damageUnit(u, u.def.hp * (VCOL.hit * imp * imp + (crush ? VCOL.crush.dmg : 0)), by, true, h);
+  for (let i = 0; i < 2; i++) puff(x + rand(-1, 1), u.y + rand(.5, 2), z + rand(-1, 1), 'dust', 1.5, rand(-2, 2), rand(0, 2), rand(-2, 2));
+  const d = dist(u, S.ear); if (d < 1500) { fx.boom(8 + 10 * Math.min(1, imp), d); if (u === S.my) S.shake = Math.max(S.shake, .2 + .35 * Math.min(1, imp)); }
+}
+function vehCol(dt) {
+  if (!VCOL.on) return;
+  let C = VCOL.cell; VG.clear(); VB.length = 0;
+  for (const u of S.units) if (!u.dead) C = Math.max(C, 2 * u.def.env[3] + 1);   // a cell no smaller than two hulls end to end: the 3 x 3 cells round one hold all it can touch
+  for (const u of S.units) {
+    if (u.dead || u.gone) continue;
+    if (!u.rail) u.cox = 0;
+    else if (u.cox || u.coxW) { if (S.t - (u.vcC || -9) > VCOL.jam) u.coxW = 0; const w = u.coxW || 0; if (w !== u.cox) u.cox += clamp(w - u.cox, -(w ? VCOL.ease : VCOL.back) * dt, (w ? VCOL.ease : VCOL.back) * dt); }
+    const e = u.def.env, hw = e[5], off = Math.max(0, e[3] - hw), cx = Math.cos(u.h), cz = -Math.sin(u.h), i = Math.floor(u.x / C), j = Math.floor(u.z / C), key = i * 65536 + j;
+    const b = VP[VB.length] || (VP[VB.length] = { u: null, ax: 0, az: 0, bx: 0, bz: 0, r: 0, i: 0, j: 0, n: 0 }); b.u = u;   // a pool: nothing is kept on the unit
+    b.ax = u.x + cx * off; b.az = u.z + cz * off; b.bx = u.x - cx * off; b.bz = u.z - cz * off; b.r = hw; b.i = i; b.j = j; b.n = VB.length;
+    VB.push(b); const l = VG.get(key); if (l) l.push(b); else VG.set(key, [b]);
+  }
+  for (const A of VB) for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+    const l = VG.get((A.i + di) * 65536 + A.j + dj); if (!l) continue;
+    for (const B of l) if (B.n > A.n) vcolPair(A, B, dt);
+  }
+  for (const b of VB) b.u = null;
+}
+function vcolPair(A, B, dt) {
+  const a = A.u, b = B.u;
+  if (Math.abs(a.y - b.y) > VCOL.dy || Math.abs(a.x - b.x) > A.r + B.r + 20 || Math.abs(a.z - b.z) > A.r + B.r + 20) return;
+  const ia = vcolIm(a), ib = vcolIm(b), ma = !a.net && ia > 0, mb = !b.net && ib > 0;
+  if (!ma && !mb) return;
+  const q = segSeg(A.ax, A.az, A.bx, A.bz, B.ax, B.az, B.bx, B.bz), px = A.ax + (A.bx - A.ax) * q.s, pz = A.az + (A.bz - A.az) * q.s, qx = B.ax + (B.bx - B.ax) * q.t, qz = B.az + (B.bz - B.az) * q.t;
+  let nx = px - qx, nz = pz - qz, d = Math.hypot(nx, nz);
+  const pen = A.r + B.r - d; if (pen <= 0) return;
+  if (d > 1e-4) { nx /= d; nz /= d; } else { nx = a.x - b.x; nz = a.z - b.z; d = Math.hypot(nx, nz); if (d > 1e-4) { nx /= d; nz /= d; } else { nx = Math.sin(a.h); nz = Math.cos(a.h); } }   // n: from b to a
+  const sa = ia / (ia + ib), sb = 1 - sa, cx = (px + qx) / 2, cz = (pz + qz) / 2;
+  if (ma) vcolMove(a, nx * pen * sa, nz * pen * sa);
+  if (mb) vcolMove(b, -nx * pen * sb, -nz * pen * sb);
+  /* who is held: a rail hull whose nose is into the other; held jam s it sidesteps round it, to the side it already is on */
+  for (const [u, o, s] of [[a, b, -1], [b, a, 1]]) {
+    if (u.net || !u.rail || !u.ai) continue;
+    const fx = Math.cos(u.h), fz = -Math.sin(u.h);
+    if ((fx * nx + fz * nz) * s < .3) continue;
+    u.ai.rest = Math.max(u.ai.rest || 0, S.t + VCOL.rest);
+    if (S.t - (u.vcC || -9) > 1) u.vcJ = S.t; u.vcC = S.t;
+    if (S.t - u.vcJ > VCOL.jam && !u.coxW) { const l = (u.x - o.x) * -fz + (u.z - o.z) * fx; u.coxW = (l > .5 ? 1 : l < -.5 ? -1 : (u.id && u.id.length & 1) ? 1 : -1) * VCOL.side * (u.trip ? 1 : u.ds); }
+  }
+  /* the blow: closing speed along n, the speeds it leaves (an inelastic knock, e of it back), and what each pays */
+  const van = a.v.x * nx + a.v.z * nz, vbn = b.v.x * nx + b.v.z * nz, vc = vbn - van;
+  if (vc <= 0) return;
+  const j = (1 + VCOL.e) * vc / ((ia + ib) || 1);
+  for (const [u, im, s] of [[a, ia, 1], [b, ib, -1]]) if (!u.net && !u.rail && im > 0) { const f = Math.cos(u.h) * nx - Math.sin(u.h) * nz; u.sp = clamp(u.sp + s * j * im * f / GSPD, -u.def.spd, u.def.spd); }
+  if (vc < VCOL.v[0] || ia + ib <= 0) return;
+  const K = VCOL.crush, wa = ramW(a), wb = ramW(b);
+  const crA = b.kind === 'tank' && wa <= K.w && vc >= K.v && vbn > K.v / 2 && !a.def.rad, crB = a.kind === 'tank' && wb <= K.w && vc >= K.v && -van > K.v / 2 && !b.def.rad;   // a light car under a tank's tracks
+  vcolHit(a, b, vc, 2 * sa, cx, cz, crA); vcolHit(b, a, vc, 2 * sb, cx, cz, crB);
+  if (crA && !b.net && !b.rail) b.sp *= K.slow;
+  if (crB && !a.net && !a.rail) a.sp *= K.slow;
+}
 function turret(u, dt) {
   const d = u.def, a = u.ctl.aim, sl = d.sl * u.mod.slew;
   if (a && d.sl) {
@@ -8893,7 +9001,7 @@ function placeOn(u, p, s, l) {
 function tripMove(u, dt) {
   const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt * dirtK(u, T.p, T.s));   // slower on a dirt road on wheels (map version 8)
   if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
-  placeOn(u, T.p, T.s, orgTrip(u, T, dt));
+  placeOn(u, T.p, T.s, orgTrip(u, T, dt) + (u.cox || 0));   // + where a hull it met pushed it (VCOL)
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
   if (T.s >= T.p.len - 1e-6) tripEnd(u);
 }
@@ -11293,6 +11401,7 @@ function step(dt) {
   for (const p of S.planes) { if (p.net) { stepGhost(p, dt); continue; } if (p.ai && !p.dead) aiPlane(p, dt); stepPlane(p, dt); }
   heliStep(dt);
   for (const u of S.units) if (!u.dead) stepUnit(u, dt);
+  vehCol(dt);   // hull against hull, once all have moved (VCOL)
   for (const m of S.men) { if (!m.dead) stepMan(m, dt); else if (S.t - m.deadT > MAN.body) m.gone = true; }
   a0 = AIB.now(); AIB.u += a0 - a1;
   fortMen(dt);
@@ -17592,6 +17701,9 @@ function kzSite(C, ri, u, ds) {
   if (sum < K.scout) return null;
   (C.kzT || (C.kzT = []))[ri] = S.t + K.again; return { ri, s: bs, kz: 1 };
 }
+/* an assault before its H-hour: forming up, the manoeuvre's walk and the recon of the procedures (M3: mv, rec), the preparation and the screen.
+   wait: only the states where it is not yet formed up for its H-hour (form, mv, rec), for a campaign that waits for its fronts */
+function atkPreH(op, wait) { const s = op.st; return s === 'form' || s === 'mv' || s === 'rec' || (!wait && (s === 'prep' || s === 'screen')); }
 function cmdColumns(C, sq) {
   const t = C.t, R = S.T.routes, G = CMD.react, hold = S.t + FIELD.every + .4, lead = [];
   for (const u of S.units) {
@@ -17604,7 +17716,7 @@ function cmdColumns(C, sq) {
     }
     dVeh(u);
     if (!u.rail) continue;
-    for (const op of C.ops) if (op.k === 'atk' && op.ri === u.ri && (u.kind === 'tank' || u.kind === 'aa' || (S.cq && u.kind === 'lav')) && (op.st === 'form' || op.st === 'prep' || op.st === 'screen') && (S.cq || S.t - op.T0 < CMD.hold) && (u.s - op.fs) * op.sd > -40 && (op.O.s - u.s) * op.sd > 0) A.rest = hold;
+    for (const op of C.ops) if (op.k === 'atk' && op.ri === u.ri && (u.kind === 'tank' || u.kind === 'aa' || (S.cq && u.kind === 'lav')) && atkPreH(op) && (S.cq || S.t - op.T0 < CMD.hold) && (u.s - op.fs) * op.sd > -40 && (op.O.s - u.s) * op.sd > 0) A.rest = hold;
     if (!lead[u.ri] || (u.s - lead[u.ri].s) * dsOf(t, u.ri) > 0) lead[u.ri] = u;
   }
   const H = C.hit;
@@ -18603,7 +18715,7 @@ function fntPos(C, t, P2) {
   }
   return best;
 }
-const fntOps = C => C.ops.filter(o => o.k === 'atk' && !o.over && o.O.tw && (o.st === 'form' || ((o.st === 'prep' || o.st === 'screen') && o.H - S.t > 10)));
+const fntOps = C => C.ops.filter(o => o.k === 'atk' && !o.over && o.O.tw && (atkPreH(o, 1) || ((o.st === 'prep' || o.st === 'screen') && o.H - S.t > 10)));
 const fntSquad = (t, C, pos) => {
   const free = manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state && !(q.fd < FNTX.fd))).map(q => [q, q.men.find(m => !m.dead)]).filter(a => a[1]).sort((a, b) => hdist(a[1], pos) - hdist(b[1], pos));
   for (const [q, L] of free.slice(0, 2)) {
@@ -18878,7 +18990,7 @@ function campTick(C) {
     }
     if (S.t - K.T0 > CAMP.life) { campEnd(C, K, 'tempo esgotado'); continue; }
     if (K.st !== 'form') continue;
-    const late = live.filter(o => o.k === 'atk' && o.st === 'form').length;
+    const late = live.filter(o => o.k === 'atk' && atkPreH(o, 1)).length;
     if (late && S.t >= K.H - CAMP.step / 2 && (K.sl || 0) < CAMP.slip / CAMP.step) {
       K.H += CAMP.step; K.sl = (K.sl || 0) + 1; for (const o of live) campSync(K, o);
       gLog(t, 'atk', 'Hora H da campanha adiada ' + CAMP.step + ' s: ' + late + (late > 1 ? ' frentes ainda em reunião' : ' frente ainda em reunião'), null, 'camph' + K.id);
@@ -20787,7 +20899,7 @@ const GEN = { log: 80, dup: 45, vm: .25, fps: 24, pan: .5, px: 1100, tk: 10, clu
   job: { eng: 'Engenharia', line: 'Linha', garr: 'Guarnição', mort: 'Morteiro', wood: 'Observação', road: 'Patrulha', base: 'Reserva', push: 'Assalto', amb: 'Emboscada', rec: 'Reconhecimento', lp: 'Posto de escuta', guard: 'Guarda da base', held: 'Ocupação', col: 'Coluna' },
   tag: { eng: 'ENG', line: 'LIN', garr: 'GRN', mort: 'MRT', wood: 'OBS', road: 'PAT', base: 'RES', push: 'ASL', amb: 'EMB', rec: 'REC', lp: 'PE', guard: 'GDA', held: 'OCP', col: 'COL' },
   ord: { hold: 'manter', assault: 'assaltar', patrol: 'patrulhar', flank: 'flanquear', withdraw: 'recuar', supply: 'reabastecer', build: 'construir', ambush: 'emboscar', escort: 'escoltar', bait: 'isca', overwatch: 'apoio de fogo', scout: 'reconhecer', mortar: 'morteiro', observe: 'observar', move: 'deslocar' },
-  st: { form: 'REUNIÃO', prep: 'PREPARAÇÃO', screen: 'FUMAÇA', go: 'ASSALTO', fight: 'COMBATE', cons: 'CONSOLIDAÇÃO', back: 'RECUO', set: 'ARMADA', fire: 'DISPARADA', plan: 'PLANEJADA' },
+  st: { form: 'REUNIÃO', mv: 'MANOBRA', rec: 'RECONHECIMENTO', prep: 'PREPARAÇÃO', screen: 'FUMAÇA', go: 'ASSALTO', fight: 'COMBATE', cons: 'CONSOLIDAÇÃO', back: 'RECUO', set: 'ARMADA', fire: 'DISPARADA', plan: 'PLANEJADA' },
   why: { go: 'ATACA', weak: 'força insuficiente', pool: 'poucas esquadras', def: 'rota em defesa', busy: 'já há assalto nesta rota' },
   gate: { cool: 'aguardando o próximo assalto', max: 'limite de assaltos simultâneos', took: 'linha inimiga ocupada', none: 'sem objetivo' },
   kind: { inf: 'Infantaria', tank: 'carro de combate', lav: 'blindado leve', aa: 'defesa antiaérea', art: 'artilharia', truck: 'caminhão', car: 'viatura', rad: 'rádio' },
@@ -20827,6 +20939,8 @@ function genPosture(C) {
   if (op) {
     const nm = gName(op.O), H = op.H ? Math.max(0, Math.round(op.H - S.t)) : 0;
     if (op.st === 'form') return { k: 'Ofensiva', s: 'Reunindo ' + opLive(op).length + ' esquadras para atacar ' + nm + '.' };
+    if (op.st === 'mv') return { k: 'Ofensiva', s: 'Manobra a caminho da posição de assalto em ' + nm + '; a fixação ocupa a base de fogo.' };
+    if (op.st === 'rec') return { k: 'Ofensiva', s: 'Reconhecendo as abordagens de ' + nm + ' antes do assalto.' };
     if (op.st === 'prep' || op.st === 'screen') return { k: 'Ofensiva', s: 'Fogo de preparação sobre ' + nm + (op.smk ? ', fumaça a caminho' : '') + '; hora H ' + (H ? 'em ' + H + ' s' : 'agora') + '.' };
     if (op.st === 'go') return { k: 'Ofensiva', s: 'Assalto em curso contra ' + nm + (op.smk ? ', atrás da fumaça.' : ', por lances.') };
     if (op.st === 'fight') return { k: 'Ofensiva', s: 'Combate dentro de ' + nm + '.' };
@@ -24486,7 +24600,7 @@ function aidGrad(C, A) {
   let tg = null, why = '';
   const dm = S.forts.find(f => f.k === 6 && f.team !== t && !f.gone && f.prog >= 1 && (f.kn & (1 << t)) && inR(f));
   if (dm) { tg = dm; why = 'saturar a cúpula antifoguete inimiga'; }
-  else { const op = C.ops.find(o => o.k === 'atk' && !o.over && (o.st === 'form' || o.st === 'prep' || o.st === 'screen') && !o.aidG && o.O && inR(o.O)); if (op) { tg = op.O; op.aidG = 1; why = 'preparação antes da hora H'; } }
+  else { const op = C.ops.find(o => o.k === 'atk' && !o.over && atkPreH(o) && !o.aidG && o.O && inR(o.O)); if (op) { tg = op.O; op.aidG = 1; why = 'preparação antes da hora H'; } }
   if (!tg) return;
   const M = cmdMission(C, 'he', tg.x, tg.z, w.sal, AID.grad.life); M.by = u; A.gT = S.t + AID.grad.again;
   gLog(t, 'fire', 'Lançador de foguetes: salva de ' + w.sal + ' para ' + why + ' ' + ecoNear(tg.x, tg.z), u, null, tg);
@@ -28911,7 +29025,7 @@ function m5Atk(C, op) {
   }
 }
 atkOpen = (g => (...a) => { const op = g(...a); if (op && a[0]) m5Atk(a[0], op); return op; })(atkOpen);
-OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && (op.st === 'form' || op.st === 'prep' || op.st === 'screen')) m5Atk(C, op); })(OPS.atk);
+OPS.atk = (g => (C, op) => { g(C, op); if (!op.over && atkPreH(op)) m5Atk(C, op); })(OPS.atk);
 /* a tank holding its firing place: its brain fights as ever from off its road; the drive is the place's */
 AI.tank = (old => (u, dt) => {
   const A = u.ai, H = A && A.m5;
@@ -30001,12 +30115,16 @@ function buildWorld() {
   for (let c = 0; c < RN.w.length; c++) {
     const es = roadsOf(T).filter(e => e.c === c); if (!es.length) continue;
     const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], hw = RN.w[c];
+    const NC = 5;   // vertices across: the two edges sink into the ground (a blended shoulder, no gap seen from the side), the three inner ones lie ROADH above it
     for (const E of es) {
-      const r = E.p, n = T.net ? Math.max(1, Math.round(r.len / 45)) : Math.floor(r.len / 45), st = T.net ? r.len / n : 45;
+      const r = E.p, n = Math.max(1, Math.round(r.len / 12)), st = r.len / n;   // a vertex every ~12 m (was 45), so no straight segment spans a bump
       for (let i = 0; i <= n; i++) {
-        const p = routeAt(r, i * st), ax = p.x - p.dz * hw, az = p.z + p.dx * hw, bx = p.x + p.dz * hw, bz = p.z - p.dx * hw;
-        pos.push(ax, hgt(ax, az) + ROADH, az, bx, hgt(bx, bz) + ROADH, bz);
-        if (i < n) { const k = pos.length / 3 - 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+        const p = routeAt(r, i * st);
+        for (let j = 0; j < NC; j++) {
+          const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
+          pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z);
+        }
+        if (i < n) { const k = i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
       }
     }
     rtri += idx.length / 3;
@@ -31101,6 +31219,8 @@ function fortBoxes(put) {
     const X = M.v.set(ux, sa, uz).normalize().clone(), Z = M.ax.set(fx0, sf, fz0).addScaledVector(X, -(fx0 * X.x + sf * X.y + fz0 * X.z)).normalize().clone(), Y = new THREE.Vector3().crossVectors(Z, X);
     M.mx.makeBasis(X, Y, Z); const q = new THREE.Quaternion().setFromRotationMatrix(M.mx);
     const box = (lx, ly, lz, sx, sy, sz, c) => put(M.mx.compose(M.v.set(f.x + X.x * lx + Y.x * ly + Z.x * lz, f.y + X.y * lx + Y.y * ly + Z.y * lz, f.z + X.z * lx + Y.z * ly + Z.z * lz), q, M.s.set(sx, sy, sz)), c, dk);
+    /* a prop of the models pack standing at (lx, ly, lz), sx by sy by sz m; false while it is not here (PACK, packProp), and the boxes are drawn */
+    box.prop = (id, lx, ly, lz, sx, sy, sz) => typeof packProp === 'function' && packProp(id, M.mx.compose(M.v.set(f.x + X.x * lx + Y.x * ly + Z.x * lz, f.y + X.y * lx + Y.y * ly + Z.y * lz, f.z + X.z * lx + Y.z * ly + Z.z * lz), q, M.s.set(sx, sy, sz)), dk);
     if (f.k === 1) {
       const w = TR.size[1], B = L.bank, hf = B[0] * p + .04, hb = B[1] * p + .04;
       box(0, .06, 0, hw * 2, .1, w * Math.max(.35, p), L.floor);
@@ -31110,7 +31230,7 @@ function fortBoxes(put) {
       if (f.br !== null) for (const e of [1, -1]) box(f.br + e * TR.plank[0] * .28, B[0] + .08, 0, TR.plank[0] * .3, .14, w + B[2] + B[3] + 1, L.plank);
     } else if (f.k === 2) {
       const n = [5, 4, 5], d = BG.size[1], h = BG.size[2] / 3, rows = st ? 2 : Math.max(1, Math.round(p * 3));
-      for (let r = 0; r < rows; r++) for (let i = 0; i < n[r]; i++) box((i - (n[r] - 1) / 2) * hw * 2 / 5, h * (r + .5), 0, hw * 2 / 5 - .08, h - .05, d * (1 - .13 * r), L.bag[(i + r) & 1]);
+      if (!box.prop('p_sandbags', 0, 0, 0, hw * 2, BG.size[2] * rows / 3, d)) for (let r = 0; r < rows; r++) for (let i = 0; i < n[r]; i++) box((i - (n[r] - 1) / 2) * hw * 2 / 5, h * (r + .5), 0, hw * 2 / 5 - .08, h - .05, d * (1 - .13 * r), L.bag[(i + r) & 1]);
     } else postBoxes(f, box, p, st);   // the posts and the dome (POSTS)
   }
 }
@@ -31338,7 +31458,7 @@ function cityScene() {
     const pos = [], idx = [], w = CITY.plan.street * .36;
     for (const l of T.lanes) for (let k = 0; k < l.length; k++) {
       const a = l[Math.max(0, k - 1)], e = l[Math.min(l.length - 1, k + 1)], d = Math.hypot(e.x - a.x, e.z - a.z) || 1, nx = -(e.z - a.z) / d * w, nz = (e.x - a.x) / d * w, n = pos.length / 3;
-      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .45, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .45, l[k].z - nz);
+      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz);
       if (k) idx.push(n - 2, n - 1, n, n - 1, n + 1, n);
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx);
@@ -34148,7 +34268,7 @@ function gOps(g, V, P, now) {
         ax = X(mx); ay = Y(mz); have = true;
         g.setLineDash([6, 5]); g.lineDashOffset = dash; gRing(g, ax, ay, Math.max(12, rr), own, 1.4); g.setLineDash([]);
         const H = o.H;
-        const hs = o.st === 'form' ? 'REUNIÃO · ' + o.n + ' esq.' : o.st === 'prep' || o.st === 'screen' ? (H !== null && H >= 0 ? 'H−' + mmss(H) : 'H+' + mmss(-H)) : o.st === 'back' ? 'RECUO (' + (o.why || 'perdas') + ')' : '';
+        const hs = o.st === 'form' ? 'REUNIÃO · ' + o.n + ' esq.' : o.st === 'mv' || o.st === 'rec' ? o.n + ' esq.' : o.st === 'prep' || o.st === 'screen' ? (H !== null && H >= 0 ? 'H−' + mmss(H) : 'H+' + mmss(-H)) : o.st === 'back' ? 'RECUO (' + (o.why || 'perdas') + ')' : '';
         gTxt(g, 'AR · ' + (GEN.st[o.st] || o.st) + (hs ? ' · ' + hs : ''), ax, ay + Math.max(12, rr) + 13, 11 * k, own, 'center');
         if (o.st !== 'back') gArrow(g, ax, ay, ox, oy, own, k, now, o.st === 'go' || o.st === 'fight');
       }
@@ -35886,7 +36006,8 @@ function postBoxes(f, box, p, st) {
   const F = f.F, L = FLOOK, hw = f.o.hw, hd = f.o.hd, rows = st ? .6 : Math.max(.25, p), dark = 0x2e3330, steel = 0x5c625c, wood = 0x6f5b3c, conc = 0x8d8a80;
   if (f.k === 3 || f.k === 4) {
     const h = F.size[2] * rows, d = .9;
-    box(0, h / 2, hd - d / 2, hw * 2, h, d, L.bag[0]); for (const e of [1, -1]) box(e * (hw - d / 2), h / 2, 0, d, h, hd * 2 - d, L.bag[1]);
+    if (!(box.prop && box.prop('p_nest', 0, 0, 0, hw * 2, h, hd * 2))) { box(0, h / 2, hd - d / 2, hw * 2, h, d, L.bag[0]); for (const e of [1, -1]) box(e * (hw - d / 2), h / 2, 0, d, h, hd * 2 - d, L.bag[1]); }
+    if (p >= 1 && f.k === 4 && box.prop) for (const e of [1, -1]) box.prop('p_hedgehog', e * hw * .75, 0, hd + 1.4, 1.7, 1.6, 1.7);   // the anti-tank post's hedgehogs, in front
     if (p >= 1 && f.k === 3) { box(0, .9, -.2, .5, .6, 1.4, dark); box(0, 1.15, .9, .16, .16, 1.6, steel); box(0, .6, -.2, 1.6, .12, .9, steel); }
     if (p >= 1 && f.k === 4) { box(0, 1.25, .2, .14, .14, 1.3, dark); box(0, 1.05, -.2, .3, .25, .6, dark); box(0, .55, -.2, .9, .1, .7, steel); }
   } else if (f.k === 5) {
@@ -36792,7 +36913,7 @@ function br3Sink() {
   const at = b => (x, z) => z > b.z0 - T.cz && z < b.z1 + T.cz && Math.abs(x - T.rx(z)) < b.gw + T.cx, inL = L.map(at), inD = L.filter(brDown).map(at);
   for (const r of K.roads) {
     const p = r.geometry.attributes.position, y0 = r.y0 || (r.y0 = new Map()); let n = 0;
-    for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); if (inL.some(f => f(x, z))) { if (!y0.has(i)) y0.set(i, p.getY(i)); const h = hgt(x, z), y = h <= T.WL + .3 ? T.WL - 3 : inD.some(f => f(x, z)) ? h + ROADH : y0.get(i); if (Math.abs(p.getY(i) - y) > .01) { p.setY(i, y); n++; } } }
+    for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); if (inL.some(f => f(x, z))) { if (!y0.has(i)) y0.set(i, p.getY(i)); const h = hgt(x, z), y = h <= T.WL + .3 ? T.WL - 3 : inD.some(f => f(x, z)) ? h + BRDH : y0.get(i); if (Math.abs(p.getY(i) - y) > .01) { p.setY(i, y); n++; } } }
     if (n) p.needsUpdate = true;
   }
 }
@@ -36801,7 +36922,7 @@ function br3Build() {
   for (const c of K.g.children.slice()) K.g.remove(c);
   for (const b of brs()) {
     const a = Math.atan2(-b.dz, b.dx), e0 = b.ends[0], e1 = b.ends[1], n = Math.max(3, Math.round(b.len / BLOOK.seg)), hd = b.o.hd, st = S.os[b.id], c0 = BLOOK.stone[era];
-    const hex = st ? new THREE.Color(c0).multiplyScalar(BLOOK.dark).getHex() : c0, at = t => ({ x: e0.x + (e1.x - e0.x) * t, z: e0.z + (e1.z - e0.z) * t }), yAt = p => hgtT(T, p.x, p.z) + ROADH;
+    const hex = st ? new THREE.Color(c0).multiplyScalar(BLOOK.dark).getHex() : c0, at = t => ({ x: e0.x + (e1.x - e0.x) * t, z: e0.z + (e1.z - e0.z) * t }), yAt = p => hgtT(T, p.x, p.z) + BRDH;
     const R = BLOOK.rail, P = BLOOK.post, seg = b.len / n, side = (p, s) => ({ x: p.x - b.dz * s, z: p.z + b.dx * s });
     for (let i = 0; i < n; i++) {
       if (st > 1 && i > 0 && i < n - 1) continue;   // fallen: a stub at each end
@@ -36824,7 +36945,7 @@ function br3Build() {
     if (r) {
       const fe = b.ends[r.e | 0], oe = b.ends[1 - (r.e | 0)], built = Math.floor(n * clamp(r.prog, 0, 1)), dk = S.os[r.id] ? BLOOK.dark : 1, rh = new THREE.Color(c0).multiplyScalar(.85 * dk).getHex();
       for (let i = 0; i < built; i++) {
-        const t = (i + .5) / n, p = { x: fe.x + (oe.x - fe.x) * t, z: fe.z + (oe.z - fe.z) * t }, y = hgtT(T, p.x, p.z) + ROADH - .3;
+        const t = (i + .5) / n, p = { x: fe.x + (oe.x - fe.x) * t, z: fe.z + (oe.z - fe.z) * t }, y = hgtT(T, p.x, p.z) + BRDH - .3;
         br3Box(p.x, y, p.z, seg - .2, BLOOK.deck * 1.6, hd * 2, a, rh);
         br3Box(p.x, (y + T.WL - 1) / 2, p.z, .5, y - T.WL + 1, hd * 2, a, BLOOK.scaf);
       }
@@ -37171,6 +37292,311 @@ function buildHangarFallback() {
   $('#briefing').textContent = 'Este navegador não conseguiu abrir o WebGL, que o jogo usa para desenhar em 3D. Abra a página em um navegador com aceleração gráfica ligada.';
   $('#btnLaunch').disabled = true;
 }
+/* ---------- the models pack (NOT TESTED; docs/nao-testado/cf-pack-modelos.md) ----------
+   Free low-poly models (CC0 / CC-BY, models/LICENSES.md) that tools/pack/build.js turns into models/pack/<id>.glb, all the same way: +x
+   forward, the ground at y 0, one node per part (hull, turret, gun, trackL, trackR, wheels) with its pivot as translation, each part two
+   primitives (material 0 "paint": grey shades the side's colour tints; 1 "fixed": the source's own colours) in vertex colours; the people a
+   skeleton, one skinned mesh and their clips. The server hands them out at /models/pack/ (an older one does not: 404, and nothing changes).
+   Fetched the first time something asks for one (packGet), never from file:// ; until then, and whenever one fails, the model of before
+   stays. When one arrives, what was built without it is built again (packDirty). Visual only: hit boxes, parts, pivots the sim uses
+   (d.mh, d.bl), the AI and the net do not change.
+   PACK.on: ?pack=0 or localStorage cf-pack 0 turn the whole pack off. PACK.lvl(), the level: ?packq= or localStorage cf-pack-q (0 off, 1 low,
+   2 normal, 3 high), else the hangar's graphics quality (gfxLevel: Baixa 1, Média 2, Alta 3), else PACK.q: how far and how many soldiers and civilians
+   are drawn animated (PACK.near m, PACK.max); the rest stay the instanced figures of before.
+   tank, trn: which pack model draws each vehicle (by its id); arm: which weapon each small arm or launcher is (SARMS keys) */
+const PACK = {
+  url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 40, 80, 130], max: [0, 12, 28, 48],
+  tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
+  trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
+    tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
+  civWreck: { suv: 1, sedan: 1, vbied: 1 },
+  arm: { k98: 'w_kar98', garand: 'w_kar98', m4: 'w_m4', ak: 'w_ak', mg42: 'w_smg', bar: 'w_smg', m249: 'w_m4', pkp: 'w_ak', pzf: 'w_bazooka', bazooka: 'w_bazooka',
+    javelin: 'w_launcher', rpg: 'w_rpg', stinger: 'w_launcher', igla: 'w_launcher' },
+  cred: 'Modelos 3D: Quaternius (CC0), Poly by Google, Alex Safayan, AdamKokrito, Zsky, J-Toastie, KolosStudios, PabloLuna57, Nico _, madtrollstudio, CreativeTrio, Pichuliru, austincford, Carwyn Pelley, sftwr314r8 (CC-BY 3.0). Lista em models/LICENSES.md.'
+};
+PACK.on = (() => { try { if (/[?&]pack=0/.test(location.search)) return false; if (localStorage.getItem('cf-pack') === '0') return false; } catch (e) {} return typeof location !== 'undefined' && /^https?:$/.test(location.protocol); })();
+PACK.lvl = () => {
+  try { const m = location.search.match(/[?&]packq=(\d)/), v = m ? +m[1] : localStorage.getItem('cf-pack-q'); if (v !== null && v !== undefined && v !== '') return clamp(+v, 0, 3); } catch (e) {}
+  try { if (typeof gfxLevel === 'function') return clamp(gfxLevel() + 1, 1, 3); } catch (e) {}   // the hangar's graphics quality: Baixa 1, Média 2, Alta 3
+  return PACK.q;
+};
+const PACK_SARM = new Map(Object.keys(SARMS).map(k => [SARMS[k], k]));
+
+/* a GLB the pack wrote, as three objects: per node its name, TRS, children, mesh and skin; per mesh its primitives as BufferGeometries
+   (kept: every copy shares them) with their material (0 paint, 1 fixed); skins (joints, inverse binds) and clips. Only what build.js writes */
+function packRead(buf) {
+  const dv = new DataView(buf), jl = dv.getUint32(12, true), bin = 28 + jl;
+  if (dv.getUint32(0, true) !== 0x46546c67) throw new Error('not a GLB');
+  const J = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl)));
+  const T = { 5126: Float32Array, 5125: Uint32Array, 5123: Uint16Array, 5121: Uint8Array }, N = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT4: 16 };
+  const acc = i => { const a = J.accessors[i], v = J.bufferViews[a.bufferView], C = T[a.componentType], n = N[a.type]; return { arr: new C(buf.slice(bin + (v.byteOffset || 0) + (a.byteOffset || 0), bin + (v.byteOffset || 0) + (a.byteOffset || 0) + a.count * n * C.BYTES_PER_ELEMENT)), n, norm: !!a.normalized }; };
+  const attr = i => { const a = acc(i); return new THREE.BufferAttribute(a.arr, a.n, a.norm); };
+  const meshes = (J.meshes || []).map(m => m.primitives.map(p => {
+    const g = new THREE.BufferGeometry(), A = p.attributes;
+    g.setAttribute('position', attr(A.POSITION)); if (A.COLOR_0 !== undefined) g.setAttribute('color', attr(A.COLOR_0));
+    if (A.JOINTS_0 !== undefined) { g.setAttribute('skinIndex', attr(A.JOINTS_0)); g.setAttribute('skinWeight', attr(A.WEIGHTS_0)); }
+    g.setIndex(attr(p.indices)); g.computeBoundingSphere(); g.computeBoundingBox(); g.userData.keep = true;
+    return { g, mat: p.material || 0 };
+  }));
+  const nodes = J.nodes.map(n => ({ name: n.name || '', t: n.translation || [0, 0, 0], r: n.rotation || [0, 0, 0, 1], s: n.scale || [1, 1, 1], ch: n.children || [], mesh: n.mesh, skin: n.skin }));
+  const skins = (J.skins || []).map(s => { const a = acc(s.inverseBindMatrices).arr; return { joints: s.joints, inv: s.joints.map((j, k) => new THREE.Matrix4().fromArray(a, k * 16)) }; });
+  const clips = (J.animations || []).map(an => new THREE.AnimationClip(an.name, -1, an.channels.map(ch => {
+    const sm = an.samplers[ch.sampler], nm = nodes[ch.target.node].name, inp = acc(sm.input).arr, out = acc(sm.output).arr, it = sm.interpolation === 'STEP' ? THREE.InterpolateDiscrete : THREE.InterpolateLinear;
+    return ch.target.path === 'rotation' ? new THREE.QuaternionKeyframeTrack(nm + '.quaternion', inp, out, it) : new THREE.VectorKeyframeTrack(nm + (ch.target.path === 'scale' ? '.scale' : '.position'), inp, out, it);
+  })));
+  const ex = (J.asset && J.asset.extras) || {};
+  return { nodes, meshes, skins, clips, dims: ex.dims || [1, 1, 1], parts: Object.fromEntries(nodes.map((n, i) => [n.name, i]).filter(([, i]) => nodes[i].mesh !== undefined && nodes[i].skin === undefined)) };
+}
+/* the model id, or null while it is not here (the first ask starts the fetch; a failure is remembered and never retried) */
+function packGet(id) {
+  if (!PACK.on || !id) return null;
+  const E = PACK.M[id];
+  if (E) return E.st === 1 ? E.d : null;
+  const e = (PACK.M[id] = { st: 0, d: null });
+  try {
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; })
+      .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
+  } catch (er) { e.st = -1; }
+  return null;
+}
+/* a phong material in the game's look over the vertex colours: paint takes the colour, fixed stays white; c is what damageLook goes back to */
+function packMat(paint, hex, o) { const m = mat(paint ? hex : 0xffffff, Object.assign({ vertexColors: true }, o || {})); m.userData.c = paint ? hex : 0xffffff; return m; }
+/* one part (node name) of a static model as a group of its meshes, the part's pivot at the group's origin; null when the model has none */
+function packPart(P, name, hex, fixedDk) {
+  const i = P.parts[name]; if (i === undefined) return null;
+  const g = new THREE.Group();
+  for (const p of P.meshes[P.nodes[i].mesh]) { const m = new THREE.Mesh(p.g, packMat(p.mat === 0, hex)); if (p.mat !== 0 && fixedDk) { m.material.color.setScalar(fixedDk); m.material.userData.c = m.material.color.getHex(); } g.add(m); }
+  return g;
+}
+const packPivot = (P, name) => { const i = P.parts[name]; return i === undefined ? null : P.nodes[i].t; };
+/* a whole static model in its own metres (a prop, a weapon): every part where it sits */
+function packWhole(P, hex, k, dk) {
+  const g = new THREE.Group();
+  for (const nm in P.parts) { const p = packPart(P, nm, hex, dk); if (!p) continue; p.position.fromArray(packPivot(P, nm)); g.add(p); }
+  g.scale.setScalar(k || 1); return g;
+}
+
+/* a vehicle model: the procedural body comes off and the pack's goes on, fitted to the vehicle's length and width (model units, as
+   buildUnit's). tur and gun stay the nodes the scene turns, moved to the pack's turret ring and trunnion; every pack mesh is filed under the
+   damage part it stands for (pm), so damageLook keeps darkening it. keepTur: a car's gun mount (TRN) stays the procedural one */
+function packSkin(g, P, d, col, wreck, keepTur) {
+  const U = g.userData, pm = U.pm || (U.pm = {}), keep = new Set();
+  for (const f of U.fig || []) if (f) f.traverse(c => keep.add(c));
+  if (U.mast) keep.add(U.mast);
+  if (keepTur && U.tur) U.tur.traverse(c => keep.add(c));
+  const off = [];
+  g.traverse(c => { if (c.isMesh && !keep.has(c)) off.push(c); });
+  const gone = new Set(off);
+  for (const k in pm) pm[k] = pm[k].filter(m => !gone.has(m));
+  for (const m of off) kill(m);
+  const [L, W] = P.dims, sx = d.l / L, sz = d.w / W, sy = (sx + sz) / 2, hex = wreck ? 0x2b2b28 : col, dk = wreck ? .3 : 0;
+  const tag = (pid, grp) => { if (!grp) return grp; grp.traverse(c => { if (c.isMesh) (pm[pid] || (pm[pid] = [])).push(c); }); return grp; };
+  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body);
+  for (const nm of ['hull', 'trackL', 'trackR', 'wheels']) {
+    const p = tag(nm === 'hull' ? 'hull' : nm, packPart(P, nm, hex, dk)); if (!p) continue;
+    p.position.fromArray(packPivot(P, nm)); body.add(p);
+  }
+  if (!keepTur && U.tur) {
+    const tp = packPivot(P, 'turret'), gp = packPivot(P, 'gun'), tur = U.tur, gun = U.gun;
+    if (tp) {
+      tur.position.set(tp[0] * sx, tp[1] * sy, tp[2] * sz);
+      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t);
+    }
+    if (gp && gun) {
+      const o = tp || [0, 0, 0]; gun.position.set((gp[0] - o[0]) * sx, (gp[1] - o[1]) * sy, (gp[2] - o[2]) * sz);
+      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm);
+    }
+  }
+  U.pack = 1; U.sig = undefined;
+  return g;
+}
+/* the debris of a wreck: a pile of rubble under it */
+function packDebris(g, d) { const P = packGet('p_debris'); if (!P) return; const m = packWhole(P, 0, d.l / P.dims[0] * .9, .45); m.position.y = .05; g.add(m); }
+buildUnit = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def;
+  if (d.trn || u.kind !== 'tank' || !PACK.tank[d.id]) return g;
+  const P = packGet(PACK.tank[d.id]); if (!P) return g;
+  try { packSkin(g, P, d, u.col[0], wreck, false); if (wreck) packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+  return g;
+})(buildUnit);
+buildTrn = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def, id = PACK.trn[d.id];
+  if (!id || d.svc || d.rad || d.kind === 'lav') return g;
+  if (wreck && PACK.civWreck[d.id]) {   // a burnt-out car is the pack's wreck, whatever it was
+    const P = packGet('p_wreck'); if (!P) return g;
+    try { packSkin(g, P, d, 0x2b2b28, true, true); packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+    return g;
+  }
+  const P = packGet(id); if (!P) return g;
+  try { packSkin(g, P, d, u.col[0], wreck, true); if (wreck) packDebris(g, d); } catch (e) { console.warn('pack: ' + d.id, e); }
+  return g;
+})(buildTrn);
+
+/* ---------- props: the barricades, the posts and the mines, as instanced meshes of the pack's props (one per kind, its geometry fitted in a
+   unit box: x and z centred, y from 0 to 1), placed by fortBoxes through box.prop, which says false while the prop is not here (and the
+   boxes of before are drawn) ---------- */
+const PK = { inst: {}, n: {}, max: { p_sandbags: 64, p_nest: 16, p_hedgehog: 32 } };
+function packUnit(P) {   // the model's parts merged in one geometry, fitted to the unit box
+  const pos = [], col = [];
+  for (const nm in P.parts) {
+    const t = packPivot(P, nm);
+    for (const p of P.meshes[P.nodes[P.parts[nm]].mesh]) {
+      const q = p.g.toNonIndexed(), a = q.attributes.position.array, c = q.attributes.color ? q.attributes.color : null;
+      for (let i = 0; i < a.length; i += 3) pos.push(a[i] + t[0], a[i + 1] + t[1], a[i + 2] + t[2]);
+      for (let i = 0; i < a.length / 3; i++) col.push(c ? c.getX(i) : 1, c ? c.getY(i) : 1, c ? c.getZ(i) : 1);
+      q.dispose();
+    }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeBoundingBox(); const b = g.boundingBox, s = new THREE.Vector3(); b.getSize(s);
+  g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2); g.scale(1 / (s.x || 1), 1 / (s.y || 1), 1 / (s.z || 1)); g.computeBoundingSphere(); g.userData.keep = true;
+  return g;
+}
+function packInst(id) {
+  if (PK.inst[id] && PK.inst[id].parent === scene) return PK.inst[id];
+  const P = packGet(id); if (!P) return null;
+  const me = new THREE.InstancedMesh(packUnit(P), new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, flatShading: true, shininess: 4 }), PK.max[id] || 32);
+  me.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array((PK.max[id] || 32) * 3).fill(1), 3); me.frustumCulled = false; me.count = 0; scene.add(me);
+  return (PK.inst[id] = me);
+}
+const PKC = typeof THREE !== 'undefined' ? new THREE.Color() : null;
+function packProp(id, mx, dk) {
+  const me = packInst(id); if (!me) return false;
+  const n = PK.n[id] || 0; if (n >= me.instanceMatrix.count) return true;
+  me.setMatrixAt(n, mx); me.setColorAt(n, PKC.setScalar(dk || 1)); PK.n[id] = n + 1; return true;
+}
+fortBoxes = (g => put => {
+  PK.n = {}; g(put);
+  for (const id in PK.inst) { const me = PK.inst[id]; me.count = PK.n[id] || 0; me.instanceMatrix.needsUpdate = true; if (me.instanceColor) me.instanceColor.needsUpdate = true; }
+})(fortBoxes);
+/* the mines: the pack's mine, scaled to the disc of before, once it is here */
+fortScene = (g => () => {
+  g();
+  if (gMines && !gMines.userData.pack) { const P = packGet('p_mine'); if (P) { const u = packUnit(P); u.scale(MLOOK.r * 2.3, MLOOK.h * 1.6, MLOOK.r * 2.3); u.translate(0, -MLOOK.h * .8, 0); gMines.geometry.dispose(); gMines.geometry = u; gMines.material.vertexColors = true; gMines.material.needsUpdate = true; gMines.userData.pack = 1; } }
+})(fortScene);
+
+/* the supply base: its stores (crates, an ammunition box, drums, a tent, two barriers) and its sandbag walls from the pack, once every one
+   of them is here; lookSup shows them by the build and darkens them as before */
+buildSup = (f => b => {
+  const g = f(b), U = g.userData, ids = ['p_crate', 'p_ammo', 'p_drum', 'p_tent', 'p_barrier', 'p_sandbags'], Ps = ids.map(packGet);
+  if (Ps.some(p => !p)) return g;
+  try {
+    const [crate, ammo, drum, tent, bar, bags] = Ps, [w, d] = BLD.size, K = 1.7, put = (P, x, y, z, a, k) => { const m = packWhole(P, 0, (k || 1) * K); m.position.set(x, y, z); m.rotation.y = a || 0; g.add(m); return m; };
+    for (const o of U.stores.concat(U.bags)) kill(o);
+    U.stores = [put(crate, w / 2 + 2, 0, -1.6), put(crate, w / 2 + 2, 0, -.2, .4), put(crate, w / 2 + 2, crate.dims[2] * K, -.9, .2), put(ammo, w / 2 + 2.2, 0, 1.2, 1.2),
+      put(drum, -w / 2 - 2, 0, .6), put(drum, -w / 2 - 2, 0, -.5), put(drum, -w / 2 - 2.9, 0, 0), put(tent, -w / 2 - 6, 0, d / 2 + 6, Math.PI / 2, .8),
+      put(bar, 0, 0, d / 2 + 4.2), put(bar, w / 2 + 4, 0, d / 2 + 4.2)];
+    const bl = (w + 4) / (bags.dims[0] * K);
+    U.bags = [put(bags, 0, 0, d / 2 + 1.9, 0, bl), put(bags, 0, 0, -d / 2 - 1.9, Math.PI, bl)];
+  } catch (e) { console.warn('pack: base de suprimento', e); }
+  return g;
+})(buildSup);
+
+/* ---------- people: the nearest soldiers and civilians (PACK.near m, PACK.max of them) are drawn as the pack's animated models instead of
+   the instanced figure. Each has a slot from a pool: its own bones, skeleton, materials and mixer over the shared geometry and clips.
+   The clip by what it does: dead (death, held at its end), prone (aim, the body laid flat), crouched (aim, the hips lowered and the legs
+   bent at the bones), running (run, or runfire while it shoots), walking, firing (fire), aiming (aim), else idle; reloading shows idle,
+   the gun lowered. Its weapon (PACK.arm) sits in front of the chest along the aim, as the figure's did ---------- */
+const PM = { slots: [], want: null, by: new Map(), frame: -1, last: 0 };
+function packRig(id) {
+  const P = packGet(id); if (!P) return null;
+  const root = new THREE.Group(), tilt = new THREE.Group(), objs = P.nodes.map(n => (P.skins.some(s => s.joints.includes(P.nodes.indexOf(n))) ? new THREE.Bone() : new THREE.Object3D()));
+  P.nodes.forEach((n, i) => { const o = objs[i]; o.name = n.name; o.position.fromArray(n.t); o.quaternion.fromArray(n.r); o.scale.fromArray(n.s); });
+  P.nodes.forEach((n, i) => n.ch.forEach(c => objs[i].add(objs[c])));
+  const isChild = new Set(P.nodes.flatMap(n => n.ch)), mats = [];
+  root.add(tilt);
+  P.nodes.forEach((n, i) => {
+    if (n.mesh === undefined) { if (!isChild.has(i)) tilt.add(objs[i]); return; }
+    const sk = P.skins[n.skin], skel = new THREE.Skeleton(sk.joints.map(j => objs[j]), sk.inv);
+    for (const p of P.meshes[n.mesh]) {
+      const m = new THREE.SkinnedMesh(p.g, packMat(p.mat === 0, 0xffffff, { skinning: true })); m.frustumCulled = false; m.bind(skel, new THREE.Matrix4()); tilt.add(m); if (p.mat === 0) mats.push(m.material);
+    }
+  });
+  const mixer = new THREE.AnimationMixer(root), act = {};
+  for (const c of P.clips) act[c.name] = mixer.clipAction(c);
+  if (act.death) { act.death.setLoop(THREE.LoopOnce); act.death.clampWhenFinished = true; }
+  const bone = nm => objs.find(o => o.name === nm) || null;
+  return { id, root, tilt, mixer, act, mats, cur: null, m: null, seen: -1, h: P.dims[2] || 1.8, legs: ['UpperLeg_L', 'UpperLeg_R', 'LowerLeg_L', 'LowerLeg_R'].map(bone), wpn: null, wid: null, rest: null };
+}
+const PMQ = typeof THREE !== 'undefined' ? new THREE.Quaternion() : null, PMX = typeof THREE !== 'undefined' ? new THREE.Vector3(1, 0, 0) : null;
+function packPlay(s, nm, fade) {
+  const a = s.act[nm] || s.act.idle; if (!a || s.cur === a) return;
+  if (s.cur && fade) { a.reset().play(); a.crossFadeFrom(s.cur, fade, false); } else { if (s.cur) s.cur.stop(); a.reset().play(); }
+  s.cur = a;
+}
+function packWeapon(s, m) {
+  const a = m.arms && m.arms[m.w], key = a && PACK_SARM.get(a.d), wid = m.civ ? null : (key && PACK.arm[key]) || (a && a.d && a.d.k ? (a.d.k === 'sam' || a.d.k === 'atgm' ? 'w_launcher' : 'w_bazooka') : m.def.era === 'ww2' ? 'w_kar98' : m.def.side ? 'w_ak' : 'w_m4');
+  if (s.wid === wid && s.wpn) return s.wpn;
+  if (s.wpn) { kill(s.wpn); s.wpn = null; }
+  s.wid = wid; const P = wid && packGet(wid); if (!P) { s.wid = null; return null; }
+  s.wpn = packWhole(P, 0, 1); s.tilt.add(s.wpn); return s.wpn;
+}
+function packPose(s, m, dt, fresh) {
+  const st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.hypot(m.v.x, m.v.z), a = m.arms && m.arms[m.w], fire = !!a && S.t - a.t < .3, rl = !!a && a.rl > 0;
+  const nm = st === 3 ? 'death' : st === 2 ? 'aim' : mv > 3.2 || (m.run && mv > .5) ? (fire && s.act.runfire ? 'runfire' : 'run') : mv > .3 ? 'walk' : m.civ ? 'idle' : fire ? 'fire' : rl ? 'idle' : st === 1 || m.ap ? 'aim' : 'idle';
+  packPlay(s, nm, fresh ? 0 : .18);
+  if (fresh && nm === 'death' && s.act.death) s.act.death.time = s.act.death.getClip().duration;
+  if (!s.rest) s.rest = s.legs.map(b => b && b.quaternion.clone());
+  s.legs.forEach((b, i) => b && b.quaternion.copy(s.rest[i]));   // a bone no clip moves would keep the bend of the frame before
+  s.mixer.update(fresh ? 0 : dt);
+  const k = MAN.sc * 1.85 / s.h, R = s.root, T = s.tilt;
+  R.position.set(m.x, m.y, m.z); R.rotation.set(0, m.h, 0); R.scale.setScalar(k);
+  T.rotation.set(0, 0, st === 2 ? -Math.PI / 2 : 0); T.position.set(st === 2 ? -.95 : 0, st === 2 ? .18 : st === 1 ? -.42 : 0, 0);
+  if (st === 1) { const [ul, ur, ll, lr] = s.legs; for (const b of [ul, ur]) if (b) b.quaternion.multiply(PMQ.setFromAxisAngle(PMX, -1.25)); for (const b of [ll, lr]) if (b) b.quaternion.multiply(PMQ.setFromAxisAngle(PMX, 1.9)); }
+  const w = packWeapon(s, m);
+  if (w) {
+    const run = nm === 'run';
+    w.visible = st !== 3;
+    if (st === 2) { w.position.set(.05, 1.5, .12); w.rotation.set(0, 0, Math.PI / 2); }   // prone: along the ground, against the body's tilt
+    else { w.position.set(.32, run ? 1.05 : 1.28, .12); w.rotation.set(0, 0, run ? -.7 : clamp(m.ap || 0, -1, 1)); }
+  }
+}
+/* before the frame: the people to draw animated, nearest first */
+function packPre() {
+  PM.want = null; const L = PACK.lvl(), near = PACK.near[L], max = PACK.max[L];
+  if (!PACK.on || !max || typeof camera === 'undefined' || !camera || !packGet('soldier')) return;
+  packGet('civ_man'); packGet('civ_woman');
+  const c = camera.position, cand = [], fp = !!curSeat() && S.my && !S.my.dead;
+  const look = m => { if (m.in || m.gone) return; const d = Math.hypot(m.x - c.x, m.z - c.z); if (d < near) cand.push([d, m]); };
+  for (const m of S.men) if (!(m === S.my && fp)) look(m);
+  for (const m of S.civs || []) look(m);
+  cand.sort((a, b) => a[0] - b[0]); PM.want = new Set(cand.slice(0, max).map(x => x[1]));
+}
+function packManModel(m) { return m.civ ? ((m.id || 0) % 2 ? 'civ_woman' : 'civ_man') : 'soldier'; }
+function packMan(m) {
+  if (!PM.want || !PM.want.has(m)) return false;
+  const id = packManModel(m); if (!packGet(id)) return false;
+  let s = PM.by.get(m), fresh = false;
+  if (!s || s.id !== id) {
+    s = PM.slots.find(x => x.m === null && x.id === id) || null;
+    if (!s) { s = packRig(id); if (!s) return false; PM.slots.push(s); }
+    if (!s.root.parent) scene.add(s.root);
+    s.m = m; PM.by.set(m, s); s.cur = null; s.mixer.stopAllAction(); fresh = true;
+  }
+  const col = m.civ ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];
+  for (const mt of s.mats) if (mt.userData.c !== col) { mt.color.setHex(col); mt.userData.c = col; }
+  s.root.visible = true; s.seen = frameId; packPose(s, m, PM.dt || 0, fresh);
+  return true;
+}
+function packPost() {
+  for (const s of PM.slots) if (s.seen !== frameId && s.m) { PM.by.delete(s.m); s.m = null; s.root.visible = false; }
+  if (PM.slots.length > (PACK.max[3] + 8)) PM.slots = PM.slots.filter(s => { if (s.m) return true; kill(s.root); return false; });
+}
+poseMan = (f => (m, put) => { if (packMan(m)) return; f(m, put); })(poseMan);
+/* each frame: what came in is built again, the people chosen before and tidied after */
+syncScene = (g => dt => {
+  if (PACK.dirty) {
+    PACK.dirty = false;
+    for (const l of [S.units, S.wrecks, S.sup]) for (const o of l || []) if (o.m) { if (o.m.parent) o.m.parent.remove(o.m); kill(o.m); o.m = null; }
+  }
+  PM.dt = dt || 0; packPre(); g(dt); packPost();
+})(syncScene);
+/* the world is built again with each match: the pools and the instanced props go with the old scene */
+buildWorld = (g => () => { for (const s of PM.slots) kill(s.root); PM.slots = []; PM.by.clear(); for (const id in PK.inst) PK.inst[id] = null; g(); })(buildWorld);
+/* the credits, under the hangar's briefing */
+try { const b = document.getElementById('briefing'), dock = b && b.parentElement; if (dock && PACK.on) { const p = document.createElement('p'); p.className = 'hint'; p.id = 'packCred'; p.textContent = PACK.cred; p.style.cssText = 'grid-column:1/-1;font-size:11px;opacity:.6;margin:2px 0 0'; dock.appendChild(p); } } catch (e) {}
+/* the vehicles and the soldier are asked for a moment after the page opens, so the first battle already has them */
+if (PACK.on) setTimeout(() => { for (const id of new Set([...Object.values(PACK.tank), ...Object.values(PACK.trn), 'soldier', 'p_debris'])) packGet(id); }, 1500);
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

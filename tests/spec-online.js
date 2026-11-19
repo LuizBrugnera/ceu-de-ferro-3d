@@ -8,8 +8,13 @@ process.env.SPEC = '1';
 const { spawn } = require('child_process');
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const dt = 1 / 60, all = [];
+/* every page is loaded, and its battlefield built once offline, before any page connects (pre): a first newState blocks this process for seconds
+   (tens on a loaded machine), and a page already in the room that cannot answer the relay's ping within 10 s is dropped by its heartbeat (1006):
+   the room emptied before the test began. Built once, the newState in the welcome takes well under a second */
+const load = name => H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5, eco: true }), pre = new Map();
+const preload = (...names) => { for (const n of names) { const c = load(n); c.newState('modern', null, {}); pre.set(n, c); } };
 async function client(name, cls, model, o) {
-  const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5, eco: true }), $ = c.$, Net = $('Net');
+  const c = pre.get(name) || load(name), $ = c.$, Net = $('Net'); pre.delete(name);
   c.name = name; c.$ = $; c.Net = Net; c.on = true; c.sent = [];
   await new Promise((res, rej) => {
     Net.ui.welcome = () => {
@@ -100,6 +105,7 @@ const rawTests = async () => {
   console.log('-- raw sockets --'); await rawTests();
   await N.sleep(300);
   console.log('-- pages: a spectator beside a host and two guests, 20 s --');
+  preload('Host', 'Azul', 'Verm', 'Olho', 'Tarde');
   const host = await client('Host', 'tank', 'abrams', { keep: true }), g1 = await client('Azul', 'inf', 'blueRifle', { keep: true }), g2 = await client('Verm', 'inf', 'redRifle', {});
   const sp = await client('Olho', 'spec', '', { spec: true, keep: true });
   let err = null;

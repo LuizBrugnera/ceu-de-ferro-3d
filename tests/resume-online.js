@@ -39,6 +39,7 @@ const live = c => ({ planes: c.S.planes.filter(p => p.aid && !p.dead && !p.gone)
   await run(20);
   const T = a.S.T, hs = T.houses.filter(o => a.S.os[o.id] === 0).slice(0, 2);
   for (const o of hs) a.explode(o.x, o.y + 2, o.z, 60, 900, a.S.my, a.S.my.team);
+  a.S.cq.tk[1] -= a.$('ECO').site.fab.tk;   // tickets are morale: losing units costs none, so the red side is given the morale of a lost factory to carry over
   await run(4);
   const Q = a.S.cq, was = { T: Q.T, tk: Q.tk.map(Math.round).join(), st: stages(a), live: live(a), ids: aids(a), en: a.S.eco.d[0].en, n: a.Net.cqn, sites: a.S.eco.l.filter(e => !e.dead).length };
   console.log('   at the F5: ' + JSON.stringify(Object.assign({}, was, { st: was.st.split(' ').length + ' objects not intact', ids: was.ids.size })));

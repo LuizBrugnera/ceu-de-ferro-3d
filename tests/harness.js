@@ -21,7 +21,8 @@ function load(o) {
   ctx.seed = n => { ctx.$('Math').random = rng(n); };
   if (!o.eco) try { ctx.$('ECO').on = 0; } catch (e) {}   // the economy only where a test asks for it: every older test sees today's battle
   if (!o.ff) try { ctx.$('FF').on = 0; } catch (e) {}   // friendly fire only where a test asks for it or sets FF.on itself
-  if (!o.ana) try { ctx.$('ANA').on = 0; } catch (e) {}   // the analytics only where a test or tools/balance.js asks for it (load({ ana: true }))
+  if (!o.ana) try { ctx.$('ANA').on = 0; } catch (e) {}
+  if (!o.lg) try { ctx.$('LG').on = 0; } catch (e) {}   // the physical logistics only where a test asks for it (load({ eco: 1, lg: 1 })): every older economy test sees the battle before them   // the analytics only where a test or tools/balance.js asks for it (load({ ana: true }))
   try { ctx.$('MAPV = ' + (+process.env.MAPV || o.mapv || 1)); } catch (e) {}   // the old map unless a test asks for the road network (MAPV=2 or load({ mapv: 2 }))
   if (o.seed) ctx.seed(o.seed);
   ctx.run = (secs, each, dt) => { dt = dt || 1 / 60; for (let n = Math.round(secs / dt); n-- > 0;) { ctx.step(dt); if (each && each(dt) === false) break; } };

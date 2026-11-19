@@ -7,7 +7,8 @@
    toss k 3 and 4, s on shot and aishot, and the message cmd), eco (the economy: eco, ecs, keep) and gen (the general: gen, glog, gclaim,
    gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
    messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill)
-   and hlp (the units' calls for help: the messages hlp, hask and hacc).
+   hlp (the units' calls for help: the messages hlp, hask and hacc)
+   and lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -129,7 +130,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -245,9 +246,9 @@ const RX = {
     if (h !== c && pairs(m.h, v => num(v) && v > 0 && v <= 1000)) send(h.ws, { t: 'ohit', from: c.player.id, h: m.h });
   },
   /* supply bases are world objects too, with a life of their own: the host lists them all, a row each, [id, side, x, z, heading, percent
-     built, hp, stage]; a soldier's request to start one goes to the host alone, once a second at most */
+     built, hp, stage] and with lg the crates in it (0-999); a soldier's request to start one goes to the host alone, once a second at most */
   base(c, m) {
-    if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => vec(e, 8) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && e[5] >= 0 && e[5] <= 100 && (e[7] === 0 || e[7] === 1 || e[7] === 2))) cast(c, { t: 'base', e: m.e });
+    if (host(c) && Array.isArray(m.e) && m.e.length <= 16 && m.e.every(e => (vec(e, 8) || (vec(e, 9) && Number.isInteger(e[8]) && e[8] >= 0 && e[8] <= 999)) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && e[5] >= 0 && e[5] <= 100 && (e[7] === 0 || e[7] === 1 || e[7] === 2))) cast(c, { t: 'base', e: m.e });
   },
   build(c, m) {
     const h = c.room.host, now = Date.now();
@@ -325,6 +326,7 @@ RX.cq = (c, m) => {
   const room = c.room;
   if (!host(c) || !int(m.n, 0, 1e6) || (m.ph !== 0 && m.ph !== 1) || !num(m.T) || !vec(m.k, 2) || !num(m.k0) || !int(m.len, 0, 2) || !Array.isArray(m.p) || m.p.length > 64 || m.p.length % 4 || !m.p.every(v => int(v, -1000, 1000)) || !vec(m.l, 6)) return;
   const o = { t: 'cq', n: m.n, ph: m.ph, T: m.T, k: m.k, k0: m.k0, len: m.len, p: m.p, l: m.l };
+  if (Array.isArray(m.sk) && m.sk.length === m.p.length / 4 && m.sk.every(v => int(v, -1, 999))) o.sk = m.sk;   // logistics (lg): the crates of each point, -1 none
   if (m.ph === 1 && vec(m.r, 2) && int(m.r[0], -1, 1) && int(m.r[1], 0, 3)) { o.r = m.r; o.w = num(m.w) ? m.w : 0; }
   if (m.n !== (room.cqn || 0)) { room.cqn = m.n; room.keep = room.mines = null; room.snap = snapNew(); for (const q of room.values()) q.player.kills = q.player.deaths = q.player.ai = 0; scores(c); }
   cast(c, o);
@@ -343,6 +345,20 @@ RX.reqa = (c, m) => {
    radio vehicle raised or lowered the mast (k 2), to the host */
 RX.rad = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 24 && m.e.every(e => vec(e, 7) && int(e[0], 1, 1e6) && int(e[1], 0, 2) && int(e[2], 0, 1) && int(e[5], -1, 99) && int(e[6], 0, 5))) cast(c, { t: 'rad', e: m.e }); };
 RX.rsp = (c, m) => { const h = c.room.host; if (h !== c && c.player.cls === 'inf' && int(m.id, 1, 1e6)) send(h.ws, { t: 'rsp', from: c.player.id, id: m.id }); };
+/* logistics (welcome lg: 1). lsp: a guest's entry, rearm or return took n crates (k 0 a supply base, 1 a point by index) or gave them back
+   (k 2, 3), to the host; lgx: a guest at the wheel of a truck or in a transport helicopter loads by its main base (k 0) or unloads into a
+   node (k 1), to the host, whose answer (to, n the crates now aboard) goes to that guest alone; 300 ms apart at least */
+RX.lsp = (c, m) => {
+  const h = c.room.host, now = Date.now();
+  if (h === c || !int(m.k, 0, 3) || !int(m.id, 0, 65535) || !int(m.n, 1, 20) || now - (c.lt || 0) < 300) return;
+  c.lt = now; send(h.ws, { t: 'lsp', from: c.player.id, k: m.k, id: m.id, n: m.n });
+};
+RX.lgx = (c, m) => {
+  const h = c.room.host, now = Date.now();
+  if (h === c) { const o = c.room.get(m.to); if (o && o !== c && int(m.k, 0, 1) && int(m.n, 0, 999)) send(o.ws, { t: 'lgx', k: m.k, n: m.n }); return; }
+  if ((c.player.cls !== 'trn' && c.player.cls !== 'heli') || !int(m.k, 0, 1) || now - (c.lx || 0) < 300) return;
+  c.lx = now; send(h.ws, { t: 'lgx', from: c.player.id, k: m.k });
+};
 RX.rbe = (c, m) => { const h = c.room.host, k = c.player.cls; if (h !== c && ((m.k === 1 && k === 'inf') || (m.k === 2 && k === 'trn')) && (m.on === 0 || m.on === 1)) send(h.ws, { t: 'rbe', from: c.player.id, k: m.k, on: m.on }); };
 const two = cls => cls === 'inf' || cls === 'trn', vst = v => vec(v, 12) && bits(v[7]);
 /* capture (welcome says cap: 1): crew to trn with cap 1 names a transport of the other side, taken from it; the record carries cap while
@@ -461,7 +477,8 @@ RX.gclaim = (c, m) => {
 };
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
-  mk: 'w', lat: 'i', roe: 'w', brk: 'n' };   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
+  mk: 'w', lat: 'i', roe: 'w', brk: 'n',   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
+  nd: 'w' };   // logistics (F2b): a supply node's key, b<base id> or p<point index> (conv, alift, sprio)
 function gcmdOf(c) {
   if (!c || !rec(c) || typeof c.c !== 'string' || !/^[a-z]{2,8}$/.test(c.c) || c.c === 'draw') return null;
   const o = { c: c.c };
@@ -485,7 +502,7 @@ RX.gcmd = (c, m) => {
 };
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });

@@ -6591,8 +6591,8 @@ const Net = {
   toss(o, k, b) { const r = n => +n.toFixed(1); Net.mine(o, 'toss', { k, p: [r(b.x), r(b.y), r(b.z)], v: [r(b.vx), r(b.vy), r(b.vz)] }); },
   ohit(id, dmg) { Net.oh.set(id, Math.min(999, (Net.oh.get(id) || 0) + dmg)); },
   build(B) { const r = n => +n.toFixed(1); Net.send('build', { p: [r(B.x), r(B.z)], a: +B.a.toFixed(2) }); },
-  /* every supply base there is, a row each: [id, side, x, z, heading, percent built, hp, stage (2: destroyed, for as long as its wreck lies)] */
-  bases() { const r = n => +n.toFixed(1); Net.bq = false; Net.bacc = 0; Net.send('base', { e: S.sup.map(b => [b.id, b.team, r(b.x), r(b.z), +b.a.toFixed(2), Math.round(b.prog * 100), Math.ceil(Math.max(0, S.oh[b.id])), b.dead ? 2 : S.os[b.id]]) }); },
+  /* every supply base there is, a row each: [id, side, x, z, heading, percent built, hp, stage (2: destroyed, for as long as its wreck lies)], and with lg the crates in it */
+  bases() { const r = n => +n.toFixed(1), lg = Net.lg && !!S.lg; Net.bq = false; Net.bacc = 0; Net.send('base', { e: S.sup.map(b => [b.id, b.team, r(b.x), r(b.z), +b.a.toFixed(2), Math.round(b.prog * 100), Math.ceil(Math.max(0, S.oh[b.id])), b.dead ? 2 : S.os[b.id]].concat(lg ? [Math.floor(b.lc || 0)] : [])) }); },
   /* flat lists go out in pieces the server's size limit lets through */
   flat(t, k, l, o) { for (let i = 0; i < l.length; i += 200) Net.send(t, Object.assign({ [k]: l.slice(i, i + 200) }, o)); },
   objs() {
@@ -6689,14 +6689,14 @@ const Net = {
       if (!S.net || S.host || !Array.isArray(m.e)) return;
       const seen = new Set();
       for (const e of m.e) {
-        if (!Array.isArray(e) || e.length !== 8) continue;
-        const [id, team, x, z, a, pg, hp, st] = e, i = id - S.T.nid;
+        if (!Array.isArray(e) || (e.length !== 8 && e.length !== 9)) continue;
+        const [id, team, x, z, a, pg, hp, st, lc] = e, i = id - S.T.nid;
         if (!(i >= 32 && i < NDYN) || !(team === 0 || team === 1)) continue;
         let b = S.sup.find(b => b.id === id); seen.add(id);
         if (b && (b.team !== team || Math.abs(b.x - x) + Math.abs(b.z - z) > 1)) { b.gone = true; if (!b.dead) dropObj(b.o); b = null; S.sup = alive(S.sup); }   // the id went to another base
         if (!b) { if (st === 2) continue; b = addSup(id, team, x, z, a, 0); }
         if (b.dead) continue;
-        supAt(b, pg / 100); S.oh[id] = hp;
+        supAt(b, pg / 100); S.oh[id] = hp; if (Number.isInteger(lc) && lc >= 0) b.lc = lc;
         if (st !== S.os[id]) setObj(b.o, st, null);
       }
       for (const b of S.sup) if (!seen.has(b.id)) { b.gone = true; if (!b.dead) dropObj(b.o); }
@@ -11794,7 +11794,8 @@ Net.cqSend = (fresh) => {
   const Q = S.cq, p = []; if (!Q) return;
   if (!fresh) for (const o of Q.p) p.push(o.hold, Math.round(o.c * 100), Math.round(o.w[0] * 10), Math.round(o.w[1] * 10));
   Net.cqacc = 0;
-  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: Q.lost[0].concat(Q.lost[1]) }, !fresh && Q.res && { r: Q.res, w: Math.max(0, Math.round(Q.left)) }));
+  Net.send('cq', Object.assign({ n: Net.cqn, ph: fresh ? 0 : Q.ph, T: Math.round(Q.T), k: Q.tk.map(v => Math.round(v)), k0: Q.tk0, len: Q.len, p, l: Q.lost[0].concat(Q.lost[1]) }, !fresh && Q.res && { r: Q.res, w: Math.max(0, Math.round(Q.left)) },
+    !fresh && Net.lg && S.lg && { sk: Q.p.map(o => (o.base < 0 && o.hold >= 0 ? Math.floor(o.lc || 0) : -1)) }));   // logistics (lg): the crates of each point, -1 none
 };
 /* friendly fire is a rule of the room: the host's choice (message ff), which a server that does not know it never carries, and then nobody hurts a friend */
 Net.ffSend = () => { Net.ff = !!FF.on; Net.send('ff', { v: FF.on ? 1 : 0 }); };
@@ -14152,6 +14153,446 @@ GC.mis = { d: 'atk', f(t, c, by) {
 } };
 Object.assign(GEN.cn, { pplan: 'plano de produção', disp: 'despacho com missão', mis: 'missão' });
 Object.assign(GEN.no, { pop: 'Acima do teto de população do lado' });
+/* ---------- physical logistics (LG: phase F2b of the General's design; D23 A, D24 A) ----------
+   Where the economy runs, what enters at a node forward of the main base is paid for in crates (caixas) that were carried there.
+   - nodes: the main base (no stock: it always lets in, but it is far from the front); a finished supply base of the side (up to cap.b
+     crates, b.lc; start.b when it is finished: what its builders brought); a point the side holds (cap.p, p.lc; start.p for the points
+     a side holds at the start, none for one it takes; its stock is lost with it) is a place to enter only while it is tied to the base
+     (cqTied). The radio vehicle and the radio operator keep their entries (RAD.cap): they are not nodes.
+   - cost: crates an entry takes from its node by kind (inf a soldier, squad a squad of the AI, mrl a rocket launcher); a full rearm or
+     repair at a supply base costs serve (veh, man) to the player; a requisition at a forward depot costs its vehicle's crates instead of
+     tickets, and a requisitioned transport left whole there gives half back. The AI's columns (spawnColumn) enter at the foremost base
+     of their road that can pay for the whole column, else at the main base (the general logs the weak line); any other AI entry (a
+     reinforcement, an errand, a requisition) takes from the base it is born at, and a base with less than min is no entry (entryS).
+   - transport (sim: solo or host): a convoy truck takes truck crates from the main base for mt metal, rides its errand to the node
+     (leg sup), unloads within near m of a supply base or the radius of a point, and goes home; a transport helicopter (today only) takes
+     lift crates for mtL metal from the reserve's lift helicopters, flies over cut roads, lands by the node and comes back to the reserve.
+     A convoy or a helicopter lost with its load: the load is lost and its side loses lost tickets. A loaded truck standing still (sp
+     under grab.v) with an enemy soldier on foot within grab.r m and no soldier or vehicle of its own within grab.own m for grab.t s is
+     taken: its crates go to the taker's nearest node with room within grab.far m, else they are lost (D24 A).
+   - the logistics general (lgPlan, every `every` s, the AI of the sup domain, Apoio): each node's need is its room less what is on its way; it sends
+     a convoy to the node that needs it most (a supply base first, priority sprio 0-3 times what is missing, the front first), at most max
+     at a time and not when the main base has no metal; with danger on the road (threat, as colAxis reads the commander's map) it sends an
+     escort (an armoured car, else a car, from the reserve) with it, and to a node cut from its base (or a road too dangerous: air) the
+     transport helicopter instead, while there is one in the reserve.
+   - morale (D25 A): a node of the side with fewer crates than a soldier's for dry.t s costs dry.tk tickets a minute.
+   - the player: at the wheel of a truck, or in a transport helicopter, standing still for load s by the main base (within base m) it
+     loads (truck or lift crates, for metal), and by one of its nodes it unloads into it. Online the host keeps the count (lgx).
+   Online (welcome lg: 1) the stock rides the base rows (a ninth number) and cq (sk, a number a point, -1 none); lsp tells the host what a
+   guest's entry, rearm or return took or gave; lgx is a guest's load and unload and the host's answer. ECO.on 0, LG.on 0 or a server
+   without lg: no S.lg, every hook passes through */
+const LG = { on: 1, cap: { b: 120, p: 60 }, start: { b: 20, p: 30 }, min: 13,
+  cost: { inf: 2, squad: 8, car: 5, truck: 5, lav: 12, aa: 12, rad: 12, art: 15, mrl: 20, tank: 20 }, serve: { veh: 3, man: 1 },
+  truck: 40, lift: 20, mt: 30, mtL: 15, every: 5, max: 2, cmax: 4, near: 90, base: 1600, load: 3, threat: .6, air: 1.5, pri: [0, 1, 2, 4],
+  dry: { t: 180, tk: 1 }, lost: 3, grab: { r: 12, own: 30, t: 5, v: .5, far: 2500 },
+  tx: { b: 'Base de suprimento', p: 'Ponto', main: 'Base principal', why: { node: 'nó não encontrado', full: 'o nó está cheio', mt: 'falta metal na base principal', conv: 'comboios demais a caminho', lift: 'sem helicóptero de transporte na reserva', era: 'não existe nesta época', dry: 'sem caixas' } } };
+const lgSim = () => !!S.lg && ecoSim();
+Net.lg = false; Net.lgCar = new Map();   // welcome lg: 1; the host's count of what each guest's truck or helicopter carries
+/* a supply base gets its starting stock when it is finished */
+const lgFix = b => { if (b.lc === undefined && b.prog >= 1 && !b.dead) b.lc = LG.start.b; return b; };
+const lgKey = o => (o.sup && !o.eco ? 'b' + o.id : 'p' + o.i);
+const lgCap = o => (o.sup && !o.eco ? LG.cap.b : LG.cap.p);
+const lgName = o => (o.sup && !o.eco ? LG.tx.b + ' ' + (S.sup.filter(b => b.team === o.team && !b.dead).indexOf(o) + 1) : o.L + ' · ' + o.name);
+/* side t's nodes that hold crates: its finished supply bases, and the points it holds (not its main base) */
+function lgNodes(t) {
+  const out = [];
+  for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1) out.push(lgFix(b));
+  if (S.cq) for (const p of S.cq.p) if (p.base < 0 && p.hold === t) { if (p.lc === undefined) p.lc = 0; out.push(p); }
+  return out;
+}
+function lgOf(t, key) {
+  if (typeof key !== 'string') return null;
+  const n = +key.slice(1);
+  if (key[0] === 'b') { const b = S.sup.find(b => b.id === n && b.team === t && !b.dead && b.prog >= 1); return b ? lgFix(b) : null; }
+  const p = key[0] === 'p' && S.cq && S.cq.p[n]; return p && p.base < 0 && p.hold === t ? p : null;
+}
+/* the node an entity at x z stands in: a supply base within near m (LG.near), else a point within its radius */
+function lgNear(t, o) {
+  for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1 && hdist(b, o) < LG.near) return lgFix(b);
+  if (S.cq) for (const p of S.cq.p) if (p.base < 0 && p.hold === t && hdist(p, o) < p.r) { if (p.lc === undefined) p.lc = 0; return p; }
+  return null;
+}
+const lgTied = (t, o) => !!o && (o.sup ? true : !!S.cq && cqTied(t).has(o.i));
+/* crates by kind: a soldier, a squad, a vehicle (a radio vehicle is rad, a rocket launcher mrl) and the squad it carries */
+const lgMrl = d => !!d && Array.isArray(d.arm) && !!d.arm[0] && d.arm[0][0] === 'mrl';
+function lgCostU(o) {
+  const C = LG.cost;
+  if (o.man) return C.inf;
+  if (o.men) return C.squad;
+  const k = o.kind === 'art' && lgMrl(o.def) ? 'mrl' : tk(o);
+  return (C[k] !== undefined ? C[k] : C.truck) + (Array.isArray(o.cargo) && o.cargo.length ? C.squad : 0);
+}
+/* what the player's entry costs: by class and model */
+function lgCostP(cls, model) {
+  const d = DEFS[cls] && DEFS[cls][model], C = LG.cost;
+  if (cls === 'inf') return C.inf;
+  if (cls === 'trn') return d ? C[d.rad ? 'rad' : d.kind] || C.truck : C.truck;
+  if (cls === 'art') return lgMrl(d) ? C.mrl : C.art;
+  return C[cls] || 0;
+}
+/* a node's stock changed: the room hears it at the next base or cq line */
+function lgTake(o, n) { if (!o || o.lc === undefined) return; o.lc = Math.max(0, o.lc - n); if (o.sup) Net.bq = true; }
+function lgGive(o, n) { if (!o || o.lc === undefined) return 0; const k = Math.max(0, Math.min(n, lgCap(o) - o.lc)); o.lc += k; if (o.sup) Net.bq = true; return k; }
+/* the match begins: logistics exist where the economy does, the held points with their starting stock */
+ecoInit = (f => () => {
+  f(); S.lg = null; Net.lgCar.clear();
+  if (!LG.on || !S.eco || (S.net && !Net.lg)) return;
+  S.lg = { cv: [], pri: [{}, {}], dry: [{}, {}], cmd: [0, 0], wk: ['', ''], T: 0 };
+  if (S.cq) for (const p of S.cq.p) p.lc = p.base < 0 && p.hold >= 0 ? LG.start.p : 0;
+  if (S.modern && S.eco.sim) for (const t of [0, 1]) S.eco.d[t].keep.lift = Math.max(S.eco.d[t].keep.lift || 0, 1);   // the airlift's helicopter: one kept in the reserve
+})(ecoInit);
+/* a point that changes hands loses what was in it */
+cqFlip = (f => (p, was) => { if (S.lg && p.hold !== was) p.lc = 0; return f(p, was); })(cqFlip);
+/* the AI's entries: a base with less than LG.min crates is not one (entryS); a column enters where it can be paid for whole */
+entryS = (f => (t, ri, to) => {
+  if (!lgSim()) return f(t, ri, to);
+  const all = S.sup; S.sup = all.filter(b => b.team !== t || b.prog < 1 || b.dead || lgFix(b).lc >= LG.min);
+  try { return f(t, ri, to); } finally { S.sup = all; }
+})(entryS);
+/* the foremost base of side t on road ri that has `need` crates and is safe, else the main base */
+function lgEntry(t, ri, need) {
+  const ds = t ? 1 : -1; let s = endS(t, ri, FIELD.main), o = null;
+  for (const b of S.sup) if (b.team === t && b.ri === ri && b.prog >= 1 && !spawnWhy(b, t) && lgFix(b).lc >= need && (b.s - s) * ds > 0) { s = b.s; o = b; }
+  return { s, o };
+}
+const lgBase = (t, ri, s) => S.sup.find(b => b.team === t && b.ri === ri && !b.dead && b.prog >= 1 && Math.abs(b.s - s) < 1) || null;
+spawnColumn = (f => (team, nt, na, ntr, ri, s0, nar, nsq) => {
+  const L = S.lg;
+  if (!lgSim() || !(team === 0 || team === 1)) return f(team, nt, na, ntr, ri, s0, nar, nsq);
+  const C = LG.cost, side = S.E.sides[S.fac[team]], lav = trnOk() && side.lav ? TCOL.lav[Math.min(nt, TCOL.lav.length - 1)] * (C.lav + C.squad) : 0;
+  const need = nt * C.tank + na * C.aa + ntr * C.truck + nar * (lgMrl(DEFS.art[side.art]) ? C.mrl : C.art) + (nsq || 0) * C.squad + lav;
+  let b = lgBase(team, ri, s0);
+  if (b && b.lc < need) {   // short: the foremost base that can pay, else the main base, and the general says why
+    const e = lgEntry(team, ri, need); s0 = e.s;
+    L.wk[team] = 'reforços pela rota ' + (ri + 1) + ' saem ' + (e.o ? 'de uma base mais recuada' : 'da base principal, longe da frente') + ': ' + lgName(b) + ' com ' + Math.floor(b.lc) + ' caixas';
+    gLog(team, 'eco', 'Linha fraca: ' + L.wk[team], b, 'lgwk' + ri);
+    b = e.o;
+  } else if (b) L.wk[team] = '';
+  const u0 = S.units.length; L.mute = (L.mute || 0) + 1;
+  try { f(team, nt, na, ntr, ri, s0, nar, nsq); } finally { L.mute--; }
+  let n = 0; for (const u of S.units.slice(u0)) if (u.team === team) { n += lgCostU(u); u.lgp = 1; }
+  if (b) lgTake(b, n);
+})(spawnColumn);
+/* any other entry of the AI (in a Dispatch order) pays at the base it is born at */
+addUnit = (g => (...a) => { const u = g(...a), L = S.lg; if (L && L.born && !L.mute) L.born.push(u); return u; })(addUnit);
+addSquad = (g => (...a) => { const q = g(...a), L = S.lg; if (L && L.born && !L.mute) L.born.push(q); return q; })(addSquad);
+dispatch = (f => (t, M, fn) => {
+  const L = S.lg; if (!L || L.born || !lgSim()) return f(t, M, fn);
+  L.born = [];
+  try { return f(t, M, fn); } finally {
+    const B = L.born; L.born = null;
+    for (const o of B) {
+      if (o.lgp || o.dead || o.lgc) continue;
+      const at = o.men ? o.men.find(m => !m.dead) : o, b = at && S.sup.find(b => b.team === o.team && !b.dead && b.prog >= 1 && hdist(b, at) < LG.near);
+      o.lgp = 1; if (b) lgTake(lgFix(b), lgCostU(o));
+    }
+  }
+})(dispatch);
+/* ---- the player's entry: the node it chose pays, or it enters at the main base ---- */
+/* the node S.spawnAt names (a point index + 1, a supply base's id), or null for the main base or a radio */
+function lgSpawnNode() {
+  const id = S.spawnAt, Q = S.cq; if (typeof id !== 'number' || !id) return null;
+  if (Q && id > 0 && id <= Q.p.length) { const p = Q.p[id - 1]; return p.hold === S.me && p.base < 0 ? p : null; }
+  const b = S.sup.find(b => b.id === id && b.team === S.me && !b.dead && b.prog >= 1); return b ? lgFix(b) : null;
+}
+/* why the player may not enter at node o in that class: '' or dry (too few crates for it) or cut (a point cut off from its base) */
+const lgWhy = (o, cls, model) => (!S.lg || !o || S.cls === 'plane' ? '' : !lgTied(S.me, o) ? 'cut' : o.lc < lgCostP(cls, model) ? 'dry' : '');
+spawnPlayer = (f => () => {
+  if (!S.lg || S.lg.free || S.cls === 'plane' || S.cls === 'heli') return f();
+  const o = lgSpawnNode(), w = lgWhy(o, S.cls, S.model);
+  if (w) { S.spawnAt = 0; S.banner = { text: 'Entrou na base principal', sub: lgName(o) + (w === 'cut' ? ' está cortado da base' : ' sem caixas para ' + lgCostP(S.cls, S.model)), life: 3 }; }
+  const id = S.spawnAt, p = f();
+  if (o && !w && S.spawnAt === id) lgPay(o, lgCostP(S.cls, S.model));
+  return p;
+})(spawnPlayer);
+/* what the player's own act took from (n > 0) or gave back to (n < 0) node o: here, or the host is told */
+function lgPay(o, n) {
+  if (!o || !n) return;
+  if (S.net && !S.host) { Net.send('lsp', { k: (o.sup ? 0 : 1) + (n < 0 ? 2 : 0), id: o.sup ? o.id : o.i, n: Math.abs(n) }); }
+  if (n > 0) lgTake(o, n); else lgGive(o, -n);
+}
+/* ---- requisition (RQ): crates of the depot instead of tickets ---- */
+const lgDepot = o => { const d = rqDepot(o); return !d || d.k === 1 ? null : d.k === 2 ? lgFix(S.sup.find(b => b.id === d.id)) : S.cq.p[d.id - 1]; };
+Object.assign(RQ.why, { crates: 'Este depósito está sem caixas para este veículo: espere um comboio ou vá à base principal.' });
+rqWhy = (f => (o, cls, model, who) => {
+  const r = f(o, cls, model, who);
+  if (!lgSim() || (r && r !== 'tickets')) return r;
+  const n = lgDepot(o); return n && n.lc < lgCostP(cls, model) ? 'crates' : '';
+})(rqWhy);
+rqGrant = (f => (o, cls, model, who) => {
+  if (!lgSim()) return f(o, cls, model, who);
+  const Q = S.cq, k = Q ? Q.tk[o.team] : 0, n = lgDepot(o), why = f(o, cls, model, who);
+  if (!why) { Q.tk[o.team] = k; lgTake(n, lgCostP(cls, model)); }
+  return why;
+})(rqGrant);
+rqDo = (f => (cls, model) => {
+  const L = S.lg; if (!L) return f(cls, model);
+  const P = S.my, n = P && P.man && !P.dead ? lgDepot(P) : null; L.free = 1;
+  try { f(cls, model); } finally { L.free = 0; }
+  const u = S.my; if (!u || u === P || !u.rq) return;
+  const c = lgCostP(cls, model); u.rq = 0; u.rqc = n ? c : 0;   // no ticket comes back: crates do, at a depot
+  S.banner = { text: 'Requisitado', sub: DEFS[cls][model].name + ' · ' + (n ? c + ' caixas de ' + lgName(n) : 'da base principal'), life: 3 };
+})(rqDo);
+alight = (f => m => {
+  const u = m.in, mine = S.rider === m && S.my === u;
+  f(m);
+  if (!mine || !u.rqc || !S.lg || u.dead || u.hp < u.max * RQ.hp) return;
+  const o = lgDepot(u); if (!o) return;
+  const n = Math.floor(u.rqc * RQ.refund); u.rqc = 0;
+  if (n > 0) { lgPay(o, -n); S.floats.push({ x: u.x, y: u.y + 6, z: u.z, text: 'Veículo devolvido: +' + n + ' caixas em ' + lgName(o), life: 3 }); }
+})(alight);
+/* ---- rearm and repair at a supply base cost the player crates; a base with none serves nobody ---- */
+const lgSupAt = o => S.sup.find(b => !b.dead && b.prog >= 1 && b.team === o.team && hdist(b, o) < BLD.r) || null;
+resupply = (f => (P, dt) => {
+  const b = S.lg && depot(P) === 2 ? lgFix(lgSupAt(P)) : null, was = P.rearmT || 0;
+  if (b && b.lc < LG.serve.veh) { P.rearmT = 0; S.rearm = 0; S.dep = 0; return; }
+  f(P, dt);
+  if (b && was <= 2.5 && P.rearmT > 2.5) lgPay(b, LG.serve.veh);
+})(resupply);
+refill = (f => (m, dep) => { f(m, dep); const b = S.lg && dep === 2 && m === S.my ? lgSupAt(m) : null; if (b) lgPay(lgFix(b), LG.serve.man); })(refill);
+/* ---- transport: convoys, the airlift, the player's own loads, capture, losses ---- */
+/* the danger side t knows on road ri between its main base and s: as colAxis reads the commander's map */
+function lgThr(t, ri, s) {
+  const C = S.cmd && S.cmd[t], r = S.T.routes[ri], K = MANT.thr, G = CMD.cell; if (!C || !C.inf || !C.nx || !r) return 0;
+  const a = endS(t, ri, FIELD.main), lo = clamp(Math.min(a, s), 0, r.len), hi = clamp(Math.max(a, s), 0, r.len), Z = C.kz && C.kz.length === C.nx * C.nz ? C.kz : null;
+  let th = 0, n = 0;
+  for (let x = lo; x <= hi + 1e-6; x += 200) { const p = routeAt(r, Math.min(x, hi)), k = clamp((p.z + S.HW) / G | 0, 0, C.nz - 1) * C.nx + clamp(p.x / G | 0, 0, C.nx - 1); th += Math.max(0, -C.inf[k]) * K.k + (Z ? Z[k] * K.kz : 0); n++; }
+  return n ? th / n : 0;
+}
+/* where a node is on its road: a base's s, a point's projection on its nearest axis */
+const lgS = o => (o.sup ? { ri: o.ri, s: o.s } : { ri: o.ri, s: o.rs && o.rs[o.ri] !== null && o.rs[o.ri] !== undefined ? o.rs[o.ri] : o.s });
+const lgInb = (t, key) => S.lg.cv.reduce((a, c) => a + (c.t === t && c.n === key ? c.c : 0), 0);
+/* a convoy from the main base to node o: a truck with LG.truck crates for LG.mt metal, with an escort on a dangerous road. '' or why not */
+function lgConvoy(t, o, why) {
+  const L = S.lg, d = S.eco.d[t], key = lgKey(o);
+  if (L.cv.filter(c => c.t === t && c.c > 0).length >= LG.cmax) return 'conv';
+  if (lgCap(o) - o.lc - lgInb(t, key) <= 0) return 'full';
+  if (d.mt < LG.mt) return 'mt';
+  const { ri, s } = lgS(o), s0 = endS(t, ri, FIELD.main), thr = lgThr(t, ri, s), nm = lgName(o);
+  d.mt -= LG.mt;
+  const paid = v => Object.assign(v, { lgp: 1 });   // paid for by the main base: not by a node it is born near
+  const M = { kind: 'lift', why: 'comboio de suprimento: ' + nm + (why ? ' (' + why + ')' : ''), target: { ri, s } }, u = dispatch(t, M, () => paid(errand(t, 'truck', ri, s0, [{ s, k: 'sup' }, { s: s0, k: 'bye' }])));
+  u.run.k = 'conv'; u.lgc = LG.truck; Object.assign(u.mis, { kind: M.kind, why: M.why });   // errand opens an order of its own: the convoy's words
+  let e = null;
+  if (thr > LG.threat) for (const k of ['lav', 'car']) if (ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era) && (d.res[k] || []).length && ecoUse(t, k)) {
+    e = dispatch(t, { kind: 'escort', why: 'escolta do comboio para ' + nm, target: { ri, s } }, () => paid(errand(t, k, ri, s0 - (t ? 1 : -1) * 30, [{ s, k: 'turn' }, { s: s0, k: 'bye' }])));
+    e.run.k = 'esc'; Object.assign(e.mis, { kind: 'escort', why: 'escolta do comboio para ' + nm }); break;
+  }
+  L.cv.push({ t, u, n: key, c: LG.truck, T: S.t, e, s0 });
+  gLog(t, 'eco', 'Comboio com ' + LG.truck + ' caixas para ' + nm + ' pela rota ' + (ri + 1) + (e ? ', com escolta' : thr > LG.threat ? ', sem escolta na reserva' : '') + (why ? ': ' + why : ''), routeAt(S.T.routes[ri], s0), 'lgcv' + key);
+  return '';
+}
+/* a spot to set a helicopter down by node o: flat, dry, not in a wood, nothing standing within 30 m, on the side of its own base */
+function lgLZ(t, o) {
+  const b = S.base[t], a0 = Math.atan2(b.z - o.z, b.x - o.x);
+  for (let i = 0; i < 16; i++) {
+    const a = a0 + (i % 2 ? 1 : -1) * Math.floor((i + 1) / 2) * .5, r = 50 + (i % 4) * 30, x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r, g = hgt(x, z);
+    if (g <= S.T.WL + 1 || kindAt(x, z) === 1 || Math.max(Math.abs(hgt(x + 8, z) - hgt(x - 8, z)), Math.abs(hgt(x, z + 8) - hgt(x, z - 8))) / 16 > HAI.lift.lz[3] || near(x, z, 30).some(solid)) continue;
+    return { x, z };
+  }
+  return { x: o.x, z: o.z };
+}
+/* the airlift: a transport helicopter of the reserve takes LG.lift crates to node o, over the roads. '' or why not */
+function lgAirlift(t, o, why) {
+  const L = S.lg, d = S.eco.d[t], key = lgKey(o);
+  if (!S.modern) return 'era';
+  if (L.cv.filter(c => c.t === t && c.c > 0).length >= LG.cmax) return 'conv';
+  if (lgCap(o) - o.lc - lgInb(t, key) <= 0) return 'full';
+  if (d.mt < LG.mtL) return 'mt';
+  if (!(d.res.lift || []).length || !ecoUse(t, 'lift')) return 'lift';
+  d.mt -= LG.mtL;
+  const nm = lgName(o), p = dispatch(t, { kind: 'lift', why: 'ponte aérea: ' + nm + (why ? ' (' + why + ')' : ''), area: { x: o.x, z: o.z, r: 300 } }, () => heliGround(S.E.sides[S.fac[t]].lift, t, 5, true));
+  p.lgc = LG.lift; p.lgp = 1; p.lga = Object.assign({ n: key }, lgLZ(t, o)); p.ha = heliBrain(); p.ha.st = 'lg';
+  L.cv.push({ t, u: p, n: key, c: LG.lift, T: S.t, air: 1 });
+  gLog(t, 'eco', 'Ponte aérea com ' + LG.lift + ' caixas para ' + nm + (why ? ': ' + why : ''), o, 'lgal' + key);
+  return '';
+}
+aiLift = (f => (p, A, dt) => {
+  const G = p.lga; if (!G || (A.st !== 'lg' && A.st !== 'lgd')) return f(p, A, dt);
+  if (A.st === 'lg') { if (heliTo(p, G.x, G.z, HAI.lift.alt, HAI.cruise) < 70) A.st = 'lgd'; return; }
+  heliLandAt(p, G.x, G.z);
+  if (p.land && p.V < 1.6) { lgDrop(p, S.lg.cv.find(c => c.u === p)); A.st = 'stay'; A.T = S.t + HAI.lift.stay; }
+})(aiLift);
+/* a convoy or a helicopter at its node unloads what the node has room for; the rest goes home with it */
+function lgDrop(u, c) {
+  if (!c || !c.c) return;
+  const o = lgOf(c.t, c.n); if (!o) return;
+  const k = lgGive(o, c.c); c.c -= k; u.lgc = c.c;
+  if (k) gLog(c.t, 'eco', (c.air ? 'Ponte aérea entregou ' : 'Comboio entregou ') + k + ' caixas em ' + lgName(o) + ' (' + Math.floor(o.lc) + '/' + lgCap(o) + ')', o);
+}
+/* the crates of a truck that is taken: to the taker's nearest node with room, else lost */
+function lgGrab(u, t, by) {
+  const n = u.lgc; u.lgc = 0;
+  const c = S.lg.cv.find(c => c.u === u); if (c) { c.c = 0; u.run = { legs: [{ s: c.s0, k: 'bye' }], i: 0, T: 0 }; }
+  const to = lgNodes(1 - t).filter(o => hdist(o, u) < LG.grab.far && lgCap(o) > o.lc).sort((a, b) => hdist(a, u) - hdist(b, u))[0], k = to ? lgGive(to, n) : 0;
+  gLog(t, 'eco', 'Carga de ' + n + ' caixas tomada pelo inimigo ' + ecoNear(u.x, u.z), u);
+  gLog(1 - t, 'eco', 'Tomamos ' + n + ' caixas de um caminhão inimigo ' + ecoNear(u.x, u.z) + (k ? ': ' + k + ' para ' + lgName(to) : ''), u);
+  if (!S.demo && (t === S.me || 1 - t === S.me)) S.floats.push({ x: u.x, y: u.y + 6, z: u.z, text: (t === S.me ? 'Carga tomada pelo inimigo' : 'Carga capturada: ' + n + ' caixas'), life: 3 });
+  if (by) by.lgg = 0;
+}
+/* a load lost with what carried it (n: a guest's, as the host counts it): the load and LG.lost tickets */
+function lgLost(o, c, n0) {
+  const t = o.team, n = c ? c.c : n0 || o.lgc; o.lgc = 0; if (c) c.c = 0;
+  if (!n) return;
+  if (cqSim() && !S.cq.ph) S.cq.tk[t] -= LG.lost;
+  gLog(t, 'eco', (o.heli ? 'Helicóptero de suprimento perdido ' : 'Comboio perdido ') + ecoNear(o.x, o.z) + ': ' + n + ' caixas', o, 'lglost');
+  gLog(1 - t, 'eco', (o.heli ? 'Helicóptero de suprimento inimigo derrubado ' : 'Comboio inimigo destruído ') + ecoNear(o.x, o.z), o, 'lgkill');
+}
+/* the logistics general of side t: the node that needs it most gets a convoy, or the airlift when its road is cut or too dangerous */
+function lgPlan(t) {
+  const L = S.lg, P = L.pri[t], out = L.cv.filter(c => c.t === t && c.c > 0).length; if (out >= LG.max) return;   // a truck on its way home empty is not one
+  const d = S.eco.d[t], air = S.modern && (d.res.lift || []).length > 0 && d.mt >= LG.mtL;
+  let best = null, bs = 0;
+  for (const o of lgNodes(t)) {
+    const key = lgKey(o), room = lgCap(o) - o.lc - lgInb(t, key), tied = lgTied(t, o); if (room < LG.truck / 2 || (!tied && !air)) continue;
+    const pr = P[key] !== undefined ? P[key] : o.sup ? 2 : 1; if (!pr) continue;
+    const { ri, s } = lgS(o), sc = LG.pri[pr] * room / lgCap(o) * (2 - Math.min(1, Math.max(0, ecoDepth(t, o.x, o.z)) / 3000)) * (tied ? 1 : 1.5);   // the front first, a node cut off more
+    if (sc > bs) { bs = sc; best = { o, ri, s }; }
+  }
+  if (!best) return;
+  const o = best.o, cut = !lgTied(t, o) || lgThr(t, best.ri, best.s) > LG.threat * LG.air;
+  if (cut && air && !lgAirlift(t, o, lgTied(t, o) ? 'estrada perigosa' : 'cortado da base')) return;
+  if (lgTied(t, o)) lgConvoy(t, o, '');
+}
+/* the player's truck or transport helicopter: loads by the main base, unloads into a node of its side, standing still LG.load s */
+function lgHands(P, dt) {
+  const cap = P.kind === 'truck' ? LG.truck : P.heli && P.def.lift ? LG.lift : 0; if (!cap || P.dead) return;
+  const still = P.heli ? P.land && P.V < 1.6 : Math.hypot(P.v.x, P.v.z) < LG.grab.v, t = P.team;
+  if (!still) { P.lgT = 0; P.lgD = ''; return; }
+  if ((P.lgT = (P.lgT || 0) + dt) < LG.load) return;
+  const o = P.lgc ? lgNear(t, P) : null, at = !P.lgc && hdist(P, S.base[t]) < LG.base ? 'main' : o ? lgKey(o) : '';
+  if (!at || at === P.lgD) return;   // once a place, until it moves
+  P.lgD = at;
+  if (S.net && !S.host) Net.send('lgx', { k: o ? 1 : 0 });
+  else if (o) lgUnload(P, o); else lgLoad(P, cap);
+}
+function lgLoad(P, cap) {
+  const d = S.eco && S.eco.d[P.team], mt = P.heli ? LG.mtL : LG.mt;
+  if (!d || d.mt < mt) { lgSay(P, 'Falta metal na base principal para a carga'); return 0; }
+  d.mt -= mt; P.lgc = cap; lgSay(P, 'Carregado: ' + cap + ' caixas'); return cap;
+}
+function lgUnload(P, o) {
+  const k = lgGive(o, P.lgc); P.lgc -= k;
+  lgSay(P, k ? 'Entregue: ' + k + ' caixas em ' + lgName(o) : lgName(o) + ' está cheio');
+  if (k) gLog(P.team, 'eco', 'Um jogador entregou ' + k + ' caixas em ' + lgName(o), o);
+  return k;
+}
+const lgSay = (P, text) => { if (P === S.my) S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text, life: 3 }); };
+/* each step, where the match is simulated: the convoys, the capture of a loaded truck, the nodes gone dry, the logistics generals */
+function lgStep(dt) {
+  const L = S.lg; if (!L || (S.cq && S.cq.ph)) return;
+  const P = S.my; if (P && (P.kind || P.heli)) lgHands(P, dt);
+  if (!lgSim()) return;
+  const lost = o => o.hp <= 0 || !!o.cqd || (o.dead && !o.gone);
+  for (const c of L.cv) {
+    const u = c.u, e = c.e;
+    if (e && (e.dead || e.gone)) { if (!lost(e)) ecoBack(c.t, e.kind, 1); c.e = null; }   // the escort home: back in the reserve
+    if (c.end || u.dead || u.gone) {
+      if (!c.end) { c.end = 1; if (lost(u)) lgLost(u, c); else if (c.air) ecoBack(c.t, 'lift', 1); }   // the helicopter is back in the reserve
+      if (!c.e) c.done = 1; continue;
+    }
+    if (c.air || !c.c) continue;
+    const o = lgOf(c.t, c.n), { ri, s } = o ? lgS(o) : { ri: -1, s: 0 };
+    if (!o) { if (u.run && u.run.legs[0].k === 'sup') { u.run.legs = [{ s: c.s0, k: 'bye' }]; u.run.i = 0; } continue; }   // its node is gone: home
+    if ((u.ri === ri && Math.abs(u.s - s) < 30) || hdist(u, o) < (o.sup ? LG.near : o.r)) lgDrop(u, c);
+  }
+  if (L.cv.some(c => c.done)) L.cv = L.cv.filter(c => !c.done);
+  for (const u of S.units) {   // a loaded truck standing still and alone with an enemy soldier at it is taken
+    if (!u.lgc || u.dead || u.net || Math.hypot(u.v.x, u.v.z) > LG.grab.v || u === S.my || (S.rider && S.rider.in === u)) { if (u.lgg) u.lgg = 0; continue; }
+    const by = S.men.find(m => !m.dead && !m.in && m.team !== u.team && hdist(m, u) < LG.grab.r);
+    const own = S.men.some(m => !m.dead && m.team === u.team && hdist(m, u) < LG.grab.own) || S.units.some(o => o !== u && !o.dead && o.team === u.team && hdist(o, u) < LG.grab.own);
+    if (!by || own) { u.lgg = 0; continue; }
+    if ((u.lgg = (u.lgg || 0) + dt) >= LG.grab.t) lgGrab(u, u.team, by);
+  }
+  if ((L.T -= dt) > 0) return;
+  L.T = 1;
+  for (const t of [0, 1]) {
+    const D = L.dry[t];
+    for (const o of lgNodes(t)) {
+      const key = lgKey(o);
+      if (o.lc >= LG.cost.inf) { delete D[key]; continue; }
+      if (D[key] === undefined) D[key] = S.t;
+      else if (S.t - D[key] >= LG.dry.t && cqSim()) S.cq.tk[t] -= LG.dry.tk / 60;
+    }
+    for (const k in D) if (!lgOf(t, k)) delete D[k];
+    if (genBy(t, 'sup') === 'ai' && S.t >= (L.cmd[t] || 0)) { L.cmd[t] = S.t + LG.every; lgPlan(t); }
+  }
+}
+ecoStep = (f => dt => { f(dt); lgStep(dt); })(ecoStep);
+/* a truck or a helicopter lost with crates aboard and no convoy record (the player's own) */
+cqDead = (f => o => {
+  const n = S.lg && cqSim() ? o.lgc || (o.pid && Net.lgCar.get(o.pid)) || 0 : 0;
+  if (n && !S.lg.cv.some(c => c.u === o)) { lgLost(o, null, n); if (o.pid) Net.lgCar.delete(o.pid); }
+  return f(o);
+})(cqDead);
+/* ---- what the side sees: the nodes, the convoys, the weak line ---- */
+function lgView(t) {
+  const L = S.lg; if (!L) return { off: 1 };
+  const sim = lgSim(), D = L.dry[t], P = L.pri[t];
+  const nodes = lgNodes(t).map(o => { const key = lgKey(o); return { key, kind: o.sup ? 'base' : 'point', name: lgName(o), x: Math.round(o.x), z: Math.round(o.z), crates: Math.floor(o.lc), cap: lgCap(o),
+    pri: P[key] !== undefined ? P[key] : o.sup ? 2 : 1, tied: lgTied(t, o), inbound: sim ? lgInb(t, key) : 0, drySeconds: D[key] !== undefined ? Math.round(S.t - D[key]) : 0 }; });
+  const cv = sim ? L.cv.filter(c => c.t === t).map(c => ({ to: c.n, crates: c.c, air: !!c.air, x: Math.round(c.u.x), z: Math.round(c.u.z), escort: !!c.e })) : [];
+  return { on: 1, main: 'ilimitado', metal: S.eco ? Math.floor(S.eco.d[t].mt) : 0, cost: Object.assign({}, LG.cost), carry: { truck: LG.truck, lift: S.modern ? LG.lift : 0 }, metalPer: { truck: LG.mt, lift: LG.mtL }, nodes, convoys: cv, weak: L.wk[t] || '' };
+}
+ecoVM = (f => (t, all) => {
+  const V = f(t, all), L = S.lg; if (!L || !V.rows) return V;
+  const G = lgView(t), at = Math.max(0, V.rows.length - 1);
+  const rows = [{ label: 'Suprimento', value: G.nodes.length ? G.nodes.map(o => o.name + ' ' + o.crates + '/' + o.cap + (o.drySeconds >= 60 ? ' (seco há ' + Math.floor(o.drySeconds / 60) + ' min)' : '') + (o.tied ? '' : ' (cortado)')).join(' · ') : 'sem nós além da base principal' }];
+  if (G.convoys.length) rows.push({ label: 'Comboios', value: G.convoys.map(c => (c.air ? 'ponte aérea' : c.escort ? 'comboio escoltado' : 'comboio') + ' com ' + c.crates + ' caixas').join(', ') });
+  if (G.weak) rows.push({ label: 'Linha fraca', value: G.weak });
+  V.rows.splice(at, 0, ...rows); return V;
+})(ecoVM);
+/* ---- the general's orders: conv, alift, sprio; the question logi ----
+   conv { nd: a node's key (b<base id> | p<point index>), why }: a convoy from the main base to it now; alift { nd, why }: the airlift
+   (today only); sprio { nd, p: 0-3 (0: never by itself, 3: first), or -1: its own again }: how the logistics general ranks it (the sup domain,
+   Apoio, which also builds the supply bases).
+   Refused node (not a node of the side), full, mt (no metal), conv (too many on their way), lift (no helicopter in the reserve), era, off */
+GC.conv = { d: 'sup', f(t, c) {
+  if (!lgSim()) return gBad('off');
+  const o = lgOf(t, c.nd); if (!o) return gBad('node');
+  if (!lgTied(t, o)) return gBad('cut');
+  const w = lgConvoy(t, o, c.why || ''); return w ? gBad(w) : gYes();
+} };
+GC.alift = { d: 'sup', f(t, c) {
+  if (!lgSim()) return gBad('off');
+  const o = lgOf(t, c.nd); if (!o) return gBad('node');
+  const w = lgAirlift(t, o, c.why || ''); return w ? gBad(w) : gYes();
+} };
+GC.sprio = { d: 'sup', f(t, c) {
+  if (!S.lg) return gBad('off');
+  const o = lgOf(t, c.nd); if (!o) return gBad('node');
+  if (!Number.isInteger(c.p) || c.p < -1 || c.p > 3) return gBad('shape');
+  const P = S.lg.pri[t], key = lgKey(o); if (c.p < 0) delete P[key]; else P[key] = c.p;
+  gLog(t, 'eco', 'Prioridade de suprimento de ' + lgName(o) + ': ' + (c.p < 0 ? 'a de sempre' : c.p) + (c.why ? ': ' + c.why : ''), o, 'lgpr' + key);
+  return gYes();
+} };
+Object.assign(GEN.cn, { conv: 'comboio de suprimento', alift: 'ponte aérea', sprio: 'prioridade de suprimento' });
+Object.assign(GEN.no, { node: 'Nó de suprimento não encontrado', full: 'O nó está cheio', mt: 'Falta metal na base principal', conv: 'Comboios demais a caminho', lift: 'Sem helicóptero de transporte na reserva', cut: 'O nó está cortado da base: use a ponte aérea', era: 'Não existe nesta época' });
+genQuery = (f => (t, q) => (q && q.q === 'logi' && (t === 0 || t === 1) ? lgView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'logi' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: lgView(s) } : f(s, q)))(genAnswer);
+/* ---- net: welcome lg: 1; the stocks on the base rows and on cq (sk); lsp and lgx ---- */
+Net.rx.welcome = (old => m => { Net.lg = m.lg === 1; old(m); })(Net.rx.welcome);
+Net.rx.cq = (f => m => {
+  f(m);
+  const Q = S && S.cq;
+  if (S && S.lg && S.net && !S.host && Q && Array.isArray(m.sk) && m.sk.length === Q.p.length) Q.p.forEach((p, i) => { if (Number.isInteger(m.sk[i]) && m.sk[i] >= 0) p.lc = m.sk[i]; });
+})(Net.rx.cq);
+Net.rx.lsp = m => {
+  if (!S || !S.net || !S.host || !S.lg || !Number.isInteger(m.k) || !Number.isInteger(m.id) || !Number.isInteger(m.n) || m.n < 1 || m.n > 20) return;
+  const g = Net.ghosts.get(m.from), t = g ? g.team : -1; if (t < 0) return;
+  const o = m.k % 2 ? (S.cq && S.cq.p[m.id] && S.cq.p[m.id].hold === t && S.cq.p[m.id].base < 0 ? S.cq.p[m.id] : null) : lgOf(t, 'b' + m.id);
+  if (o) { if (m.k < 2) lgTake(o, m.n); else lgGive(o, m.n); }
+};
+Net.rx.lgx = m => {
+  if (!S || !S.net || !S.lg) return;
+  if (!S.host) { if (Number.isInteger(m.n) && S.my && (S.my.kind || S.my.heli)) { const P = S.my, was = P.lgc || 0; P.lgc = m.n; lgSay(P, m.n > was ? 'Carregado: ' + m.n + ' caixas' : m.n < was ? 'Entregue: ' + (was - m.n) + ' caixas' : m.k ? 'O nó está cheio' : 'Falta metal na base principal para a carga'); } return; }
+  const g = Net.ghosts.get(m.from); if (!g || g.dead) return;
+  const cap = g.kind === 'truck' ? LG.truck : g.heli && g.def.lift ? LG.lift : 0, have = Net.lgCar.get(m.from) || 0; if (!cap) return;
+  let n = have;
+  if (m.k === 0 && !have && hdist(g, S.base[g.team]) < LG.base) { const d = S.eco && S.eco.d[g.team], mt = g.heli ? LG.mtL : LG.mt; if (d && d.mt >= mt) { d.mt -= mt; n = cap; } }
+  else if (m.k === 1 && have) { const o = lgNear(g.team, g); if (o) { const k = lgGive(o, have); n = have - k; if (k) gLog(g.team, 'eco', 'Um jogador entregou ' + k + ' caixas em ' + lgName(o), o); } }
+  Net.lgCar.set(m.from, n); Net.send('lgx', { to: m.from, k: m.k, n });
+};
 /* the journal and the side effects of a command's end */
 function gDone(t, c, by, G, r) {
   if (GEN.jr) {
@@ -18020,6 +18461,20 @@ function spawnOpts() {
     .concat(S.cq ? S.cq.p.filter(o => o.base < 0 && o.hold === me).map(o => { const w = cqSpawnWhy(o, me); return { id: o.i + 1, tag: o.L, x: o.x, z: o.z, text: 'Ponto ' + o.L + ' · ' + o.name + ' · ' + (w ? SPWHY[w] : km(o)), why: w }; }) : [])
     .concat(sw.cls === 'inf' ? (S.rl || []).filter(r => r.team === me && !(r.o && r.o === S.my)).map(r => ({ id: 'r' + r.id, tag: 'R', x: r.x, z: r.z, text: RAD.name[r.k] + ' · ' + (r.w ? RAD.why[r.w] : r.n + (r.n === 1 ? ' entrada' : ' entradas') + ', leva a cada ' + RAD.wave[r.k] + ' s · ' + km(r)), why: r.w ? 'rad' : '' })) : []);
 }
+/* logistics (LG): each forward node with its crates, and no entry where they do not pay for this class or a point is cut off from the base */
+Object.assign(SPWHY, { dry: 'sem caixas', cut: 'cortado da base' });
+spawnOpts = (f => () => {
+  const L = f(); if (!S.lg) return L;
+  const k = sw.cls, n = lgCostP(k, sw.sel[k]), P = S.cq ? S.cq.p : [];
+  for (const o of L) {
+    if (!o.id || typeof o.id !== 'number') continue;
+    const nd = o.id <= P.length ? P[o.id - 1] : lgFix(S.sup.find(b => b.id === o.id) || {}); if (nd.lc === undefined) continue;
+    const c = Math.floor(nd.lc), w = o.why ? '' : !lgTied(S.me, nd) ? 'cut' : c < n ? 'dry' : '';
+    o.text += ' · ' + c + (c === 1 ? ' caixa' : ' caixas') + (n ? ' (entrada: ' + n + ')' : '') + (w ? ' · ' + SPWHY[w] : '');
+    if (w) o.why = w;
+  }
+  return L;
+})(spawnOpts);
 function drawSpawn() {
   const box = $('#swapSpawn'), on = sw.cls !== 'plane' && sw.cls !== 'heli' && !(S.net && !Net.sb && !S.cq), cvs = $('#spawnMap'), g = cvs.getContext('2d');
   box.hidden = !on; if (!on) { sw.sp = ''; return; }

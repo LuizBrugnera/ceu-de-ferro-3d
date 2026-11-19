@@ -230,6 +230,20 @@ O operador de drone leva o fuzil e quatro tipos. Y escolhe e L lança e põe os 
 
 Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos. No modo assistido o drone voa para onde a mira olha (W avança, Shift e Z sobem e descem); X passa ao modo acro. O sinal cai com a distância, atrás de morros e casas e perto de um bloqueador (HMMWV e Tigr). Fuzil, metralhadora, antiaérea e estilhaço derrubam drones.
 
+## Insurgentes (conteúdo pronto, ainda fora das partidas)
+
+A terceira facção da frente atual já tem todo o conteúdo, mas nenhuma partida a usa: o jogo ainda tem dois lados, e o trabalho dos 3 lados (EUA × Rússia × Insurgentes) é que vai ligá-la. Tudo está em `FACTIONS.modern.insurgentes`, no formato de um lado de `ERAS`, com as cores próprias (picapes cor de areia, roupa escura, bandeira preta em cada veículo). Não há aviões nem helicópteros: a defesa antiaérea é a técnica com ZU-23 e o Strela.
+
+| Tipo | Unidades |
+| --- | --- |
+| Infantaria | Combatente (AKM), Metralhador de PKM, Granadeiro de RPG-7, Atirador de SVD, Equipe de Malyutka, Equipe de Kornet (lote antigo), Operador de Strela, Morteiro de 82 mm, Plantador de IED (sapador), Rádio, Operador de drone comercial, Homem-bomba |
+| Veículos | Técnica com DShK, com SPG-9 e com ZU-23-2; moto com garupa armado; Land Cruiser e sedã civis; carro-bomba; caminhão ZIL-131; BTR-70 capturado; T-55A e T-62M capturados; técnica com foguetes de 107 mm |
+| Drones | Reconhecimento (Mavic comercial), bombardeiro agrícola com granadas, FPV caseiro com ogiva de RPG |
+
+Economia: tudo é mais barato e mais fraco. Um pelotão custa 15 de energia e 8 de metal (os outros pagam 25 e 15), uma técnica 5 e 5, um T-55 14 e 28 (um tanque comum custa 20 e 40). Em troca, a blindagem é pouca: o T-55 tem 95 de vida contra 150 de um Abrams, recarrega em 6,5 s e a munição explode mais fácil; as técnicas morrem com uma rajada. A tabela está em `FACTIONS.modern.insurgentes.eco`.
+
+Homem-bomba e carro-bomba: armam 2 s depois de entrar em campo e explodem perto do inimigo (8 m o homem-bomba, 12 m o carro). Morto armado, pode explodir com o tiro (metade das vezes o homem-bomba, três de cada quatro o carro). O colete faz 420 de dano em 32 m; o carro-bomba, 1400 em 70 m. Destroem veículos leves, danificam casas e avariam tanques (o carro-bomba destrói um tanque a menos de uns 40 m), e deixam uma nuvem de poeira que tapa a vista por 25 s. A IA corre ou dirige até o inimigo mais próximo e segura a explosão se houver civil visto na área e o alvo não estiver identificado, como a artilharia (regras da guerra). Nada disso foi testado numa partida: veja `docs/nao-testado/cf-insurgentes-conteudo.md`.
+
 ## Controles
 
 "Controles", no hangar, mostra as teclas do veículo escolhido e o resumo da missão. Em todas as classes: C troca a câmera, H troca de veículo, Tab abre a visão de general, Esc solta o mouse, M abre o mapa de tiro onde ele existe.

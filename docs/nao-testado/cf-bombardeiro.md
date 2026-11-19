@@ -58,11 +58,31 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 
 `README.md` e `MCP.md`: seção "Bombardeio estratégico".
 
+## Ajustes na junção com o `main` (os 3 lados entraram enquanto eu trabalhava)
+
+- O lado dos Insurgentes já existe no `main`: `ERAS.modern.sides[2]` com `fac: 'insurgentes'` e `air: false`. Por isso o `stkKinds` acha o `STK.fac.insurgentes` pelo `side.fac`.
+- Na mesma `ERAS`, EUA e Rússia ganharam `bomber`.
+- Verificação de lado pela regra nova:
+  - `isSide(t)` no lugar de `t === 0 || t === 1`;
+  - inimigo por `foeSide(t, ...)`;
+  - `spotted(o, t)` (visão por lado);
+  - posições que o lado viu por `sX`/`sZ` (P3).
+- `droneRail(team)` do `main` mirava `S.base[1 - team]`, que não existe para o lado 2. Agora mira `foeBase(team)` (o mesmo erro valia para os drones kamikaze da IA insurgente do P7).
+- `server.js`:
+  - os bombardeiros vão para `MSIDE`, que agora diz o lado de cada modelo;
+  - nas listas `MODELS` eles entram no fim, para nenhum índice antigo mudar.
+- `mcp-general.js` 2.3.0: `UNITS` com `strat`, `svbied`, `shahed` antes das instalações. O `ecoI` do `main` põe os tipos de recuperação depois das instalações.
+- A seção STK foi dividida em duas:
+  - a parte de simulação ficou antes do marcador `/* ---------- 3D scene`, como o `main` pede (#75);
+  - a parte de tela (crateras e botão da visão de general) ficou antes de `function boot()`.
+- **Problema que já existe no `main` (não é deste PR).** A página dá `Uncaught ReferenceError: dsOf is not defined` ao carregar. O `dsOf` é chamado no `spawnPlayer` e no `addUnit` e não é definido em lugar nenhum do `origin/main` (conferido no arquivo do `main`). Com isso a página carrega com erro, e o meu smoke depois da junção não conseguiu rodar a simulação. Outra sessão no mesmo Chrome mostrou o mesmo erro numa cópia sua.
+
 ## O que rodou (smoke)
 
 - `node --check` na página, no `server.js` e no `mcp-general.js`: ok.
-- Servidor em 127.0.0.1 e página no Chrome: nenhum erro novo no console (só o 404 que já existia). `buildPlane` dos 4 modelos montou.
-- Um script avulso, fora do repo (`/home/luiz/secondmate/data/cf-bombardeiro/smoke/`), carregou a simulação.
+- Antes da junção com o `main`: servidor em 127.0.0.1, página no Chrome sem erro novo no console (só o 404 que já existia), e o `buildPlane` dos 4 modelos montou.
+- Depois da junção: `node --check` nos três arquivos ok, servidor sobe e entrega a página (200). No console aparece o `dsOf is not defined` do `main` (acima) e o 404. Os scripts avulsos de smoke não rodam mais: o `main` tem código de simulação depois do marcador da cena 3D (`dsOf`, `lsRoutes`).
+- Antes da junção, um script avulso, fora do repo (`/home/luiz/secondmate/data/cf-bombardeiro/smoke/`), carregou a simulação.
   - Ele carregou como o `tests/harness.js`, mais a seção STK, e criou vazias as funções que ficam depois da cena 3D (`mmMan`, `mmW`).
   - Mapa v5, economia ligada, logística desligada.
   - B-2 contra um ponto a 2,5 km da base inimiga: subiu, alinhou e soltou as 8 bombas; as crateras ficaram de 30 m antes a 320 m depois do alvo, em linha. Na volta foi abatido pela defesa da base inimiga. Isso foi antes de mudar o `out` para 3 s; numa versão anterior ele arremeteu "fora da linha".

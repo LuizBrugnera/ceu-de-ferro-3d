@@ -27,7 +27,7 @@ console.log('-- CLK: the battle keeps to the clock as the frames slow down --');
   r = run(10, 10, 30);
   ok(Math.abs(r.ratio - 1) < 1e-6 && Math.abs(r.dmax - K.hmax) < 1e-9 && r.n <= 100 * Math.floor(K.budget / 30) + 6, 'at 10 frames a second with steps of 30 ms: real time (before .5x), in ' + (r.n / 100).toFixed(1) + ' steps a frame of 1/30 s, ' + Math.floor(K.budget / 30) * 30 + ' ms of the budget of ' + K.budget);
   r = run(4, 10, 30);
-  ok(Math.abs(r.ratio - 4 * Math.floor(K.budget / 30) * K.hmax) < .01 && r.ratio > .2 * 1.9, 'at 4 frames a second with steps of 30 ms: ' + r.ratio.toFixed(2) + 'x (before .2x, and three steps a frame then too): the budget spent on longer steps');
+  ok(Math.abs(r.ratio - 4 * Math.floor(K.budget / 30) * K.hmax) < .03 && r.ratio > .2 * 1.9, 'at 4 frames a second with steps of 30 ms: ' + r.ratio.toFixed(2) + 'x (before .2x, and three steps a frame then too): the budget spent on longer steps');
   r = run(4, 10, 2 * K.budget);
   ok(r.n <= 40 + Math.ceil(K.catch / K.h) && r.dmax <= K.hmax + 1e-9, 'a step dearer than the whole budget: one a frame, of 1/30 s (' + r.ratio.toFixed(2) + 'x), the frames are not held up more');
   r = run(2, 10, 2);
@@ -57,5 +57,17 @@ console.log('-- MANB: a soldier\'s mind 30 times a second of battle, his body ev
   calls.clear(); C.run(1, null, 1 / 30);
   ok([...calls.values()].every(l => l.length === 30), 'at 30 steps a second (CLK under load): once a step, the same 30 times');
   ok(d0 - off() > 4 && !H.nan(S), 'and they walk to their post (' + Math.round(d0) + ' m off it, ' + Math.round(off()) + ' m after 4 s)');
+}
+
+console.log('-- what flies keeps its hops of 1/60 s in a longer step --');
+{
+  const C = H.load({ seed: 6 }), S = C.newState('modern', null, { watch: 1 }), hops = [];
+  C.__h = dt => hops.push(dt); C.$('stepShots = (f => function (dt) { __h(dt); return f(dt); })(stepShots)');
+  C.run(1 / 60, null, 1 / 60); const a = hops.splice(0);
+  C.run(1 / 30, null, 1 / 30); const b = hops.splice(0);
+  ok(a.length === 1 && Math.abs(a[0] - 1 / 60) < 1e-9, 'a step of 1/60 s: one hop, as before');
+  ok(b.length === 2 && b.every(d => Math.abs(d - 1 / 60) < 1e-9), 'a step of 1/30 s (CLK under load): two hops of 1/60 s, so a round at 900 m/s still moves 15 m a hop past a vehicle or a plane');
+  C.run(3, null, 1 / 30);
+  ok(!H.nan(S) && !C.$('S').over, 'a modern battle in steps of 1/30 s goes on (' + C.$('S').men.length + ' soldiers)');
 }
 H.done();

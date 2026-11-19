@@ -145,8 +145,9 @@ for (const era of ['modern', 'ww2']) {
   ok(lg.some(s => /Demolição: esquadra a caminho/.test(s)) && lg.some(s => /carga\(s\) armada/.test(s)) && lg.some(s => /destruída/.test(s)), 'the log tells it: on its way, charges set, the bridge down');
   const q = $2('genQuery')(t, { q: 'brg' });
   ok(q.ok && q.br.length === 6 && q.br[b.i].st === 'down' && q.br[b.i].open === 0 && q.br.filter(x => x.st === 'ok').length === 5, 'the question brg: six bridges, that one down and shut');
+  C.mcd = {};   // the first one's cool-down (cd, which comes first) may not be over yet if the bridge fell quickly: the bridge itself is the question
   const r2 = $2('genCmd')(t, { c: 'man', k: 'demolish', x: b.x, z: b.z }, 'sys');
-  ok(!r2.ok && r2.why === 'down', 'demolish again: refused (down)');
+  ok(!r2.ok && r2.why === 'down', 'demolish again: refused (' + r2.why + ')');
   const c2 = $2('genCmd')(1 - t, { c: 'man', k: 'cross', x: L[0].x, z: L[0].z }, 'sys');
   ok(!c2.ok && c2.why === 'whole', 'cross at a bridge that stands: refused (whole)');
   C.mcd = {};

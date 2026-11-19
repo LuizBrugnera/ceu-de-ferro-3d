@@ -609,12 +609,12 @@ const MSIDE = {
     ['su57', 'su25', 'tu160', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
       'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
     ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
-      'tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
+      'tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
 {
   const m = MODELS.modern, R = rooms.modern, add = (cls, ids) => { for (const id of ids) { if (m[cls].includes(id)) throw new Error('insurgent model already there: ' + id); m[cls].push(id); } };
   add('tank', ['t55', 't62']); add('art', ['tec107']);
   add('inf', ['insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber']);
-  add('trn', ['tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']);
+  add('trn', ['tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']);
   for (const id of [...m.tank, ...m.art, ...m.trn]) R.gnd.add(id);
   for (const id of m.inf) R.inf.add(id);
   for (const era in MSIDE) {

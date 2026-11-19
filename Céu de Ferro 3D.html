@@ -15358,6 +15358,7 @@ function heliAir(team, id, far) {
 const heliClearAt = (x, z) => { let top = hgt(x, z); for (const o of near(x, z, 20)) if (solid(o)) top = Math.max(top, topOf(o)); return top; };
 function heliLiftRun(team) {
   const Q = SQUAD[S.era], aboard = S.units.reduce((a, u) => a + (u.cargo ? u.cargo.length : 0), 0) + S.planes.reduce((a, p) => a + (p.cargo ? p.cargo.length : 0), 0);
+  if (!S.E.sides[S.fac[team]].lift) return null;   // no transport helicopter on a side with no aviation (the Insurgents)
   if (S.men.length + aboard + Q.length > IAI.cap || heliCount(team, p => p.def.lift)) return null;
   if (!ecoUse(team, 'lift', 'squad')) return null;
   const p = heliGround(S.E.sides[S.fac[team]].lift, team, 5, true); p.cargo = Q.slice(); return p;
@@ -21840,6 +21841,7 @@ GC.disp = { d: 'atk', f(t, c) {
   if (c.mk !== undefined && !GPC.mis.includes(c.mk)) return gBad('kind');
   const A = gpArea(c); if (!A) return gBad('map');
   const n = Number.isInteger(c.n) ? clamp(c.n, 1, GPC.n) : 1, P = popOf(t), U = popUse(t), side = S.E.sides[S.fac[t]], b = S.base[t], air = u[3] === 'air';
+  if (air && !side[k]) return gBad('kind');   // a side with no aviation (the Insurgents) has no fighter, cas or heli to send
   if (air ? U.air + n > P.air : k === 'squad' ? U.men + n * SQUAD[S.era].length > P.men : U.veh + n > P.veh) return gBad('pop');
   const M = Object.assign({ why: c.why || 'despacho do general: ' + ECO.tx.u[k].toLowerCase(), area: A }, c.mk ? { kind: c.mk } : { by: MIS.col }), was = new Set(S.planes);
   let id = 0, got = 0;
@@ -23700,7 +23702,15 @@ const BOMB = { man: { name: 'Colete explosivo', dmg: 420, r: 32, arm: 2, trig: 8
   cloud: [.55, .45, 25], shake: .02, every: .25, fx: 24 };
 Object.assign(ARMS, {
   rcl: { k: 'shell', rl: 7, spd: 435, dmg: 48, r: 6, ammo: 14, sp: .003 },
-  zu23: { k: 'gun', rate: .035, dmg: 7, spd: 970, ap: .25, ammo: 400, life: 2.6, sp: .0045, sweep: 1 }
+  zu23: { k: 'gun', rate: .035, dmg: 7, spd: 970, ap: .25, ammo: 400, life: 2.6, sp: .0045, sweep: 1 },
+  /* the Insurgents' old anti-air (cf-insurg-antiaerea; NOT TESTED, see docs/nao-testado/cf-insurg-antiaerea.md): gunfire and unguided rockets only,
+     aimed by eye with lead (the AI's lowPlane/known sight, so weaker at night and in bad weather); no radar, no lock, no missile. kpv: the 14.5 mm
+     KPV of the ZPU; shil: the Shilka's four 23 mm AZP-23, fast but short of ammunition; s5, s8: unguided 57 and 80 mm rocket pods as fast, heavy,
+     loose rounds in salvos (rate short, spread wide, a pod's worth of ammo) */
+  kpv: { k: 'gun', rate: .065, dmg: 9, spd: 990, ap: .3, ammo: 480, life: 2.5, sp: .0055, sweep: 1 },
+  shil: { k: 'gun', rate: .017, dmg: 6.5, spd: 970, ap: .24, ammo: 900, life: 2.6, sp: .005, sweep: 1 },
+  s5: { k: 'gun', rate: .07, dmg: 15, spd: 560, ap: .1, ammo: 64, life: 3.4, sp: .016, sweep: 1 },
+  s8: { k: 'gun', rate: .11, dmg: 28, spd: 600, ap: .2, ammo: 40, life: 3.6, sp: .013, sweep: 1 }
 });
 Object.assign(SARMS, {
   akm: { name: 'AKM', rate: .1, dmg: 8, spd: 715, mag: 30, mags: 6, sp: .009, rl: 2.6, auto: 1 },
@@ -23736,6 +23746,14 @@ Object.assign(SARMS, {
     tecDshk: { name: 'Técnica com DShK', kind: 'car', role: 'Picape armada', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 14, spd: 26, tr: .9, sl: 1.6, el: [-.2, .9], open: 1, seats: { gun: 1, pax: 3 }, arm: [['hmg', { name: 'DShKM 12,7 mm' }]] },
     tecSpg9: { name: 'Técnica com SPG-9', kind: 'car', role: 'Picape com canhão sem recuo', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 14, spd: 26, tr: .9, sl: 1.1, el: [-.15, .4], open: 1, seats: { gun: 1, pax: 2 }, arm: [['rcl', { name: 'SPG-9 73 mm sem recuo' }]] },
     tecZu: { name: 'Técnica com ZU-23-2', kind: 'car', role: 'Picape antiaérea', l: 5.2, w: 1.9, hh: .85, cab: .7, px: -1.4, hp: 15, spd: 24, tr: .85, sl: 1.3, el: [-.1, 1.4], open: 1, seats: { gun: 1, pax: 1 }, arm: [['zu23', { name: 'ZU-23-2 (2× 23 mm)' }]], aaGun: 1 },
+    zpu4: { name: 'ZPU-4 (4× 14,5 mm, rebocada)', kind: 'car', role: 'Antiaérea rebocada', l: 3.8, w: 2.1, hh: .35, cab: .3, px: 0, hp: 12, spd: 5, tr: .5, sl: 1.5, el: [-.1, 1.5], open: 1, seats: { gun: 1, pax: 0 }, arm: [['kpv', { name: 'ZPU-4 (4× KPV 14,5 mm)', rate: .045, ammo: 600 }]], aaGun: 1 },
+    zpu2: { name: 'ZPU-2 (2× 14,5 mm, rebocada)', kind: 'car', role: 'Antiaérea rebocada', l: 3.2, w: 1.9, hh: .3, cab: .3, px: 0, hp: 10, spd: 5, tr: .5, sl: 1.6, el: [-.1, 1.5], open: 1, seats: { gun: 1, pax: 0 }, arm: [['kpv', { name: 'ZPU-2 (2× KPV 14,5 mm)', ammo: 400 }]], aaGun: 1 },
+    dshkAA: { name: 'DShK em reparo antiaéreo', kind: 'car', role: 'Metralhadora antiaérea', l: 2.6, w: 1.6, hh: .25, cab: .2, px: 0, hp: 8, spd: 4, tr: .5, sl: 1.8, el: [-.1, 1.5], open: 1, seats: { gun: 1, pax: 0 }, arm: [['hmg', { name: 'DShKM 12,7 mm (antiaérea)', dmg: 8, ap: .2, spd: 850, ammo: 500 }]], aaGun: 1 },
+    zuTruck: { name: 'Caminhão com ZU-23-2', kind: 'car', role: 'Caminhão antiaéreo', l: 6.4, w: 2.4, hh: 1, cab: 1.8, px: -1.6, hp: 24, spd: 15, tr: .55, sl: 1.3, el: [-.1, 1.4], open: 1, seats: { gun: 1, pax: 2 }, arm: [['zu23', { name: 'ZU-23-2 (2× 23 mm)' }]], aaGun: 1 },
+    tecS5: { name: 'Técnica com foguetes S-5 (57 mm)', kind: 'car', role: 'Picape com foguetes antiaéreos', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 14, spd: 25, tr: .9, sl: 1.1, el: [-.05, 1.3], open: 1, seats: { gun: 1, pax: 1 }, arm: [['s5', { name: 'Casulos S-5 57 mm (não guiados)' }]], aaGun: 1 },
+    tecS8: { name: 'Técnica com foguetes S-8 (80 mm)', kind: 'car', role: 'Picape com foguetes antiaéreos', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 14, spd: 25, tr: .9, sl: 1, el: [-.05, 1.3], open: 1, seats: { gun: 1, pax: 1 }, arm: [['s8', { name: 'Casulos S-8 80 mm (não guiados)' }]], aaGun: 1 },
+    shilka: { name: 'ZSU-23-4 Shilka (capturada, só mira óptica)', kind: 'lav', role: 'Antiaérea blindada antiga', l: 6.5, w: 3, hh: 1.1, t: [2.4, 2.4, .8, -.4], g: 1.8, cab: 2.2, hp: 60, spd: 14, tr: .6, sl: 1.1, el: [-.05, 1.4], seats: { gun: 1, pax: 0 }, seat: 'gunnerM',
+      arm: [['shil', { name: 'AZP-23 (4× 23 mm, mira óptica)' }], ['none', {}]], aaGun: 1 },
     moto: { name: 'Moto com garupa armado', kind: 'car', role: 'Motocicleta', l: 2.2, w: .8, hh: .5, cab: .2, px: -.6, hp: 6, spd: 30, tr: 1.2, sl: 2, el: [-.3, .6], open: 1, seats: { gun: 1, pax: 0 }, arm: [['hmg', { name: 'PKM 7,62 do garupa', dmg: 4.5, ap: 0, rate: .1, ammo: 400 }]] },
     suv: { name: 'Land Cruiser civil', kind: 'car', role: 'Utilitário civil', l: 4.8, w: 1.9, hh: 1, cab: .6, hp: 12, spd: 27, tr: .85, seats: { pax: 4 }, arm: NOARM },
     sedan: { name: 'Sedã civil', kind: 'car', role: 'Carro civil', l: 4.5, w: 1.75, hh: .75, cab: .4, hp: 9, spd: 28, tr: .9, seats: { pax: 3 }, arm: NOARM },
@@ -23760,8 +23778,8 @@ const FACTIONS = { modern: { insurgentes: { id: 'insurgentes', era: 'modern', sl
     car: 'tecDshk', trk: 'zil131', lav: 'btr70', rad: null, col: 0xb3a586, col2: 0x6f6553, mark: 0x1d1d1b },
   inf: ['insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber'],
   squad: ['insRifle', 'insRifle', 'insRifle', 'insMG', 'insRPG', 'insRPG'],
-  veh: { tech: ['tecDshk', 'tecSpg9', 'tecZu'], moto: 'moto', civ: ['suv', 'sedan'], vbied: 'vbied', truck: 'zil131', lav: 'btr70', tanks: ['t55', 't62'], mlrs: 'tec107' },
-  aaTrn: 'tecZu', bomb: { man: 'insBomber', car: 'vbied' }, air: false, uniform: [0x6b5d4a, 0x2b2a27],
+  veh: { tech: ['tecDshk', 'tecSpg9', 'tecZu', 'tecS5', 'tecS8'], aaOld: ['zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecZu', 'tecS5', 'tecS8', 'shilka'], moto: 'moto', civ: ['suv', 'sedan'], vbied: 'vbied', truck: 'zil131', lav: 'btr70', tanks: ['t55', 't62'], mlrs: 'tec107' },
+  aaTrn: 'tecZu', aaOld: ['tecZu', 'zpu4', 'tecS5', 'zuTruck', 'dshkAA', 'tecS8', 'zpu2', 'shilka'], bomb: { man: 'insBomber', car: 'vbied' }, air: false, uniform: [0x6b5d4a, 0x2b2a27],
   eco: { squad: [15, 8, 15, 'inf'], car: [5, 5, 8, 'veh'], truck: [6, 6, 10, 'veh'], lav: [15, 22, 25, 'veh', 'modern'], aa: [8, 10, 18, 'veh'], art: [8, 12, 25, 'veh'],
     tank: [14, 28, 40, 'veh'], drone: [5, 2, 15, 'veh', 'modern'], bomber: [8, 4, 12, 'inf', 'modern'], vbied: [10, 12, 15, 'veh', 'modern'] } } } };
 /* the faction of a def or an id, and a cost by the faction's table (else the economy's) */
@@ -23775,10 +23793,10 @@ const facCost = (k, fac) => { const F = fac && FACTIONS.modern[fac]; return (F &
    such unit (no aircraft for the Insurgents), so the economy never draws one (ecoUse), the plan wants none (gpPlan) and the cap holds none (popOf) */
 {
   const F = FACTIONS.modern.insurgentes, E = ERAS.modern;
-  E.sides[F.slot] = Object.assign({}, F.side, { art: F.side.art || F.side.mlrs, aaT: F.aaTrn, air: F.air !== false, fac: F.id });
+  E.sides[F.slot] = Object.assign({}, F.side, { art: F.side.art || F.side.mlrs, aaT: F.aaTrn, aaOld: F.aaOld, air: F.air !== false, fac: F.id });
   INF.modern[F.slot] = F.inf.slice();
   REC.side.modern[F.slot] = {};   // no recovery vehicle nor ambulance: recFleet sends none
-  for (const id of ['tecDshk', 'tecSpg9', 'tecZu', 'moto', 'zil131', 'btr70']) Object.defineProperty(TRNS, id, { value: TRNS[id], enumerable: true });
+  for (const id of ['tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'zil131', 'btr70']) Object.defineProperty(TRNS, id, { value: TRNS[id], enumerable: true });
   for (const k of DK) if (!DDEF[k][F.slot]) { const n = DRONES[k].names[F.slot] = 'Drone improvisado'; DDEF[k][F.slot] = Object.assign(Object.create(DRONES[k]), { name: n }); }   // a drone kind the content named none for
 }
 const AIRK = { fighter: 1, cas: 1, heli: 1, lift: 1, plane: 1 };
@@ -23787,7 +23805,7 @@ ecoUse = (g => (t, k, k2) => (sideLacks(t, k) || sideLacks(t, k2) ? false : g(t,
 popOf = (g => t => { const o = g(t); if (sideLacks(t, 'plane')) o.air = 0; return o; })(popOf);
 gpPlan = (g => t => { const pp = g(t); for (const k in pp.f) if (sideLacks(t, k)) pp.f[k] = 0; return pp; })(gpPlan);
 /* an AA vehicle for a side with none: its AA technical, on the same road (base AA, a column's AA) */
-addUnit = (g => (kind, team, x, z, id, ...r) => { const sd = S.E.sides[S.fac[team]]; if (kind === 'aa' && !id && !sd.aa) { if (!sd.aaT) return null; kind = 'car'; id = sd.aaT; } return g(kind, team, x, z, id, ...r); })(addUnit);
+addUnit = (g => (kind, team, x, z, id, ...r) => { const sd = S.E.sides[S.fac[team]]; if (kind === 'aa' && !id && !sd.aa) { if (!sd.aaT) return null; const L = sd.aaOld; id = L ? L[(S.aaOldN = (S.aaOldN || 0) + 1) % L.length] : sd.aaT; kind = TRNS[id] ? TRNS[id].kind : 'car'; } return g(kind, team, x, z, id, ...r); })(addUnit);
 /* the kits an AI soldier's row names by index: a third side's come after every kit an older page knew, so the old indices hold */
 trnKits = (g => () => { const l = g(), c = INF[S.era][2]; return c ? l.concat(c.filter(id => !l.includes(id))) : l; })(trnKits);
 /* ---- the bombs: when one goes, and the AI that takes it to its target ---- */
@@ -32650,7 +32668,7 @@ buildTrn = (f => (u, wreck) => {
 /* the Insurgents' looks (FACTIONS.modern.insurgentes; NOT TESTED): the uniform of their slot, the bodies of their vehicles, and on each a
    black flag on a short pole (side.mark), the SPG-9's long tube and the ZU-23's twin barrels on the bed, the car bomb's load in the back */
 MCOL.modern[2] = FACTIONS.modern.insurgentes.uniform;
-Object.assign(TLOOK, { tecDshk: { ax: [1.5, -1.3], hood: 1.3 }, tecSpg9: { ax: [1.5, -1.3], hood: 1.3 }, tecZu: { ax: [1.6, -1.4], hood: 1.35 }, moto: { ax: [.75, -.75], hood: .35 },
+Object.assign(TLOOK, { tecDshk: { ax: [1.5, -1.3], hood: 1.3 }, tecSpg9: { ax: [1.5, -1.3], hood: 1.3 }, tecZu: { ax: [1.6, -1.4], hood: 1.35 }, tecS5: { ax: [1.5, -1.3], hood: 1.3 }, tecS8: { ax: [1.5, -1.3], hood: 1.3 }, zpu4: { ax: [1.2, -1.2] }, zpu2: { ax: [1, -1] }, dshkAA: { ax: [.8, -.8] }, zuTruck: { ax: [2.4, -1.2, -2.2], hood: 1.5 }, shilka: { ax: [2.4, 1.1, -1, -2.2], bow: 1.3, props: 1 }, moto: { ax: [.75, -.75], hood: .35 },
   suv: { ax: [1.5, -1.4], hood: 1.2, roof: 1 }, sedan: { ax: [1.4, -1.3], hood: 1.1, roof: 1 }, vbied: { ax: [1.4, -1.3], hood: 1.1, roof: 1 },
   zil131: { ax: [2.6, -1.3, -2.5], hood: 1.6, tilt: 1 }, btr70: { ax: [2.7, 1.2, -1, -2.5], bow: 1.4, props: 1 } });
 buildTrn = (f => (u, wreck) => {
@@ -32660,6 +32678,10 @@ buildTrn = (f => (u, wreck) => {
   if (!wreck) { box(g, .04, 1.3, .04, dark, -d.l * .45, by + .65, -W * .4); box(g, .55, .35, .02, mat(FACTIONS.modern.insurgentes.side.mark), -d.l * .45 - .28, by + 1.1, -W * .4); }   // the flag
   if (d.id === 'tecSpg9' && gun) { const t = new THREE.Mesh(cylX(.1, .1, 2.1, 10), dark); t.position.set(.5, .12, 0); gun.add(t); }
   if (d.id === 'tecZu' && gun) for (const s of LRS) { const t = new THREE.Mesh(cylX(.05, .04, 2.2, 8), dark); t.position.set(.9, .1, s * .22); gun.add(t); }
+  /* the old AA (cf-insurg-antiaerea): barrels on the mount (the model's gun group), a rocket pod's tubes, the Shilka's four barrels */
+  if (gun && (d.id === 'zpu4' || d.id === 'zpu2' || d.id === 'zuTruck' || d.id === 'shilka')) { const n = d.id === 'zpu2' || d.id === 'zuTruck' ? 2 : 4; for (let i = 0; i < n; i++) { const t = new THREE.Mesh(cylX(.045, .035, d.id === 'shilka' ? 2.2 : 1.9, 8), dark); t.position.set(.9, .1 + (i > 1 ? .22 : 0), (i % 2 ? 1 : -1) * .2); gun.add(t); } }
+  if (gun && d.id === 'dshkAA') { const t = new THREE.Mesh(cylX(.05, .04, 1.2, 8), dark); t.position.set(.6, .1, 0); gun.add(t); }
+  if (gun && (d.id === 'tecS5' || d.id === 'tecS8')) for (const z of d.id === 'tecS5' ? [-.4, 0, .4] : [-.3, .3]) { const t = new THREE.Mesh(cylX(d.id === 'tecS5' ? .09 : .13, d.id === 'tecS5' ? .09 : .13, 1.3, 10), mat(0x4e5442)); t.position.set(.5, .1, z); gun.add(t); }
   if (d.id === 'vbied' && !wreck) { const c = mat(0x5b5f57); for (let i = 0; i < 3; i++) box(g, .45, .5, .45, c, -d.l * .3 + i * .5, by - .1, 0); box(g, .02, .02, W * .7, mat(0xb3201d), -d.l * .1, by + .2, 0); }   // the drums and the wire
   return g;
 })(buildTrn);
@@ -37335,7 +37357,7 @@ const PACK = {
   url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 90, 120, 160], max: [0, 16, 28, 48],
   tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
   trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
-    tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
+    tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', tecS5: 'pickup', tecS8: 'pickup', zuTruck: 'trk_m939', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
   civWreck: { suv: 1, sedan: 1, vbied: 1 },
   arm: { k98: 'w_kar98', garand: 'w_kar98', m4: 'w_m4', ak: 'w_ak', mg42: 'w_smg', bar: 'w_smg', m249: 'w_m4', pkp: 'w_ak', pzf: 'w_bazooka', bazooka: 'w_bazooka',
     javelin: 'w_launcher', rpg: 'w_rpg', stinger: 'w_launcher', igla: 'w_launcher' },

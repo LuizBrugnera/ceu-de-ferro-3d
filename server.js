@@ -8,7 +8,8 @@
    gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
    messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill)
    hlp (the units' calls for help: the messages hlp, hask and hacc)
-   and lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx).
+   lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
+   and rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -45,7 +46,10 @@ const FKINDS = 6;   // the kinds of work fort and fbuild carry
 const rooms = { ww2: new Map(), modern: new Map() };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
-for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
+for (const era in MODELS) rooms[era].specs = new Set();
+/* recovery vehicles and ambulances (rec): the AI's alone, models of its ground rows, never a player's (the page's REC.side is the other copy) */
+const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54'], modern: ['m88a2', 'brem1', 'm997', 'uaz452'] };
+for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);   // spectators: clients with no body, not in the room's map
 let nextId = 1;
 
 const model = (era, cls, id) => typeof cls === 'string' && Object.hasOwn(era, cls) && era[cls].includes(id);
@@ -130,7 +134,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -505,7 +509,7 @@ RX.gcmd = (c, m) => {
 };
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });

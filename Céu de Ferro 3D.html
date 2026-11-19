@@ -14825,6 +14825,418 @@ Net.rx.lgx = m => {
   else if (m.k === 1 && have) { const o = lgNear(g.team, g); if (o) { const k = lgGive(o, have); n = have - k; if (k) gLog(g.team, 'eco', 'Um jogador entregou ' + k + ' caixas em ' + lgName(o), o); } }
   Net.lgCar.set(m.from, n); Net.send('lgx', { to: m.from, k: m.k, n });
 };
+/* ---------- vehicle recovery and medical evacuation (REC: package W18, topic T9 of the General's design) ----------
+   Where the economy runs and is simulated here (solo or host), a ground vehicle is no longer only whole or destroyed, nor a soldier only up or dead.
+   - immobilized (imobilizado): an AI ground vehicle of a kind in k (tank, AA, artillery, light armour, radio vehicle) that a hit would destroy
+     is knocked out instead, by chance p, unless that hit was more than over of its hull, its ammunition went up or it burns: its engine is
+     gone, hp of its hull is left and its crew bails out (a squad aboard gets out). Its side counts it lost (cqDead), its shooter has the
+     kill. The hulk stays where it stands, parked (silent, no capture weight, out of the population and of the plan), and is written off
+     as a wreck after life s with no recovery vehicle on its way. Hit again until its hull is gone, or burnt out, it is destroyed.
+   - the recovery vehicle (veículo de recuperação, the reserve's arv: Bergepanther and M32 in 1944, M88A2 and BREM-1 today) leaves the main
+     base by the hulk's road, leaves the road for it, hitches within gap m of it standing still hitch s, and tows it at tow of its pace to
+     its side's nearest node on that road (a finished supply base with the crates, else the main base); then it goes home, back to the
+     reserve. At the node the full repair costs fix crates by kind (from the supply base; at the main base, the metal those crates are worth
+     at a convoy's LG.mt for LG.truck) and the vehicle goes back to the reserve of its kind with its experience (vx, vl: the next of its kind
+     out of the reserve carries it).
+   - capture: a recovery vehicle may tow an enemy hulk its side had in sight within seen s, at most ahead m past its own line: it is its side's
+     from the hitch, its reserve's at the node.
+   - the badly wounded (ferido grave): an AI soldier who goes down (WND) from a hit of grave or more damage is only stabilized by a mate's
+     first aid: he lies out of the fight hold s more and then dies, unless he is evacuated. A lighter one gets up after first aid, as before.
+   - medical evacuation: an ambulance (Kfz. 31 and Dodge WC-54 in 1944, M997 and UAZ-452 today; the reserve's amb) goes by road to the
+     wounded, stops within r m of one, loads every one of its side down or stabilized within pick m in load s, up to n, the next one within
+     area m of the first, and takes them to the nearest node; there they go back to the reserve (a squad for every squad's worth of them) and
+     it goes home. Today the reserve's transport helicopter flies the evacuation instead when the wounded lie farther than road m from a road,
+     the road is dangerous (LG.threat, as the logistics read it) or no ambulance is in the reserve: it lands by them, its crew carries those
+     within heli.pick m of where it was sent aboard in heli.load s (up to LIFT.seats), and flies them home, back to the reserve.
+   - the general (Apoio, the sup domain; every `every` s with the AI in it): a recovery vehicle for the hulk worth most (its own before the
+     enemy's, none with a known enemy within safe m of it) and an evacuation for the largest group of wounded, at most max of each out at a
+     time, none for a hulk more than ahead m past its line; its reserve keeps one of each (keep). A human or a model: recv { id } (a hulk's number), medv { x, z } (the wounded within area m),
+     and the question rec.
+   Online (welcome rec: 1) only the host simulates this: the new vehicles ride the AI rows like any other (the server knows their models) and a
+   guest sees a hulk follow its tow; a new host keeps the hulks parked and starts the rest over. REC.on 0, no economy, or a server without rec:
+   no S.rec, every hook passes through and draws no random number */
+const REC = { on: 1, p: .5, over: .7, hp: .25, life: 300, k: { tank: 1, aa: 1, art: 1, lav: 1, rad: 1 },
+  val: { tank: 3, art: 2, aa: 2, lav: 2, rad: 1.5 }, fix: { tank: 10, art: 8, aa: 6, lav: 6, rad: 6 },
+  gap: 6, hitch: 6, tow: .55, reach: 12, road: 30, every: 5, max: 2, ahead: 300, safe: 200, seen: 300, grave: 15, hold: 600,
+  amb: { n: 4, r: 8, pick: 15, load: 5, area: 250, road: 300 }, heli: { pick: 150, load: 20 },
+  keep: { arv: 1, amb: 1 }, unit: { arv: [15, 25, 30, 'veh'], amb: [10, 10, 12, 'veh'] },
+  side: { ww2: [{ arv: 'bergep', amb: 'kfz31' }, { arv: 'm32', amb: 'wc54' }], modern: [{ arv: 'm88a2', amb: 'm997' }, { arv: 'brem1', amb: 'uaz452' }] },
+  tx: { arv: 'Veículo de recuperação', amb: 'Ambulância' } };
+Object.assign(ECO.tx.u, { arv: REC.tx.arv, amb: REC.tx.amb });
+/* the vehicles: built as the transports are, kept out of every list a player picks from (not enumerable in TRNS): only a general fields them */
+{
+  const D = {
+    bergep: { name: 'Bergepanther', role: REC.tx.arv, l: 6.9, w: 3.3, hh: 1.4, cab: .4, px: .9, hp: 80, spd: 12, tr: .5, sl: 1.5, el: [-.2, .8], seats: { gun: 1, pax: 2 }, arm: [['hmg', { name: 'MG 34' }]], svc: 'arv' },
+    m32: { name: 'M32 (recuperação)', role: REC.tx.arv, l: 6.2, w: 2.7, hh: 1.5, cab: .5, px: .8, hp: 75, spd: 13, tr: .5, sl: 1.5, el: [-.2, .8], seats: { gun: 1, pax: 2 }, arm: [['hmg', { name: 'M2 .50' }]], svc: 'arv' },
+    m88a2: { name: 'M88A2 Hercules', role: REC.tx.arv, l: 8.6, w: 3.7, hh: 1.6, cab: .6, px: 1.2, hp: 90, spd: 13, tr: .5, sl: 1.5, el: [-.2, .8], seats: { gun: 1, pax: 2 }, arm: [['hmg', { name: 'M2 .50' }]], svc: 'arv' },
+    brem1: { name: 'BREM-1', role: REC.tx.arv, l: 7, w: 3.5, hh: 1.4, cab: .5, px: 1, hp: 85, spd: 15, tr: .5, sl: 1.5, el: [-.2, .8], seats: { gun: 1, pax: 2 }, arm: [['hmg', { name: 'NSVT 12,7' }]], svc: 'arv' },
+    kfz31: { name: 'Phänomen Granit (Kfz. 31)', role: REC.tx.amb, l: 5.2, w: 2, hh: 1.1, cab: 1, hp: 18, spd: 16, tr: .75, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
+    wc54: { name: 'Dodge WC-54', role: REC.tx.amb, l: 4.9, w: 2, hh: 1.1, cab: 1, hp: 20, spd: 18, tr: .75, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
+    m997: { name: 'HMMWV M997', role: REC.tx.amb, l: 5.2, w: 2.2, hh: 1.2, cab: 1, hp: 30, spd: 24, tr: .8, seats: { pax: 2 }, arm: NOARM, svc: 'amb' },
+    uaz452: { name: 'UAZ-452A', role: REC.tx.amb, l: 4.4, w: 1.9, hh: 1.2, cab: 1, hp: 18, spd: 22, tr: .8, seats: { pax: 2 }, arm: NOARM, svc: 'amb' } };
+  for (const era in REC.side) REC.side[era].forEach((o, side) => {
+    for (const k in o) {
+      const id = o[k], d = Object.assign(D[id], { kind: 'car', era, side, id, trn: 1 }), top = (.5 + d.hh + .6) / 2;
+      d.sl = d.sl || 0; d.el = d.el || [0, 0]; d.arms = d.arm.map(([a, x]) => Object.assign({}, ARMS[a], x));
+      d.parts = partsOf('car', d, carBoxes(d), GS); d.tx = (d.px || 0) * GS; d.env = [0, top, 0, d.l / 2, top, d.w / 2].map(v => v * GS);
+      d.mh = 1.5 + GS * (.5 + d.hh + .75); d.bl = GS * ((d.px || 0) + 1.2); d.hitR = 8; d.crewI = d.parts.findIndex(p => p.id === 'crew'); d.hot = d.parts.find(p => p.burn).box; d.lay = seatLay(d);
+      Object.defineProperty(TRNS, id, { value: d, enumerable: false });
+    }
+  });
+}
+const recSim = () => !!S.rec && ecoSim();
+Net.rec = false;
+Net.rx.welcome = (old => m => { Net.rec = m.rec === 1; old(m); })(Net.rx.welcome);
+/* the match begins: the two kinds exist where this does, and each reserve starts with one of each and keeps it */
+ecoInit = (f => () => {
+  f(); S.rec = null;
+  for (const k in REC.unit) delete ECO.unit[k];
+  if (!REC.on || !S.eco || (S.net && !Net.rec)) return;
+  Object.assign(ECO.unit, REC.unit);
+  S.rec = { n: 0, v: [], men: [0, 0], vet: [{}, {}], cmd: [0, 0], T: 0, live: 0 };
+  if (S.eco.sim) for (const t of [0, 1]) { const d = S.eco.d[t]; for (const k in REC.keep) { d.keep[k] = Math.max(d.keep[k] || 0, REC.keep[k]); if (!(d.res[k] || []).length) d.res[k] = ['hq']; } }
+})(ecoInit);
+const recHulk = h => !!h && !!h.imm && !h.dead && !h.gone;
+const recBusy = h => !!h.rcq && !h.rcq.dead && !!h.rcq.rcv && h.rcq.rcv.h === h;
+const recHurt = (m, t) => !m.dead && !m.gone && m.team === t && !!m.ai && !m.net && !m.in && (!!m.stab || (!!m.down && !m.tr));
+const recN = n => n + (n === 1 ? ' ferido' : ' feridos');
+const recTaken = m => !!m.evq && !m.evq.dead && !m.evq.gone;
+/* ---- the hulk ---- */
+/* would this hit destroy an AI ground vehicle that may be knocked out instead (and the draw says so) */
+function recCan(u, dmg) {
+  if (!recSim() || !REC.k[tk(u)] || !u.ai || u.net || u.fixed || u.left || u.ai.park || u.def.svc || u === S.my || u.pid || u.me || (u.occ && u.occ.some(Boolean))) return false;
+  if (u.hp - dmg > 0 || u.end || u.burn || dmg > REC.over * u.max) return false;
+  return Math.random() < REC.p;
+}
+function recImm(u, by) {
+  const e = u.def.parts.ix.engine, c = u.ctl;
+  u.hp = u.max * REC.hp; u.end = 0; if (e !== undefined) u.parts[e].hp = 0; refit(u);
+  if (u.cargo) letOff(u, false);
+  u.imm = { T: S.t, id: ++S.rec.n }; u.dep = 0;
+  u.ai = brain(0); u.ai.park = 1; u.fld = 1; u.run = null; u.trip = null; u.rail = false; u.sp = 0; u.gp = null; u.fix = null; u.bye = true; u.name = u.def.name;
+  c.drive = c.turn = 0; c.brake = true; c.fire[0] = c.fire[1] = false;
+  cqDead(u); ffNote(u, by);
+  if (u.team !== S.me) award(by, u.kind === 'tank' ? 150 : u.kind === 'aa' ? 120 : u.kind === 'art' ? 130 : 60, u.name + ' imobilizado', u, false);
+  gLog(u.team, 'eco', 'Imobilizado: ' + u.name + ' ' + ecoNear(u.x, u.z) + ' (nº ' + u.imm.id + '), a tripulação abandonou o veículo', u, 'rcim' + u.imm.id);
+}
+/* written off: nobody came for it */
+function recWreck(u) {
+  u.dead = u.gone = true; u.tow = null;
+  const w = { u, life: 45, det: false }; S.wrecks.push(w); wreckObj(w); if (S.wrecks.length > 24) dropObj(S.wrecks.shift().o);
+  gLog(u.team, 'eco', 'Abandonado como sucata: ' + u.name + ' ' + ecoNear(u.x, u.z), u);
+}
+ruin = (f => (u, dmg, by) => {
+  if (u.imm) { u.hp -= dmg; if (u.hp <= 0 || u.end) { u.tow = null; killUnit(u, u.end === 2); } return; }   // a hulk hit again: destroyed, already counted lost
+  if (recCan(u, dmg)) { recImm(u, by); return; }
+  return f(u, dmg, by);
+})(ruin);
+fieldFix = (f => (u, dt) => { if (u.imm) { u.fix = null; return; } return f(u, dt); })(fieldFix);
+/* the units' turn: a hulk is silent and still, the recovery vehicle and the ambulance have their own minds */
+for (const k of ['tank', 'aa', 'art', 'car', 'truck', 'lav']) AI[k] = (f => (u, dt) => {
+  if (u.imm) { const c = u.ctl; c.drive = c.turn = 0; c.brake = true; c.fire[0] = c.fire[1] = false; c.aim2 = null; return; }
+  if (u.rcv) return aiRec(u, dt);
+  if (u.mev) return aiAmb(u, dt);
+  return f(u, dt);
+})(AI[k]);
+/* a tank, a light armour or a car does not waste its gun on a hulk while there is anything else */
+pickGround = (f => u => {
+  if (!S.rec || !S.rec.live) return f(u);
+  const all = S.units; S.units = all.filter(o => !o.imm);
+  try { return f(u); } finally { S.units = all; }
+})(pickGround);
+/* the population and the plan do not count it */
+popUse = (f => t => { const r = f(t); if (S.rec && S.rec.live) for (const u of S.units) if (u.imm && u.team === t && !u.dead && !u.net) r.veh--; return r; })(popUse);
+/* a unit out of the reserve: the experience of one of its kind that was recovered */
+addUnit = (g => (...a) => {
+  const u = g(...a), R = S.rec, L = R && u.ai && !u.fixed && R.vet[u.team] && R.vet[u.team][tk(u)];
+  if (L && L.length) Object.assign(u, L.shift());
+  return u;
+})(addUnit);
+/* ---- driving: by the road while it can, then across country ---- */
+/* toward g ({ x, z }): along its road (rail) while the place is far along it, then off the road straight to it, at k of its pace. Distance left */
+function recGo(u, g, k) {
+  const c = u.ctl, p = g.p || (g.p = railOf(g.x, g.z));
+  c.brake = false;
+  if (u.rail) {
+    const r = S.T.routes[u.ri], e = clamp(p.s, 0, r.len) - u.s;
+    if (u.ri !== p.ri || Math.abs(e) < REC.road) u.rail = false;   // there: off the road
+    else {
+      const ds = Math.sign(e) || u.ds; c.turn = 0;
+      if (ds !== u.ds) { c.drive = 0; if (Math.abs(u.sp) < 1) { u.ds = ds; u.lane = -u.lane; } }
+      else c.drive = Math.min(1, .25 + Math.abs(e) / 60) * k;
+      return Math.abs(e) + Math.abs(p.off);
+    }
+  }
+  const d = driveTo(u, g.x, g.z); c.drive *= k; return d;
+}
+/* to its road (the lane of the way it goes), then along it to s, at k of its pace. Distance left */
+function recRoad(u, s, k) {
+  const c = u.ctl; c.brake = false;
+  if (!u.rail) {
+    const p = u.rp || (u.rp = railOf(u.x, u.z)), r = S.T.routes[p.ri], ds = Math.sign(s - p.s) || u.ds, lane = ds * RUNS.lane, q = routeAt(r, clamp(p.s, 0, r.len));
+    const x = q.x - q.dz * lane, z = q.z + q.dx * lane;
+    if (driveTo(u, x, z) > 5) { c.drive *= k; return Math.abs(s - p.s) + hdist(u, { x, z }); }
+    Object.assign(u, { rail: true, ri: p.ri, s: clamp(p.s, 0, r.len), ds, lane, rp: null }); place(u);
+  }
+  const r = S.T.routes[u.ri], e = clamp(s, 0, r.len) - u.s, ds = Math.sign(e) || u.ds;
+  c.turn = 0;
+  if (Math.abs(e) < 3) { c.drive = 0; return Math.abs(e); }
+  if (ds !== u.ds) { c.drive = 0; if (Math.abs(u.sp) < 1) { u.ds = ds; u.lane = -u.lane; } return Math.abs(e); }
+  c.drive = Math.min(1, .25 + Math.abs(e) / 60) * k; return Math.abs(e);
+}
+/* the tow: the hulk hangs behind the vehicle's tail, turned toward it */
+function recTrail(u, h) {
+  const cx = Math.cos(u.h), cz = -Math.sin(u.h), L = u.def.env[3], hx = u.x - cx * L, hz = u.z - cz * L, dx = hx - h.x, dz = hz - h.z, d = Math.hypot(dx, dz) || 1, D = h.def.env[3] + 1;
+  h.x = hx - dx / d * D; h.z = hz - dz / d * D; h.y = hgt(h.x, h.z); h.h = Math.atan2(-dz, dx); h.v = { x: u.v.x, y: 0, z: u.v.z }; h.sp = 0; h.moveT = S.t;
+}
+/* side t's nearest node on road ri to s: a finished supply base that has the crates for a hulk of kind k (any, with no logistics), else the main base */
+function recDest(t, ri, s, k) {
+  let best = { o: null, ri, s: endS(t, ri, FIELD.main) }, bd = Math.abs(best.s - s);
+  for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1 && b.ri === ri && (!S.lg || lgFix(b).lc >= (REC.fix[k] || 6))) { const dd = Math.abs(b.s - s); if (dd < bd) { bd = dd; best = { o: b, ri, s: b.s }; } }
+  return best;
+}
+const recWhere = to => (to.o ? lgName(to.o) : LG.tx.main);
+/* ---- the recovery vehicle ---- */
+function recFleet(t, k, ri, why, area) {
+  const d = S.eco.d[t], s0 = endS(t, ri, FIELD.main);
+  if (!(d.res[k] || []).length || !ecoUse(t, k)) return null;
+  const u = dispatch(t, { kind: 'support', why, area }, () => Object.assign(addUnit('car', t, 0, 0, REC.side[S.era][S.fac[t]][k], false, ri, s0, (t ? 1 : -1) * RUNS.lane, 0), { fld: 1, lgp: 1, home: s0 }));
+  if (u.mis) Object.assign(u.mis, { kind: 'support', why });
+  S.rec.v.push({ t, k, u, T: S.t }); return u;
+}
+/* a recovery vehicle for hulk h: '' or why not */
+function recSend(t, h, why) {
+  if (!recHulk(h) || h.tow) return 'id';
+  if (recBusy(h)) return 'tow';
+  if (h.team !== t && ecoDepth(t, h.x, h.z) < -REC.ahead) return 'far';
+  const p = railOf(h.x, h.z), u = recFleet(t, 'arv', p.ri, (h.team === t ? 'recuperar ' : 'capturar ') + h.name + ' ' + ecoNear(h.x, h.z), { x: h.x, z: h.z, r: 300 });
+  if (!u) return 'nores';
+  u.rcv = { st: 'go', h, T: 0, g: { x: h.x, z: h.z } }; h.rcq = u;
+  gLog(t, 'eco', REC.tx.arv + ' a caminho de ' + (h.team === t ? '' : 'um inimigo imobilizado: ') + h.name + ' ' + ecoNear(h.x, h.z) + (why ? ': ' + why : ''), h, 'rcsend' + h.imm.id);
+  return '';
+}
+function recHook(u, h) {
+  const R = u.rcv, t = u.team, cx = Math.cos(u.h), cz = -Math.sin(u.h), D = u.def.env[3] + h.def.env[3] + 1;
+  if (h.team !== t) {   // an enemy's: ours from here
+    gLog(h.team, 'eco', 'O inimigo rebocou o nosso ' + h.name + ' imobilizado ' + ecoNear(h.x, h.z), h);
+    h.team = t; h.ds = t ? 1 : -1; h.cap = 1; h.col = u.col;
+    gLog(t, 'eco', 'Capturamos um ' + h.name + ' imobilizado ' + ecoNear(h.x, h.z), h);
+  }
+  h.x = u.x - cx * D; h.z = u.z - cz * D; h.y = hgt(h.x, h.z); h.h = u.h; h.tow = u;   // the crew rigs it behind
+  const p = railOf(h.x, h.z); R.to = recDest(t, p.ri, p.s, tk(h)); R.st = 'tow'; R.T = 0; u.rp = null;
+  gLog(t, 'eco', h.name + ' engatado: a caminho de ' + recWhere(R.to), h);
+}
+/* at the node: the full repair, paid, and the vehicle back in the reserve with its experience */
+function recFix(u, h, to) {
+  const t = u.team, k = tk(h), n = REC.fix[k] || 6, o = to.o && !to.o.dead ? to.o : null, d = S.eco.d[t];
+  let paid;
+  if (o && S.lg && o.lc >= n) { lgTake(o, n); paid = n + ' caixas de ' + lgName(o); }
+  else { const mt = Math.ceil(n * LG.mt / LG.truck); d.mt = Math.max(0, d.mt - mt); paid = mt + ' de metal na ' + (o ? lgName(o) : LG.tx.main.toLowerCase()); }
+  if (h.vx) { const V = S.rec.vet[t]; (V[k] || (V[k] = [])).push({ vx: h.vx, vl: h.vl || 0 }); }
+  h.dead = h.gone = true; h.tow = null; ecoBack(t, k, 1); S.rec.got = (S.rec.got || 0) + 1;
+  gLog(t, 'eco', (h.cap ? 'Capturado e reparado: ' : 'Recuperado e reparado: ') + h.name + ' volta à reserva (' + paid + ')' + (h.vl ? ' com a veterania' : ''), o || S.base[t], 'rcfix');
+}
+function recHome(u) {
+  const R = u.rcv || u.mev; R.st = 'home'; u.rp = null;
+  if (u.rcv && u.rcv.h && u.rcv.h.tow === u) u.rcv.h.tow = null;
+}
+function aiRec(u, dt) {
+  const R = u.rcv, c = u.ctl, A = u.ai;
+  if ((A.think -= dt) <= 0) { A.think = GAI.think; looks(u, TCOL.gun); }
+  if (R.st === 'go') {
+    const h = R.h;
+    if (!recHulk(h) || h.tow || h.rcq !== u) { recHome(u); return; }
+    if (hdist(R.g, h) > 5) R.g = { x: h.x, z: h.z };
+    recGo(u, R.g, 1);
+    if (!u.rail && hdist(u, h) < u.def.env[3] + h.def.env[3] + REC.gap) {
+      c.drive = c.turn = 0; c.brake = true;
+      if (Math.abs(u.sp) < ENT.slow && (R.T += dt) >= REC.hitch) recHook(u, h);
+    } else R.T = 0;
+  } else if (R.st === 'tow') {
+    const h = R.h;
+    if (!recHulk(h) || h.tow !== u) { recHome(u); return; }
+    if (recRoad(u, R.to.s, REC.tow) < REC.reach) { recFix(u, h, R.to); R.h = null; recHome(u); }
+  } else if (recRoad(u, u.home, 1) < REC.reach) { u.dead = u.gone = true; return; }
+  gunner(u, TCOL.gun);
+}
+/* ---- the wounded ---- */
+manDown = (f => (m, dmg, h) => { const r = f(m, dmg, h); if (r && recSim()) m.grave = dmg >= REC.grave ? 1 : 0; return r; })(manDown);
+/* a mate's first aid to a badly wounded one: stabilized, he stays down until he is evacuated or hold s pass */
+rescue = (f => (m, A, c) => {
+  const d = A.rsc;
+  if (d && d.grave && A.rst === 2 && recSim() && !d.dead && d.down && d.resc === m && S.t - A.rT2 > WND.treat) {
+    d.stab = S.t; d.down = S.t + REC.hold; d.tr = 0; d.resc = null; A.rsc = null; c.mx = c.mz = 0; S.stabs = (S.stabs || 0) + 1;
+    return false;
+  }
+  return f(m, A, c);
+})(rescue);
+/* nobody goes to treat one who is stabilized again */
+sqRescue = (f => (q, live) => {
+  f(q, live);
+  if (S.rec) for (const d of q.men) if (d.stab && d.resc) { const r = d.resc; if (r.ai && r.ai.rsc === d) r.ai.rsc = null; d.resc = null; d.tr = 0; }
+})(sqRescue);
+/* side t's wounded waiting for an evacuation, in groups within area m: the largest first */
+function recWounded(t, x, z, r) {
+  const L = S.men.filter(m => recHurt(m, t) && !recTaken(m) && (x === undefined || Math.hypot(m.x - x, m.z - z) < r)), out = [];
+  while (L.length) {
+    const a = L.shift(), g = [a];
+    for (let i = L.length - 1; i >= 0; i--) if (hdist(L[i], a) < REC.amb.area) g.push(L.splice(i, 1)[0]);
+    out.push({ x: g.reduce((s, m) => s + m.x, 0) / g.length, z: g.reduce((s, m) => s + m.z, 0) / g.length, men: g });
+  }
+  return out.sort((a, b) => b.men.length - a.men.length);
+}
+/* an evacuation for group g: the helicopter today when the wounded lie far from a road, the road is dangerous or no ambulance is in the
+   reserve; else an ambulance. '' or why not */
+function recEvac(t, g, why) {
+  const d = S.eco.d[t], p = railOf(g.x, g.z), nm = ecoNear(g.x, g.z), n = g.men.length;
+  const air = S.modern && (d.res.lift || []).length > 0, amb = (d.res.amb || []).length > 0, far = Math.abs(p.off) > REC.amb.road || (S.lg ? lgThr(t, p.ri, p.s) > LG.threat : false);
+  if (air && (far || !amb) && ecoUse(t, 'lift')) {
+    const w = 'evacuação médica: ' + recN(n) + ' ' + nm + (why ? ' (' + why + ')' : ''), q = dispatch(t, { kind: 'lift', why: w, area: { x: g.x, z: g.z, r: 300 } }, () => heliGround(S.E.sides[S.fac[t]].lift, t, 5, true));
+    q.lgp = 1; q.mev = { n: 0, T: 0, lz: lgLZ(t, g), at: { x: g.x, z: g.z } }; q.ha = heliBrain(); q.ha.st = 'mev';
+    for (const m of g.men) m.evq = q;
+    S.rec.v.push({ t, k: 'heli', u: q, T: S.t });
+    gLog(t, 'eco', 'Helicóptero de evacuação para ' + recN(n) + ' ' + nm + (why ? ': ' + why : ''), g, 'rcev');
+    return '';
+  }
+  if (!amb) return 'nores';
+  const u = recFleet(t, 'amb', p.ri, 'evacuação médica: ' + recN(n) + ' ' + nm, { x: g.x, z: g.z, r: 300 }); if (!u) return 'nores';
+  u.mev = { st: 'go', n: 0, T: 0, at: { x: g.x, z: g.z }, m: null, g: null };
+  for (const m of g.men) m.evq = u;
+  gLog(t, 'eco', 'Ambulância a caminho de ' + recN(n) + ' ' + nm + (why ? ': ' + why : ''), g, 'rcev');
+  return '';
+}
+/* those of its side within r m of o (v itself, or where the helicopter was sent), down or stabilized, aboard v, up to cap */
+function recLoad(v, R, r, cap, o) {
+  for (const m of S.men) {
+    if (R.n >= cap) break;
+    if (!recHurt(m, v.team) || hdist(m, o || v) > r || (recTaken(m) && m.evq !== v)) continue;
+    if (m.resc && m.resc.ai && m.resc.ai.rsc === m) m.resc.ai.rsc = null;
+    m.gone = true; m.evac = 1; m.down = 0; m.evq = v; R.n++;
+  }
+}
+/* the wounded brought in: back in the reserve, a squad for every squad's worth */
+function recHand(t, n, o) {
+  if (!n) return;
+  const R = S.rec, k = SQUAD[S.era].length; let q = 0;
+  R.men[t] += n; R.saved = (R.saved || 0) + n;
+  while (R.men[t] >= k) { R.men[t] -= k; ecoBack(t, 'squad', 1); q++; }
+  gLog(t, 'eco', 'Evacuação: ' + recN(n) + (n === 1 ? ' tratado ' : ' tratados ') + (o ? 'na ' + lgName(o) : 'na base principal') + (q ? '; ' + q + ' esquadra' + (q > 1 ? 's' : '') + ' de volta à reserva' : '; ' + R.men[t] + ' de ' + k + ' para a próxima esquadra'), o || S.base[t], 'rchand');
+}
+/* the next wounded one for the ambulance: the nearest of its side within area m of where it was sent */
+function recNext(u, R) {
+  let best = null, bd = 1e9;
+  for (const m of S.men) { if (!recHurt(m, u.team) || (recTaken(m) && m.evq !== u) || Math.hypot(m.x - R.at.x, m.z - R.at.z) > REC.amb.area) continue; const d = hdist(m, u); if (d < bd) { bd = d; best = m; } }
+  if (best) best.evq = u;
+  return best;
+}
+function aiAmb(u, dt) {
+  const R = u.mev, c = u.ctl, t = u.team, A = u.ai;
+  c.fire[0] = c.fire[1] = false;
+  if ((A.think -= dt) <= 0) A.think = GAI.think;
+  if (R.st === 'go') {
+    let m = R.m;
+    if (!m || !recHurt(m, t)) { m = R.m = recNext(u, R); R.g = null; R.T = 0; if (!m) { R.st = R.n ? 'back' : 'home'; u.rp = null; return; } }
+    if (!R.g || hdist(R.g, m) > 8) R.g = { x: m.x, z: m.z };
+    recGo(u, R.g, 1);
+    if (!u.rail && hdist(u, m) < REC.amb.r + u.def.env[3]) {
+      c.drive = c.turn = 0; c.brake = true;
+      if (Math.abs(u.sp) < ENT.slow && (R.T += dt) >= REC.amb.load) { recLoad(u, R, REC.amb.pick, REC.amb.n); R.m = null; R.T = 0; if (R.n >= REC.amb.n) { R.st = 'back'; u.rp = null; } }
+    } else R.T = 0;
+  } else if (R.st === 'back') {
+    if (!R.to) { const p = u.rail ? { ri: u.ri, s: u.s } : railOf(u.x, u.z); R.to = recDest(t, p.ri, p.s, ''); }
+    if (recRoad(u, R.to.s, 1) < REC.reach) { recHand(t, R.n, R.to.o); R.n = 0; R.st = 'home'; }
+  } else if (recRoad(u, u.home, 1) < REC.reach) u.dead = u.gone = true;
+}
+/* the helicopter: to a landing zone by the wounded, down, its crew carries them aboard, home */
+aiLift = (f => (p, A, dt) => {
+  const M = p.mev; if (!M || (A.st !== 'mev' && A.st !== 'mevd')) return f(p, A, dt);
+  if (A.st === 'mev') { if (heliTo(p, M.lz.x, M.lz.z, HAI.lift.alt, HAI.cruise) < 70) A.st = 'mevd'; return; }
+  heliLandAt(p, M.lz.x, M.lz.z);
+  if (p.land && p.V < 1.6 && (M.T += dt) >= REC.heli.load) { recLoad(p, M, REC.heli.pick, LIFT.seats, M.at); A.st = 'home'; }
+})(aiLift);
+/* ---- each step, where the match is simulated: the tows, the hulks written off, the vehicles home or lost, the generals ---- */
+function recStep(dt) {
+  const R = S.rec; if (!R || !recSim() || (S.cq && S.cq.ph)) return;
+  let live = 0;
+  for (const u of S.units) {
+    if (!u.imm || u.dead) continue;
+    live++;
+    const w = u.tow && !u.tow.dead && u.tow.rcv && u.tow.rcv.h === u && u.tow.rcv.st === 'tow' ? u.tow : null;
+    if (u.tow && !w) { u.tow = null; u.imm.T = S.t; }   // its tow is gone: it waits for another
+    if (w) recTrail(w, u);
+    else if (S.t - u.imm.T > REC.life && !recBusy(u)) recWreck(u);
+  }
+  R.live = live;
+  const lost = o => o.hp <= 0 || !!o.cqd || (o.dead && !o.gone);
+  for (const v of R.v) {
+    const u = v.u; if (!u.dead && !u.gone) continue;
+    v.done = 1;
+    const n = u.mev ? u.mev.n : 0;
+    if (lost(u)) {
+      if (u.rcv && u.rcv.h && u.rcv.h.tow === u) u.rcv.h.tow = null;
+      gLog(v.t, 'eco', (v.k === 'arv' ? REC.tx.arv : v.k === 'amb' ? REC.tx.amb : 'Helicóptero de evacuação') + ' perdido ' + ecoNear(u.x, u.z) + (n ? ' com ' + recN(n) : ''), u, 'rclost');
+    } else { ecoBack(v.t, v.k === 'heli' ? 'lift' : v.k, 1); if (v.k === 'heli') recHand(v.t, n, null); }
+  }
+  if (R.v.some(v => v.done)) R.v = R.v.filter(v => !v.done);
+  if ((R.T -= dt) > 0) return;
+  R.T = 1;
+  for (const t of [0, 1]) if (genBy(t, 'sup') === 'ai' && S.t >= R.cmd[t]) { R.cmd[t] = S.t + REC.every; recPlan(t); }
+}
+ecoStep = (f => dt => { f(dt); recStep(dt); })(ecoStep);
+/* the hulk side t's recovery general would go for: its own before the enemy's, by worth and distance, none past ahead m beyond its line nor with a
+   known enemy near (a human or a model may still send one for its own anywhere) */
+function recPick(t) {
+  const C = S.cmd && S.cmd[t]; let best = null, bs = -1e9;
+  for (const h of S.units) {
+    if (!recHulk(h) || h.tow || recBusy(h) || ecoDepth(t, h.x, h.z) < -REC.ahead || (h.team !== t && S.t - h.seenT > REC.seen) || (C && cmdKnown(C, h.x, h.z, REC.safe) > 0)) continue;
+    const sc = (h.team === t ? 2 : 1) * (REC.val[tk(h)] || 1) - hdist(h, S.base[t]) / 4000;
+    if (sc > bs) { bs = sc; best = h; }
+  }
+  return best;
+}
+function recPlan(t) {
+  const R = S.rec, d = S.eco.d[t], out = k => R.v.filter(v => v.t === t && (v.k === k || (k === 'amb' && v.k === 'heli' && v.u.mev))).length;
+  if (out('arv') < REC.max && (d.res.arv || []).length) { const h = recPick(t); if (h) recSend(t, h, ''); }
+  if (out('amb') < REC.max) {
+    const C = S.cmd && S.cmd[t], g = recWounded(t).find(g => g.men.some(m => m.stab) && !(C && cmdKnown(C, g.x, g.z, REC.safe) > 0));   // one bleeding out would not live to see it come
+    if (g) recEvac(t, g, '');
+  }
+}
+/* ---- what side t knows of it: its hulks and the enemy's it has seen, the wounded, the vehicles out ---- */
+function recView(t) {
+  const R = S.rec; if (!R) return { off: 1 };
+  const sim = recSim(), d = S.eco && S.eco.d[t], r = k => (d ? (d.res[k] || []).length : 0);
+  const hulks = S.units.filter(h => recHulk(h) && (h.team === t || S.t - h.seenT < REC.seen)).map(h => ({ id: h.imm.id, kind: tk(h), name: h.name, own: h.team === t, x: Math.round(h.x), z: Math.round(h.z),
+    towed: !!h.tow, coming: recBusy(h), left: h.tow || recBusy(h) ? 0 : Math.max(0, Math.round(REC.life - (S.t - h.imm.T))) }));
+  const wounded = sim ? recWounded(t).map(g => ({ x: Math.round(g.x), z: Math.round(g.z), n: g.men.length, stabilized: g.men.filter(m => m.stab).length })) : [];
+  const out = sim ? R.v.filter(v => v.t === t).map(v => ({ k: v.k, x: Math.round(v.u.x), z: Math.round(v.u.z), st: (v.u.rcv || v.u.mev || {}).st || (v.u.ha && v.u.ha.st) || '', carrying: v.u.mev ? v.u.mev.n : v.u.rcv && v.u.rcv.st === 'tow' ? 1 : 0 })) : [];
+  return { on: 1, hulks, wounded, out, reserve: { arv: r('arv'), amb: r('amb'), lift: S.modern ? r('lift') : 0 }, fix: Object.assign({}, REC.fix), toSquad: R.men[t], recovered: R.got || 0, evacuated: R.saved || 0 };
+}
+ecoVM = (f => (t, all) => {
+  const V = f(t, all); if (!S.rec || !V.rows) return V;
+  const G = recView(t), own = G.hulks.filter(h => h.own), at = Math.max(0, V.rows.length - 1);
+  const s = (own.length ? own.length + ' imobilizado' + (own.length > 1 ? 's' : '') + (own.some(h => h.towed) ? ' (' + own.filter(h => h.towed).length + ' rebocado)' : '') : 'nenhum imobilizado')
+    + (G.wounded.length ? ' · ' + G.wounded.reduce((a, g) => a + g.n, 0) + ' feridos à espera' : '') + (G.out.length ? ' · ' + G.out.length + ' em missão' : '');
+  V.rows.splice(at, 0, { label: 'Recuperação', value: s }); return V;
+})(ecoVM);
+/* ---- the general's orders: recv { id } a recovery vehicle for that hulk (its number in the question rec); medv { x, z } an evacuation of
+   the wounded within REC.amb.area m of there; the question rec. Refused: id (no such hulk), tow (one on its way), far (an enemy hulk
+   beyond the line), hurt (no wounded there), nores (none in the reserve), off ---- */
+GC.recv = { d: 'sup', f(t, c) {
+  if (!recSim()) return gBad('off');
+  const h = S.units.find(h => recHulk(h) && h.imm.id === c.id); if (!h || (h.team !== t && S.t - h.seenT > REC.seen)) return gBad('id');
+  const w = recSend(t, h, c.why || ''); return w ? gBad(w) : gYes(h.imm.id);
+} };
+GC.medv = { d: 'sup', f(t, c) {
+  if (!recSim()) return gBad('off');
+  if (!Number.isFinite(c.x) || !Number.isFinite(c.z)) return gBad('shape');
+  const g = recWounded(t, c.x, c.z, REC.amb.area)[0]; if (!g) return gBad('hurt');
+  const w = recEvac(t, g, c.why || ''); return w ? gBad(w) : gYes();
+} };
+Object.assign(GEN.cn, { recv: 'recuperar veículo', medv: 'evacuação médica' });
+Object.assign(GEN.no, { tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais, à frente da linha', hurt: 'Nenhum ferido para evacuar ali' });
+genQuery = (f => (t, q) => (q && q.q === 'rec' && (t === 0 || t === 1) ? recView(t) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => (q && q.q === 'rec' && (s === 0 || s === 1) ? { ok: true, why: '', id: 0, r: recView(s) } : f(s, q)))(genAnswer);
 /* the journal and the side effects of a command's end */
 function gDone(t, c, by, G, r) {
   if (GEN.jr) {
@@ -18051,6 +18463,27 @@ function buildTrn(u, wreck) {
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
 }
+/* the recovery vehicles and ambulances (REC): a car's body, and on it the tracks, the crane and the spade, or the box with its red crosses */
+Object.assign(TLOOK, { bergep: { ax: [2.5, 1.4, .3, -.8, -1.9, -2.9], hood: 0, roof: 1 }, m32: { ax: [2.2, 1.2, .1, -1, -2.1], hood: 0, roof: 1 }, m88a2: { ax: [3.2, 2, .8, -.4, -1.6, -2.8, -3.6], hood: 0, roof: 1 },
+  brem1: { ax: [2.7, 1.6, .5, -.6, -1.7, -2.8], hood: 0, roof: 1 }, kfz31: { ax: [1.7, -1.3], hood: 1.2, roof: 1 }, wc54: { ax: [1.5, -1.3], hood: 1.1, roof: 1 }, m997: { ax: [1.6, -1.6], hood: 1.4, roof: 1, slant: 1 }, uaz452: { ax: [1.4, -1.3], hood: .4, roof: 1 } });
+buildTrn = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def; if (!d.svc) return g;
+  const L = d.l, W = d.w, H = d.hh, by = .45 + H, dark = mat(0x1c1d1e), M2 = mat(wreck ? 0x1f1f1c : u.col[1]);
+  const box = (w, hh, dp, m, x, y, z, rz, rx) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, hh, dp), m); b.position.set(x, y, z); if (rz) b.rotation.z = rz; if (rx) b.rotation.x = rx; g.add(b); return b; };
+  if (d.svc === 'arv') {
+    for (const s of SIDES) box(L * .9, .5, .4, dark, 0, .35, s * W * .5);   // the tracks
+    for (const s of SIDES) box(.14, 2.4, .14, M2, L * .18, by + 1.05, s * W * .28, .35, -s * .18);   // the A-frame of the crane, folded forward
+    box(.16, .16, W * .62, M2, L * .18 - .45, by + 2.15, 0); box(.1, 1.2, .06, dark, L * .18 - .5, by + 1.5, 0);   // its head and the hook
+    box(.25, .8, W * .92, M2, -L * .5 - .12, .7, 0, -.35);   // the spade at the tail
+    box(L * .25, .35, W * .7, M2, -L * .3, by + .1, 0);   // the winch
+  } else {
+    const red = mat(wreck ? 0x2b1f1c : 0xb3201d), wh = mat(wreck ? 0x3a3a36 : 0xe8e6df), bl = L * .55, bx = -L * .5 + bl / 2 + .05;
+    box(bl, 1.25, W * .92, wh, bx, by + .5, 0);   // the box behind the cab
+    for (const s of SIDES) { box(.8, .22, .02, red, bx, by + .55, s * (W * .46 + .02)); box(.22, .8, .02, red, bx, by + .55, s * (W * .46 + .02)); }
+    box(.8, .02, .22, red, bx, by + 1.14, 0); box(.22, .02, .8, red, bx, by + 1.14, 0);
+  }
+  return g;
+})(buildTrn);
 /* the figures aboard: the crew of one that is driven, then one for each boxed soldier, in the seats no human sits in */
 function trnScene() {
   for (const u of S.units) {

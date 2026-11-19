@@ -79,6 +79,10 @@ function bridge(env) {
   const spr = await b.call('set_supply_priority', { node: 'p2', priority: 3 }); ok(!spr.isError && last() === JSON.stringify(Object.entries({ c: 'sprio', nd: 'p2', p: 3 }).sort()), 'set_supply_priority maps to sprio {nd, p}');
   const nl = seenCmd.length, bad3 = [await b.call('send_convoy', { node: 'X1' }), await b.call('send_convoy', {}), await b.call('set_supply_priority', { node: 'p2', priority: 9 })];
   ok(bad3.every(r => r.isError) && seenCmd.length === nl, 'a node that is not b<id> or p<index>, none, or a priority out of -1..3: refused locally');
+  const rv = await b.call('recover_vehicle', { id: 7, why: 'tanque na estrada' }); ok(!rv.isError && last() === JSON.stringify(Object.entries({ c: 'recv', id: 7, why: 'tanque na estrada' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'recover_vehicle maps to recv {id, why}');
+  const mv = await b.call('send_medevac', { x: 4000, z: -200 }); ok(!mv.isError && last() === JSON.stringify(Object.entries({ c: 'medv', x: 4000, z: -200 }).sort()), 'send_medevac maps to medv {x, z}');
+  const nr = seenCmd.length, bad4 = [await b.call('recover_vehicle', {}), await b.call('recover_vehicle', { id: 0 }), await b.call('send_medevac', { x: 1 })];
+  ok(bad4.every(r => r.isError) && seenCmd.length === nr, 'recover_vehicle without an id or with id 0, send_medevac without z: refused locally');
   const n0 = seenCmd.length;
   const inv = [await b.call('build_site', { kind: 'castle', x: 1, z: 1 }), await b.call('produce_unit', { kind: 'Abrams' }), await b.call('produce_unit', { kind: 'x', count: 9 }), await b.call('scout', { x: 'a', z: 1 }), await b.call('send_command', { command: { c: 'x', key: 1 } }), await b.call('send_command', { command: { c: 'draw' } })];
   ok(inv.every(r => r.isError) && seenCmd.length === n0, 'invalid inputs are refused locally with isError, nothing sent');
@@ -93,6 +97,7 @@ function bridge(env) {
   const gh = await b.call('get_state', { from_host: true }); ok(!gh.isError && seenAsk[3].q.q === 'state' && gh.json.data.stock.en === 9, 'get_state from_host asks the host for the whole picture (gask state)');
   const gp = await b.call('get_production_plan'); ok(!gp.isError && seenAsk[seenAsk.length - 1].q.q === 'plan', 'get_production_plan: the relay passes gask plan to the host');
   await new Promise(r => setTimeout(r, 1100)); const gl2 = await b.call('get_logistics'); ok(!gl2.isError && seenAsk[seenAsk.length - 1].q.q === 'logi', 'get_logistics: the relay passes gask logi to the host');
+  await new Promise(r => setTimeout(r, 1100)); const gr = await b.call('get_recovery'); ok(!gr.isError && seenAsk[seenAsk.length - 1].q.q === 'rec', 'get_recovery: the relay passes gask rec to the host');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

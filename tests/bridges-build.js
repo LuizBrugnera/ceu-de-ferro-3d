@@ -136,6 +136,10 @@ console.log('-- the general: rebuild and cross at a point --');
   g2.run(480, () => { const f = $2('brPontSite')(op2.pz); if (f && f.prog > .1 && f.prog < .9 && !sk) { sk = 1; $2('fortAt')(f, .9); } if (S.pe.some(x => x.op) && tp === null) tp = S.t; return tp === null; }); g2.run(25);   // most of the laying skipped once it is under way
   ok(tp !== null && op2.over && sk, 'the squad lays the pontoon and the new crossing opens ' + (tp === null ? '-' : Math.round(tp - tc)) + ' s after it reaches the bank; the manoeuvre ends');
   const qc = $2('genQuery')(t, { q: 'brg' }); ok(qc.ps.length === 1 && qc.ps[0].open === 1 && qc.ps[0].team === 'own', 'brg lists it: own, open');
+  const b2 = L.find(x => x !== b && x.ends.some(e => $2('brHome')(t, e))), pt = { x: T.rx(b2.z + 500), z: b2.z + 500 }, d2 = $2('hdist')(pt, b2);
+  $2('hitObj')(b2.o, 1e5, null); g2.step(dt);
+  C.mcd = {}; const c3 = $2('genCmd')(t, { c: 'man', k: 'cross', x: pt.x, z: pt.z }, 'sys'), op3 = C.ops.find(o => o.k === 'tra' && !o.over);
+  ok(d2 > 250 && d2 < 800 && c3.ok && op3 && op3.b === b2.i && op3.pz === undefined, 'cross ' + Math.round(d2) + ' m from a fallen bridge: the pontoon goes to that bridge, not to a stretch of the river');
   ok(H.nan(S) === null, 'no NaN');
 }
 
@@ -158,5 +162,16 @@ console.log('-- the AI chooses them --');
   for (const b of L) for (const e of b.ends) C.known.push({ team: 1, kind: 'tank', sx: e.x + 5, sz: e.z, dead: false, seenT: S.t, man: false });
   const tra = $3('MANG').tra(C, X());
   ok(tra.length === 1 && tra[0].res.ps && tra[0].sc >= $3('MAN').min, 'every bridge down with the enemy at all of them: the crossing goes to a narrow stretch of the river (z ' + (tra[0] && tra[0].res.ps ? tra[0].res.ps.z : '-') + ', score ' + (tra[0] ? tra[0].sc.toFixed(2) : '-') + ')');
+}
+
+console.log('-- a guest takes the host\'s obj pairs in their order --');
+{
+  const g4 = H.load({ mapv: 5, seed: 13 }), $4 = g4.$, S = g4.sandbox('ww2'), b = $4('brs()')[2], id = b.id, obj = $4('Net').rx.obj;
+  $4('hitObj')(b.o, 1e5, null); g4.step(dt); S.net = true; S.host = false;
+  obj({ e: [id, 0, id, 2] });
+  ok(S.os[id] === 2 && !$4('brOpen')(b), 'rebuilt and down again within one message (' + id + ',0,' + id + ',2): the guest has it down, as the host');
+  obj({ e: [id, 0, id, 1] });
+  ok(S.os[id] === 1 && $4('brOpen')(b), 'rebuilt and hit (' + id + ',0,' + id + ',1): the guest has it standing and hurt (stage ' + S.os[id] + ')');
+  S.net = false;
 }
 done();

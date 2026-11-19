@@ -9335,6 +9335,7 @@ const Net = {
       if (!S.net || S.host || !Array.isArray(m.e)) return;
       for (let i = 0; i + 1 < m.e.length; i += 2) {
         const o = S.T.byId[m.e[i]], st = m.e[i + 1];
+        if (o && o.br && st === 0 && S.os[o.id] > 0) { setObj(o, 0, null, m.full === 1); continue; }
         if (!o || !(st === 1 || st === 2) || st <= S.os[o.id]) continue;
         S.oh[o.id] = o.hp * OBJS.ghost[st]; S.ot[o.id] = S.t; setObj(o, st, null, m.full === 1);
       }
@@ -21186,7 +21187,7 @@ function brSquad(X, p, home, sap, far) {
   return best;
 }
 /* the bridge a command names: { x, z } nearest within 800 m */
-const brAt = (spec, R) => { const a = Number.isFinite(spec.x) && Number.isFinite(spec.z) ? spec : manAt(spec); if (!a) return null; let best = null, bd = R || 800; for (const b of brs()) { const d = Math.hypot(b.x - a.x, b.z - a.z); if (d < bd) { bd = d; best = b; } } return best; };   // x z as given: a fallen bridge's place is water, which manAt refuses
+const brAt = (spec, R, f) => { const a = Number.isFinite(spec.x) && Number.isFinite(spec.z) ? spec : manAt(spec); if (!a) return null; let best = null, bd = R || 800; for (const b of brs()) { if (f && !f(b)) continue; const d = Math.hypot(b.x - a.x, b.z - a.z); if (d < bd) { bd = d; best = b; } } return best; };   // x z as given: a fallen bridge's place is water, which manAt refuses
 MANG.dem = (C, X) => {
   const t = X.t, out = [];
   if (!brOn()) return out;
@@ -21225,7 +21226,7 @@ MANG.tra = (C, X) => {
 function brOpenOp(t, C, spec, by, R, k) {
   if (!brOn()) return gBad('server');
   if (k !== 'dem' && R && R.res && R.res.ps) return brSiteOp(t, C, spec, by, R);
-  const b = (R && R.res && R.res.b) || brAt(spec, k === 'tra' ? BR.ps.pick : 0);
+  const b = (R && R.res && R.res.b) || (k === 'tra' ? brAt(spec, 0, brDown) || brAt(spec, BR.ps.pick) : brAt(spec));
   if (!b && k === 'tra') return brSiteOp(t, C, spec, by, R);   // no bridge there: a pontoon at that stretch of the river (W20b)
   if (!b) return gBad('at');
   if (k === 'reb') { if (S.net && !Net.brb) return gBad('server'); if (!brDown(b)) return gBad('up'); if (brReb(b)) return gBad('reb'); if (brCost(t)) return gBad('cost'); }
@@ -21446,7 +21447,7 @@ Net.rx.welcome = (old => m => { Net.gtq = m.gq === 1; old(m); })(Net.rx.welcome)
    { f, s site, E span edge, op open, was ever open }; S.pg those open (hgt reads their deck: the line between the banks' heights); S.bpw their
    cells for footPath. Destroyed, it shuts as a fallen bridge's pontoon does: what stood on it is lost, the riders bound over it stop at the bank
    (brCut) and look for another way. The next match begins with the network as the terrain made it (brNetReset). ps.cap: free pontoons a side;
-   ps.z: m between two; ps.near: how far from a point a command looks for a site; ps.pick: a cross command within pick m of a bridge is that bridge's.
+   ps.z: m between two; ps.near: how far from a point a command looks for a site; ps.pick: a cross command with no fallen bridge within 800 m but a standing one within pick m is that bridge's (refused whole).
    ai: rebuild (reb): a fallen bridge that carries one of its axes or holds its vehicles at the bank, or with no crossing open at all, with no known
    enemy within safe m of either end, not one the side blew itself within reb.keep s, and a free squad (sappers first) on its bank. The crossing
    (tra) takes a free site when no fallen bridge will do (every crossing shut, or vehicles held at a bridge whose end has the enemy near): the
@@ -21585,11 +21586,6 @@ setObj = (g => (o, st, by, quiet) => {
 /* online: welcome brb: 1, the server carries the rebuild (fort kind 8) and a bridge's stage back to 0 in obj; a guest takes that 0 for a bridge */
 Net.brb = false;
 Net.rx.welcome = (old => m => { Net.brb = m.brb === 1; old(m); })(Net.rx.welcome);
-Net.rx.obj = (old => m => {
-  old(m);
-  if (!S.net || S.host || !Array.isArray(m.e)) return;
-  for (let i = 0; i + 1 < m.e.length; i += 2) { const o = S.T.byId[m.e[i]]; if (o && o.br && m.e[i + 1] === 0 && S.os[o.id] > 0) setObj(o, 0, null, m.full === 1); }
-})(Net.rx.obj);
 /* ---- the general: rebuild (reb), and the crossing at a free site ---- */
 MANC.rebuild = ['reb', 'atk'];
 MANORD.push('reb');

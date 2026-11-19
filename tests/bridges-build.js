@@ -45,12 +45,11 @@ console.log('-- rebuilding a fallen bridge --');
   const g2 = H.load({ mapv: 5, seed: 7, eco: 1 }), $2 = g2.$, S = g2.watch('ww2', {}), b = $2('brs()')[0], e = b.ends[0];
   $2('hitObj')(b.o, 1e5, null); g2.step(dt);
   const d = S.eco && S.eco.d[0];
-  if (d) {
-    const mt = d.mt; d.mt = FORT.rebuild.cost[1] - 1;
-    ok($2('fortWhy')(8, 0, e.x + 5, e.z, 0) === 'cost', 'where the economy is on, the rebuild costs metal: refused short of ' + FORT.rebuild.cost[1]);
-    d.mt = mt + 500; const m0 = d.mt, f = $2('fortStart')(8, 0, e.x + 5, e.z, 0);
-    ok(f && d.mt === m0 - FORT.rebuild.cost[1], 'and pays it when it starts (' + m0 + ' -> ' + d.mt + ' metal)');
-  } else ok(true, 'no economy in this sandbox: no cost to check');
+  ok(!!d && $2('ecoSim')(), 'the economy is on in this match (side 0 has a stock)');
+  const mt = d.mt; d.mt = 119;
+  ok($2('fortWhy')(8, 0, e.x + 5, e.z, 0) === 'cost', 'where the economy is on, the rebuild costs 120 metal: refused at 119');
+  d.mt = mt + 500; const m0 = d.mt, f = $2('fortStart')(8, 0, e.x + 5, e.z, 0);
+  ok(f && d.mt === m0 - 120, 'and pays 120 when it starts (' + m0 + ' -> ' + d.mt + ' metal)');
 }
 
 console.log('-- the sites of the river --');
@@ -136,10 +135,15 @@ console.log('-- the general: rebuild and cross at a point --');
   g2.run(480, () => { const f = $2('brPontSite')(op2.pz); if (f && f.prog > .1 && f.prog < .9 && !sk) { sk = 1; $2('fortAt')(f, .9); } if (S.pe.some(x => x.op) && tp === null) tp = S.t; return tp === null; }); g2.run(25);   // most of the laying skipped once it is under way
   ok(tp !== null && op2.over && sk, 'the squad lays the pontoon and the new crossing opens ' + (tp === null ? '-' : Math.round(tp - tc)) + ' s after it reaches the bank; the manoeuvre ends');
   const qc = $2('genQuery')(t, { q: 'brg' }); ok(qc.ps.length === 1 && qc.ps[0].open === 1 && qc.ps[0].team === 'own', 'brg lists it: own, open');
-  const b2 = L.find(x => x !== b && x.ends.some(e => $2('brHome')(t, e))), pt = { x: T.rx(b2.z + 500), z: b2.z + 500 }, d2 = $2('hdist')(pt, b2);
+  const near = x => $2('brSites()').find(s => !$2('brPontSite')(s.z) && $2('hdist')(s, x) > 300 && $2('hdist')(s, x) < 800);
+  const b2 = L.find(x => x !== b && x.ends.some(e => $2('brHome')(t, e)) && near(x)), s2 = near(b2), d2 = $2('hdist')(s2, b2), e2 = b2.ends.find(e => $2('brHome')(t, e));
   $2('hitObj')(b2.o, 1e5, null); g2.step(dt);
-  C.mcd = {}; const c3 = $2('genCmd')(t, { c: 'man', k: 'cross', x: pt.x, z: pt.z }, 'sys'), op3 = C.ops.find(o => o.k === 'tra' && !o.over);
-  ok(d2 > 250 && d2 < 800 && c3.ok && op3 && op3.b === b2.i && op3.pz === undefined, 'cross ' + Math.round(d2) + ' m from a fallen bridge: the pontoon goes to that bridge, not to a stretch of the river');
+  ok($2('brTraAt')({ x: s2.x, z: s2.z }) === null && $2('brTraAt')({ x: b2.x + 200, z: b2.z }) === b2, 'with no pontoon on it: a point at the stretch is the stretch; 200 m from the fallen bridge, every stretch 300 m or more away, the bridge');
+  ok($2('fortStart')(7, t, e2.x + 3, e2.z, 0) && $2('brPont')(b2), 'the ' + $2('brName')(b2).toLowerCase() + ' down, with its pontoon');
+  C.mcd = {}; const c3 = $2('genCmd')(t, { c: 'man', k: 'cross', x: b2.x, z: b2.z }, 'sys');
+  ok(!c3.ok && c3.why === 'pont', 'cross at that bridge itself: still the bridge, refused (pont)');
+  C.mcd = {}; const c4 = $2('genCmd')(t, { c: 'man', k: 'cross', x: s2.x, z: s2.z }, 'sys'), op4 = C.ops.find(o => o.k === 'tra' && !o.over);
+  ok(d2 > 300 && d2 < 800 && c4.ok && op4 && op4.pz === s2.z && op4.b === -1, 'cross at a narrow stretch ' + Math.round(d2) + ' m from it: the pontoon goes to that stretch, a new crossing to flank by');
   ok(H.nan(S) === null, 'no NaN');
 }
 

@@ -25,6 +25,7 @@ Tudo em `Céu de Ferro 3D.html`, nos trechos do P6b (manobras `MANT.*`, abordage
 - **Fustigamento (`gue`) contra o líder**: perder em pontos é contra o inimigo à frente (`mnLead`). Perder em tíquetes é contra o inimigo com mais tíquetes. A mensagem do plano diz isso.
 - **Postura (STG)**: a razão de tíquetes é contra o inimigo com mais tíquetes.
 - `fortTargets`: as trincheiras com soldados de qualquer inimigo dentro.
+- Depois do merge do main (#70, construir mais), os embrulhos de `fortPlan` e `afpPlaces` (`bmrSupTries`, `bmrKitSup`, `afpPlaces`) também passaram a usar `mnDs` e `mnBase`.
 
 Com N = 2, cada troca dá o mesmo valor de antes: `mnFoes(t)` é `[1 - t]`, `mnBase` é `S.base[1 - t]`, `mnDs` é `t ? 1 : -1` sem `R.ends`, e `mnLead` é o outro lado.
 

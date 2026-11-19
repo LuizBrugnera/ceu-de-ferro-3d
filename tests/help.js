@@ -207,7 +207,7 @@ for (const [era, mapv, eco] of [['ww2', 1, 0], ['modern', 4, 1]]) {
   });
   const HL = $('helps')(), L = HL.l, k = {}, st = {};
   for (const R of L) { k[R.k] = (k[R.k] || 0) + 1; st[R.st] = (st[R.st] || 0) + 1; }
-  const minds = { duty: 0, fall: 0, help: 0 }; for (const l of [S.units, S.squads, S.planes]) for (const o of l) if (o.mind) minds[o.mind.k]++;
+  const minds = { duty: 0, fall: 0, help: 0, drill: 0 }; for (const l of [S.units, S.squads, S.planes]) for (const o of l) if (o.mind) minds[o.mind.k]++;
   ok(HL.n >= 3 && L.some(R => R.resp || R.pl), era + ': the units call for help and others answer (' + HL.n + ' calls: ' + JSON.stringify(k) + ', ' + JSON.stringify(st) + ')');
   ok(L.every(R => R.st === 'done' || R.st === 'gone' || S.t - R.T0 <= $('MIND').ask.life + 1), era + ': no call outlives its ' + $('MIND').ask.life + ' s');
   ok(!lie, era + ': nothing believed that its eyes did not perceive (' + lie + ')');

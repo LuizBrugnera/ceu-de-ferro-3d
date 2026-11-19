@@ -219,13 +219,13 @@ if ($('typeof LADDER !== "undefined"')) {
           const A = o.ai, fm = A.fm && A.fm.t;
           if (fm) { indirect++; if (!(fm.cm || spotted(fm) || S.t - fm.seenT < SPOT.keep + 1)) bad.push('fire mission on an unspotted ' + (fm.kind || (fm.sup ? 'base' : '?'))); continue; }
           const ts = (o.man ? [A.tgt] : o.def && o.def.vmax ? [o.tgt, A.tgt] : [A.tgt, A.low, A.inf]).filter(Boolean);
-          if (!ts.length && A.areaT === S.t) { area++; continue; }
+          if (!ts.length && (A.areaT === S.t || (A.dx && A.dx.fire && S.t <= A.dx.T))) { area++; continue; }   // covering fire into an objective, or a drill's fire into a smoke screen it sees (DRILLS: fumaca)
           shots++;
           if (!ts.some(t => !tclass(t) || g(o, t) >= 2 || mem(o, t))) bad.push((o.man ? 'soldier' : o.kind || 'aircraft') + ' at ' + (ts.map(t => (t.man ? 'soldier' : t.kind || 'aircraft') + ' g' + g(o, t)).join(', ') || 'nothing') + ' t=' + S.t.toFixed(1));
         }
         for (const m of S.missiles) { if (seen.has(m)) continue; seen.add(m); const b = m.by, t = m.target; if (!b || !b.ai || !t || !tclass(t)) continue; gm++; if (g(b, t) < 3) gbad.push((b.man ? 'soldier' : b.kind || 'aircraft') + ' g' + g(b, t)); }
       });
-      ok(shots > 50 && !bad.length, era + ', ' + SECS + ' s: ' + shots + ' aimed shots, ' + area + ' of covering fire into an objective, ' + indirect + ' indirect on the side\'s map; at what it had not made out: ' + bad.length + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
+      ok(shots > 50 && !bad.length, era + ', ' + SECS + ' s: ' + shots + ' aimed shots, ' + area + ' of covering fire into an objective or a smoke screen, ' + indirect + ' indirect on the side\'s map; at what it had not made out: ' + bad.length + (bad.length ? ' (' + bad.slice(0, 3).join('; ') + ')' : ''));
       ok((era === 'ww2' || gm > 0) && !gbad.length, era + ': ' + gm + ' guided missiles at a target, every one identified first' + (gbad.length ? '; not: ' + gbad.slice(0, 3).join(', ') : ''));
     }
   }

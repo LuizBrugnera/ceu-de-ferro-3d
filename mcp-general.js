@@ -387,7 +387,7 @@ function stateView(logN) {
   };
   if (pd) out.map = {
     ageSeconds: age(R.pic.at),
-    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? holder(p.base) : undefined })),
+    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, taker: p.cap >= 0 ? holder(p.cap) : undefined, base: p.base >= 0 ? holder(p.base) : undefined })),
     roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: NS() === 3 && Array.isArray(pd.tk) ? Object.fromEntries(pd.tk.map((n, s) => [s === SIDE ? 'ours (' + facName(s) + ')' : facName(s), n])) : pd.tk,
     ticketsNote: NS() === 3 ? 'by faction; a side with no tickets or without its main base is out, and the match goes on until one is left' : 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,

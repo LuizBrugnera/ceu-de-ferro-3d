@@ -6943,9 +6943,11 @@ function addSquad(team, x, z, ri, s, kits) {
   });
   q.n0 = q.live = q.men.length; S.squads.push(q); return q;
 }
-/* a man's place: at the squad's post once it is there (q.at), else in the loose formation around its anchor on the road */
+/* a man's place: at the squad's post once it is there (q.at), else in the loose formation around its anchor on the road; at a halt its
+   perimeter was formed for (q.drPer: the end of a walk, its order, or the meeting place for its ride), his place in the ring */
 const slot = (q, i) => {
   const O = q.ord, X = q.bg && !q.state ? q.bg[i] : null; if (X) return X;
+  const P = q.drPer; if (P && !q.state && P.p[i] && (P.h === O ? q.at : P.h === q.rd && q.halt && q.rd.st !== 'ride')) return P.p[i];
   if (q.at && !q.state && O && O.x !== undefined) { const P = q.pts || (q.pts = ptPts(q, O) || postPts(q.team, O.x, O.z, Math.max(q.n0, 1), O.R)); return P[i % P.length]; }
   const p = q.tp ? routeAt(q.tp, q.ts - IAI.form[1] * (i >> 1)) : routeAt(S.T.routes[q.ri], q.s - q.ds * IAI.form[1] * (i >> 1)), off = (i % 2 ? 1 : -1) * (IAI.form[2] + IAI.form[0] * (i >> 1)); return { x: p.x - p.dz * off, z: p.z + p.dx * off };   // on a trip (q.tp) the formation is along it
 };
@@ -11530,8 +11532,8 @@ mindGate = (g => o => { g(o); if (!(o.ffQ > S.t)) return; const c = o.ctl; if (o
    esc: on the move with a tank or armoured car of its side moving its way within r m, slower than v m/s: behind it, back [lo, hi] m, side m off its line, and an
      anti-tank soldier believed near is shot first;
    per: halted on the way with no threat (at the meeting place for its ride, or at the end of a walk): a ring of r m round the leader, each man facing out;
-     over once every man is within at m of his place and set s have gone (at the end of a walk the ring stays the squad's places there), and not
-     again for the same halt unless a threat came and went;
+     over once every man is within at m of his place and set s have gone (the ring stays the squad's places for the rest of that halt, at the
+     end of a walk or at the meeting place until it boards: slot), and not again for the same halt unless a threat came and went;
    ff: hit by its own side within t s: cease fire for hold s, a smoke at its own place as the signal, the shooter told to hold, a report;
    fix: an assault with an enemy made out in a building or a work between r[0] and r[1] m: one fire team holds it with fire from cover, the
      other flanks by flank m and goes in (lat).
@@ -11809,12 +11811,11 @@ DRILLS.push(
       const O = K.O, G = DRILL.inf.per; if (K.near || S.t - K.hitT < 20) { q.drPer = null; return 0; }
       if (K.live.length < 3 || (q.pts && O.k === 'hold') || q.bd || q.bg) return 0;
       const h = q.rd && q.rd.st !== 'ride' && q.halt ? q.rd : q.at && (O.k === 'move' || O.k === 'withdraw') && !O.disp && !q.op ? O : null;   // not every halt: one stops for an enemy it may not have perceived, an operation's waits are its overwatch
-      if (!h || (d ? S.t - d.T0 > G.set && K.live.every(m => !d.p[m.ai.i] || hdist(m, d.p[m.ai.i]) < G.at) : q.drPer === h)) return 0;
+      if (!h || (d ? S.t - d.T0 > G.set && K.live.every(m => !d.p[m.ai.i] || hdist(m, d.p[m.ai.i]) < G.at) : q.drPer && q.drPer.h === h)) return 0;
       return { u: .7, h };
     },
-    act(q, d) { const l = drMen(q), c = drMid(l), n = l.length, R = DRILL.inf.per.r; d.p = []; q.drPer = d.h; l.forEach((m, k) => { const a = k * TAU / n + q.id; d.p[m.ai.i] = Object.assign(clearOf(c.x + Math.cos(a) * R, c.z + Math.sin(a) * R, 1, {}), { fx: c.x + Math.cos(a) * 40, fz: c.z + Math.sin(a) * 40 }); }); },
-    man(q, d, m, A) { const p = d.p[A.i]; if (!p) return; drGo(m, A, p, false, hdist(m, p) > 2 ? 0 : 1); drCtl(A, { face: { x: p.fx, y: hgt(p.fx, p.fz) + 1.5, z: p.fz } }); },
-    end(q, d) { if (q.at && q.ord === d.h && !q.state) q.pts = q.men.map((m, i) => d.p[i] || { x: m.x, z: m.z }); } },
+    act(q, d) { const l = drMen(q), c = drMid(l), n = l.length, R = DRILL.inf.per.r; d.p = []; q.drPer = { h: d.h, p: d.p }; l.forEach((m, k) => { const a = k * TAU / n + q.id; d.p[m.ai.i] = Object.assign(clearOf(c.x + Math.cos(a) * R, c.z + Math.sin(a) * R, 1, {}), { fx: c.x + Math.cos(a) * 40, fz: c.z + Math.sin(a) * 40 }); }); },
+    man(q, d, m, A) { const p = d.p[A.i]; if (!p) return; drGo(m, A, p, false, hdist(m, p) > 2 ? 0 : 1); drCtl(A, { face: { x: p.fx, y: hgt(p.fx, p.fz) + 1.5, z: p.fz } }); } },
   { id: 'fogo-amigo', cls: 'inf', s: 'fogo amigo: cessar fogo, sinalizar com fumaça e informar', min: 4, max: 8, cool: 10,
     when(q, bt, d) { const F = q.drF; return F && S.t - F.t < DRILL.inf.ff.t ? { u: 2, of: F.by } : d && S.t - d.T0 < DRILL.inf.ff.hold ? 2 : 0; },
     act(q, d) {

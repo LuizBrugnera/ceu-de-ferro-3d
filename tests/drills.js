@@ -209,6 +209,14 @@ console.log('-- movement: bounds in the open, behind a friendly tank, a halt, a 
     clear();
   }
   {
+    const q = squad(0, mid - 300, 0, null, { k: 'move', s: mid + 600, x: at(mid + 600).x, z: at(mid + 600).z }); C.run(2); q.rd = { st: 'call', sP: q.ts, T: S.t + 999 };   // waiting at the meeting place for its ride
+    C.run(25); const R = q.drPer, l = live(q), ring = () => l.filter(m => R && R.p[m.ai.i] && $('hdist')(m, R.p[m.ai.i]) < 2.5).length;
+    const n0 = ring(), ended = !(q.dr && q.dr.id === 'perimetro') && took(q, 'perimetro'); C.run(40); const n1 = ring();
+    q.rd = null; const col = l.filter(m => R && R.p[m.ai.i] && $('hdist')($('slot')(q, m.ai.i), R.p[m.ai.i]) > .1).length;
+    ok(ended && n0 >= l.length - 1 && n1 >= l.length - 1 && col === l.length, 'waiting for its ride: the ring formed, the drill over, ' + n1 + ' of ' + l.length + ' still in their ring places 40 s on; the ride gone, ' + col + ' back to the column\'s places');
+    clear();
+  }
+  {
     const q = squad(0, mid, 0, null, { k: 'move', s: mid, x: at(mid).x, z: at(mid).z }); q.at = true;
     const t0 = $('lodTier')(q); q.dr = { id: 'perimetro' }; const t1 = $('lodTier')(q); q.dr = { id: 'artilharia' }; const t2 = $('lodTier')(q); q.dr = null;
     ok(t0 > 0 && t1 === t0 && t2 === 0, 'a far, quiet squad: its pace (LOD tier ' + t0 + ') kept in the perimeter (' + t1 + '), the usual pace under shells (' + t2 + ')');

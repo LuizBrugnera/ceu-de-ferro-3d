@@ -11,7 +11,10 @@
    lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
    rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
    rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs),
-   and br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg).
+   br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg)
+   gq (the general's tools for everyone: gask missions, unit with an id, lots and mines),
+   crl (the radio relay of the command net: the work of kind 8 in fort and fbuild),
+   and the tactical map (gask tmap: the asker's side's layer k, one of f v o t p k l, at 1 km; an older server answers shape).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -44,7 +47,7 @@ const LOADS = {
 };
 const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40 };
 const NST = Object.keys(STW).length;
-const FKINDS = 7;   // the kinds of work fort and fbuild carry (7: the pontoon, br)
+const FKINDS = 8;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl)
 const rooms = { ww2: new Map(), modern: new Map() };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
@@ -109,7 +112,7 @@ const RX = {
       if (!GENKEY || m.key !== GENKEY) { send(c.ws, { t: 'error', code: 'gen' }); return c.ws.close(); }   // one guess a connection
       if ((m.side !== 0 && m.side !== 1) || [...room.gens].some(o => o.player.side === m.side)) return send(c.ws, { t: 'error', code: 'taken' });
       c.player = { id: nextId++, name: 'MCP', cls: 'gen', model: '', side: m.side, kills: 0, deaths: 0, ai: 0 }; c.gen = 1; c.room = room; room.gens.add(c);
-      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1 });
+      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1, gq: 1 });
     }
     if (m.cls === 'spec') {   // a spectator: no body, not in the roster, never host; it is sent everything and can send nothing
       const room = rooms[m.room];
@@ -136,7 +139,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -513,11 +516,15 @@ RX.gcmd = (c, m) => {
   if (!h) return no('host');
   if (h !== c) send(h.ws, { t: 'gcmd', from: c.player.id, s, g: c.gen ? 1 : 0, d: m.d, c: o, n });   // the host applies its own player's commands itself
 };
+/* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
+   lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap'];
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
+  if (Number.isInteger(q.id) && Math.abs(q.id) < 1e6) o.id = q.id;
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });
   if (h !== c) send(h.ws, { t: 'gask', from: c.player.id, s: sideOf(c), q: o, n });
 };

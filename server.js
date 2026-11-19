@@ -30,8 +30,8 @@ const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Fer
 /* valid models per room and class (a model's side is MSIDE's, below); the page's PLANES, TANKS, AAS, ARTS and INF tables are the other copy.
    inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size */
 const MODELS = {
-  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'jeep', 'gmc', 'm3ht'] },
-  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'tigr', 'ural', 'btr82', 'mtlbu'] }
+  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
+  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
 };
 /* helicopters: aircraft to every check of an AI row or a loss, a class of their own to join, swap and hstate. None in 1944 */
 MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8'];
@@ -62,8 +62,9 @@ const MAXN = { ww2: 2, modern: 3 };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].ns = 2; rooms[era].gen = Array(MAXN[era]).fill(0); rooms[era].genk = Array(MAXN[era]).fill(0); rooms[era].host = null; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
-/* recovery vehicles and ambulances (rec): the AI's alone, models of its ground rows, never a player's (the page's REC.side is the other copy) */
-const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54'], modern: ['m88a2', 'brem1', 'm997', 'uaz452'] };
+/* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
+   the repair trucks are a player's too, so they are also in the trn lists above, each in its side's half */
+const SVC = { ww2: ['bergep', 'm32', 'kfz31', 'wc54', 'opelw', 'gmcw'], modern: ['m88a2', 'brem1', 'm997', 'uaz452', 'm1089', 'mtoub'] };
 for (const era in SVC) for (const id of SVC[era]) rooms[era].gnd.add(id);
 let nextId = 1;
 
@@ -486,7 +487,8 @@ RX.ecs = (c, m) => {
   if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !vec(m.v, 8) || !int(m.c, 0, 2) || !ints(m.q, 60, 5) || ![m.r, m.kp, m.ms, m.ls].every(l => ints(l, 40, 2)) || !ints(m.sl, 40, 4)
     || !ints(m.kn, 144, 6) || !ints(m.gd, 72, 3) || !(Array.isArray(m.sc) && (m.sc.length === 0 || vec(m.sc, 3))) || !int(m.tg, 0, 1e6)) return;
   const pl = ints(m.pp, 60, 3) && vec(m.po, 8);   // the production plan (F2), optional: [kind, field, out] each and [posture, budget, out, scale %]
-  castSide(c, Object.assign({ t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, pl && { pp: m.pp, po: m.po }), m.s);
+  const wk = ints(m.wk, 9, 1) && m.wk.length === 9;   // the works (BMR), optional: [en, mt spent the last minute, crates, en, mt spent in all, supply bases, their cap, field works, their cap]
+  castSide(c, Object.assign({ t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, pl && { pp: m.pp, po: m.po }, wk && { wk: m.wk }), m.s);
 };
 /* the commander's view of side s: top-level fields checked, their insides are the host's (it is trusted with the whole battle) */
 RX.gen = (c, m) => {

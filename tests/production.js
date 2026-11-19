@@ -159,20 +159,46 @@ console.log('-- tickets are morale where the economy pays (D25 A) --');
   ok(b.f.dead && b.d === 0, 'with no economy a dome lost costs none (' + b.d + ')');
 }
 
-console.log('-- a solo game is its own host: the frame meter calibrates the budget offline (D6) --');
+console.log('-- a solo game is its own host: the frame meter calibrates the budget offline (D6), by the mean over its period, not a lone frame --');
 {
-  const C = H.load({ seed: 4, eco: 1, mapv: 4 }), $ = C.$, S = solo(C, 'ww2'), GP = $('GP'), AIB = $('AIB');
+  const C = H.load({ seed: 4, eco: 1, mapv: 4 }), $ = C.$, S = solo(C, 'ww2'), GP = $('GP'), AIB = $('AIB'), M = GP.meter, gpMeter = $('gpMeter');
   C.run(2, () => park(S));
-  const stat = AIB.stat; AIB.stat = () => ({ n: 300, ok: false, avg: AIB.avg * 2, worst: AIB.worst * 2 });
-  S.popT = 0; $('gpMeter')(); AIB.stat = stat;
-  const P = $('popOf')(1);
-  ok(!S.net && S.popK === 1 - GP.meter.dn && P.men < GP.pop.men, 'offline, frames over the AI budget: the budget shrinks to ' + Math.round(S.popK * 100) + '% (' + P.men + ' soldiers of ' + GP.pop.men + ')');
+  /* the meter fed by hand: a period of meter.every s at 60 frames a second, each frame's AI time from ms(i) (the commander a fifth of it), then the meter's turn */
+  const period = ms => { AIB.take(); for (let i = 0; i < M.every * 60; i++) { S.t += 1 / 60; const a = ms(i); AIB.g = a / 5; AIB.u = a - a / 5; AIB.tick(); } S.popT = 0; gpMeter(); return S.popK; };
+  const ks = n => { const o = []; for (let i = 0; i < n; i++) o.push(period(ms)); return o; };
+  let ms = () => AIB.avg * .9; S.popK = 1;
+  ok(ks(6).every(k => k === 1), 'a host at ' + AIB.avg * .9 + ' ms a frame, under its ' + AIB.avg + ' ms budget, for 60 s: the population whole');
+  ms = i => (i === 300 ? 50 : AIB.avg * .9);
+  ok(ks(3).every(k => k === 1), 'the same with one frame of 50 ms in each period (' + M.every + ' s): still whole, a lone frame is not a slow machine');
+  ms = i => (i % 60 === 0 ? AIB.worst * 1.5 : AIB.avg * .7);
+  ok(ks(3).every(k => k === 1), 'a frame over the ' + AIB.worst + ' ms worst every second, the mean under budget (as a browser at 57 fps measured): still whole');
+  const use = $('popUse'), field = u => { C.__u = u; C.$('popUse = __u'); };
+  field(() => ({ men: 0, veh: 0, air: 0 }));   // each cut bites at once: the field within every budget (the hold for one that has not is below)
+  const n0 = S.glog.l[1].length; ms = () => AIB.avg * 2;
+  const down = ks(8), P = $('popOf')(1);
+  ok(down[0] === 1 - M.dn && down.every((k, i) => !i || k <= down[i - 1]) && P.men < GP.pop.men, 'offline, every frame over the AI budget: the budget shrinks period by period (' + down.map(k => Math.round(k * 100) + '%').join(' ') + ', ' + P.men + ' soldiers of ' + GP.pop.men + ')');
+  ok(Math.abs(S.popK - M.min) < 1e-9 && down.filter(k => Math.abs(k - M.min) < 1e-9).length <= 4, 'and reaches its floor of ' + M.min * 100 + '% only after ' + Math.round((1 - M.min) / M.dn) * M.every + ' s over budget');
+  const line = S.glog.l[1].slice(n0).find(e => /Teto de população reduzido/.test(e.s));
+  ok(line && /8 ms por quadro em média nos últimos 10 s \(orçamento 4 ms; pior quadro 8 ms, comandante 1,6 ms\)/.test(line.s), 'the general\'s log gives the numbers measured: "' + (line && line.s) + '"');
+  ms = () => AIB.avg * .5;
+  const up = ks(12);
+  ok(up.every((k, i) => k >= (i ? up[i - 1] : M.min)) && S.popK === 1, 'the AI time falls to ' + AIB.avg * .5 + ' ms: the budget grows back to whole (' + up.map(k => Math.round(k * 100) + '%').join(' ') + ')');
+  ok(S.glog.l[1].some(e => /Teto de população ampliado a 100%: IA do anfitrião em 2 ms/.test(e.s)), 'and the log says so, with the numbers');
+  S.popK = .7; ms = () => AIB.avg * (M.low + 1) / 2;
+  ok(ks(3).every(k => k === .7), 'between ' + AIB.avg * M.low + ' and ' + AIB.avg + ' ms it holds where it is (no seesaw)');
+  S.popK = 1; ms = () => AIB.avg * 2;
+  field(() => ({ men: 200, veh: 40, air: 12 }));   // both sides still have out more than any budget: a cut has not bitten yet
+  const held = ks(4);
+  ok(held.every(k => k === 1 - M.dn), 'over budget with the force still out over the budget the last cut set: one cut, then it waits for it to bite (' + held.map(k => Math.round(k * 100) + '%').join(' ') + ')');
+  field(() => ({ men: 0, veh: 0, air: 0 }));
+  ok(period(ms) === 1 - 2 * M.dn, 'a side back within it, the cost still over: the next cut (' + Math.round(S.popK * 100) + '%)');
+  field(use); S.popK = 1;
 }
 
 console.log('-- an AI × AI match with the economy: everything by order, nothing dead --');
 {
   const C = H.load({ seed: 21, eco: 1, mapv: 4 }), $ = C.$, S = C.watch('modern', { min: 30 }), seen = new Set(), free = [], AIB = $('AIB');
-  AIB.stat = () => ({ n: 300, ok: true, avg: AIB.avg, worst: AIB.worst });   // the frame meter on a steady reading: the budget whole, whatever this machine's speed
+  AIB.take = () => ({ n: 600, s: 10, avg: AIB.avg, gen: AIB.gen, worst: AIB.worst });   // the frame meter on a steady reading: the budget whole, whatever this machine's speed
   C.run(150, () => { for (const l of [S.units, S.planes, S.squads]) for (const o of l) if (!seen.has(o)) { seen.add(o); if ((o.ai || o.men) && o.mis && !o.mis.d) free.push(o.kind || o.role || o.job); } });
   const P = [0, 1].map(t => $('popOf')(t)), U = [0, 1].map(t => $('popUse')(t));
   ok(!free.length && !H.nan(S), 'modern, 150 s: ' + seen.size + ' units and squads, every AI one by a Dispatch order' + (free.length ? ' (not: ' + free.slice(0, 6).join(', ') + ')' : ''));

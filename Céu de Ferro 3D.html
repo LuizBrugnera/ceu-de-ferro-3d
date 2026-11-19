@@ -13222,16 +13222,34 @@ function fortPose(m) {
   c.aim = dir; c.fire = false; c.mx = c.mz = 0;   // it stops to throw
   if (dot(m.f, dir) > .9999 && m.v.x * m.v.x + m.v.z * m.v.z < .01) { c.nade = 1; A.gnT = S.t + F.gap; }
 }
+/* P6b (3 sides): the maneuvers' view of the enemy with N sides (S.N, 2 when unset; S.rel[a][b] 'ally' makes a friend, everyone else is a foe).
+   mnFoe(t, s): s is a side and an enemy of t; mnFoes(t): t's enemies; mnBase(t, x, z): the enemy base nearest x z (nearest t's own base without x z);
+   mnDs(t, ri): t's way forward along road ri (the map's dsOf when there is one, else the 2-side t ? 1 : -1); mnLead(t): the enemy ahead, by points then
+   tickets, among those still in the match: { e, h its points, k its tickets }. With N = 2 every one of them is the old 1 - t */
+const mnFoe = (t, s) => Number.isInteger(s) && s >= 0 && s < (S.N || 2) && s !== t && !(S.rel && S.rel[t] && S.rel[t][s] === 'ally');
+const mnFoes = t => { const o = []; for (let s = 0; s < (S.N || 2); s++) if (mnFoe(t, s)) o.push(s); return o; };
+const mnBase = (t, x, z) => {
+  const o = x === undefined && S.base[t] ? S.base[t] : { x, z }; let b = null, bd = Infinity;
+  for (const s of mnFoes(t)) { const B = S.base[s]; if (!B) continue; const d = (B.x - o.x) ** 2 + (B.z - o.z) ** 2; if (!(d >= bd)) { bd = d; b = B; } }
+  return b || S.base[1 - t] || S.base[0];
+};
+const mnDs = (t, ri) => (typeof dsOf === 'function' && S.T.routes[ri] && S.T.routes[ri].ends ? dsOf(t, ri) : t ? 1 : -1);
+const mnLead = t => {
+  const k = S.cq ? S.cq.tk : null, alive = mnFoes(t).filter(e => !k || !(k[e] <= 0)), L = alive.length ? alive : mnFoes(t);
+  let best = null;
+  for (const e of L) { const h = S.cq ? cqHeld(e) : 0, ke = k ? k[e] : 0; if (!best || h > best.h || (h === best.h && ke > best.k)) best = { e, h, k: ke }; }
+  return best || { e: 1 - t, h: 0, k: 0 };
+};
 /* the planner's hand: a squad holding its post with no enemy near and no work there yet starts one, a trench across the way to the enemy,
    or walls in a town and around a supply base it guards; its men, standing at the post, build it */
 function fortPlan(t, sq) {
-  const A = FORT.ai, e = S.base[1 - t]; let n = 0;
+  const A = FORT.ai; let n = 0;
   if (S.net && !Net.ft) return;
   for (const f of S.forts) if (f.team === t && !f.pre && f.k <= 2 && !f.F.cn) n++;   // the cap is the trenches' and walls'; a post has its own (F.cap), a radio relay its own (CNR)
   for (const q of sq) {
     const O = q.ord, L = q.men.find(m => !m.dead), qd = O && O.dig ? A.oq : A.quiet;   // a work the general ordered there is dug with the enemy nearer
     if (!L || O.k !== 'hold' || !q.at || O.x === undefined || q.fd < qd || S.t < (q.digT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, qd)) continue;
-    const k = O.dig ? O.dig.k : O.tw || O.b ? 2 : 1, a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
+    const k = O.dig ? O.dig.k : O.tw || O.b ? 2 : 1, e = mnBase(t, O.x, O.z), a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
     if (k <= 2 && n >= A.cap) continue;
     if (S.forts.some(f => f.k === k && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;
     q.digT = S.t + A.again;
@@ -13239,7 +13257,7 @@ function fortPlan(t, sq) {
   }
 }
 /* a battery's list: each trench with enemy soldiers in it that have been spotted */
-function fortTargets(u, all) { for (const f of S.forts) if (f.k === 1 && f.tg && f.in[1 - u.team]) all.push(f.tg[1 - u.team]); }
+function fortTargets(u, all) { for (const f of S.forts) if (f.k === 1 && f.tg) for (const e of mnFoes(u.team)) if (f.in[e] && f.tg[e]) all.push(f.tg[e]); }
 /* the player's hands on a trench or a wall. N in the build mode goes from the supply base (S.bm, which build() keeps) to the trench, the
    sandbags and out; S.fm is the mode for those two: k the kind, and as S.bm where it would lie, a across the aim, and why not. The trigger
    starts it and the mode stays, for the next piece. True when build() has nothing left to do */
@@ -14824,7 +14842,7 @@ function manAt(spec) {
     const n = T.net && T.net.n.find(n => n.id === a); if (!n) return null;
     const q = railOf(n.x, n.z); return { p: null, x: n.x, z: n.z, ri: q.ri, s: q.s, nm: RN.names[a] || a };
   }
-  if (a && typeof a === 'object' && Number.isInteger(a.ri) && T.routes[a.ri] && !Number.isFinite(a.x)) { const s = Number.isFinite(a.s) ? a.s : lineS(0, a.ri); const q = routeAt(T.routes[a.ri], clamp(s, 0, T.routes[a.ri].len)); return { p: null, x: q.x, z: q.z, ri: a.ri, s: clamp(s, 0, T.routes[a.ri].len), nm: 'a rota ' + (a.ri + 1) }; }
+  if (a && typeof a === 'object' && Number.isInteger(a.ri) && T.routes[a.ri] && !Number.isFinite(a.x)) { const s = Number.isFinite(a.s) ? a.s : lineS(T.routes[a.ri].ends ? T.routes[a.ri].ends[0] : 0, a.ri); const q = routeAt(T.routes[a.ri], clamp(s, 0, T.routes[a.ri].len)); return { p: null, x: q.x, z: q.z, ri: a.ri, s: clamp(s, 0, T.routes[a.ri].len), nm: 'a rota ' + (a.ri + 1) }; }
   if (a && typeof a === 'object' && ok(a)) { const q = railOf(a.x, a.z); return { p: null, x: a.x, z: a.z, ri: q.ri, s: q.s, nm: gNear(a.x, a.z) }; }
   return null;
 }
@@ -15008,7 +15026,7 @@ function* cmdManJob(C, sq) {   // a piece for each kind it weighs (plan's job); 
   C.mnT = fresh ? Math.max(C.mnT, S.t + MAN.every / 2) : S.t + MAN.every; C.man = C.man.filter(o => !o.over);
   const dk = docK(C), free = manFree(sq), inMan = C.man.reduce((a, o) => a + opLive(o).length, 0), room = free.length - MAN.keep;
   if (C.man.length >= manMax(C, dk) || !(inMan < MAN.share * (free.length + inMan)) || room < 1) return;
-  const X = { t, C, sq, free, room, doc: dk, ds: t ? 1 : -1, live: C.man }, W = MANW[dk] || MANW.balanced, all = [];
+  const X = { t, C, sq, free, room, doc: dk, ds: mnDs(t, frontR()), live: C.man }, W = MANW[dk] || MANW.balanced, all = [];
   for (const k of MANORD) {
     if (!MANG[k] || (C.mcd[k] || 0) > S.t) continue;
     for (const c of MANG[k](C, X)) all.push(c);
@@ -15056,7 +15074,7 @@ function mresName(n) {
 /* the reserve of side t that a manoeuvre may post: whole, in no op, not sent forward by the defence, not a guard */
 const mresRes = t => S.squads.find(q => q.team === t && !q.net && q.live >= 3 && !q.state && q.job === 'base' && !q.op && q.ord && !q.ord.res && !q.ord.b && !q.lift) || null;
 /* no enemy known by the node and none of its points within MRES.foe m */
-const mresSafe = (C, n) => !(cmdKnown(C, n.x, n.z, MRES.safe) > 0) && !S.cq.p.some(p => p.hold === 1 - C.t && hdist(p, n) < MRES.foe);
+const mresSafe = (C, n) => !(cmdKnown(C, n.x, n.z, MRES.safe) > 0) && !S.cq.p.some(p => mnFoe(C.t, p.hold) && hdist(p, n) < MRES.foe);
 /* a node's reach of the points: m the weighted longest way, far the longest, k the points it reaches by class 0/1 roads */
 function mresScore(idx, wt, a) {
   let m = 0, far = 0, k = 0;
@@ -15134,7 +15152,7 @@ MANE.mres = (C, op) => {
 /* the defence of a point on another axis than the reserve's: with the reserve posted off the front road it still answers by the roads (cmdDefend's own branch
    needs the same axis); true when it dealt with the case, false: the reserve cannot get there and cmdDefend returns as before */
 function mresDefend(C, res, w, E, kx, kz) {
-  const t = C.t, ds = t ? 1 : -1, L = res.men.find(m => !m.dead);
+  const t = C.t, ds = mnDs(t, w.ri), L = res.men.find(m => !m.dead);
   if (!L || !tripSq(res, { x: w.x, z: w.z })) return false;
   if (res.op || genBy(t, 'def') !== 'ai') return true;
   if (E > 2 && !res.ord.res) { const R = S.T.routes[w.ri], s = clamp(w.s - ds * 300, 0, R.len), b = routeAt(R, s); genCmd(t, { c: 'res', ri: w.ri, s, x: b.x - b.dz * 30, z: b.z + b.dx * 30 }, 'ai', { res, w, E, b }); }
@@ -15179,11 +15197,11 @@ function depOn(n, ri) {
   const a = n.ax.find(a => a[0] === ri); if (a) return a[1];
   const q = railOf(n.x, n.z); return q.ri === ri && q.d <= RN.onAx ? q.s : null;
 }
-const depSafe = (C, n) => !S.cq.p.some(p => p.hold === 1 - C.t && hdist(p, n) < DEPX.safe) && !(cmdKnown(C, n.x, n.z, DEPX.know) > 0);
+const depSafe = (C, n) => !S.cq.p.some(p => mnFoe(C.t, p.hold) && hdist(p, n) < DEPX.safe) && !(cmdKnown(C, n.x, n.z, DEPX.know) > 0);
 /* the place on axis ri to fall back to: MANT.dep.back m behind the line (or lo..hi m), every DEPX.step m of the road and DEPX.side m off it to either hand,
    with the most cover (the nearer to the line when equal); n: { x, z, id its name }. The network's nodes are too few and too bare for it */
 function depBest(C, t, ri, lo, hi) {
-  const ds = t ? 1 : -1, ls = lineS(t, ri), K = MANT.dep, r = S.T.routes[ri], a = lo === undefined ? K.back[0] : lo, b = hi === undefined ? K.back[1] : hi; let best = null;
+  const ds = mnDs(t, ri), ls = lineS(t, ri), K = MANT.dep, r = S.T.routes[ri], a = lo === undefined ? K.back[0] : lo, b = hi === undefined ? K.back[1] : hi; let best = null;
   for (let back = a; back <= b; back += DEPX.step) {
     const s = ls - ds * back; if (s < 0 || s > r.len) continue;
     const p = routeAt(r, s);
@@ -15218,7 +15236,7 @@ MANO.dep = (t, C, spec, by, R) => {
   else {   // a place: on (or by) an axis, behind the line
     const q = railOf(A.x, A.z); if (q.d > RN.onAx || !depSafe(C, A)) return gBad('at');
     ri = q.ri; s = q.s; n = { x: A.x, z: A.z }; n.id = depName(n);
-    const back = (lineS(t, ri) - s) * (t ? 1 : -1); if (back < DEPX.mind || back > DEPX.maxd) return gBad('at');
+    const back = (lineS(t, ri) - s) * mnDs(t, ri); if (back < DEPX.mind || back > DEPX.maxd) return gBad('at');
   }
   if (C.fb[ri] || C.man.some(o => o.k === 'dep' && !o.over && o.ri === ri)) return gBad('max');
   const fb = { x: n.x, z: n.z, s, nm: n.id || depName(n), ri }, k = C.ratio[ri];
@@ -15227,7 +15245,7 @@ MANO.dep = (t, C, spec, by, R) => {
   const all = manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)), eng = q => (q.men.some(m => !m.dead && m.kit > 0) ? 1 : 0);
   const free = all.length - MAN.keep >= 1 ? all.filter(q => q.ri === ri && Math.abs(q.s - s) < CMD.reach).sort((a, b) => eng(b) - eng(a) || Math.abs(a.s - s) - Math.abs(b.s - s)) : [];
   if (free.length) {
-    const q = free[0], e = S.base[1 - t];
+    const q = free[0], e = mnBase(t, fb.x, fb.z);
     op.dig = q; op.digT = S.t; op.n0 += q.live;
     opTake(op, q, { k: 'hold', ri, s, x: fb.x, z: fb.z, dig: { k: 1, a: headTo(fb.x, fb.z, e.x, e.z) } });
   }
@@ -15252,7 +15270,7 @@ OPS.dep = (C, op) => {
 MANE.dep = (C, op) => { if (C.fb[op.ri] === op.fb) C.fb[op.ri] = null; };
 /* a line post of side C falls back (cmdDefend): to the fallback line when the axis has one behind the post; true when it did */
 function depWithdraw(C, q, L) {
-  const O = q.ord, fb = C.fb[q.ri], t = C.t, ds = t ? 1 : -1;
+  const O = q.ord, fb = C.fb[q.ri], t = C.t, ds = mnDs(t, q.ri);
   if (!fb || !L || q.op || O.k !== 'hold' || O.wd || O.b || !(q.job === 'line' || q.job === 'held') || q.live > q.n0 * C.doc.wd || q.fd >= 350 || (q.s - fb.s) * ds < 120) return false;
   if (L.smk > 0) L.ctl.nade = 2;
   setOrd(q, { k: 'withdraw', ri: q.ri, s: fb.s, x: fb.x, z: fb.z, R: 9 });
@@ -15325,7 +15343,7 @@ function mbFlkPlan(t, C, tg, axRi, free, n, ap, Tm) {
   }
   const no = why => { MBF.why = why; return null; };
   if (!sN || !eN || sN === eN || sd > K.reach || ed > MBF.endMax) return no('node');
-  if (!ap) { const r = S.T.routes[axRi], q = railOf(tg.x, tg.z), s0 = q.ri === axRi ? q.s : sOn(axRi, tg.x, tg.z), d = t ? 1 : -1; ap = mbApproach(axRi, s0, s0 - d * (CMD.fup + MBF.back)); }
+  if (!ap) { const r = S.T.routes[axRi], q = railOf(tg.x, tg.z), s0 = q.ri === axRi ? q.s : sOn(axRi, tg.x, tg.z), d = mnDs(t, axRi); ap = mbApproach(axRi, s0, s0 - d * (CMD.fup + MBF.back)); }
   const onAp = p => ap.some(a => Math.abs(a.x - p.x) < MBF.near && Math.abs(a.z - p.z) < MBF.near && Math.hypot(a.x - p.x, a.z - p.z) < MBF.near);
   const sec = netPath(sN.i, eN.i, e => e.len * RN.cls.foot[e.c] * (e.c === 0 ? MBF.main : 1) * (e.p.some(onAp) ? 4 : 1), 'foot'); if (!sec || !sec.e.length) return no('path');
   const main = netPath(sN.i, eN.i, undefined, 'foot'), poly = mbNetPoly(N, sec), mp = main && main.e.length ? mbNetPoly(N, main) : polyOf([sN, eN]);
@@ -15408,7 +15426,7 @@ MANG.inf = (C, X) => {
   if (X.free.length < MAN.keep + 1) return out;
   const squads = X.free.filter(q => q.live >= K.live); if (!squads.length) return out;
   const near = p => squads.reduce((a, q) => Math.min(a, hdist(mbLead(q) || q.men[0], p)), 1e9);
-  const cand = P.filter(p => p.hold === 1 - t && p.base < 0 && !(M[p.i] > S.t) && cmdKnown(C, p.x, p.z, 500) <= K.weak && !C.ops.some(o => !o.over && (o.P === p || (o.O && o.O.tw === p)))).sort((a, b) => near(a) - near(b));
+  const cand = P.filter(p => mnFoe(t, p.hold) && p.base < 0 && !(M[p.i] > S.t) && cmdKnown(C, p.x, p.z, 500) <= K.weak && !C.ops.some(o => !o.over && (o.P === p || (o.O && o.O.tw === p)))).sort((a, b) => near(a) - near(b));
   const p = cand[0]; if (!p) return out;
   const q = squads.slice().sort((a, b) => hdist(mbLead(a), p) - hdist(mbLead(b), p))[0], L = mbLead(q), kn = cmdKnown(C, p.x, p.z, 500);
   if (!L || hdist(L, p) > K.far) { M[p.i] = S.t + MBI.skip; return out; }
@@ -15488,18 +15506,20 @@ function mbDrop(a, L) {
   for (const g of [0, .5, -.5, 1, -1]) { const c = Math.cos(g), s = Math.sin(g), x = a.x + (dx * c - dz * s) / d * r, z = a.z + (dz * c + dx * s) / d * r; if (gMapOk(x, z)) return { x, z }; }
   return null;
 }
+/* the side an asset is of (its own team; the enemy base nearest it when it has none) */
+const mbOwner = (t, a) => (a.o && mnFoe(t, a.o.team) ? a.o.team : S.base.indexOf(mnBase(t, a.x, a.z)));
 const mbWho = a => a.o.id !== undefined ? a.k + a.o.id : a.k + Math.round(a.x / 200) + ',' + Math.round(a.z / 200);
 MANG.raid = (C, X) => {
   const t = X.t, K = MANT.raid, M = (C.mbx || (C.mbx = {})).raid || (C.mbx.raid = {}), out = [];
   if (X.room < 1 || !X.free.length) return out;
   const nearest = a => X.free.reduce((m, q) => Math.min(m, hdist(mbLead(q) || q.men[0], a)), 1e9);
-  const cand = mbRaidAssets(t).filter(a => ecoDepth(1 - t, a.x, a.z) >= K.depth && !(M[mbWho(a)] > S.t) && !C.ops.some(o => !o.over && o.k === 'raid' && o.tg === a.o) && nearest(a) < MBR.far).sort((a, b) => b.val / (1 + nearest(b) / 2000) - a.val / (1 + nearest(a) / 2000));
+  const cand = mbRaidAssets(t).filter(a => ecoDepth(mbOwner(t, a), a.x, a.z) >= K.depth && !(M[mbWho(a)] > S.t) && !C.ops.some(o => !o.over && o.k === 'raid' && o.tg === a.o) && nearest(a) < MBR.far).sort((a, b) => b.val / (1 + nearest(b) / 2000) - a.val / (1 + nearest(a) / 2000));
   const a = cand[0]; if (!a) return out;
   const sqs = X.free.slice().sort((p, q) => hdist(mbLead(p), a) - hdist(mbLead(q), a)).slice(0, Math.min(X.room, X.doc === 'aggressive' && a.val >= 4 ? K.n[1] : K.n[0])), L = mbLead(sqs[0]);
   const drop = L && mbDrop(a, L), path = drop && footPath(C, L.x, L.z, drop.x, drop.z);
   if (!path || !mbRaidOk(path, mbTm('raid')) || path.thr > K.thr) { if (drop) M[mbWho(a)] = S.t + MBR.skip; return out; }
   out.push({ k: 'raid', sc: clamp(K.w * a.val / 4 * (1 - .5 * path.thr / K.thr), 0, 2), spec: { c: 'raid', at: { x: a.x, z: a.z }, n: sqs.length }, at: { x: a.x, z: a.z }, res: { a, sqs, drop, path },
-    why: a.nm + ' a ' + gN(ecoDepth(1 - t, a.x, a.z) / 1000) + ' km atrás da linha inimiga e um caminho a pé de ameaça ' + gN(path.thr) });
+    why: a.nm + ' a ' + gN(ecoDepth(mbOwner(t, a), a.x, a.z) / 1000) + ' km atrás da linha inimiga e um caminho a pé de ameaça ' + gN(path.thr) });
   return out;
 };
 MANO.raid = (t, C, spec, by, R) => {
@@ -15608,11 +15628,11 @@ function blkSquad(t, C, x, z) {
   return null;
 }
 MANG.blk = (C, X) => {
-  const t = X.t, e = 1 - t, A = MANT.blk, out = [];
+  const t = X.t, A = MANT.blk, out = [];
   if (!(S.T.mv >= 4) || !S.cq || !X.free.length || C.man.some(o => o.k === 'blk' && !o.over)) return out;
-  const seen = blkSeen(C, e); if (!seen.length) return out;
-  const sites = blkSites(), tally = new Map();
-  for (const v of seen) for (const st of sites) if (hdist(st, v) < BLKX.site && ecoDepth(e, st.x, st.z) >= 0) tally.set(st, (tally.get(st) || 0) + 1);
+  const sites = blkSites(), tally = new Map();   // N sides: every enemy's supply roads, each site counted for the enemy it is behind
+  for (const e of mnFoes(t)) for (const v of blkSeen(C, e)) for (const st of sites) if (hdist(st, v) < BLKX.site && ecoDepth(e, st.x, st.z) >= 0) tally.set(st, (tally.get(st) || 0) + 1);
+  if (!tally.size) return out;
   for (const [st, nv] of [...tally].sort((a, b) => b[1] * b[0].sc - a[1] * a[0].sc).slice(0, 3)) {
     if (cmdKnown(C, st.x, st.z, 250) > BLKX.near) continue;
     const sw = blkSquad(t, C, st.pos[0].x, st.pos[0].z); if (!sw) continue;
@@ -15622,12 +15642,12 @@ MANG.blk = (C, X) => {
   return out;
 };
 MANO.blk = (t, C, spec, by, R) => {
-  const e = 1 - t, a = manAt(spec), A = MANT.blk; if (!a) return gBad('at');
-  let site = null, bd = BLKX.site;
-  for (const st of blkSites()) { const d = hdist(st, a); if (d < bd && ecoDepth(e, st.x, st.z) >= 0) { bd = d; site = st; } }
+  const a = manAt(spec), A = MANT.blk; if (!a) return gBad('at');
+  let site = null, bd = BLKX.site, e = -1;   // N sides: the enemy whose supply road it is (the one behind whose line the site lies)
+  for (const st of blkSites()) { const d = hdist(st, a); if (d >= bd) continue; const f = mnFoes(t).find(o => ecoDepth(o, st.x, st.z) >= 0); if (f !== undefined) { bd = d; site = st; e = f; } }
   if (!site) return gBad('at');
   const sw = blkSquad(t, C, site.pos[0].x, site.pos[0].z); if (!sw) return gBad(manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)).length ? 'path' : 'sq');
-  const q = sw.q, nv = blkSeen(C, e).filter(v => hdist(v, site) < BLKX.site).length, p = site.pos[0], o = { site, kz: { x: site.x, z: site.z }, ri: site.ri, st: 'set', sprung: 0, arr: 0, tank: null, first: null, last: null, n0: q.live, nv };
+  const q = sw.q, nv = blkSeen(C, e).filter(v => hdist(v, site) < BLKX.site).length, p = site.pos[0], o = { site, e, kz: { x: site.x, z: site.z }, ri: site.ri, st: 'set', sprung: 0, arr: 0, tank: null, first: null, last: null, n0: q.live, nv };
   if (!Number.isFinite(spec.T)) o.Tmax = clamp(sw.way.len / MAN.pace + A.hold + 30, 60, MAN.life);
   const op = manOpen(C, 'blk', spec, by, o);
   opTake(op, q, { k: 'ambush', ri: site.ri, s: site.s, x: p.x, z: p.z, R: 9, kz: op.kz, op, wp: sw.way, fast: 1 });
@@ -15660,7 +15680,7 @@ OPS.blk = (C, op) => {
   } else if (op.st === 'fire') {
     if (S.t > op.T || own <= op.n0 * .5 || cmdKnown(C, s.x, s.z, 400) > own * INC.amb.odds) {
       op.st = 'back'; op.T = S.t; gLog(t, 'amb', 'Bloqueio recolhe: recuar ' + A.back + ' m', s);
-      const hq = S.base[1 - t], d = Math.hypot(s.x - hq.x, s.z - hq.z) || 1, c = clearOf(s.x + (s.x - hq.x) / d * A.back, s.z + (s.z - hq.z) / d * A.back, 2, {});
+      const hq = op.e >= 0 && S.base[op.e] ? S.base[op.e] : mnBase(t, s.x, s.z), d = Math.hypot(s.x - hq.x, s.z - hq.z) || 1, c = clearOf(s.x + (s.x - hq.x) / d * A.back, s.z + (s.z - hq.z) / d * A.back, 2, {});
       l.forEach(q => { const L = blkLeader(q); if (L && L.smk > 0) L.ctl.nade = 2; opTake(op, q, { k: 'withdraw', ri: s.ri, s: s.s, x: c.x, z: c.z, R: 9 }); });
     }
   } else if (S.t - op.T > 40 || l.every(q => q.at)) return opEnd(C, op);
@@ -15681,18 +15701,19 @@ const cutList = L => L.map(p => gName(p)).join(', ');
 /* the enemy points next to Q that taking Q leaves nearly surrounded (CUTX.ring of their links or more lead to Q or to points side t holds), short of being cut off
    outright (lost: cutLost's); they count CUTX.k of their value. An encirclement is mostly that: a point whose ties to the enemy base are cut or held by us */
 const CUTX = { ring: .66, k: .5 };
-const cutRing = (t, Q, lost) => { const P = S.cq.p; return Q.links.map(i => P[i]).filter(p => p.hold === 1 - t && p.base < 0 && !lost.includes(p) && p.links.length && p.links.filter(j => j === Q.i || P[j].hold === t).length / p.links.length >= CUTX.ring); };
+const cutRing = (t, Q, lost, e) => { const P = S.cq.p, E = e === undefined ? Q.hold : e; return Q.links.map(i => P[i]).filter(p => p.hold === E && mnFoe(t, E) && p.base < 0 && !lost.includes(p) && p.links.length && p.links.filter(j => j === Q.i || P[j].hold === t).length / p.links.length >= CUTX.ring); };
 const cutSay = (lost, ring) => (lost.length ? 'corta ' + cutList(lost) + ' da base inimiga' : '') + (lost.length && ring.length ? ' e ' : '') + (ring.length ? 'cerca ' + cutList(ring) : '');
 /* the free squads of side t that cmdAttack could send at Q: its pool (same road, in reach), and the strength they and the known enemy make */
 function cutOdds(C, t, Q, free) {
-  const ds = t ? 1 : -1, pool = free.filter(q => q.ri === Q.ri && Math.abs(Q.s - q.s) < CMD.reach), own = pool.reduce((a, q) => a + q.live, 0);
+  const pool = free.filter(q => q.ri === Q.ri && Math.abs(Q.s - q.s) < CMD.reach), own = pool.reduce((a, q) => a + q.live, 0);
   return { own, foe: Math.max(CMD.guess, cmdKnown(C, Q.x, Q.z, 500)), n: pool.length };
 }
 MANG.cut = (C, X) => {
-  const t = X.t, e = 1 - t, A = MANT.cut, out = [];
+  const t = X.t, A = MANT.cut, out = [];
   if (!S.cq || C.pref || C.man.some(o => o.k === 'cut' && !o.over)) return out;
   for (const Q of cqTargets(t)) {
-    if (Q.hold !== e || Q.base >= 0 || C.ops.some(o => o.k === 'atk' && !o.over && o.O.tw === Q)) continue;
+    const e = Q.hold;   // N sides: the encirclement is against the side holding Q
+    if (!mnFoe(t, e) || Q.base >= 0 || C.ops.some(o => o.k === 'atk' && !o.over && o.O.tw === Q)) continue;
     const lost = cutLost(e, Q), ring = cutRing(t, Q, lost), value = lost.reduce((a, p) => a + cutVal(p), 0) + CUTX.k * ring.reduce((a, p) => a + cutVal(p), 0); if (!lost.length && !ring.length) continue;
     const od = cutOdds(C, t, Q, X.free);
     out.push({ k: 'cut', sc: clamp(A.w * Math.min(2, .5 + value / 2) * (od.n >= 2 && od.own / od.foe >= C.doc.atk ? 1 : .4), 0, 2), spec: { c: 'encircle', at: gPts().indexOf(Q), n: 1, why: 'cercar ' + cutList(lost.concat(ring)) },
@@ -15701,24 +15722,24 @@ MANG.cut = (C, X) => {
   return out;
 };
 MANO.cut = (t, C, spec, by, R) => {
-  const e = 1 - t, a = manAt(spec), Q = a && a.p;
-  if (!Q || Q.hold !== e || Q.base >= 0 || !S.cq.p.some(p => p.hold === t && p.links.includes(Q.i))) return gBad('at');
+  const a = manAt(spec), Q = a && a.p, e = Q ? Q.hold : -1;
+  if (!Q || !mnFoe(t, e) || Q.base >= 0 || !S.cq.p.some(p => p.hold === t && p.links.includes(Q.i))) return gBad('at');
   if (C.pref || C.ops.some(o => o.k === 'atk' && !o.over && o.O.tw === Q)) return gBad('max');
   const lost = cutLost(e, Q), ring = cutRing(t, Q, lost); if (!lost.length && !ring.length) return gBad('path');
   if (manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)).length < 2) return gBad('sq');
-  const op = manOpen(C, 'cut', spec, by, { Q, ri: Q.ri, lost: lost.concat(ring).map(p => p.i), kz: { x: Q.x, z: Q.z }, seen: 0 });
+  const op = manOpen(C, 'cut', spec, by, { Q, e, ri: Q.ri, lost: lost.concat(ring).map(p => p.i), kz: { x: Q.x, z: Q.z }, seen: 0 });
   C.pref = { p: Q, T: S.t + op.Tmax, op };
   gLog(t, 'atk', 'Cerco: tomar ' + gName(Q) + ' ' + cutSay(lost, ring) + (spec.why && by !== 'ai' ? ' (' + spec.why + ')' : ''), Q);
   return gYes(op.id);
 };
 OPS.cut = (C, op) => {
-  const t = C.t, e = 1 - t, Q = op.Q, P = S.cq.p, off = why => { gLog(t, 'atk', 'Cerco desfeito: ' + why, op.kz); return opEnd(C, op); };
+  const t = C.t, e = op.e >= 0 ? op.e : 1 - t, Q = op.Q, P = S.cq.p, off = why => { gLog(t, 'atk', 'Cerco desfeito: ' + why, op.kz); return opEnd(C, op); };
   if (Q.hold === t) {
     const iso = op.lost.map(i => P[i]).filter(p => p.hold === e && !cqTied(e).has(p.i));
     gLog(t, 'rep', iso.length ? 'Cerco fechado: ' + cutList(iso) + ' isolado(s) da base inimiga' : 'Cerco: ' + gName(Q) + ' tomado', op.kz); return opEnd(C, op);
   }
   if (Q.hold !== e) return off(gName(Q) + ' mudou de mãos');
-  if (!cutLost(e, Q).length && !cutRing(t, Q, []).length) return off('o inimigo religou os pontos a sua base');
+  if (!cutLost(e, Q).length && !cutRing(t, Q, [], e).length) return off('o inimigo religou os pontos a sua base');
   const atk = C.ops.some(o => o.k === 'atk' && !o.over && o.O.tw === Q);
   if (atk) op.seen = 1; else if (op.seen) return off('o assalto a ' + gName(Q) + ' terminou sem tomá-lo');
   if (genBy(t, 'atk') !== 'ai' && !atk && S.t - op.T0 > 60) return off('o general conduz os assaltos');
@@ -15755,14 +15776,14 @@ const fntSquad = (t, C, pos) => {
   return null;
 };
 MANG.fnt = (C, X) => {
-  const t = X.t, e = 1 - t, A = MANT.fnt, out = [];
+  const t = X.t, A = MANT.fnt, out = [];
   if (!S.cq || C.man.some(o => o.k === 'fnt' && !o.over)) return out;
   const P = S.cq.p;
   for (const M of fntOps(C)) {
     const P1 = M.O.tw, foeP = cmdKnown(C, P1.x, P1.z, 500); if (foeP < A.foe) continue;
     let best = null;
     for (const P2 of P) {
-      if (P2.hold !== e || P2.base >= 0 || P2 === P1 || hdist(P2, P1) < A.apart || !P2.links.some(i => P[i].hold === t)) continue;
+      if (!mnFoe(t, P2.hold) || P2.base >= 0 || P2 === P1 || hdist(P2, P1) < A.apart || !P2.links.some(i => P[i].hold === t)) continue;
       const pos = fntPos(C, t, P2); if (!pos) continue;
       const free = X.free.map(q => [q, q.men.find(m => !m.dead)]).filter(a => a[1] && hdist(a[1], pos) <= FNTX.walk); if (!free.length && !gFireSrc(t, 'he', P2.x, P2.z)) continue;
       const d = free.length ? Math.min(...free.map(a => hdist(a[1], pos))) : 1e6 + hdist(P2, P1); if (!best || d < best.d) best = { P2, d };
@@ -15773,15 +15794,15 @@ MANG.fnt = (C, X) => {
   return out;
 };
 MANO.fnt = (t, C, spec, by, R) => {
-  const e = 1 - t, a = manAt(spec), P2 = a && a.p, A = MANT.fnt;
-  if (!P2 || P2.hold !== e || P2.base >= 0) return gBad('at');
+  const a = manAt(spec), P2 = a && a.p, A = MANT.fnt;
+  if (!P2 || !mnFoe(t, P2.hold) || P2.base >= 0) return gBad('at');
   const M = fntOps(C).filter(o => o.O.tw !== P2 && hdist(o.O, P2) >= A.apart).sort((u, v) => hdist(u.O, P2) - hdist(v.O, P2))[0]; if (!M) return gBad('path');
   const pos = fntPos(C, t, P2); if (!pos) return gBad('at');
   const sw = fntSquad(t, C, pos), fire = gFireSrc(t, 'he', P2.x, P2.z);   // with no squad near enough, a feint by fire alone (a demonstration of the guns and mortars)
   if (!sw && !fire) return gBad(manFree(S.squads.filter(q => q.team === t && !q.net && q.live && !q.state)).length ? 'path' : 'sq');
   const q = sw && sw.q, rt = by === 'ai' && R && R.spec === spec ? undefined : gRtIn(spec.rt); if (rt === null) return gBad('rt');   // W21: a route of the person's is walked; the AI's own way is named on the order
   const own = !!rt, way = own ? q && gWay(q, rt, pos.x, pos.z) : q ? sw.way : null; if (own && !way) return gBad('way');
-  const p = railOf(pos.x, pos.z), op = manOpen(C, 'fnt', spec, by, { main: M, P1: M.O.tw, P2, pos, ri: p.ri, kz: { x: P2.x, z: P2.z }, d0: cmdKnown(C, P2.x, P2.z, FNTX.near), n0: q ? q.live : 0, fired: 0 });
+  const p = railOf(pos.x, pos.z), op = manOpen(C, 'fnt', spec, by, { main: M, P1: M.O.tw, P2, e: P2.hold, pos, ri: p.ri, kz: { x: P2.x, z: P2.z }, d0: cmdKnown(C, P2.x, P2.z, FNTX.near), n0: q ? q.live : 0, fired: 0 });
   if (q) opTake(op, q, { k: 'overwatch', ri: p.ri, s: p.s, x: pos.x, z: pos.z, R: 12, ax: P2.x, az: P2.z, wp: way, fast: 1, rt: own ? rt : gRtOf(way) });
   gLog(t, 'atk', 'Finta ' + (q ? '' : 'pelo fogo ') + 'sobre ' + gName(P2) + ' para atrair a reserva antes da hora H em ' + gName(M.O.tw) + (spec.why && by !== 'ai' ? ' (' + spec.why + ')' : ''), P2);
   return gYes(op.id);
@@ -15792,7 +15813,7 @@ OPS.fnt = (C, op) => {
   if (op.n0 && !l.length) return off('sem esquadras');
   if (op.n0 && own < op.n0 * .6) return off('perdas na esquadra');
   if (M.over || M.st === 'back') return off('o assalto principal terminou');
-  if (P2.hold !== 1 - t) return off(gName(P2) + ' mudou de mãos');
+  if (P2.hold !== (op.e >= 0 ? op.e : 1 - t)) return off(gName(P2) + ' mudou de mãos');
   if (!op.fired && M.H !== undefined && S.t >= M.H - A.lead) {   // the shells fall: on what is known of the enemy there, else on the point
     op.fired = S.t;
     const hot = C.known.filter(o => !o.dead && Math.hypot(o.sx - P2.x, o.sz - P2.z) < 300 && S.t - o.moveT > 3).slice(0, 3);
@@ -15822,9 +15843,9 @@ function gueLow(C) {
   const t = C.t;
   if (gueSide(C) < MANT.gue.ratio) return 'ratio';
   if (!S.cq) return '';
-  const k = S.cq.tk, h = cqHeld(t), he = cqHeld(1 - t);
-  if (k[t] < k[1 - t] * GUEX.tkr || (k[t] < S.cq.tk0 * GUEX.tk && h < he)) return 'tk';
-  return h + GUEX.pts <= he && k[t] <= k[1 - t] ? 'pts' : '';
+  const k = S.cq.tk, h = cqHeld(t), Ld = mnLead(t), he = Ld.h, ke = Math.max(...mnFoes(t).map(e => k[e] || 0), 0);   // N sides: against the enemy ahead (points) and the most tickets
+  if (k[t] < ke * GUEX.tkr || (k[t] < S.cq.tk0 * GUEX.tk && h < he)) return 'tk';
+  return h + GUEX.pts <= he && k[t] <= k[Ld.e] ? 'pts' : '';
 }
 /* the known enemy clusters (strength by GUEX.val at least) away from a town's core and with none of ours within GUEX.safe m: [{ x, z, v }] */
 function gueClusters(C) {
@@ -15884,8 +15905,8 @@ MANG.gue = (C, X) => {
   if (lo) { if (C.gueLo === undefined || C.gueLo === null) C.gueLo = S.t; } else C.gueLo = null;
   if (!why || (why === 'ratio' && S.t - C.gueLo < MANT.gue.calm)) return [];
   const cl = gueClusters(C); if (!cl.length) return [];
-  const sc = clamp(MANT.gue.w * (why === 'ratio' ? MANT.gue.ratio / Math.max(R, .1) : GUEX.lose + .1 * Math.max(0, cqHeld(1 - C.t) - cqHeld(C.t))), 0, 2);   // losing on tickets or points: GUEX.lose, more the more points behind
-  const t = C.t, tk = S.cq ? S.cq.tk.map(Math.round) : [0, 0], why2 = why === 'tk' ? 'tíquetes em baixa (' + tk[t] + ' contra ' + tk[1 - t] + ')' : 'menos pontos que o inimigo (' + cqHeld(t) + ' contra ' + cqHeld(1 - t) + ')';
+  const sc = clamp(MANT.gue.w * (why === 'ratio' ? MANT.gue.ratio / Math.max(R, .1) : GUEX.lose + .1 * Math.max(0, mnLead(C.t).h - cqHeld(C.t))), 0, 2);   // losing on tickets or points: GUEX.lose, more the more points behind
+  const t = C.t, tk = S.cq ? S.cq.tk.map(Math.round) : [], Ld = mnLead(t), kt = mnFoes(t).reduce((a, e) => ((tk[e] || 0) > (tk[a] || 0) ? e : a), Ld.e), why2 = why === 'tk' ? 'tíquetes em baixa (' + tk[t] + ' contra ' + tk[kt] + ')' : 'menos pontos que o inimigo à frente (' + cqHeld(t) + ' contra ' + Ld.h + ')';
   return [{ k: 'gue', sc, spec: { c: 'harass', n: Math.min(MANT.gue.n, X.room), why: why === 'ratio' ? 'relação ' + gN(R) + ':1' : why === 'tk' ? 'tíquetes em baixa' : 'pontos em baixa' }, why: why === 'ratio' ? 'em inferioridade (' + gN(R) + ':1) contra o inimigo conhecido' : why2, at: { x: cl[0].x, z: cl[0].z } }];
 };
 MANO.gue = (t, C, spec, by, R) => {
@@ -23593,7 +23614,7 @@ function embSite(C, ei, lo, hi) {
    the road, firing along it; linear: beside it); the first picket MANT.emb.sec m up the road toward the enemy (the end of the edge nearer its
    base), the second as far down it; the escape place MANT.emb.back m out on the hidden side. [{ role, x, z }], esc */
 function embPlaces(site, n, t) {
-  const E = S.T.net.e[site.e], r = E.p, sd = site.sd, K = MANT.emb, hq = S.base[1 - t], up = hdist(r[0], hq) < hdist(r[r.length - 1], hq) ? -1 : 1;
+  const E = S.T.net.e[site.e], r = E.p, sd = site.sd, K = MANT.emb, hq = mnBase(t, r[r.length >> 1].x, r[r.length >> 1].z), up = hdist(r[0], hq) < hdist(r[r.length - 1], hq) ? -1 : 1;
   const at = (s, off) => { const p = routeAt(r, clamp(s, 0, E.len)), x = p.x - p.dz * off * sd, z = p.z + p.dx * off * sd; return hgt(x, z) > S.T.WL + 1 ? { x, z } : { x: site.pos[0].x, z: site.pos[0].z }; };
   const L = [Object.assign({ role: 'asl' }, { x: site.pos[0].x, z: site.pos[0].z })];
   if (n >= 2) L.push(Object.assign({ role: 'sup' }, site.f === 'L' ? at(site.s - up * 120, 45) : at(site.s - up * 75, 100)));
@@ -23612,13 +23633,16 @@ const m4Lead = q => q.men.find(m => !m.dead);
 const embSquads = (pool, site, n, far) => pool.map(q => [q, m4Lead(q)]).filter(a => a[1] && hdist(a[1], site) < far).sort((a, b) => hdist(a[1], site) - hdist(b[1], site) || (a[0].id || 0) - (b[0].id || 0)).slice(0, n).map(a => a[0]);
 /* the edges side C knows the enemy's supply runs by: on its supply roads (blkRoads), behind its line, with a timetable (two passes and a period) */
 function itdEdges(C) {
-  const e = 1 - C.t, roads = blkRoads(C, e), out = [];
-  if (!roads.length || !C.hu) return out;
-  S.T.net.e.forEach((E, i) => {
-    if (!(C.hu[i] > 0)) return; const H = habOf(C, i); if (H.n < 2 || !(H.per > 0)) return;
-    const m = E.smp[E.smp.length >> 1]; if (ecoDepth(e, m.x, m.z) < 0 || !roads.some(r => E.smp.some(p => blkDist(r, p.x, p.z) < BLKX.edge))) return;
-    out.push([i, H]);
-  });
+  const out = [];
+  if (!C.hu) return out;
+  for (const e of mnFoes(C.t)) {   // N sides: every enemy's supply roads; an edge is kept once
+    const roads = blkRoads(C, e); if (!roads.length) continue;
+    S.T.net.e.forEach((E, i) => {
+      if (!(C.hu[i] > 0) || out.some(o => o[0] === i)) return; const H = habOf(C, i); if (H.n < 2 || !(H.per > 0)) return;
+      const m = E.smp[E.smp.length >> 1]; if (ecoDepth(e, m.x, m.z) < 0 || !roads.some(r => E.smp.some(p => blkDist(r, p.x, p.z) < BLKX.edge))) return;
+      out.push([i, H]);
+    });
+  }
   return out;
 }
 /* the narrowest place of edge ei by side C's choke layer: { s, k } (s along it) */
@@ -23773,11 +23797,11 @@ MANE.itd = MANE.emb;
    point and with little known enemy at it, is worth how much longer the enemy's way gets without it (r: the shortest, or the way round the
    main road when it is on a flank). Kept MANT.grd.every s. [{ P, pi, x, z, nm, cut (edges), r, d0, d1, alt, node | b }], best first */
 function grdSites(C) {
-  const t = C.t, e = 1 - t, K = MANT.grd, N = S.T.net, Q = S.cq.p;
+  const t = C.t, K = MANT.grd, N = S.T.net, Q = S.cq.p;
   if (C.m4g && S.t - C.m4g.T < K.every && C.m4g.n === N.e.length) return C.m4g.l;
   const cls = RN.cls.veh, len = E => E.len * cls[E.c], out = [];   // netPath itself weighs each edge by what the bridges make of it
   brs();
-  const foes = Q.filter(p => p.hold === e).concat([S.base[e]]), mine = Q.filter(p => p.hold === t && p.base < 0);
+  const foes = Q.filter(p => mnFoe(t, p.hold)).concat(mnFoes(t).map(e => S.base[e]).filter(Boolean)), mine = Q.filter(p => p.hold === t && p.base < 0);   // N sides: every enemy's points and bases
   const near = p => foes.reduce((a, f) => (hdist(f, p) < hdist(a, p) ? f : a), foes[0]);
   const pts = mine.map(p => [p, near(p)]).sort((a, b) => hdist(a[0], a[1]) - hdist(b[0], b[1])).slice(0, K.pts);
   const path = (a, b, f) => netPath(a, b, E => { const c = f(E); return c === Infinity ? Infinity : c; });
@@ -23854,10 +23878,10 @@ OPS.grd = (C, op) => {
    the reaction goes to the side the enemy sees less (the straight line to each side's place and the place itself on the sight layer), by the
    hidden walk; the mortars go on the enemy's way in (MANT.p11.back m behind it, toward where it came from) at H */
 function p11(C, op, I) {
-  const t = C.t, e = 1 - t, K = MANT.p11, M = C.tm, fl = op.sq.filter(q => q.qr === 'flk' && q.op === op);
+  const t = C.t, K = MANT.p11, M = C.tm, fl = op.sq.filter(q => q.qr === 'flk' && q.op === op);
   if (!fl.length) return;
   const P = S.cq.p.find(p => hdist(p, I) < 50 && p.hold === t); if (!P) return;
-  const foes = S.cq.p.filter(p => p.hold === e).concat([S.base[e]]), src = foes.reduce((a, f) => (hdist(f, P) < hdist(a, P) ? f : a), foes[0]);
+  const foes = S.cq.p.filter(p => mnFoe(t, p.hold)).concat(mnFoes(t).map(e => S.base[e]).filter(Boolean)), src = foes.reduce((a, f) => (hdist(f, P) < hdist(a, P) ? f : a), foes[0]);
   const lat = Math.abs(wrap(Math.atan2(I.kz - P.z, I.kx - P.x) - Math.atan2(src.z - P.z, src.x - P.x)));
   if (lat < K.lat) return;
   let ux = I.x - I.kx, uz = I.z - I.kz; const d = Math.hypot(ux, uz) || 1; ux /= d; uz /= d;
@@ -24138,7 +24162,7 @@ function apAnswer(t, q) {
   const C = cmdOf(t), pts = gPts(); let P = null, bd = AP.ask;
   for (const p of pts) { const d = hdist(p, q); if (d < bd) { bd = d; P = S.cq ? cqObj(p) : { ri: p.ri, s: p.s, x: p.x, z: p.z, tw: p }; } }
   if (!P) { const p = railOf(q.x, q.z); P = { ri: p.ri, s: p.s, x: q.x, z: q.z }; }
-  const sd = q.a === 1 || q.a === -1 ? q.a : t ? 1 : -1;
+  const sd = q.a === 1 || q.a === -1 ? q.a : mnDs(t, P.ri);
   if (!C.tm) return { none: 1, nm: gName(P), x: Math.round(P.x), z: Math.round(P.z) };
   const pl = apNow(C, P, sd); if (!pl) return { why: 'way' };
   const R = v => Math.round(v);
@@ -24415,11 +24439,11 @@ opFree = (g => q => { q.apr = null; g(q); })(opFree);
    knows to be weakly held (its f under MANT.trn.f), MANT.trn.d m from the point: two squads go there by the commander's safest way (at a run: a long walk
    gets a ride from a free truck, MAN.ride) and hold it quietly as a block. The point is put first for cmdAttack (C.pref, as cut does). Ended when the point is
    ours or changes hands, or when the enemy known at the choke is MANT.trn.foe times the squads there. spec.at: a node of the network, a point or x z (the choke) */
-const trnBase = t => gPts().find(p => p.base === 1 - t) || null;
+const trnBase = (t, e) => gPts().find(p => p.base >= 0 && (e === undefined || e < 0 ? mnFoe(t, p.base) : p.base === e)) || null;   // N sides: the base of e (Q's holder)
 const trnNode = (x, z) => { const N = S.T.net; let b = null, bd = 1e9; for (const n of N.n) { const d = Math.hypot(n.x - x, n.z - z); if (d < bd) { bd = d; b = n; } } return b; };
 /* the choke on the way from enemy point Q back to the enemy's base: { x, z, k, nm } or null */
 function trnChoke(C, Q) {
-  const N = S.T.net, B = trnBase(C.t), M = C.tm, K = MANT.trn; if (!N || !B || !M) return null;
+  const N = S.T.net, B = trnBase(C.t, Q.hold), M = C.tm, K = MANT.trn; if (!N || !B || !M) return null;
   const a = trnNode(Q.x, Q.z), b = trnNode(B.x, B.z); if (!a || !b || a === b) return null;
   const p = netPath(a.i, b.i, undefined, 'foot'); if (!p) return null;
   const Z = tmStatic(S.T);
@@ -24431,10 +24455,10 @@ function trnChoke(C, Q) {
   return null;
 }
 MANG.trn = (C, X) => {
-  const t = X.t, e = 1 - t, K = MANT.trn, out = [];
+  const t = X.t, K = MANT.trn, out = [];
   if (!S.cq || !C.tm || X.free.length < K.n + MAN.keep || C.man.some(o => o.k === 'trn' && !o.over)) return out;
   for (const Q of cqTargets(t)) {
-    if (Q.hold !== e || Q.base >= 0) continue;
+    if (!mnFoe(t, Q.hold) || Q.base >= 0) continue;
     const near = X.free.filter(q => { const L = mbLead(q); return L && hdist(L, Q) < CMD.reach; }), own = near.reduce((a, q) => a + q.live, 0), foe = Math.max(CMD.guess, cmdKnown(C, Q.x, Q.z, 500));
     if (own / foe >= K.ratio) continue;   // weak enough to be taken head on: no need to go round
     const ch = trnChoke(C, Q); if (!ch) continue;
@@ -24445,12 +24469,12 @@ MANG.trn = (C, X) => {
 };
 MANO.trn = (t, C, spec, by, R) => {
   const K = MANT.trn, at = manAt(spec); if (!at) return gBad('at');
-  const res = R && R.res, e = 1 - t;
-  const Q = res && res.Q ? res.Q : gPts().filter(p => p.hold === e && p.base < 0).sort((a, b) => hdist(a, at) - hdist(b, at))[0]; if (!Q) return gBad('at');
+  const res = R && R.res;
+  const Q = res && res.Q ? res.Q : gPts().filter(p => mnFoe(t, p.hold) && p.base < 0).sort((a, b) => hdist(a, at) - hdist(b, at))[0]; if (!Q) return gBad('at');
   const free = manFree(mbSq(t)).filter(q => { const L = mbLead(q); return L && hdist(L, at) < K.far; }).sort((a, b) => hdist(mbLead(a), at) - hdist(mbLead(b), at));
   const n = clamp(Number.isInteger(spec.n) ? spec.n : K.n, 1, K.n), sqs = free.slice(0, n); if (!sqs.length) return gBad('sq');
   const ways = sqs.map(q => { const L = mbLead(q); return tripOf(L.x, L.z, at.x, at.z, { mode: 'foot', team: t }); }); if (ways.some(w => !w || w.length < 2)) return gBad('path');
-  const op = manOpen(C, 'trn', spec, by, { Q, nm: at.nm, tx: at.x, tz: at.z, ri: at.ri, s: at.s, kz: { x: at.x, z: at.z }, st: 'go', in: 0 });
+  const op = manOpen(C, 'trn', spec, by, { Q, e: Q.hold, nm: at.nm, tx: at.x, tz: at.z, ri: at.ri, s: at.s, kz: { x: at.x, z: at.z }, st: 'go', in: 0 });
   sqs.forEach((q, i) => { const off = (i % 2 ? 1 : -1) * 30; opTake(op, q, { k: 'hold', ri: at.ri, s: at.s, x: at.x + off, z: at.z, R: 12, wp: polyOf([...ways[i], { x: at.x + off, z: at.z }]), fast: 1, quiet: 1 }); op.n0 += q.live; });
   if (!C.pref) C.pref = { p: Q, T: S.t + op.Tmax, op };
   gLog(t, 'atk', 'Desbordamento: ' + mbSqs(sqs.length) + ' pela retaguarda até ' + at.nm + ', para cortar ' + gName(Q) + ' da base inimiga', at, 'mtrn' + op.id);
@@ -24460,7 +24484,7 @@ OPS.trn = (C, op) => {
   const t = C.t, K = MANT.trn, l = opLive(op), Q = op.Q, at = { x: op.tx, z: op.tz }, off = why => { gLog(t, 'atk', 'Desbordamento encerrado: ' + why, at); return opEnd(C, op); };
   if (!l.length || l.reduce((a, q) => a + mbLive(q), 0) < op.n0 * .5) return off('o elemento perdeu mais da metade');
   if (Q.hold === t) return off(gName(Q) + ' tomado');
-  if (Q.hold !== 1 - t) return off(gName(Q) + ' mudou de mãos');
+  if (Q.hold !== (op.e >= 0 ? op.e : 1 - t)) return off(gName(Q) + ' mudou de mãos');
   const own = l.reduce((a, q) => a + mbLive(q), 0);
   if (cmdKnown(C, op.tx, op.tz, 500) > K.foe * own) return off('o inimigo em ' + op.nm + ' tem mais que o dobro');
   if (!op.in && l.every(q => q.at)) { op.in = S.t; gLog(t, 'atk', 'Desbordamento: bloqueio em posição em ' + op.nm + ', cortando ' + gName(Q), at); }
@@ -24472,7 +24496,7 @@ MANE.trn = (C, op) => { if (C.pref && C.pref.op === op) C.pref = null; };
    choice on), and only when that way is seen at most MANT.inf.exp %; without the plan it is footPath's as before */
 function prInfWay(C, X, p, q) {
   if (!apOn() || !C.tm) return null;
-  const P = cqObj(p), sd = X.ds, pl = apGet(C, P, sd); if (!pl) { apAsk(C, P, sd); return null; }
+  const P = cqObj(p), sd = mnDs(X.t, P.ri), pl = apGet(C, P, sd); if (!pl) { apAsk(C, P, sd); return null; }
   const a = pl.A.slice().sort((x, y) => x.exp - y.exp)[0], L = mbLead(q); if (!a || !L || a.exp > MANT.inf.exp) return null;
   const wp = apWalk(pl, L.x, L.z, a.cells[a.cells.length - 1], p.x, p.z); if (!wp) return null;
   wp.thr = mbMeanThr(C, wp); wp.ap = a; return wp;
@@ -24545,7 +24569,7 @@ function m7Assault(t, C, spec, by, k) {
   const at = manAt(spec); if (!at) return gBad('at');
   if (at.p && (at.p.hold === t || at.p.base >= 0)) return gBad(at.p.hold === t ? 'own' : 'at');
   if (!C.tm) return gBad('ap');
-  const P = at.p && S.cq ? cqObj(at.p) : { ri: at.ri, s: at.s, x: at.x, z: at.z, tw: at.p || null }, sd = t ? 1 : -1, pl = apNow(C, P, sd);
+  const P = at.p && S.cq ? cqObj(at.p) : { ri: at.ri, s: at.s, x: at.x, z: at.z, tw: at.p || null }, sd = mnDs(t, P.ri), pl = apNow(C, P, sd);
   if (!pl || !pl.A.length) return gBad('ap');
   const A = pl.A, ix = i => (Number.isInteger(i) && i >= 0 && i < A.length ? A[i] : null), fx = A.reduce((b, a) => (a.ang < b.ang ? a : b), A[0]);
   if ((spec.ap !== undefined && !ix(spec.ap)) || (spec.ap2 !== undefined && !ix(spec.ap2))) return gBad('ap');
@@ -24596,7 +24620,7 @@ function m7Hold(t, C, spec, by, k) {
   const rt = gRtIn(spec.rt); if (rt === null) return gBad('rt');
   const pool = m7Pool(t, spec, by, nd, Number.isInteger(spec.n) ? spec.n : M7.n[k]); if (!pool.length) return gBad('sq');
   const ways = pool.map(q => m7Way(C, q, rt, nd.x, nd.z)); if (ways.some(w => !w)) return gBad('way');
-  const e = S.base[1 - t], a = headTo(nd.x, nd.z, e.x, e.z);
+  const e = mnBase(t, nd.x, nd.z), a = headTo(nd.x, nd.z, e.x, e.z);
   const op = manOpen(C, k, spec, by, { nm: nd.nm, kz: { x: nd.x, z: nd.z }, tx: nd.x, tz: nd.z, st: 'go', in: 0 });
   pool.forEach((q, i) => { m7Take(op, q, m7Ord('hold', nd.x + (i ? (i % 2 ? 25 : -25) : 0), nd.z, { fast: 1, quiet: k === 'trn' ? 1 : 0, wp: ways[i], dig: { k: 1, a } })); op.n0 += q.live; });
   gLog(t, k === 'grd' ? 'def' : 'atk', (k === 'grd' ? 'Guarda da rua alternativa em ' : 'Desbordamento: ' + mbSqs(pool.length) + ' rumo a ') + nd.nm + (spec.why && by !== 'ai' ? ' — ' + spec.why : ''), nd, 'm7' + op.id);
@@ -24630,7 +24654,7 @@ OPS.pen = (C, op) => {
     if (!l.some(q => q.at) && cmdKnown(C, op.tx, op.tz, 400) > M7.foe * own) { gLog(t, 'atk', 'Penetração cancelada: a brecha fechou ' + op.nm, op.kz); return opEnd(C, op); }
     if (!l.every(q => q.at)) return;
     op.st = 'exp'; op.in = S.t;
-    const Z = tmStatic(S.T), e = S.base[1 - t], dx = e.x - op.tx, dz = e.z - op.tz, dl = Math.hypot(dx, dz) || 1; let b = -1, bv = .2;
+    const Z = tmStatic(S.T), e = mnBase(t, op.tx, op.tz), dx = e.x - op.tx, dz = e.z - op.tz, dl = Math.hypot(dx, dz) || 1; let b = -1, bv = .2;
     for (let q = 0; q < Z.nx * Z.nz; q++) { if (Z.k[q] <= bv) continue; const p = apXZ(Z, q), d = hdist(p, { x: op.tx, z: op.tz }); if (d < M7.deep[0] || d > M7.deep[1] || ((p.x - op.tx) * dx + (p.z - op.tz) * dz) / dl < d * .3 || !gMapOk(p.x, p.z)) continue; bv = Z.k[q]; b = q; }
     if (b < 0) { gLog(t, 'atk', 'Penetração: brecha aberta ' + op.nm, op.kz); op.st = 'held'; return; }
     const p = apXZ(Z, b); op.ex = p; gLog(t, 'atk', 'Penetração explora até o ponto-chave ' + gNear(p.x, p.z), p);
@@ -24656,7 +24680,7 @@ GC.man.f = (f => function (t, c, by, R) {
   if (Number.isFinite(c.H)) { if (c.k === 'ambush' || c.k === 'guard' || c.k === 'turn') spec.T = c.H; else spec.H = clamp(c.H, 0, GENC.H[1]); }
   const r = opNew(t, spec, by, R);
   if (r && r.ok && c.k === 'guard' && c.f === 'mine') {
-    const C = cmdOf(t), op = C.ops.find(o => o.id === r.id && o.k === 'grd'), e = S.base[1 - t];
+    const C = cmdOf(t), op = C.ops.find(o => o.id === r.id && o.k === 'grd'), e = op ? mnBase(t, op.x, op.z) : null;
     if (op) { const m = genCmd(t, { c: 'fort', k: 'mineat', x: op.x, z: op.z, a: headTo(op.x, op.z, e.x, e.z), why: 'guarda de ' + op.nm }, by); if (!m.ok) gLog(t, 'def', 'Guarda de ' + op.nm + ': minas recusadas (' + (GEN.no[m.why] || m.why) + ')', op.kz); }
   }
   return r && typeof r === 'object' ? r : gBad('off');
@@ -24705,8 +24729,9 @@ function afpPlaces(t) {
 function afpApproaches(C, A, P) {
   const t = C.t, key = P.map(p => p.id + ':' + Math.round(p.x) + ':' + Math.round(p.z)).join();
   if (A.ap && A.apK === key) return A.ap;
-  const ds = t ? 1 : -1, e = S.base[1 - t], out = [];
+  const out = [];
   for (const p of P) S.T.routes.forEach((r, ri) => {
+    const ds = mnDs(t, ri), e = mnBase(t, p.x, p.z);
     let bs = 0, bd = 1e9; for (let s = 0; s <= r.len; s += 25) { const q = routeAt(r, s), d = Math.hypot(q.x - p.x, q.z - p.z); if (d < bd) { bd = d; bs = s; } }
     if (bd > p.ru + 150) return;
     const s = bs + ds * (p.ru + AFP.post.out); if (s < 0 || s > r.len) return;
@@ -24727,7 +24752,7 @@ const afpBeside = (o, sides) => { const l = []; for (const sd of sides) for (con
 const afpRing = (x, z) => { const l = [[x, z]]; for (const R of [15, 30, 45]) for (let i = 0; i < 8; i++) l.push([x + Math.cos(i * TAU / 8) * R, z + Math.sin(i * TAU / 8) * R]); return l; };
 /* a minefield across road ri from s outward (ds), at the first point where its middle may lie, within ecoDepth AFP.mine.min..max */
 function afpMineAt(t, ri, s0, k) {
-  const r = S.T.routes[ri], ds = t ? 1 : -1;
+  const r = S.T.routes[ri], ds = mnDs(t, ri);
   for (let s = s0; Math.abs(s - s0) <= AFP.mine.far; s += ds * AFP.mine.step) {
     if (s < 0 || s > r.len) return null;
     const p = routeAt(r, s), dep = ecoDepth(t, p.x, p.z); if (dep < AFP.mine.min) return null;
@@ -24744,7 +24769,7 @@ function afpHas(t, it) {
 }
 /* what side t wants, the first first: { key, k (a W21.fort kind), x z (where it is judged), cx cz (the place, for the AA), why, nm, spot() } */
 function afpWant(C, A) {
-  const t = C.t, ds = t ? 1 : -1, e = S.base[1 - t], P = afpPlaces(t), out = [], arm = aidArmour(C);
+  const t = C.t, e = mnBase(t), P = afpPlaces(t), out = [], arm = aidArmour(C);   // N sides: the enemy base nearest ours; each road's way by mnDs
   const tier = Math.min(2, (!ecoSim() ? 1 : (n => (n < AFP.tier[0] ? 0 : n < AFP.tier[1] ? 1 : 2))(aidSites(t).length)) + (C.stgAfp || 0));   // M8: a strongpoint, area denial or defence in depth plans one tier up
   for (const p of P) {   // the AA umbrella
     const d = Math.hypot(e.x - p.x, e.z - p.z) || 1, c = clearOf(p.x + (e.x - p.x) / d * 40, p.z + (e.z - p.z) / d * 40, 3, {});
@@ -24756,7 +24781,7 @@ function afpWant(C, A) {
     const ax = C.known.some(k => !k.dead && !k.man && (tk(k) === 'tank' || tk(k) === 'lav') && Math.abs(k.sx - o.x) < AFP.thr.r && Math.abs(k.sz - o.z) < AFP.thr.r);
     const hot = v >= AFP.thr.v || inc, L = hot ? thr : calm, why = s => s + ' ' + o.nm + (hot ? ' (ameaça nesse eixo)' : '');
     if (hot || arm) L.push({ key: 'at' + o.id, k: 'atpost', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('posto anticarro'), spot: () => afpSpot(t, 3, o.a, afpBeside(o, [-1, 1])) });
-    if (hot && sapOn()) { const k = ax || arm ? 'mineat' : 'mineap', m = afpMineAt(t, o.ri, o.s + ds * (AFP.mine.out - AFP.post.out), k); if (m) L.push({ key: 'mf' + o.id, k, x: m.x, z: m.z, a: m.a, nm: o.nm, why: why('campo minado'), spot: () => m }); }
+    if (hot && sapOn()) { const k = ax || arm ? 'mineat' : 'mineap', m = afpMineAt(t, o.ri, o.s + mnDs(t, o.ri) * (AFP.mine.out - AFP.post.out), k); if (m) L.push({ key: 'mf' + o.id, k, x: m.x, z: m.z, a: m.a, nm: o.nm, why: why('campo minado'), spot: () => m }); }
     if (hot || i < AFP.apr[tier]) L.push({ key: 'mg' + o.id, k: 'bunker', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('ninho de metralhadora'), spot: () => afpSpot(t, 4, o.a, afpBeside(o, [1, -1])) });
   });
   out.push(...thr, ...calm);
@@ -24788,7 +24813,7 @@ function afpWant(C, A) {
     for (const q of cand.slice(0, AFP.look)) {   // the strongest first, a few looked at a plan
       const x = (q % M.nx + .5) * c, z = -S.HW + (((q / M.nx) | 0) + .5) * c, p = railOf(x, z); if (p.d > AFP.mine.road) continue;
       const dep = ecoDepth(t, x, z); if (dep < AFP.choke.back[0] || dep > AFP.choke.back[1]) continue;
-      const r = S.T.routes[p.ri], o = routeAt(r, p.s), f = routeAt(r, clamp(p.s + ds * AFP.post.ahead, 0, r.len));
+      const r = S.T.routes[p.ri], o = routeAt(r, p.s), f = routeAt(r, clamp(p.s + mnDs(t, p.ri) * AFP.post.ahead, 0, r.len));
       best = { x: o.x, z: o.z, dx: o.dx, dz: o.dz, a: headTo(o.x, o.z, f.x, f.z) }; break;
     }
     if (best) out.push({ key: 'ck' + aidKey(best.x, best.z), k: 'bunker', x: best.x, z: best.z, a: best.a, nm: ecoNear(best.x, best.z), why: 'ninho de metralhadora no gargalo ' + ecoNear(best.x, best.z), spot: () => afpSpot(t, 4, best.a, afpBeside(best, [1, -1])) });
@@ -24944,14 +24969,14 @@ function stgSit(C) {
   const t = C.t, R = S.T.routes, Q = S.cq, kn = C.known.filter(o => !o.dead), kk = o => (o.man ? (o.def && o.def.mort ? 'mort' : o.def && o.def.rad ? 'rad' : 'inf') : tk(o));
   const n = k => kn.filter(o => kk(o) === k).length, own = R.reduce((a, r, ri) => a + (C.own[ri] || 0), 0), foe = R.reduce((a, r, ri) => a + (C.enemy[ri] || 0), 0);
   const mine = S.units.filter(u => u.team === t && !u.dead), sq = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state);
-  const eco = S.eco && S.eco.d && S.eco.d[t] ? (ecoLive(t).length + 1) / (ecoFoe(t).length + 1) : 1, tkr = Q ? (Q.tk[t] + 1) / (Q.tk[1 - t] + 1) : 1;
+  const eco = S.eco && S.eco.d && S.eco.d[t] ? (ecoLive(t).length + 1) / (ecoFoe(t).length + 1) : 1, tkr = Q ? (Q.tk[t] + 1) / (Math.max(...mnFoes(t).map(e => Q.tk[e] || 0), 0) + 1) : 1;   // N sides: against the most tickets
   const sup = S.sup.filter(b => b.team !== t && !b.dead && spotted(b)).length, deep = kn.filter(o => ecoDepth(t, o.sx, o.sz) > 150).length;
   const held = Q.p.filter(p => p.hold === t), pc = C.stgPc || (C.stgPc = Q.p.map(p => p.hold));
   Q.p.forEach((p, i) => { if (p.hold === t && pc[i] !== t && pc[i] !== undefined) C.stgBr = { i, T: S.t, nm: gName(p) }; pc[i] = p.hold; });
   const wear = sq.length ? sq.reduce((a, q) => a + q.live / Math.max(1, q.n0 || q.live), 0) / sq.length : 1;
   return { R: (own + 1) / (foe + 1), own, foe, eco: Math.sqrt(eco * tkr), tkr, aa: n('aa'), art: n('art') + n('mort'), rad: n('rad'), trk: n('truck'), arm: n('tank') + n('lav'), sup, deep,
     oAir: mine.filter(u => u.kind === 'heli').length + S.planes.filter(p => !p.dead && p.team === t).length, oArt: mine.filter(u => u.kind === 'art').length + S.men.filter(m => !m.dead && m.team === t && m.def && m.def.mort).length,
-    oArm: mine.filter(u => u.kind === 'tank' || u.kind === 'lav').length, oInf: sq.length, res: sq.some(q => q.job === 'base' && q.live >= 3), towns: held.filter(p => p.tw).length, foeTowns: Q.p.filter(p => p.tw && p.hold === 1 - t).length,
+    oArm: mine.filter(u => u.kind === 'tank' || u.kind === 'lav').length, oInf: sq.length, res: sq.some(q => q.job === 'base' && q.live >= 3), towns: held.filter(p => p.tw).length, foeTowns: Q.p.filter(p => p.tw && mnFoe(t, p.hold)).length,
     hab: Object.keys(C.hk || {}).length, quiet: R.filter((r, ri) => (C.enemy[ri] || 0) < 1 && C.post[ri] !== 'def').length, atkF: R.filter((r, ri) => C.post[ri] === 'atk').length,
     brk: C.stgBr && S.t - C.stgBr.T < STG.brk ? C.stgBr : null, wear, sap: sapOn() };
 }

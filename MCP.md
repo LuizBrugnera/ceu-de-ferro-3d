@@ -46,7 +46,7 @@ Foi provado contra o jogo de verdade (anfitrião rodando a página, economia lig
 
 ## O que o modelo pode fazer
 
-- Ler: `get_state` (economia, instalações, fila, esquadras com ids, pontos com índice e dono, avistamentos, últimas linhas do diário; tudo com idade), `get_log`, `ask_view`, `ask_why`, `ask_placement`.
+- Ler: `get_state` (economia, instalações, fila, esquadras com ids, nome e posto (`recruit`, `regular`, `veteran`, `elite`), os veículos e aeronaves veteranos do lado, pontos com índice e dono, avistamentos, últimas linhas do diário; tudo com idade), `get_log`, `ask_view`, `ask_why`, `ask_placement`.
 - Economia: `build_site` (pow, mine, fab), `produce_unit`, `cancel_order`, `set_priority`, `scrap_site`, `set_site_defence`, `set_reserve`, `scout`, `strike`.
 - Produção e despacho: `set_production_plan` (quantos de um tipo em campo; `auto` devolve tudo ao plano da IA), `dispatch_units` (1 a 4 da reserva agora, com missão, área, latitude, regras de engajamento e hora H), `assign_mission` (missão nova para esquadras em campo), `get_production_plan` (postura, teto de população e, por tipo, desejado, em campo, reserva e fila). O `get_state` traz o plano em `economy.productionPlan`.
 - Logística: `get_logistics` (cada nó com caixas, capacidade, prioridade, se está ligado à base, o que está a caminho e há quanto tempo está seco; os comboios; o custo das entradas; a linha fraca), `send_convoy` (um caminhão com 40 caixas da base principal para um nó, `b<id>` ou `p<índice>`), `airlift_supply` (hoje: 20 caixas de helicóptero de transporte da reserva), `set_supply_priority` (0 a 3, -1 volta ao padrão). Sem ordens, o general logístico da IA manda os comboios sozinho.

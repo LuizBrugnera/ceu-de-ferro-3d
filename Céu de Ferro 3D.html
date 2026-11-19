@@ -3284,7 +3284,7 @@ function aiPlane(p, dt) {
   else if (p.egress > 0) { p.egress -= dt; dir = toward(p, b.x, b.z, g0 + 700); }
   else if (t && t.kind) dir = aiRun(p, t, dt);
   else if (t) {
-    const rng = dist(t, p), tv = vel(t), j = Math.sin(S.t * 1.3 + p.seed) * rng * .012 * (1.6 - p.skill) + Math.sin(S.t * 2.1 + p.seed * 1.7) * rng * aimErr(p, p.tgt, rng); let tt = rng / d.gun.spd, lx, ly, lz;
+    const rng = dist(t, p), tv = vel(t), j = Math.sin(S.t * 1.3 + p.seed) * rng * .012 * (1.6 - p.skill - vetSk(p)) + Math.sin(S.t * 2.1 + p.seed * 1.7) * rng * aimErr(p, p.tgt, rng); let tt = rng / d.gun.spd, lx, ly, lz;
     for (let i = 0; i < 2; i++) { lx = t.x + (tv.x - p.v.x) * tt - p.x; ly = t.y + (tv.y - p.v.y) * tt - p.y; lz = t.z + (tv.z - p.v.z) * tt - p.z; tt = Math.hypot(lx, ly, lz) / d.gun.spd; }   // the round leaves with the airspeed, the target covers ASPD times its own
     dir = vnorm({ x: lx, y: ly + .5 * GR * tt * tt + j, z: lz + j });
     const cosOff = dot(dir, p.f);
@@ -3522,8 +3522,8 @@ function notice(a, t) {
   else if (e.kn && e.v < PERC.lose) e.kn = e.told = false;
   if (!e.kn) e.rc = e.ic = 0;
   else {   // the ladder: the class, then the model, while it is in sight
-    const L = LADDER, f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * dt;
-    if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); e.mis = qr(0, 1) < L.mis; }
+    const L = LADDER, vk = vetK(a, 'id'), f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * vk * dt;   // a veteran makes out faster (VET)
+    if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]) * vetK(a, 'react'); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); e.mis = qr(0, 1) < L.mis; }
     if (sr > 0) { e.rc = Math.min(1, e.rc + f(qa * L.rec)); e.ic = Math.min(1, e.ic + f(Math.max(qa, qo * L.optF) * L.id)); if (e.ic >= 1) e.rc = 1; }
     if (e.rc < 1 && !(a.ai.tgt || a.tgt) && (!a.ln || S.t - a.ln.t > HEAR.ln * .5)) a.ln = { x: t.x + e.ex, z: t.z + e.ez, t: S.t, of: t };   // something there: it looks
   }
@@ -3578,7 +3578,7 @@ function aimErr(a, t, rng, f) {
   let w = Math.hypot(rx - al * ux, ry - al * uy, rz - al * uz) / r;
   w = q.cross * w * (1 - .5 * k);
   w += q.first * (1 - k) * (e && e.told ? AIM.told : 1) + q.mv * Math.min(1, Math.hypot(av.x, av.z) / q.vm) + (S.t - a.hitT < q.hitW ? q.hit : 0);
-  return Math.min(AIM.max, w * (1.5 - a.skill) / .725);
+  return Math.min(AIM.max, w * (1.5 - a.skill - vetSk(a)) / .725);
 }
 /* a gun or sight laid a little off the direction v, by e rad, drifting: a bias that settles, not a new dice roll each step */
 function jit(a, v, e) { const s = a.seed || 0; return e < 1e-4 ? v : vnorm({ x: v.x + e * Math.sin(S.t * 2.3 + s), y: v.y + e * Math.sin(S.t * 1.9 + s * 1.3), z: v.z + e * Math.sin(S.t * 2.7 + s * .7) }); }
@@ -4342,7 +4342,7 @@ function ghostMan(m, dt) {
    (slot). state 0: it advances with its column, 1: broken, it has fallen back to s0. It rides in a truck as u.cargo, a list of kits */
 const manBrain = i => ({ jam: null, jamT: 0, free: 0, fs: 1, wo: -1, ws: 1, wpT: 0, path: null, los: false, think: rand(0, IAI.think), tgt: null, mem: null, gx: 0, gz: 0, st: 0, run: false, seed: rand(0, 9), hurt: null, hurtT: -99, cs: null, wT: 0, flank: false, i: i || 0 });
 /* a squad's number, which its soldiers' rows carry: the lowest one free on its side, 1 to 31 */
-const sqId = t => { for (let i = 1; i < 32; i++) if (!S.squads.some(q => q.team === t && q.id === i)) return i; return 31; };
+const sqId = t => { for (let i = 1; i < 32; i++) if (!S.squads.some(q => q.team === t && q.id === i) && !S.units.some(u => u.cvt && u.cvt.t === t && u.cvt.id === i && !u.dead)) return i; return 31; };   // nor one a squad aboard keeps (VET)
 function addSquad(team, x, z, ri, s, kits) {
   const E = INF[S.era][S.fac[team]], q = { team, men: [], n0: 0, live: 0, ri, s, s0: s, ds: team ? 1 : -1, fixed: false, state: 0, think: rand(0, IAI.think), fd: 1e9, pd: 1, id: sqId(team) };
   (kits || SQUAD[S.era]).forEach((k, i) => {
@@ -4459,7 +4459,7 @@ function squadThink(q) {
   q.fd = 1e9;
   for (const o of S.units) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
   for (const o of S.men) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
-  if (!q.state && live.length <= q.n0 * (q.mil ? CIV.mil.rout : IAI.rout)) { q.state = 1; q.s0 = clamp(q.s - q.ds * IAI.back, 0, r.len); if (L.smk > 0) L.ctl.nade = 2; }
+  if (!q.state && live.length <= q.n0 * (q.mil ? CIV.mil.rout : IAI.rout) * vetK(q, 'brk')) { q.state = 1; q.s0 = clamp(q.s - q.ds * IAI.back, 0, r.len); if (L.smk > 0) L.ctl.nade = 2; }
   if (q.state) { q.at = false; if (q.tp) { q.ts = Math.max(0, q.ts - MAN.run * IAI.think * .8); tripS(q); } else q.s += clamp(q.s0 - q.s, -MAN.run * IAI.think * .8, MAN.run * IAI.think * .8); return; }   // routed on a trip: back along it
   cmdSquad(q, L, O);
   const e = clamp(ORD[O.k](q, O), 0, r.len) - q.s, fast = !!O.rush || (!!O.fast && q.fd > FIELD.dbl) || O.k === 'withdraw' || O.k === 'flank';   // O.fast (map version 4, a manoeuvre's approach): at a run while no enemy is within FIELD.dbl m, halting as any squad does
@@ -8413,7 +8413,8 @@ const leash = o => (o.mis ? o.mis.area.r * (o.mis.lat === 2 ? 1.5 : 1) : 1e9);
 /* the mind of one AI unit: beliefs, then its options scored, then the best (o.mind) */
 function mindThink(o) {
   const M = o.mis, bt = belief(o), W = MIND.w, sc = { duty: W.duty + W.thr * Math.min(bt.thr, 6) }, s = mStr(o);
-  if (M && s < M.brk && bt.thr > .3 && !o.men && !o.fixed) sc.fall = W.fall + (M.brk - s) + .05 * bt.thr;
+  const brk = M ? M.brk * vetK(o, 'brk') : 0;   // a veteran holds on longer (VET)
+  if (M && s < brk && bt.thr > .3 && !o.men && !o.fixed) sc.fall = W.fall + (brk - s) + .05 * bt.thr;
   const R = o.help; if (R && R.resp === o && (R.st === 'on')) sc.help = R.u + MIND.stick;
   const was = o.mind && o.mind.k; let k = 'duty';
   for (const j in sc) if (sc[j] > sc[k]) k = j;
@@ -8455,7 +8456,7 @@ function mindAsk(o, bt) {
 }
 /* ---- the calls ---- */
 const helps = () => S.help || (S.help = { n: 0, l: [], v: 0 });
-const helpWho = o => (o.men ? 'Esquadra' + (o.job ? ' (' + o.job + ')' : '') : o.pid || o === S.my ? (o.name || 'Jogador') : o.kind ? ((o.def && o.def.name) || o.name || o.kind) : o.def ? o.def.name : 'unidade');   // a supply base (kind sup) has a name and no def
+const helpWho = o => (o.men ? sqName(o) + (o.job ? ' (' + o.job + ')' : '') : o.pid || o === S.my ? (o.name || 'Jogador') : o.kind ? ((o.def && o.def.name) || o.name || o.kind) : o.def ? o.def.name : 'unidade');   // a supply base (kind sup) has a name and no def
 const helpLive = o => !!o && (o.men ? o.live > 0 && o.men.some(m => !m.dead) : !o.dead && !o.gone);
 const helpAt = o => (o.men ? o.men.find(m => !m.dead) || o.men[0] : o);
 /* o asks for k, at the place of at, for tgt (a belief: its x z as o believes; or a point) */
@@ -8795,6 +8796,141 @@ Net.rx.lift = m => {
     const sq = addSquad(g.team, sx, sz, q.ri, q.s, m.n.filter(k => E[k]).slice(0, LIFT.seats), 1); sq.job = 'air'; sq.jk = 0; sq.col = false; setOrd(sq, { k: 'hold', ri: q.ri, s: q.s, x: sx, z: sz, R: 7 });
   }
 };
+/* ---------- veterancy (W16, topic T6 of the General's design): experience, ranks, named squads, and a general who keeps its veterans ----------
+   Every AI unit that fights earns experience, o.vx (a soldier's is his squad's): VET.xp[kind] for each enemy it kills, by what that was (a soldier, a vehicle
+   by its kind, an aircraft); xp.done for a mission done (a squad's move or withdrawal reached, a build finished); xp.help for a call for help it answered and
+   met; xp.take for each squad of an assault that takes its point; xp.live a minute for staying alive in contact (its mind's threat at least VET.live).
+   At VET.lv[i] it rises to rank i (o.vl, VET.rank): Recruta, Regular, Veterano, Elite. Each rank adds sk to its skill (the spread of its aim), makes its
+   reaction react times what it was (the ladder's react), its making out of the class and the model id times as fast, and its breaking point brk times
+   what it was (the share of a squad at which it routs; the strength under which a vehicle or aircraft breaks off under fire; how long fire keeps a
+   soldier pinned). Rank 0 is today's unit.
+   Squads have names, by side and number (VETN; the number is the one their soldiers' rows carry, so a guest's map names them too), and a squad that
+   rides in a truck gets out with its experience and its number (kept for it meanwhile), so its name. Ranks live where the battle is simulated (the
+   host); a new host starts them over.
+   The AI general keeps its veterans (keep, from rank keep.l): a squad worn under keep.sq of its men is not sent into a new assault and is taken out of one
+   under way; a vehicle under keep.hp of its hull falls back and calls for a repair before it would, an aircraft under keep.air breaks off for home; and
+   their calls for help weigh keep.pri more a rank. A promotion to Veterano or Elite goes in the general's diary and on its side's radio */
+const VET = { on: 1, lv: [0, 6, 16, 32], sk: .05, react: .9, id: 1.15, brk: .85, dt: 2, live: .5,
+  xp: { man: 1, tank: 4, lav: 3, aa: 3, art: 3, truck: 1.5, car: 1.5, rad: 1.5, plane: 4, heli: 4, done: 3, help: 2, take: 4, live: 1 },
+  keep: { l: 2, sq: .75, hp: .7, air: .6, pri: .25, again: 60 }, rank: ['Recruta', 'Regular', 'Veterano', 'Elite'] };
+const VETN = [['Lobo', 'Falcão', 'Onça', 'Gavião', 'Jaguar', 'Tigre', 'Condor', 'Puma', 'Raposa', 'Coruja', 'Pantera', 'Águia', 'Carcará', 'Tatu', 'Sucuri', 'Harpia'],
+  ['Urso', 'Corvo', 'Víbora', 'Javali', 'Escorpião', 'Chacal', 'Abutre', 'Lince', 'Cobra', 'Touro', 'Hiena', 'Tubarão', 'Bisão', 'Texugo', 'Cascavel', 'Dragão']];
+/* who holds o's experience: a soldier's squad (or the soldier, alone), else o */
+const vetOf = o => (o && o.man ? o.sq || o : o);
+const vetLvl = o => { const h = vetOf(o); return VET.on && h ? h.vl || 0 : 0; };
+const vetSk = o => vetLvl(o) * VET.sk;
+const vetK = (o, k) => { const l = vetLvl(o); return l ? Math.pow(VET[k], l) : 1; };
+/* a squad's name: by its side and number (the list again with II past its end); a militia is the town's */
+const vetName = (t, id) => { const L = VETN[t ? 1 : 0], i = Math.max(1, id | 0) - 1; return L[i % L.length] + (i >= L.length ? ' II' : ''); };
+const sqName = q => (q.mil ? 'Milícia' : 'Esquadra ' + vetName(q.team, q.id));
+/* o for the diary: a squad's name, a vehicle's or aircraft's model, and its rank from Regular up */
+const vetWho = o => { const h = vetOf(o), l = vetLvl(o); return (h.men ? sqName(h) : h.def ? h.def.name || h.kind : 'unidade') + (l ? ' (' + VET.rank[l] + ')' : ''); };
+/* o's experience grows by n; at a new rank it is promoted (and from Veterano up the general and its side hear of it) */
+function vetGain(o, n) {
+  const h = vetOf(o);
+  if (!VET.on || !h || !(n > 0) || (S.net && !S.host) || h.net || h.mil || (h.men ? !(h.live > 0) : h.dead || !h.ai)) return;
+  h.vx = (h.vx || 0) + n;
+  let l = 0; while (l + 1 < VET.lv.length && h.vx >= VET.lv[l + 1]) l++;
+  if (l <= (h.vl || 0)) return;
+  h.vl = l;
+  if (l < 2) return;
+  const at = h.men ? h.men.find(m => !m.dead) || h : h, s = vetWho(h).replace(/ \(.*\)$/, '') + ' promovid' + (h.men ? 'a' : 'o') + ' a ' + VET.rank[l];
+  gLog(h.team, 'rep', s, at);
+  if (S.my && S.my.team === h.team && !S.my.dead) { S.feed.push({ text: 'Rádio: ' + s, life: 6, team: h.team }); if (S.feed.length > 4) S.feed.shift(); }
+}
+/* a kill: what it was worth, to whoever did it (an enemy's AI): the one the blow that killed it names (vetBy, while it is dealt), else the last to hit it
+   within DMG.credit s (a crash) */
+const vetKind = o => (o.man ? 'man' : o.kind ? (VET.xp[o.kind] ? o.kind : 'car') : o.heli ? 'heli' : 'plane');
+let vetBy = null;
+const vetDeal = g => (o, a, by, ...r) => { const w = vetBy; vetBy = by || null; try { return g(o, a, by, ...r); } finally { vetBy = w; } };
+killMan = (g => (m, by, ...r) => { const w = vetBy; vetBy = by || null; try { return g(m, by, ...r); } finally { vetBy = w; } })(killMan);
+ruin = vetDeal(ruin); lose = vetDeal(lose);
+function vetKill(by, o) { if (by && o && by.team !== undefined && by.team !== o.team && !o.drone && !by.drone) vetGain(by, VET.xp[vetKind(o)]); }
+cqDead = (g => o => {
+  const was = o.vxk; g(o);
+  if (!was && o && o.team !== undefined) { o.vxk = 1; vetKill(vetBy || (o.lastBy && S.t - o.hitT < DMG.credit ? o.lastBy : null), o); }
+})(cqDead);
+/* a mission done (W7's report), and a call for help met */
+rep = (g => (o, k, d) => { g(o, k, d); if (k === 'done' && o) vetGain(o, d && d.k === 'help' ? (d.ok ? VET.xp.help : 0) : VET.xp.done); })(rep);
+/* a worn veteran squad the AI general keeps out of assaults */
+const vetKept = q => vetLvl(q) >= VET.keep.l && q.live > 0 && q.live < (q.n0 || q.men.length) * VET.keep.sq;
+function vetKeepSq(q, op) {
+  if (op) { const i = op.sq.indexOf(q); if (i >= 0) op.sq.splice(i, 1); if (q.op === op) opFree(q); }
+  if (!q.vkT) { q.vkT = S.t; gLog(q.team, 'ord', 'Preservar ' + vetWho(q) + ', ' + q.live + ' de ' + (q.n0 || q.men.length) + ' homens: ' + (op ? 'sai do assalto a ' + gName(op.O) : 'fica fora dos assaltos'), q.men.find(m => !m.dead), 'vk' + q.id); }
+}
+cmdAttack = (g => (C, sq) => g(C, VET.on ? sq.filter(q => { if (!vetKept(q)) return true; if (!q.op && FREE[q.job]) vetKeepSq(q, null); return false; }) : sq))(cmdAttack);
+/* a hurt veteran vehicle falls back for a repair before it would (MIND.ask.hurt), a hurt veteran aircraft goes home */
+mindAsk = (g => (o, bt) => {
+  const K = VET.keep;
+  if (VET.on && !o.men && o.ai && !o.net && !o.fixed && !o.fld && !o.run && vetLvl(o) >= K.l && !(S.t - (o.vkT || -1e9) < K.again)) {
+    const s = mStr(o);
+    if (o.def.vmax && !o.heli && s < K.air && bt.thr > 0) { o.vkT = S.t; mindFall(o); gLog(o.team, 'ord', 'Preservar ' + vetWho(o) + ': avariado (' + Math.round(s * 100) + '%), volta à base', o); return; }
+    if (!o.def.vmax && o.max && s < K.hp && s >= MIND.ask.hurt) {
+      const R = helpAsk(o, 'repair', o, null);
+      if (R) { o.vkT = S.t; if (bt.thr > .3) mindFall(o); gLog(o.team, 'ord', 'Preservar ' + vetWho(o) + ': avariado (' + Math.round(s * 100) + '%), recua para reparo', o); return; }
+    }
+  }
+  return g(o, bt);
+})(mindAsk);
+/* a veteran's call for help weighs more */
+helpAsk = (g => (o, k, at, tgt) => {
+  const M = o && o.mis, l = vetLvl(o); if (!M || !l) return g(o, k, at, tgt);
+  const p = M.pri; M.pri = p * (1 + VET.keep.pri * l);
+  try { return g(o, k, at, tgt); } finally { M.pri = p; }
+})(helpAsk);
+/* a squad that boards a truck leaves its number and experience in it (u.cvt; sqId gives the number to nobody else meanwhile); the squad that gets out
+   has them (a new number, so a new name, only when the old one is in use again: part of it stayed on foot) */
+boxMan = (g => (u, m) => {
+  const q = m && m.sq, c = u.cvt;
+  if (q && !q.mil && !q.net && (!c || (q.vx || 0) > c.vx)) u.cvt = { id: q.id, t: q.team, vx: q.vx || 0 };
+  return g(u, m);
+})(boxMan);
+dismount = (g => u => {
+  const c = u.cvt; u.cvt = null; const q = g(u);
+  if (c && q && q.vx === undefined && c.t === q.team) {
+    if (c.id !== q.id && !S.squads.some(o => o !== q && o.team === q.team && o.id === c.id && o.live > 0)) q.id = c.id;
+    q.vx = 0; vetGain(q, c.vx);
+  }
+  return q;
+})(dismount);
+/* every VET.dt s where the battle is simulated: staying alive in contact, the assaults that took their point, and the veterans the general takes out */
+function vetStep() {
+  const dt = VET.dt, live = o => o.mind && S.t - o.mind.T < 3 && o.mind.thr >= VET.live;
+  for (const u of S.units) if (u.cvt && !u.cargo) u.cvt = null;   // its load lost on the way: the number is free again
+  for (const u of S.units) if (u.ai && !u.net && !u.dead && live(u)) vetGain(u, VET.xp.live * dt / 60);
+  for (const p of S.planes) if (p.ai && !p.net && !p.dead && live(p)) vetGain(p, VET.xp.live * dt / 60);
+  for (const q of S.squads) if (!q.net && q.live > 0 && !q.mil && live(q)) vetGain(q, VET.xp.live * dt / 60);
+  if (!S.cmd) return;
+  for (const C of S.cmd) for (const op of C.ops) {
+    if (op.k !== 'atk' || op.over) continue;
+    if (op.st === 'cons' && !op.vxc) { op.vxc = 1; for (const q of opLive(op)) vetGain(q, VET.xp.take); }
+    if (genBy(C.t, 'atk') === 'ai' && op.st !== 'back' && op.st !== 'cons') for (const q of op.sq.slice()) if (q.op === op && vetKept(q)) vetKeepSq(q, op);
+  }
+}
+/* a veteran soldier shakes off fire sooner: each new pin (m.sup, from any source) is cut to brk times its length */
+aiMan = (g => (m, dt) => { if (m.sup > S.t && m.sup !== m.vsup && vetLvl(m)) m.sup = m.vsup = S.t + (m.sup - S.t) * vetK(m, 'brk'); return g(m, dt); })(aiMan);
+step = (g => dt => { g(dt); if (VET.on && (!S.net || S.host) && (S.vetT = (S.vetT || 0) - dt) <= 0) { S.vetT = VET.dt; vetStep(); } })(step);
+/* the general's view and its MCP state: each squad's name, rank and experience; the veterans of the side among its vehicles and aircraft */
+genVM = (g => (t, all) => {
+  const V = g(t, all); if (!V || !V.u) return V;
+  const sim = !S.net || S.host, pos = new Map(), cnt = [0, 0], mine = s => s === t || V.all;
+  if (sim) for (const l of [S.units, S.planes]) for (const o of l) if (!o.dead && mine(o.team)) pos.set(o.x + ',' + o.z, o);
+  for (const e of V.u) {
+    if (!mine(e.t) || e.age !== undefined) continue;
+    let o = null;
+    if (e.sqd && e.id) { o = sim ? S.squads.find(q => q.team === e.t && q.id === e.id && q.live > 0) : null; e.nm = o ? sqName(o) : sqName({ team: e.t, id: e.id }); }
+    else if (sim) o = pos.get(e.x + ',' + e.z) || null;
+    const l = o ? vetLvl(o) : 0; if (l) { e.vl = l; if (l >= 2) cnt[e.t]++; }
+  }
+  if (sim && V.f) for (const s of [0, 1]) if (mine(s)) V.f[s].vet = cnt[s];
+  return V;
+})(genVM);
+genState = (g => t => {
+  const o = g(t);
+  for (const r of o.sq || []) { const q = S.squads.find(q => q.team === t && q.id === r.id && q.live > 0); r.nm = q ? sqName(q) : sqName({ team: t, id: r.id }); r.rank = q ? vetLvl(q) : 0; r.xp = q ? Math.round((q.vx || 0) * 10) / 10 : 0; }
+  if (!S.net || S.host) o.vet = [...S.units, ...S.planes].filter(u => u.team === t && !u.dead && u.ai && vetLvl(u)).map(u => ({ who: u.def.name || u.kind, g: u.kind || (u.heli ? 'heli' : 'plane'), rank: vetLvl(u), xp: Math.round(u.vx * 10) / 10, x: Math.round(u.x), z: Math.round(u.z) }));
+  return o;
+})(genState);
 /* ---------- woods, trenches and sandbags (WOODS, FORT) ----------
    WOODS: where the terrain's forest (kind 1) is dense enough to hide a soldier and stop a truck. A forest node stays kind 1 when it lies
    inside the map (edge m from its border), road m from a road, base m from an airfield and town m from a town, and its forest noise less
@@ -19464,6 +19600,35 @@ addEventListener('keydown', e => {
   const R = guest ? 1 : helpCall(P, m.k, m.tx, m.tz);
   S.banner = R ? { text: 'Pedido no rádio: ' + NEEDS[m.k].s, sub: 'Quem estiver perto e puder, atende', life: 2.5 } : { text: 'Já há um pedido seu no ar', sub: 'Um por vez, e o mesmo de novo só depois de ' + MIND.ask.again + ' s', life: 2 };
 });
+/* ---------- veterancy on the general's map (W16): a unit's rank as chevrons by its mark (one Regular, two Veterano, three Elite, gold), a squad's
+   name under it when the map is zoomed in, and the side's Veterano and Elite units in the Forças table ---------- */
+const VETUI = { name: 1.25, gold: '#ffd84a' };
+gUnitsL = (g0 => (g, V, P, now) => {
+  g0(g, V, P, now);
+  const k = P.k;
+  for (const u of V.u) {
+    if (!u.vl || !gOn(P, u.x, u.z, 20)) continue;
+    const x = P.X(u.x) + 9 * k, y = P.Y(u.z) - 7 * k, w = 3.2 * k, c = u.vl >= 3 ? VETUI.gold : '#ece6d6';
+    for (let i = 0; i < u.vl; i++) {
+      const yy = y - i * 2.6 * k; g.beginPath(); g.moveTo(x - w, yy - w * .6); g.lineTo(x, yy); g.lineTo(x + w, yy - w * .6);
+      g.lineWidth = 2.6 * k; g.strokeStyle = 'rgba(8,12,13,.85)'; g.stroke(); g.lineWidth = 1.2 * k; g.strokeStyle = c; g.stroke();
+    }
+  }
+})(gUnitsL);
+gLabels = (g0 => (g, V, P) => {
+  g0(g, V, P);
+  if (P.k < VETUI.name) return;
+  for (const u of V.u) if (u.nm && gOn(P, u.x, u.z, 20)) gTxt(g, u.nm.replace(/^Esquadra /, ''), P.X(u.x), P.Y(u.z) + (u.tag ? 30 : 20) * P.k, 9 * P.k, gCol(V, u.t), 'center');
+})(gLabels);
+genPanels = (g0 => V => {
+  g0(V);
+  const tb = $('#genForces'), f = V.f || [], a = f[V.t] && f[V.t].vet, b = V.all && f[1 - V.t] ? f[1 - V.t].vet : undefined;
+  let tr = tb.querySelector('tr.vet');
+  if (!(a || b)) { if (tr) tr.remove(); return; }
+  const r = ['Veteranos e elite', String(a || 0), b === undefined ? '—' : String(b)];
+  if (!tr) { tr = gE('tr', 'vet'); for (const s of r) tr.appendChild(gE('td', '', s)); tb.appendChild(tr); return; }
+  r.forEach((s, i) => { if (tr.children[i].textContent !== s) tr.children[i].textContent = s; });
+})(genPanels);
 /* the Controles panel: opened by its chip, closed by its button, by Esc or by the chip again; the focus goes in and comes back */
 function keysPanel(v) {
   const p = $('#keysPanel'), b = $('#btnKeys');

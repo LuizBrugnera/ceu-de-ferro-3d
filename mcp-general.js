@@ -210,7 +210,8 @@ const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 
   air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de 6 obras de campanha do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
   mcap: 'Limite de minas do lado', mkn: 'No máximo 4 unidades novas por ordem', hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila',
   mil0: 'Sem tropa nossa na vila para armar os civis', roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento', down: 'A ponte já caiu',
-  whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', server: 'O servidor desta sala é antigo: sem pontes destrutíveis',
+  whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', up: 'A ponte está de pé: nada a reconstruir', reb: 'Já há uma reconstrução nessa ponte',
+  site: 'Nenhum trecho do rio ali serve para um pontão: largo demais, margens íngremes ou perto de uma ponte', pcap: 'Seu lado já tem 3 pontões fora das pontes', server: 'O servidor desta sala é antigo: sem pontes destrutíveis',
   hasmine: 'Já temos uma mina nessa jazida', foemine: 'O inimigo tem uma mina nessa jazida', sap: 'Nenhuma esquadra com sapadores livre para isso', path: 'Nenhum caminho a pé seguro até lá',
   cd: 'Essa manobra ainda está em espera', n: 'Número de esquadras inválido', near: 'perto demais de outra instalação', lot: 'num lote da cidade-sede', front: 'à frente da linha',
   dep: 'mina só sobre jazida livre', fabroad: 'fábrica precisa de estrada a menos de 500 m', q: 'fila cheia', unknown: 'instalação inimiga não localizada', none: 'nada na reserva', en: 'Falta energia' };

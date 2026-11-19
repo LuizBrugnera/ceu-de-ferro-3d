@@ -14,6 +14,7 @@ Tudo num bloco novo no fim da parte de simulação de `Céu de Ferro 3D.html` (p
 - Pesos por doutrina (`M4.doc`) e personalidade (`M4.per`) aplicados dentro de cada tipo; o sorteio de gosto da partida (`MANW`) não mudou.
 - Contadores `M4S()` (armadas, em posição, adiantadas, disparadas, sucesso, perdidas, descobertas, guardas, contra-flancos, e os motivos de recusa em `why`) e medidor de tempo `M4B.stat()`.
 - `M4.on = 0` desliga tudo; sem mapa tático (`TM.on = 0`) também.
+- Com o M0 (#48): a emboscada planejada e a interdição entram no evento `ab` da analytics (`f: emb|itd`, armada/disparada/fim) e na métrica de emboscadas (`byF.emb`, `byF.itd`); o disparo delas passa pelo `cmdSpring` original (como o `blk`), para o gancho do M0 também vê-lo. As três manobras já ganham o evento `mv` pelo `manOpen`.
 - Botões na aba Campanha do general (lista `GORMAN`): Emboscada planejada, Interdição da logística e Guarda da rua alternativa, com clique no alvo no mapa como as outras manobras.
 - Merge com o M2 (abordagens, #45): os dois blocos convivem; o M4 tem o seu próprio caminho tático (`tmWalk`) e não toca em `atkFit`/`atkOpen` nem no planejador do M2. `tests/tmap.js` compara a partida com o mapa e sem ele com `AP.on = 0` e `M4.on = 0`.
 - Docs: README (Emboscadas e ruas alternativas; o Mapa tático deixou de dizer que ninguém o usa), MCP.md, ajuda do `man` em `mcp-general.js`, `tests/README.md`, `tests/all.sh`.
@@ -31,6 +32,7 @@ Tudo num bloco novo no fim da parte de simulação de `Céu de Ferro 3D.html` (p
 - **Depois da última rodada de testes** mudaram três coisas e só o smoke rodou: (1) a guarda saiu de `C.man` (não ocupa vaga de manobra); (2) os pesos de personalidade foram de `PERS.w` para `M4.per` (com isso `personality.js` passou, mas `ambush.js` não rodou de novo depois); (3) o limite de espera da emboscada virou "no máximo 600 s parada no sítio" (`MANT.emb.far`), em vez de 900/1200 s até a passagem.
 - **Torneio A/B (D10) não feito.** Só 4 partidas de 15 min (1944, sementes 3 e 4, M4 ligado/desligado), antes das mudanças acima: com o M4, a IA abriu 1 emboscada planejada em 4 partidas-lado e 2–3 guardas por partida, mas os bloqueios (`blk`) caíram (a guarda tomava a vaga de manobra: daí a mudança 1). Inconclusivo; a segunda rodada (12 partidas) foi interrompida pela regra nova. O M0 (métricas `mv`/`ab`/`tr`) não estava no main.
 - **Custo por quadro não medido com o M4 isolado.** Nas 4 partidas, `AIB.gen` subiu de ~2,3 para ~3,2–3,7 ms por quadro com o M4 ligado, mas as partidas divergem (mais homens vivos), então não dá para atribuir. O `M4B` foi criado para medir isso e não chegou a rodar. Uma busca `tmWalk` de 2,4 km custa ~0,5 ms no Node (1944).
+- A integração com o M0 (eventos `ab`/`mv` do M4 e o `balance.js`) não rodou; a comparação A/B com as métricas do M0 (o critério D10) fica para depois.
 - Nada depois do merge com o M2 (#45) além do smoke: o M2 e o M4 juntos numa partida (os dois leem o mapa e disputam esquadras livres) nunca rodaram; nem os botões novos da aba Campanha.
 - Partidas online (anfitrião e convidado), o desenho na Visão de General no navegador (rota pontilhada, barra na zona de morte, quadrado da guarda), e o modelo (MCP) mandando `man k=ambush|interdict|guard` de verdade.
 - O contra-flanco numa partida real (o contador `p11` ficou em 0 nas partidas medidas) e a interdição com artilharia de verdade no alcance (no teste não havia canhão; só se viu o pedido).
@@ -52,7 +54,7 @@ node tests/tmap.js && node tests/personality.js && node tests/campaign.js && nod
 PAGE=<a página do main> node tests/man-c.js   # compare as falhas com o main (gen-cmd, man-a, man-c e general já falham lá)
 ```
 
-A/B (D10), com o harness, partidas de 15 min, M4 ligado (1) e desligado (0), várias sementes e as duas épocas; compare `amb` (armadas/disparadas por tipo), `m4s`, `tk`, `held` e `aib.gen`/`m4b`:
+A/B (D10) com o M0: `node tools/balance.js` (veja o cabeçalho dele) com `M4.on` 1 e 0, comparando `amb` (`byF.emb`, `byF.itd`, `okShare`) e o placar. Ou, com o harness, partidas de 15 min, M4 ligado (1) e desligado (0), várias sementes e as duas épocas; compare `amb` (armadas/disparadas por tipo), `m4s`, `tk`, `held` e `aib.gen`/`m4b`:
 
 ```js
 // node probe.js <era> <segundos> <semente> <0|1>

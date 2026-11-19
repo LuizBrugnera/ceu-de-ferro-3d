@@ -11,11 +11,13 @@
    lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
    rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
    rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs),
-   br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg)
+   br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg),
    gq (the general's tools for everyone: gask missions, unit with an id, lots and mines),
    crl (the radio relay of the command net: the work of kind 8 in fort and fbuild),
    the tactical map (gask tmap: the asker's side's layer k, one of f v o t p k l, at 1 km; an older server answers shape),
-   and the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape).
+   the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape)
+   and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
+   at any narrow stretch of the river, the same kind 7 row placed by its own x z).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -48,7 +50,7 @@ const LOADS = {
 };
 const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40 };
 const NST = Object.keys(STW).length;
-const FKINDS = 8;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl)
+const FKINDS = 9;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb)
 const rooms = { ww2: new Map(), modern: new Map() };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].host = null; rooms[era].gen = [0, 0]; rooms[era].genk = [0, 0]; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
@@ -140,7 +142,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -230,7 +232,7 @@ const RX = {
   },
   /* the world's objects belong to the host: it alone says what stage they came to (full: 1, all of them, for someone who has just joined),
      and what anyone else's rounds did to them goes to it alone */
-  obj(c, m) { if (host(c) && pairs(m.e, v => v === 1 || v === 2)) cast(c, Object.assign({ t: 'obj', e: m.e }, m.full === 1 && { full: 1 })); },
+  obj(c, m) { if (host(c) && pairs(m.e, v => v === 0 || v === 1 || v === 2)) cast(c, Object.assign({ t: 'obj', e: m.e }, m.full === 1 && { full: 1 })); },
   /* the buildings are the host's too (bld): e [element, state, ...], f those that came down, m [aid, tenths of a storey, ...] of its soldiers
      upstairs, s [building, states as text, ...] for someone who has just joined; a guest's hits h [building, element, damage or -1, ...] and
      bursts b [x, y, z, radius, damage, ...] go to the host alone (bhit) */
@@ -615,7 +617,7 @@ function snapIn(c, m) {
       }
       P.menT = now; for (const [id, r] of P.men) if (now - r.at > Math.max(10000, 4 * P.menP)) P.men.delete(id);
       break;
-    case 'obj': for (let i = 0; i + 1 < m.e.length; i += 2) P.obj.set(m.e[i], Math.max(P.obj.get(m.e[i]) || 0, m.e[i + 1])); break;
+    case 'obj': for (let i = 0; i + 1 < m.e.length; i += 2) { if (m.e[i + 1] === 0) P.obj.delete(m.e[i]); else P.obj.set(m.e[i], Math.max(P.obj.get(m.e[i]) || 0, m.e[i + 1])); } break;   // 0: a bridge built again (brb)
     case 'bld':
       if (m.e) for (let i = 0; i + 1 < m.e.length; i += 2) if (P.be.size < SNAPBLD || P.be.has(m.e[i])) P.be.set(m.e[i], m.e[i + 1]);
       if (m.f) for (const b of m.f) P.bf.add(b);
@@ -678,7 +680,7 @@ const partidas = () => {
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
 /* a batch is a list of events, each an object of a known kind with its match time */

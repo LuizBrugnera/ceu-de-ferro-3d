@@ -240,7 +240,6 @@ function buildRig(id, o, G) {
   return { w, tris: tris.length, parts: 'anims ' + J.animations.map(a => a.name).join(',') };
 }
 
-/* ---------- composite: parts taken from other built models, placed by hand ---------- */
 function licences() {
   const used = new Set(Object.values(CFG.models).map(m => m.src)), L = ['# Licenças dos modelos', '',
     'Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/models/pack/`) saem de fontes livres pelo `tools/pack/build.js`, que os converte, corta em partes e recolore. Só fontes que permitem redistribuir: CC0 (domínio público) e CC-BY (com crédito, abaixo). O `f22.glb` é do Hernani (modelo próprio do projeto).', '',
@@ -248,7 +247,7 @@ function licences() {
   for (const s of CFG.sources) {
     if (!used.has(s.pid)) continue;
     const files = Object.keys(CFG.models).filter(k => CFG.models[k].src === s.pid).map(k => '`' + k + '.glb`').join(', ');
-    L.push('| ' + files + ' | [' + s.title + '](https://poly.pizza/m/' + s.pid + ') | ' + s.author + ' | ' + s.lic + ' |');
+    L.push('| ' + files + ' | [' + s.title + '](https://poly.pizza/m/' + s.pid + ') | ' + s.author + (s.also ? ' (' + s.also + ')' : '') + ' | ' + s.lic + ' |');
   }
   L.push('', 'CC-BY 3.0: https://creativecommons.org/licenses/by/3.0/ . CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/ .', '',
     'Mudanças feitas em todos: convertidos para GLB compacto, girados para +x, cores dos materiais passadas para as cores dos vértices (a pintura vira tons de cinza que a página tinge com a cor do lado), separados em partes (casco, torre, canhão, lagartas, rodas) e, no soldado, só as animações usadas.', '');

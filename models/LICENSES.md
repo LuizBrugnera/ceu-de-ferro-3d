@@ -11,7 +11,7 @@ Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/mod
 | `tk_sherman.glb` | [Tank](https://poly.pizza/m/41Tq_Kf0Tui) | Nico _ | CC-BY 3.0 |
 | `tk_abrams.glb` | [Tank](https://poly.pizza/m/4t0RMXCl_Ud) | Poly by Google | CC-BY 3.0 |
 | `tk_leo.glb` | [Tank](https://poly.pizza/m/7GG1xDtc8l) | Zsky | CC-BY 3.0 |
-| `tk_t72.glb` | [Tank](https://poly.pizza/m/CAZeAFrhC7) | PabloLuna57 | CC-BY 3.0 |
+| `tk_t72.glb` | [Tank](https://poly.pizza/m/CAZeAFrhC7) | PabloLuna57 (o mesmo arquivo publicado por KolosStudios em https://poly.pizza/m/egcLMSGiuA (CC-BY 3.0), crédito aos dois) | CC-BY 3.0 |
 | `car_jeep.glb` | [Jeep](https://poly.pizza/m/AcSdGGrgYP) | Zsky | CC-BY 3.0 |
 | `car_hmmwv.glb` | [Humvee](https://poly.pizza/m/Ebryot9iKM) | madtrollstudio | CC-BY 3.0 |
 | `car_scout.glb` | [Truck](https://poly.pizza/m/EWp0hGvZPV) | Zsky | CC-BY 3.0 |

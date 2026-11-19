@@ -1,6 +1,6 @@
 'use strict';
 /* the models pack: where each model comes from and how build.js turns it into models/pack/<id>.glb.
-   sources: poly.pizza id (pid), title, author and licence as the page shows them (build.js --fetch checks the licence again).
+   sources: poly.pizza id (pid), title, author and licence as the page shows them (build.js --fetch checks the licence again); also: a note for the licence list.
    models: src the source; yaw degrees about +y that bring its front to +x (pca: after turning its long axis to x); len: its length in m; paint the materials (names as regexes, or indices) that take the
    side's colour; nodes [regex on the source node name, part]; split rules on the connected pieces left (in 0..1 of the model's box: cx cy cz
    the piece's centre, lo hi its bottom and top, x0 x1 its back and front; long: longer on x than that many times its other sides); def the
@@ -18,7 +18,7 @@ module.exports = {
     { pid: "41Tq_Kf0Tui", title: "Tank", author: "Nico _", lic: "CC-BY 3.0" },
     { pid: "4t0RMXCl_Ud", title: "Tank", author: "Poly by Google", lic: "CC-BY 3.0" },
     { pid: "7GG1xDtc8l", title: "Tank", author: "Zsky", lic: "CC-BY 3.0" },
-    { pid: "CAZeAFrhC7", title: "Tank", author: "PabloLuna57", lic: "CC-BY 3.0" },
+    { pid: "CAZeAFrhC7", title: "Tank", author: "PabloLuna57", lic: "CC-BY 3.0", also: "o mesmo arquivo publicado por KolosStudios em https://poly.pizza/m/egcLMSGiuA (CC-BY 3.0), crédito aos dois" },
     { pid: "AcSdGGrgYP", title: "Jeep", author: "Zsky", lic: "CC-BY 3.0" },
     { pid: "Ebryot9iKM", title: "Humvee", author: "madtrollstudio", lic: "CC-BY 3.0" },
     { pid: "EWp0hGvZPV", title: "Truck", author: "Zsky", lic: "CC-BY 3.0" },

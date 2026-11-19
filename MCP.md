@@ -36,9 +36,23 @@ Foi provado contra o jogo de verdade (anfitrião rodando a página, economia lig
    ```
 
    - `CEU_ROOM`: a época, `modern` ou `ww2`.
-   - `CEU_SIDE`: `0` ou `1`, o lado a comandar (um general por lado; humano ou ponte, quem pedir primeiro).
+   - `CEU_SIDE`: `0`, `1` ou `2`, o lado a comandar (um general por lado; humano ou ponte, quem pedir primeiro). O `2` (Insurgentes) só existe na Frente atual com 3 lados; veja a tabela abaixo.
    - `CEU_KEY`: igual ao `GENKEY` do servidor.
    - Opcionais: `CEU_SEAT=0` (não pega a cadeira ao conectar; o modelo chama `seat`) e `CEU_DOMAINS` (domínios tomados junto com a cadeira, padrão `eco`).
+
+## Lados e facções
+
+| `CEU_SIDE` | Frente atual (`modern`) | Frente de 1944 (`ww2`) |
+|---|---|---|
+| `0` | EUA (a antiga Força Azul) | Alemanha |
+| `1` | Rússia (a antiga Força Vermelha) | Aliados |
+| `2` | Insurgentes (só numa sala de 3 lados) | (não existe) |
+
+- O número de lados é da sala: quem entra primeiro diz (`ns` no `join`) e o `welcome` repete. Uma página de outra contagem é recusada (`sides`).
+- Com 3 lados é todos contra todos: os dois inimigos também lutam entre si. As instruções da ponte dizem a facção e os dois inimigos.
+- No `get_state`, `link` traz `faction`, `sides` e `enemies`. Com 3 lados, `holder` e `base` dos pontos dizem `ours`, `contested` ou o nome da facção (`USA`, `Russia`, `Insurgents`) em vez de `enemy`, e `tickets` vira um mapa por facção. Com 2 lados tudo continua como antes.
+- Uma ponte de lado 2 pode entrar numa sala vazia; se o primeiro jogador abrir a sala com 2 lados, o servidor a desconecta (`sides`) e ela tenta de novo depois.
+- **Não testado** (veja `docs/nao-testado/cf-3l-p5-servidor.md`).
 
 ## Primeiro prompt sugerido
 
@@ -64,12 +78,13 @@ Versão 2 (W13): o modelo tem as mesmas ferramentas que o general da IA e que o 
 - Estratégias do general (M8): o `get_state` traz `stg`: a estratégia que a IA do lado escolheu em cada rota (`fr`: `ri`, `k`, `nm`, `g` atk ou def, nota `v` e `why`) e a geral (`eco`), ou `null` quando a IA não está com o ataque nem a defesa. As escolhas também aparecem no diário (tipo `stg`).
 - Economia e sapadores (v2): `claim_deposit` (uma mina sobre a jazida, pelo `i` de `ask_view` economy.dep, e a guarda dela), `get_lots` (os lotes da cidade-sede), `lay_minefield` (campo anticarro ou antipessoal), `clear_mines` (uma esquadra com sapadores varre o lugar), `sabotage` (incursão com sapadores e cargas de demolição), `get_mines` (as minas do lado, as inimigas conhecidas e os campos suspeitos) e `arm_militia`.
 - Manobra (v2.1, M7, **não testado**, veja `docs/nao-testado/cf-m7-jogador-mcp.md`): `get_tactical_map` (uma camada do mapa tático do seu lado em células de 1 km: `v` vigilância inimiga, `t` tráfego inimigo, `k` gargalos, `f`, `o`, `p`, `l`), `plan_approaches` (as 3 abordagens do seu lado até o objetivo mais perto de x,z, com ângulo do eixo, km, minutos a pé, % à vista, % na mata, posição de assalto e reunião), `order_maneuver` (`fixflank`: fixar pelo eixo e flanquear pela abordagem `approach`; `envelop`: duas manobras, `approach` e `approach2`; `turn`: desbordamento até o entroncamento ou ponte atrás do inimigo; `penet`: penetração num trecho estreito da frente), `plan_ambush` (a emboscada planejada do M4 na estrada mais perto de x,z ou na aresta `edge`, com janela) e `guard_route` (a guarda de rua alternativa do M4, e minas se pedir). Por `send_command`: `man` com `k` `fixflank`, `envelop`, `turn`, `penet` (e `ambush` com `e`, `guard` com `f: "mine"`) e as chaves novas `ap`, `ap2`, `f`, `e`; o relay as aceita quando o `welcome` traz `man2: 1` (servidor antigo responde `shape`).
+- Bombardeio estratégico (v2.2, **não testado**, veja `docs/nao-testado/cf-bombardeiro.md`): `strategic_strike` (o bombardeiro do lado, `weapon: strat`, ou, para os Insurgentes, `svbied` e `shahed`, contra `site_id`, `point` ou `x`, `z`, com `heading` opcional do bombardeiro; recusas `fac`, `res`, `slive`, `pop`, `id`, `map`, `sdr`, `mv`) e `get_strikes` (reserva, fila e em missão de cada arma, custos, limites e os últimos ataques). A arma sai da reserva: produza antes com `produce_unit` (`strat`, `svbied`, `shahed`). Diferente da IA, a sua ordem não é segurada por amigos ou civis sob as bombas.
 - Missões e cartão da unidade (v2): `get_missions` (a missão de cada esquadra, veículo e aeronave do lado) e `get_unit` (o cartão de uma esquadra: o que ela vê e o que ela decide, em dados e em frases, o mesmo que o jogador vê ao selecionar uma esquadra).
 - Cadeira: `seat` (`claim` toma a cadeira e a economia; `release` devolve tudo à IA, que reassume na hora).
 
 ## O que não pode
 
-- Não vê o inimigo além do que o seu lado enxerga (névoa); não vê nem controla o outro lado.
+- Não vê o inimigo além do que o seu lado enxerga (névoa); não vê nem controla os outros lados.
 - Não pilota nem atira em primeira pessoa; não comanda unidades individuais, só esquadras por id e operações.
 - Não cria nem encerra partidas, não troca de sala ou de época, não escolhe o anfitrião.
 - Por padrão a IA segue decidindo defesa e apoio; o modelo só toma `def`/`sup` se pedir (`seat` com `domains`, ou `ctl`).

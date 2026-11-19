@@ -14,7 +14,7 @@
    Environment:
      CEU_URL   relay address, default ws://localhost:8080 (the path is not used)
      CEU_ROOM  the room = the era, as the page names it: modern (default) or ww2
-     CEU_SIDE  0 or 1, the side to command (default 0)
+     CEU_SIDE  0, 1 or 2, the side to command (default 0). modern: 0 the USA, 1 Russia, 2 the Insurgents (2 only in a room of 3 sides); ww2: 0 Germany, 1 the Allies
      CEU_KEY   the relay's GENKEY (required)
      CEU_NAME  a name for the log lines this process writes (default Claude)
      CEU_SEAT  set to 0 to NOT claim the seat on connect (the model then calls the `seat` tool)
@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.1.0';   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.3.0';   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -48,10 +48,14 @@ const now = () => Date.now(), sleep = ms => new Promise(r => setTimeout(r, ms));
 
 /* ---------------------------------------------------------------- relay link */
 const R = {
-  ws: null, up: false, fatal: '', id: 0, w: null, host: 0, gn: [0, 0], gk: [0, 0], wantSeat: AUTOSEAT, tries: 0,
+  ws: null, up: false, fatal: '', id: 0, w: null, host: 0, gn: [0, 0, 0], gk: [0, 0, 0], wantSeat: AUTOSEAT, tries: 0,
   gen: null, ecs: null, ecoAsked: 0, eco: null, pic: null, T: 0, Tat: 0, ev: [], evSeq: 0, picBusy: false, glog: [], logAt: 0, n: 0, pend: new Map(), lastCmd: 0, lastAsk: 0, lastClaim: 0, chain: Promise.resolve(), gctlWait: [],
 };
-if (SIDE !== 0 && SIDE !== 1) { log('CEU_SIDE must be 0 or 1'); R.fatal = 'CEU_SIDE must be 0 or 1'; }
+/* the factions by side, and the room's sides (welcome ns; a relay that does not say has 2) */
+const FACS = { modern: ['USA', 'Russia', 'Insurgents'], ww2: ['Germany', 'the Allies'] }, FAC = FACS[ROOM] || FACS.modern;
+const NS = () => (SIDE === 2 || (R.w && R.w.ns === 3) ? 3 : 2), facName = s => FAC[s] || 'side ' + s;
+const foesOf = () => [...Array(NS()).keys()].filter(s => s !== SIDE);
+if (!Number.isInteger(SIDE) || SIDE < 0 || SIDE >= FAC.length) { const e = 'CEU_SIDE must be ' + (FAC.length === 3 ? '0, 1 or 2' : '0 or 1') + ' in room ' + ROOM; log(e); R.fatal = e; }
 if (!KEY) { log('CEU_KEY is not set: the relay will refuse this bridge'); }
 
 function connect() {
@@ -76,13 +80,13 @@ function connect() {
 function onRelay(m) {
   switch (m.t) {
     case 'welcome':
-      R.w = m; R.id = m.id; R.host = m.host || 0; R.gn = m.gn || [0, 0]; R.gk = m.gk || [0, 0]; R.up = true; R.tries = 0;
+      R.w = m; R.id = m.id; R.host = m.host || 0; R.gn = m.gn || [0, 0, 0]; R.gk = m.gk || [0, 0, 0]; R.up = true; R.tries = 0;
       R.gen = null; R.ecs = null; R.eco = null; R.pic = null; R.glog = [];   // a fresh stream follows a join
-      log('joined room ' + ROOM + ' side ' + SIDE + ' as player ' + R.id + ' (eco ' + (m.eco ? 1 : 0) + ', gen ' + (m.gen ? 1 : 0) + ')');
+      log('joined room ' + ROOM + ' (' + NS() + ' sides) side ' + SIDE + ' (' + facName(SIDE) + ') as player ' + R.id + ' (eco ' + (m.eco ? 1 : 0) + ', gen ' + (m.gen ? 1 : 0) + ')');
       if (m.eco && m.gen && R.wantSeat) R.claimP = claim(1).catch(() => {});   // ready() waits for its gctl, so the first tool call sees the seat
       break;
     case 'error': {
-      const why = { gen: 'the relay refused the key (CEU_KEY must equal the relay\'s GENKEY, and the relay needs GENKEY set)', room: 'unknown room ' + ROOM, taken: 'another bridge already holds side ' + SIDE + ' (or CEU_SIDE is invalid)' }[m.code] || ('relay error ' + m.code);
+      const why = { gen: 'the relay refused the key (CEU_KEY must equal the relay\'s GENKEY, and the relay needs GENKEY set)', room: 'unknown room ' + ROOM, taken: 'another bridge already holds side ' + SIDE + ' (or CEU_SIDE is invalid)', sides: 'the match in room ' + ROOM + ' has fewer sides than side ' + SIDE + ' needs (side 2 needs a room of 3 sides); retrying' }[m.code] || ('relay error ' + m.code);
       log(why);
       if (m.code === 'gen' || m.code === 'room') { R.fatal = why; try { R.ws.close(); } catch (e) { /* closing */ } }
       else R.lastErr = why;
@@ -207,14 +211,17 @@ const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 
   mt: 'Falta metal na base principal', conv: 'Comboios demais a caminho', lift: 'Sem helicóptero de transporte na reserva', cut: 'O nó está cortado da base: use a ponte aérea',
   era: 'Não existe nesta época', tow: 'Já há um veículo de recuperação a caminho', far: 'Longe demais: fora do território ou à frente da linha', hurt: 'Nenhum ferido para evacuar ali',
   mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até 8 pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até 9 km)',
-  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de 6 trincheiras e parapeitos do lado', postcap: 'Limite de postos deste tipo do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
+  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de trincheiras e parapeitos do lado (cresce com a economia e os pontos tomados)', postcap: 'Limite de postos deste tipo do lado (cresce com a economia e os pontos tomados)', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
   mcap: 'Limite de minas do lado', mkn: 'No máximo 4 unidades novas por ordem', hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila',
   mil0: 'Sem tropa nossa na vila para armar os civis', roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento', down: 'A ponte já caiu',
   whole: 'A ponte está de pé: pontão só numa ponte destruída', pont: 'Já há um pontão nessa ponte', up: 'A ponte está de pé: nada a reconstruir', reb: 'Já há uma reconstrução nessa ponte',
   site: 'Nenhum trecho do rio ali serve para um pontão: largo demais, margens íngremes ou perto de uma ponte', pcap: 'Seu lado já tem 3 pontões fora das pontes', server: 'O servidor desta sala é antigo: sem pontes destrutíveis',
   hasmine: 'Já temos uma mina nessa jazida', foemine: 'O inimigo tem uma mina nessa jazida', sap: 'Nenhuma esquadra com sapadores livre para isso', path: 'Nenhum caminho a pé seguro até lá',
+  nofix: 'Nenhum veículo avariado ali', ap: 'Sem abordagem: o mapa tático do lado ainda não chega a esse objetivo', man2: 'O servidor desta sala é antigo: sem as manobras novas',
   cd: 'Essa manobra ainda está em espera', n: 'Número de esquadras inválido', near: 'perto demais de outra instalação', lot: 'num lote da cidade-sede', front: 'à frente da linha',
   dep: 'mina só sobre jazida livre', rcap: 'Limite de 3 antenas de rádio do lado', nrad: 'Nenhum veículo-rádio ou operador de rádio livre para isso', crl: 'O servidor desta sala é antigo: sem antenas de rádio', fabroad: 'fábrica precisa de estrada a menos de 500 m', q: 'fila cheia', unknown: 'instalação inimiga não localizada', none: 'nada na reserva', en: 'Falta energia' };
+Object.assign(PT, { fac: 'Este lado não tem essa arma', scap: 'Limite de armas estratégicas desse tipo', slive: 'Já há um ataque estratégico desse tipo em curso',
+  ff: 'Tropas amigas na área do bombardeio', sdr: 'Drones indisponíveis nesta sala' });   // the strategic strike (2.2)
 const explain = r => (r.ok ? 'accepted' : 'refused: ' + (r.why || 'unspecified') + (PT[r.why] ? ' (' + PT[r.why] + ')' : '') + (WHY[r.why] ? ' - ' + WHY[r.why] : '') + (r.note ? ' - ' + r.note : ''));
 
 /* the host's answer to a command: text for the model */
@@ -307,7 +314,7 @@ const WHYP = { type: 'string', maxLength: 120, description: 'optional reason (ap
 
 /* ---------------------------------------------------------------- state view for the model */
 /* the page's index tables, mirrored: ecoI() = units then sites (ecs kinds), ESK (site kinds), EWHY, GEN.tag (squad jobs, +1), GEN.ord (+1), GOP (operation kinds) */
-const UNITS = ['squad', 'car', 'truck', 'lav', 'aa', 'art', 'tank', 'rad', 'aaf', 'fighter', 'cas', 'heli', 'lift', 'drone'], SITES = ['pow', 'mine', 'fab'], KINDS = UNITS.concat(SITES, ['arv', 'amb', 'rpr']);   // the page's ecoI: the recovery kinds after the sites
+const UNITS = ['squad', 'car', 'truck', 'lav', 'aa', 'art', 'tank', 'rad', 'aaf', 'fighter', 'cas', 'heli', 'lift', 'drone', 'strat', 'svbied', 'shahed'], SITES = ['pow', 'mine', 'fab'], KINDS = UNITS.concat(SITES, ['arv', 'amb', 'rpr']);   // the page's ecoI: the base kinds (the strategic weapons last of them), the sites, then the recovery kinds
 const EWHY = ['', 'en', 'mt', 'busy', 'none', 'full'], JOBS = ['eng', 'line', 'garr', 'mort', 'wood', 'road', 'base', 'push', 'amb', 'rec', 'lp', 'guard', 'held', 'col'];
 const ORDS = ['hold', 'assault', 'patrol', 'flank', 'withdraw', 'supply', 'build', 'ambush', 'escort', 'bait', 'overwatch', 'scout', 'mortar', 'observe', 'move'], OPS = ['', 'atk', 'amb', 'ctr', 'usr'];
 const kname = i => KINDS[i] || 'kind#' + i, sname = i => SITES[i] || 'site#' + i;
@@ -328,7 +335,8 @@ function onOps(a, b) {
   for (const [id, o] of is) if (id !== undefined && !was.has(id) && a) event('op_started', 'operation ' + id + ' (' + (o.k || '?') + (o.nm ? ' ' + o.nm : '') + ') started');
   for (const [id, o] of was) if (id !== undefined && !is.has(id)) event('op_ended', 'operation ' + id + ' (' + (o.k || '?') + (o.nm ? ' ' + o.nm : '') + ') ended');
 }
-const holder = h => (h === -1 ? 'contested' : h === SIDE ? 'ours' : 'enemy');
+/* who holds a point or a base: ours, contested, or with 3 sides the enemy faction by name (the two enemies are not allies) */
+const holder = h => (h === -1 || h === undefined ? 'contested' : h === SIDE ? 'ours' : NS() === 3 ? facName(h) : 'enemy');
 function onPic(prev, d) {   // a point that changed hands since the last picture
   if (!prev || !Array.isArray(prev.pts) || !Array.isArray(d.pts)) return;
   for (const p of d.pts) { const o = prev.pts[p.i]; if (o && o.hold !== p.hold) event('point', p.L + ' ' + p.name + ' (point ' + p.i + '): ' + holder(o.hold) + ' -> ' + holder(p.hold), d.T); }
@@ -359,7 +367,7 @@ function stateView(logN) {
   const sqs = g ? flat(g.q, 6).map(([id, job, ord, op, dx, dz]) => { const p = sqPic.get(id) || {}; return { sqId: id, id, name: p.nm, rank: RANKS[p.rank], job: JOBS[job - 1] || '?', order: ORDS[ord - 1] || null, operation: OPS[op] || null, at: pos(p.x, p.z), men: p.n, goingTo: dx || dz ? { x: dx, z: dz } : null, radio: LINK[p.link], orderArrivesInS: p.eta }; })
     : ((pd && pd.sq) || []).map(p => ({ id: p.id, name: p.nm, rank: RANKS[p.rank], job: p.job, at: pos(p.x, p.z), men: p.n }));
   const out = {
-    link: { connected: R.up, room: ROOM, side: SIDE, playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
+    link: { connected: R.up, room: ROOM, side: SIDE, faction: facName(SIDE), sides: NS(), enemies: foesOf().map(facName), playerId: R.id, hostPresent: R.host > 0, seat: holder_(), seatHeldByMe: held(), error: R.fatal || undefined },
     matchClockT: R.T, clockAgeSeconds: age(R.Tat),
     economy: e ? {
       ageSeconds: age(R.ecs.at), controller: ['ai', 'me', 'mcp'][e.c],
@@ -374,14 +382,17 @@ function stateView(logN) {
       scout: e.sc && e.sc.length === 3 ? { x: e.sc[0], z: e.sc[1], secondsLeft: e.sc[2] } : null, strikeTargetId: e.tg || null,
       productionPlan: Array.isArray(e.po) && e.po.length === 8 ? { posture: ['attack', 'hold', 'defend'][e.po[0]] || '?', populationBudget: { men: e.po[1], vehicles: e.po[2], aircraft: e.po[3] },
         populationOut: { men: e.po[4], vehicles: e.po[5], aircraft: e.po[6] }, budgetScalePct: e.po[7], fieldWantedVsOut: Object.fromEntries(flat(e.pp, 3).map(([k, f, h]) => [kname(k), { wanted: f, out: h }])) } : null,
+      construction: Array.isArray(e.wk) && e.wk.length === 9 ? { spentLastMinute: { en: e.wk[0], mt: e.wk[1] }, spentTotal: { en: e.wk[3], mt: e.wk[4] }, cratesInNodes: e.wk[2] >= 0 ? e.wk[2] : null,
+        supplyBases: { n: e.wk[5], cap: e.wk[6] }, trenchesAndSandbags: { n: e.wk[7], cap: e.wk[8] }, note: 'every work costs energy and metal (supply base 50/80, trench 4/6, sandbags 2/5, posts as before, 1/4 a mine of an ordered minefield); caps grow with the economy and the points held; ask_view economy.works has the post caps and the AI budget' } : null,
     } : null,
     general: g ? { ageSeconds: age(R.gen.at), view: pickView(g.v), squads: sqs } : (sqs.length ? { squads: sqs } : null),
     log: { ageSeconds: age(R.logAt), lines: R.glog.slice(-logN).map(([T, k, text, x, z, tx, tz]) => ({ T, kind: k, text, at: pos(x, z) })) },
   };
   if (pd) out.map = {
     ageSeconds: age(R.pic.at),
-    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, base: p.base >= 0 ? (p.base === SIDE ? 'ours' : 'enemy') : undefined })),
-    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: pd.tk, ticketsNote: 'index 0 = side 0, 1 = side 1',
+    points: (pd.pts || []).map(p => ({ i: p.i, name: p.L + ' ' + p.name, x: p.x, z: p.z, holder: holder(p.hold), capture: p.c, taker: p.cap >= 0 ? holder(p.cap) : undefined, base: p.base >= 0 ? holder(p.base) : undefined })),
+    roads: pd.roads, seenEnemies: pd.foe, ownVehicles: pd.veh, veterans: pd.vet && pd.vet.map(v => ({ unit: v.who, kind: v.g, rank: RANKS[v.rank], x: v.x, z: v.z })), tickets: NS() === 3 && Array.isArray(pd.tk) ? Object.fromEntries(pd.tk.map((n, s) => [s === SIDE ? 'ours (' + facName(s) + ')' : facName(s), n])) : pd.tk,
+    ticketsNote: NS() === 3 ? 'by faction; a side with no tickets or without its main base is out, and the match goes on until one is left' : 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
     commandNet: pd.cn || undefined,
     personality: pd.per || undefined, difficulty: pd.dif || undefined, enemyHabits: pd.hab && pd.hab.length ? pd.hab : undefined,   // W17: the side's AI general, and the roads the enemy is seen to use again and again
@@ -392,7 +403,7 @@ function stateView(logN) {
 const pickView = v => { if (!v) return null; const o = {}; for (const k of ['doc', 'post', 'gate', 'atkT', 'ops', 'fm', 'sc', 'hit', 'focus', 'thr', 'want', 'res', 'ev', 'mev', 'gue', 'per', 'dif', 'hab']) if (v[k] !== undefined && v[k] !== null && !(Array.isArray(v[k]) && v[k].length === 0)) o[k] = v[k]; return o; };
 
 /* ---------------------------------------------------------------- tools */
-const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone; ww2 has no lav/heli/lift/drone; with recovery on, also arv amb rpr: recovery vehicle, ambulance, repair truck)' };
+const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone, and the strategic weapon of your side: strat (the bomber) or, for the Insurgents, svbied and shahed; ww2 has no lav/heli/lift/drone/svbied/shahed; with recovery on, also arv amb rpr: recovery vehicle, ambulance, repair truck)' };
 const siteId = { type: 'integer', description: 'site id (from get_state or ask_view)' };
 const xz = { x: { type: 'number', description: 'map x, metres' }, z: { type: 'number', description: 'map z, metres' } };
 /* a route: 1-8 waypoints [{x, z}] the squads walk through, in order, before the target; flattened into rt */
@@ -505,6 +516,16 @@ const TOOLS = [
   { name: 'strike', description: 'Target a known enemy site (id from knownEnemySites, not dead, recently seen) for an artillery mission. Refused as unknown if the sighting is stale or never made.',
     inputSchema: { type: 'object', properties: { id: { type: 'integer', description: 'enemy site id from knownEnemySites' }, why: WHYP }, required: ['id'], additionalProperties: false },
     run: async a => { const e = need(a, { id: ['i', true], why: ['s', false] }); if (e) throw new Error(e); return runCmd(Object.assign({ c: 'strike' }, pick(a, ['id', 'why']))); } },
+  { name: 'strategic_strike', description: 'A strategic strike (very expensive, one at a time, a massive burst that destroys buildings and vehicles and harms your own troops nearby when friendly fire is on): your side\'s bomber (weapon strat: B-2 or Tu-160 today, He 177 or B-17 in 1944; it climbs, runs straight and high over the target and drops its stick, then flies home and is back in the reserve) or, for a side with no air force (the Insurgents), the heavy truck bomb (svbied: drives the roads to the target and goes off) or a salvo of 5 long-range one-way drones (shahed). The weapon must be in your reserve: produce it first (produce_unit kind strat, svbied or shahed; at most 2 owned and 1 out at a time). Target: an enemy site or supply base you know (site_id), a point index (point), or x, z. heading: the bomber\'s run, radians (default from your base to the target). weapon defaults to the first your reserve has. Accepted with the strike id (get_strikes follows it) or refused: fac (your side has no such weapon), res (none in the reserve), slive (one of that weapon already out), pop (over the population budget), id, map, sdr (no drones in this room), mv (the truck needs the road-network map). Unlike the AI, your order is not held back for friends or civilians under the pattern: look first.',
+    inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['strat', 'svbied', 'shahed'] }, site_id: { type: 'integer', description: 'enemy site or supply base id (knownEnemySites)' }, point: { type: 'integer', minimum: 0, description: 'point index from get_state map.points' }, ...xz, heading: { type: 'number', description: 'run heading of a bomber, radians (0 = toward +x)' }, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { weapon: ['w', false, ['strat', 'svbied', 'shahed']], site_id: ['i', false, 0, 999999], point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], heading: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.site_id === undefined && a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give site_id, point, or both x and z');
+      return runCmd(Object.assign({ c: 'bomb' }, pick(a, ['weapon', 'site_id', 'point', 'x', 'z', 'heading', 'why'], { weapon: 'k', site_id: 'id', point: 'pi', heading: 'a' })), 'cmd');
+    } },
+  { name: 'get_strikes', description: 'Ask the host for your side\'s strategic weapons: per weapon (strat, svbied, shahed) how many are in the reserve, queued and out, with the cost [energy, metal, seconds], the caps, and the last strikes (id, weapon, target x z, state in words, who ordered it, age in seconds, ended, result ok or lost). One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'stk' }) },
   { name: 'send_command', description: 'Send any command object to the host, or (with question instead of command) a raw question. command is {"c": name, ...params}; d is "eco" for the economy names (build, make, cancel, prio, scrap, def, keep, scout, strike: the dedicated tools are easier) and "cmd" for everything else (default eco; the host ignores d, it is only a hint).\n'
     + 'GENERAL COMMANDS (ids = squad ids from get_state general.squads, at most 24; pi = point index from get_state map.points; x, z in metres; why = short note for the log). Unless noted, the answer is accepted with an operation id or refused with a Portuguese reason:\n'
     + '- atk {pi | x,z (nearest point within 600 m) | ri,s; ids?: squads to use (omit for the AI\'s pick), sd?: 1 to split, H?: seconds to H-hour 20-300, smk?: 0 for no smoke, fx,fz?: fire-support point, x2,z2?: second approach} planned assault on a point; refused link (point not adjacent to one of ours), own, busy, max (at most the side\'s fronts: 3 cautious, 4 balanced, 5 aggressive), sq, tk.\n'
@@ -553,7 +574,7 @@ const TOOLS = [
       const c = Object.assign({ c: 'req', k: a.kind }, pick(a, ['x', 'z', 'ids', 'why'])); if (a.kind === 'fire' && a.rounds !== undefined) c.n = a.rounds; else if (a.count !== undefined) c.n = a.count;
       return runCmd(withRt(c, a), 'cmd');
     } },
-  { name: 'build_defence', description: 'Order a field fortification at a place: trench; sandbag (a sandbag emplacement); bunker (a machine-gun nest); atpost (an anti-tank post); post (an observation tower); aapos (an AA position: a fixed anti-aircraft gun, one from the reserve when the economy is on); mineat or mineap (a minefield, anti-tank or anti-personnel, of 5 mines across the way to the enemy); sup (a supply base); radio (a radio relay: a mast that extends the command net about 2.8 km around it once built, at most 3 a side, its own cap apart from the field works; it can be jammed, located by direction finding and destroyed). The general picks the builder (an engineer squad first, then the nearest free one) unless you name ids. Works start once the builders are there and no enemy is near. Optional facing (radians; default toward the enemy base) and route (every kind but sup) the builders walk first. Accepted with an operation id or refused (way, sq, map, rt, fcap: the side already has its most trenches and sandbags (6), postcap: the side already has its most posts of that kind, cost: short of energy or metal, rcap: the side already has its 3 radio relays, crl: the relay\'s server is too old, res: no fixed AA in the reserve, max, mcap: the side\'s mine limit, off, and for sup the supply-base reasons: steep, road, obj, base, foe, cap, reach).',
+  { name: 'build_defence', description: 'Order a field fortification at a place: trench; sandbag (a sandbag emplacement); bunker (a machine-gun nest); atpost (an anti-tank post); post (an observation tower); aapos (an AA position: a fixed anti-aircraft gun, one from the reserve when the economy is on); mineat or mineap (a minefield, anti-tank or anti-personnel, of 5 mines across the way to the enemy); sup (a supply base); radio (a radio relay: a mast that extends the command net about 2.8 km around it once built, at most 3 a side, its own cap apart from the field works; it can be jammed, located by direction finding and destroyed). The general picks the builder (an engineer squad first, then the nearest free one) unless you name ids. Works start once the builders are there and no enemy is near. Optional facing (radians; default toward the enemy base) and route (every kind but sup) the builders walk first. Accepted with an operation id or refused (way, sq, map, rt, fcap: the side already has its most trenches and sandbags (10, up to 20 with the economy and the points held), postcap: the side already has its most posts of that kind (caps grow the same way), cost: short of energy or metal (every kind costs: trench 4/6, sandbag 2/5, sup 50/80, a minefield 5/20), rcap: the side already has its 3 radio relays, crl: the relay\'s server is too old, res: no fixed AA in the reserve, max, mcap: the side\'s mine limit, off, and for sup the supply-base reasons: steep, road, obj, base, foe, cap, reach).',
     inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['trench', 'sandbag', 'bunker', 'atpost', 'post', 'aapos', 'mineat', 'mineap', 'sup', 'radio'] }, ...xz, facing: { type: 'number', description: 'heading in radians' }, ids: IDS, route: ROUTE, why: WHYP }, required: ['kind', 'x', 'z'], additionalProperties: false },
     run: async a => {
       const e = need(a, { kind: ['w', true, ['trench', 'sandbag', 'bunker', 'atpost', 'post', 'aapos', 'mineat', 'mineap', 'sup', 'radio']], x: ['n', true], z: ['n', true], facing: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
@@ -658,7 +679,7 @@ const TOOLS = [
   { name: 'ask_view', description: 'Ask the host for the complete fog-limited view of your side right now: economy (stock, caps, sites with output and guards, deposits, queue, costs per unit kind with names), commander fields and the last 20 log lines. Bigger and slower than get_state (one question per second); use it for the cost table by unit and site kind, the resource deposits (dep: position, rich, own) and the production slots.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'view' }) },
-  { name: 'get_match_report', description: 'The after-action review of a match. match "current" (default) asks the host about the match on: while it runs, your side only (tickets and where they went, losses by kind, cost-effectiveness, the decisions that weighed most with how much they moved the margin, a ticket curve); once it is over, both sides. match "list" lists the matches the server keeps (newest first, kept 90 days; played and AI x AI tournaments); match "<era>/<name>" from that list returns that match\'s review. One host question a second, like the other asks.',
+  { name: 'get_match_report', description: 'The after-action review of a match. match "current" (default) asks the host about the match on: while it runs, your side only (tickets and where they went, losses by kind, cost-effectiveness, the decisions that weighed most with how much they moved the margin, a ticket curve); once it is over, every side. match "list" lists the matches the server keeps (newest first, kept 90 days; played and AI x AI tournaments); match "<era>/<name>" from that list returns that match\'s review. One host question a second, like the other asks.',
     inputSchema: { type: 'object', properties: { match: { type: 'string', description: 'current (default), list, or era/name from the list' } }, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: matchReport },
   { name: 'seat', description: 'Claim or release the general\'s seat of your side, or just report who holds it. Commands are refused unless this bridge holds the seat; one general per side (a human or this bridge), first come first served. A claim also takes over the domains you list (default ["eco"]: the economy; the attack is yours with the seat; defence and support stay with the AI unless you list "def" and "sup", and the AI then no longer decides there). Release hands every domain back to the AI at once.',
@@ -677,7 +698,14 @@ const TOOL = new Map(TOOLS.map(t => [t.name, t]));
 const listing = () => TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, ...(t.annotations ? { annotations: t.annotations } : {}) }));
 
 /* ---------------------------------------------------------------- MCP over stdio */
-const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. The same tools a person has on the general\'s view: campaigns (create_campaign, attach_operation), the threat board (get_threats, triage_threat, send_qrf, set_defence_policy), deposits and mines (claim_deposit, lay_minefield, clear_mines, sabotage), and a squad\'s card (get_missions, get_unit: what it sees and what it decides). The manoeuvre tools: get_tactical_map (a layer of what your side knows: enemy sight, traffic, choke points), plan_approaches (three ways to an objective with time and exposure), order_maneuver (fix and flank by an approach, envelop, turn, penetrate), plan_ambush (on any road) and guard_route (a junction or bridge on your flank). You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+const INSTRUCTIONS_ = 'You are the general of side ' + SIDE + ' (' + facName(SIDE) + ') in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. The same tools a person has on the general\'s view: campaigns (create_campaign, attach_operation), the threat board (get_threats, triage_threat, send_qrf, set_defence_policy), deposits and mines (claim_deposit, lay_minefield, clear_mines, sabotage), and a squad\'s card (get_missions, get_unit: what it sees and what it decides). The manoeuvre tools: get_tactical_map (a layer of what your side knows: enemy sight, traffic, choke points), plan_approaches (three ways to an objective with time and exposure), order_maneuver (fix and flank by an approach, envelop, turn, penetrate), plan_ambush (on any road) and guard_route (a junction or bridge on your flank). You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+/* the instructions name the faction and, with 3 sides, both enemies; before the welcome the count is unknown in modern, so they say both cases */
+const INSTRUCTIONS = () => {
+  const three = SIDE === 2 || NS() === 3, sure = SIDE === 2 || !!R.w, foes = [0, 1, 2].filter(s => s !== SIDE).map(facName);
+  if (ROOM !== 'modern') return INSTRUCTIONS_;
+  if (three && sure) return INSTRUCTIONS_ + ' This match has three sides (0 USA, 1 Russia, 2 Insurgents), all against all: your enemies are ' + foes.join(' and ') + ', and they also fight each other. Points, bases and tickets name the faction that holds them; a side with no tickets or without its main base is out, and the match goes on until one side is left. Pick which enemy to press by value and local chance, and do not let the leader in tickets run away.';
+  return INSTRUCTIONS_ + ' The modern front may have three sides (0 USA, 1 Russia, 2 Insurgents, all against all): get_state link.sides and link.enemies say which; with three, your two enemies also fight each other.';
+};
 const out = o => process.stdout.write(JSON.stringify(o) + '\n');
 const ok = (id, result) => out({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message, data) => out({ jsonrpc: '2.0', id, error: Object.assign({ code, message }, data !== undefined ? { data } : {}) });
@@ -696,11 +724,11 @@ async function handle(msg) {
       case 'initialize': {
         const want = params.protocolVersion;
         legacyVersion = LEGACY.includes(want) ? want : LEGACY[0];
-        return ok(id, { protocolVersion: legacyVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'ceu-general', version: VERSION }, instructions: INSTRUCTIONS });
+        return ok(id, { protocolVersion: legacyVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'ceu-general', version: VERSION }, instructions: INSTRUCTIONS() });
       }
       case 'ping': return ok(id, {});
       case 'server/discover':
-        return ok(id, { resultType: 'complete', supportedVersions: MODERN.concat(LEGACY), capabilities: { tools: { listChanged: false } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'ceu-general', version: VERSION } }, instructions: INSTRUCTIONS });
+        return ok(id, { resultType: 'complete', supportedVersions: MODERN.concat(LEGACY), capabilities: { tools: { listChanged: false } }, _meta: { 'io.modelcontextprotocol/serverInfo': { name: 'ceu-general', version: VERSION } }, instructions: INSTRUCTIONS() });
       case 'tools/list': return ok(id, Object.assign({ tools: listing() }, extra));
       case 'tools/call': {
         const t = typeof params.name === 'string' && TOOL.get(params.name);

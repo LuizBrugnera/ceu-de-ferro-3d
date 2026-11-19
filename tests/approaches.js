@@ -75,6 +75,7 @@ function field(o) {
 }
 {
   const E = field(), { $, S, Cm, tg, at, mk, sq } = E;
+  $('PR').on = 0;   // M2's own assault: with M3's procedures a strong point draws p12, whose recon walks to the assault positions (tests/procedures.js)
   const a = mk('road', 0, 0), b = mk('road', 1, 40), c3 = mk('road', 2, 80), ri0 = [a.ri, b.ri, c3.ri];
   $('cmdSense')(Cm, sq()); $('tmNow')(0);
   $('cmdAttack')(Cm, sq());
@@ -98,8 +99,10 @@ function field(o) {
     op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
     const O = op.O;
     const as = op.sq.filter(q => q.ord.k === 'assault'), ow = op.sq.filter(q => q.ord.k === 'overwatch');
+    const cut = (() => { try { return $('ORG').on ? $('ORG').poly.cut : 1; } catch (e) { return 1; } })();
+    const segNear = (p, c) => { let b = 1e9; for (let i = 1; i < p.length; i++) { const A = p[i - 1], B = p[i], dx = B.x - A.x, dz = B.z - A.z, L = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((c.x - A.x) * dx + (c.z - A.z) * dz) / L)); b = Math.min(b, Math.hypot(A.x + u * dx - c.x, A.z + u * dz - c.z)); } return b; };
     ok(op.st === 'go' && as.length >= 2 && as.every(q => q.ord.wp && q.ord.wp === q.apw), 'H-hour: ' + as.length + ' squads assault, each along its approach' + (ow.length ? ', ' + ow.length + ' covers them' : ''));
-    ok(as.every(q => { const p = q.ord.wp, e2 = p[p.length - 1], ap = op.ap[q.ape]; return Math.hypot(e2.x - O.x, e2.z - O.z) < 1 && p.some(c => Math.abs(c.x - ap.pos.x) < 1 && Math.abs(c.z - ap.pos.z) < 1); }), '  through its assault position, into the objective');
+    ok(as.every(q => { const p = q.ord.wp, e2 = p[p.length - 1], ap = op.ap[q.ape]; return Math.hypot(e2.x - O.x, e2.z - O.z) < 1 && segNear(p, ap.pos) <= cut; }), '  through its assault position (within ' + cut + ' m: the organic movement rounds the corners), into the objective');
     ok(ow.every(q => q.ord.wp === q.apv && Math.hypot(q.ord.x - op.ap[q.ape].pos.x, q.ord.z - op.ap[q.ape].pos.z) < 1), '  the cover fires from its element\'s assault position, gone there along the approach');
     console.log('    orders: ' + op.sq.map(q => q.ord.k + (q.ord.wp ? ' (way ' + (q.ord.wp.len / 1000).toFixed(2) + ' km)' : '')).join(', '));
     $('opEnd')(Cm, op);

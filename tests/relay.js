@@ -7,6 +7,7 @@ const N = require('./net'), { ok, done } = require('./harness');
   const h = await join('tank', 'abrams'), a = await join('inf', 'blueRifle'), b = await join('inf', 'redAT'), bad = await join('inf', 'schutze'), bad2 = await join('inf', 'nope');
   ok(h.w && h.w.inf === 1 && h.w.swap === 1, 'welcome says inf: 1');
   ok(a.w && b.w, 'a soldier of each side joins the modern room');
+  ok(h.w.man2 === 1 && a.w.man2 === 1 && b.w.man2 === 1, 'welcome says man2: 1 to a player, so a guest general may order the M7 manoeuvres (they were refused as "the room is old")');
   ok(!bad.w && bad.err && bad.err.code === 'model' && !bad2.w, 'a 1944 kit or an unknown one is refused there');
   const w2 = await join('inf', 'bazookaman', 'ww2'); ok(!!w2.w, 'and a 1944 kit joins the 1944 room');
   const none = async (c, t) => !(await c.wait(t, 150));

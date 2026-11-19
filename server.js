@@ -12,7 +12,8 @@
    rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
    rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs),
    br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg),
-   gq (the general's tools for everyone: gask missions, unit with an id, lots and mines)
+   gq (the general's tools for everyone: gask missions, unit with an id, lots and mines),
+   the tactical map (gask tmap: the asker's side's layer k, one of f v o t p k l, at 1 km; an older server answers shape)
    and brb (bridges built again: the rebuild is the work of kind 8 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
    at any narrow stretch of the river, the same kind 7 row placed by its own x z).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
@@ -518,7 +519,7 @@ RX.gcmd = (c, m) => {
 };
 /* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
    lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
-const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines'];
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap'];
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
   if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });

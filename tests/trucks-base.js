@@ -78,6 +78,25 @@ console.log('-- a ride waits for its squad, not for ever --');
     ok(!q.rd && !(u.trip && u.trip.rq === q), MAN_WAIT('the truck gave up after MAN.ride.wait s past when the squad was due, and goes home'));
   }
 }
+console.log('-- the planner\'s ride for a squad that joins a manoeuvre meanwhile (from cf-pontes-construir test) --');
+{
+  /* the bug: a fetch was sent for a squad far from its order; before it came the general took the squad for a manoeuvre (a squad with a ride
+     on its way is free for one); the car came, called it and boxed it away from a pontoon half laid, and the manoeuvre ended for want of it */
+  const fetch = man => {
+    const q = S.squads.find(q => q.team === t && !q.net && q.live >= 3 && !q.state && !q.lift && !q.rd && !q.op && q.men.some(m => !m.dead));
+    const L = q.men.find(m => !m.dead), p = $('railOf')(L.x, L.z), sg = q.ds || 1; q.ri = p.ri; q.s = p.s;
+    const u = $('errand')(t, 'car', q.ri, q.s + 900 * sg, [{ s: q.s, k: 'load', q }, { s: q.s - 1500 * sg, k: 'drop' }, { s: q.s + 900 * sg, k: 'bye' }]);
+    u.run.k = 'fetch'; u.run.q = q;
+    C.run(3); const way = u.run.legs[u.run.i].k;   // on its way to the squad
+    if (man) q.op = { k: 'tra', man: 1, over: false, sq: [q], id: 998 };   // the general takes the squad for a manoeuvre meanwhile
+    C.run(3); const r = { way, leg: u.run.legs[u.run.i].k, d: Math.round(Math.abs(u.s - q.s)) };
+    q.op = null; S.units.splice(S.units.indexOf(u), 1); return r;
+  };
+  const a = fetch(false);
+  ok(a.way === 'load' && a.leg === 'load', 'a fetch on its way to a squad of no manoeuvre keeps on to it (' + a.leg + ', ' + a.d + ' m off)');
+  const b = fetch(true);
+  ok(b.way === 'load' && b.leg === 'bye', 'the squad taken for a manoeuvre meanwhile: the car turns home and leaves it at its work (' + b.leg + ')');
+}
 function MAN_WAIT(s) { return s + ' (wait ' + $('MAN').ride.wait + ' s)'; }
 ok(H.nan(S) === null, 'no NaN');
 H.done();

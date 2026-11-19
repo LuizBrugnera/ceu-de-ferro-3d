@@ -5,7 +5,7 @@ Pela regra de entrega do capitão, nenhuma suíte, linha de base ou partida A/B 
 
 ## O que mudou
 
-Tudo no `Céu de Ferro 3D.html`. Há uma seção nova `M5` logo antes de `function boot()` e cinco linhas trocadas em `OPS.amb`, `OPS.blk` e `lgConvoy`.
+Tudo no `Céu de Ferro 3D.html`. Há uma seção nova `M5` no fim da simulação, logo antes do marcador `3D scene` (estava antes de `function boot()`, fora do harness: corrigido em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/75) e cinco linhas trocadas em `OPS.amb`, `OPS.blk` e `lgConvoy`.
 
 - **Custo tático do trecho** (`m5Edge`, `m5Cost`). O custo de hoje (comprimento × classe × (1 + `C.et`)) passa a ser multiplicado por 1 + média, nas amostras do trecho, do mapa tático M1. Os pesos são: vigilância inimiga `kV` 3, força `kF` 1,5, nossas perdas `kP` 0,6 e tráfego inimigo `kT` 0,3. O resultado fica em cache por lado até a próxima renovação do mapa (`C.m5e`, `C.m5n`).
 - **Viagem tática** (`tripTac`). Usa o mesmo registro do `tripTo`, mas com esse custo. O `tripTo` foi embrulhado: toda viagem de veículo da IA usa o custo tático quando o lado tem mapa. Caminhões e carros sorteiam ainda até +15% por trecho (`M5.jit`). Assim os caminhos de custo parecido se alternam e não viram hábito para o inimigo emboscar. Hoje passam pelo `tripTo` a volta da carona, o desvio de ponte caída (W20) e o `back` de uma viagem.
@@ -30,17 +30,20 @@ Tudo no `Céu de Ferro 3D.html`. Há uma seção nova `M5` logo antes de `functi
 - O servidor sobe em 127.0.0.1 e a página carrega no Chrome. A demonstração IA × IA roda sem erro novo no console (só o 404 que já existia).
 - Uma chamada de cada função no console da demonstração: `m5Edge` dá multiplicadores entre 1 e 3,1. `tripTo` de um caminhão gerou uma viagem tática (`tac: 1`, 2,2 km). `m5Spot`, `m5Lg` e `m5Home` responderam sem erro.
 
+## Testado em 9f2a313 (tarefa cf-testar-ia)
+
+- **Bug corrigido** em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/75: o bloco do M5 estava depois do marcador `3D scene`, fora da parte que o harness (e toda execução sem navegador) carrega. Sem navegador o `lgConvoy`, o `OPS.amb` e o `OPS.blk` lançavam `ReferenceError` (`m5Lg`, `m5Tank`) e nenhuma suíte rodava o M5. O bloco foi para a simulação (com o M6, que estava depois dele) e `tests/sim-split.js` guarda isso.
+- **Bug corrigido** em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/105: num mapa sem rede de estradas (`S.T.net` ausente, mapa antigo) o `m5Spot` e o `m5Go` liam `S.T.net.e` e a partida morria (`tests/field.js`). Agora o M5 não age sem rede.
+- **Bug corrigido** em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/97: o M5 não chamava os tanques do assalto nos estados `mv`/`rec` do M3.
+- `tests/sim-split.js`: partida de 150 s com logística física (4 comboios) e o M5 no mapa antigo: ok. `tests/ambush.js`, `tests/approaches.js`, `tests/tmap.js`, `tests/campaign.js`: passaram.
+- `tests/bridges.js` (3), `tests/bridges-build.js` (3), `tests/logistics.js` (1), `tests/field.js` (2): falham **igual com `M5.on = 0`**: não são do M5.
+- Partidas no harness: 1944 12 min, 1 tanque saiu do trilho para apoiar um assalto (`u.ai.m5`); hoje 15 min, nenhum. Sem erro.
+
 ## O que NÃO foi testado
 
-- Nenhuma suíte (`tests/*.js`), nenhuma partida longa, nenhum torneio A/B e nenhuma medição de custo por quadro.
-- Não foi verificado se:
-  - os tanques do assalto de fato chegam, seguram a posição e voltam;
-  - a viagem tática desiste demais. O `tripAI` larga a viagem com inimigo a menos de 600 m (`MANT.trip.fight`), e aí o tanque segue em linha reta pelo terreno, como antes;
-  - o tanque da emboscada chega antes do inimigo passar;
-  - o comboio alterna o eixo;
-  - a nova fração de tempo de veículo no trilho fica abaixo dos ~86% medidos pelo scout.
-- Online: só o anfitrião roda isso (veículos sem `u.net`). Não foi testado com convidados nem com a passagem do anfitrião.
-- Os testes que existem para emboscada, bloqueio, carona, pontes e logística podem mudar de resultado. O tanque agora vem de mais longe, as viagens usam outro custo e o comboio sorteia o eixo.
+- Se os tanques do assalto chegam, seguram a posição e voltam; se o tanque da emboscada chega antes da passagem; se o comboio alterna o eixo; a fração de tempo no trilho (a medida da sonda não funcionou: `u.spd` não é o campo da velocidade).
+- O torneio A/B e o custo por quadro com e sem `M5.on`.
+- Online (só o anfitrião roda o M5).
 
 ## Riscos
 

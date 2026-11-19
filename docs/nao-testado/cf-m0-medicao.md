@@ -1,5 +1,9 @@
 # cf-m0-medicao: medição da manobra do general, pacote M0 (testado em parte)
 
+## Testado em 806508d: ok (parte)
+- `tests/ana-man.js`: **all passed** (bfbba9e, depois de #75; antes ele morria com `ReferenceError: m5Tank`). `tests/ana-online.js`: **all passed** (depois do #96; a página-anfitriã era derrubada pelo heartbeat do relay nesta máquina carregada).
+- **Continua sem teste:** os casos novos de "parado primeiro" e do custo no `ana-man.js`, o custo do general no `balance.js` e a referência `tools/ref/manobra-base.json` refeita. O torneio de cerca de 75 min não rodou: o node estava saturado por outro torneio.
+
 Pedido do capitão: "ele nunca flanqueiam, ou tentam dominar ruas alternativas, tipo, dar a volta para emboscar uma rua movimentada". Este é o
 pacote M0 da proposta de manobra (todas as decisões D1–D12 na opção A): medir a manobra para que cada pacote seguinte prove que melhorou o
 general.

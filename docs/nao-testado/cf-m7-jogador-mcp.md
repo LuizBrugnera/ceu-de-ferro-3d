@@ -1,5 +1,13 @@
 # M7 Jogador e MCP: o que mudou e o que não foi testado
 
+## Testado em 806508d e 1cedd86 (parte)
+- MCP: `tests/mcp-general.js` **all passed** depois do #94. As recusas `ap` e `man2` do M7 (e `nofix`) não tinham o texto em português na ponte, e o teste esperava a versão 2.0.0 e não as ferramentas do M7.
+- `tests/approaches-relay.js`, `tests/ambush.js` (M4), `tests/tmap.js` e `tests/sim-split.js`: passam. `tests/gen-cmd.js`: a única falha era a checagem "sem aleatório", que lia blocos que não são comandos, corrigida no #107. A rodada inteira depois do conserto foi cortada pelo tempo limite no node carregado; os blocos que chegaram a rodar passaram.
+- `tests/approaches.js`: **falha em 2 checagens do M2** (fica para o teste do M2): uma reunião à vista (`v 0.87`) e o tempo de um pedaço da busca (34–45 ms, medido num node muito carregado).
+- Execução headless (1cedd86, 1944, semente 9): `genCmd(0, {c:'man', k:'fixflank', pi})` abre a manobra. O log diz "Fixar e flanquear contra G · Vila do Moinho: fixação a 16° do eixo, manobra por 52° (1,6 km, 24% à vista), 2 esquadras". As esquadras saem (`go`), embarcam e desembarcam do caminhão como previsto. Em 480 s de partida a hora H ainda não tinha chegado (a caminhada é longa). As fases seguintes não foram vistas.
+- Navegador (1cedd86), Visão de General com o comando assumido: a linha de manobras (`#gcM7`) cabe na coluna em 1280 e 1920 px (`scrollWidth === clientWidth`, nenhum botão fora). A abordagem (Auto, A1-A3), a guarda (Posto, Minas) e os chips de camada aparecem. `gask ap` sobre Vila do Moinho volta com 3 abordagens (87° 8,8 min 11% à vista; 6° 6,3 min 21%; 76° 10,9 min 9%).
+- **Continua sem teste:** o desenho das abordagens no mapa e os botões "Fixar e flanquear por An" e "Envolver"; a hora H, o fogo, o assalto e "tomado"; `envelop`, `turn`, `penet` e a guarda com minas numa partida; o relay com convidado mandando as manobras e com servidor antigo; as 5 ferramentas MCP contra um anfitrião real; o `tests/m7.js` sugerido abaixo.
+
 Tarefa `cf-m7-jogador-mcp`, pacote M7 da proposta de manobra do general (§13, §15, §17; decisões D1-D12 = A).
 Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado**. Rodou só a checagem de fumaça: o servidor sobe e a página carrega no Chrome sem erro lançado (os seis tipos novos e a camada nova aparecem registrados).
 

@@ -81,10 +81,13 @@ console.log('-- held at the bank, and the way round --');
   ok(held && !u.dead && held.d < b.gw + 60 && !held.wet, 'it stops at the bank (' + Math.round(held ? held.d : -1) + ' m from the middle of the river), not in it'); g.step(dt);
   g.run(BR.step * 2 + .5, () => { u.ctl.drive = 1; });
   ok(!!u.trip && !uses(u.trip.p, b) && L.some(c => c !== b && uses(u.trip.p, c)), 'brStep sends it round by another bridge (a trip of ' + Math.round(u.trip ? u.trip.p.len : 0) + ' m)');
+  S.units.splice(S.units.indexOf(u), 1);   // the first one, on its way round, off the road: else the two meet head-on on it (vehicle collisions)
   const v = $('addUnit')('truck', 0, 0, 0, null, false, ri, sb + 600, 0); $('place')(v);
   for (const c of L) down(c); g.step(dt);
-  let vh = 0; g.run(40 + BR.step * 2, () => { v.ctl.drive = 1; if (v.brT > S.t - .1) vh++; });
+  let vh = 0, lw = v.brW || 0; const looks = []; g.run(40 + BR.step * 2, () => { v.ctl.drive = 1; if (v.brT > S.t - .1) vh++; if ((v.brW || 0) !== lw) { lw = v.brW; looks.push(S.t); } });
   ok(vh > 0 && !v.trip && !v.dead, 'with no bridge left it holds at the bank and waits');
+  const gap = Math.max(...looks.slice(1).map((t, i) => t - looks[i]));
+  ok(BR.hold === 8 && looks.length >= 3 && gap <= BR.hold + BR.step + .5, 'and looks again for a way every ' + gap.toFixed(1) + ' s (BR.hold ' + BR.hold + ' s, ' + looks.length + ' looks in ' + Math.round(40 + BR.step * 2) + ' s)');
 }
 
 console.log('-- the pontoon --');
@@ -133,7 +136,7 @@ for (const era of ['modern', 'ww2']) {
   const sq = $2('manFree')(S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state));
   const b = L.find(b => b.c === 1 && b.ends.some(e => $2('brHome')(t, e))), e = b.ends.find(e => $2('brHome')(t, e));
   const ux = (e.x - b.x) / $2('hdist')(e, b), uz = (e.z - b.z) / $2('hdist')(e, b);
-  const q0 = sq[0], put = (q, d) => q.men.forEach((m, i) => { if (!m.dead) { m.x = e.x + ux * d + uz * (i - 2) * 2; m.z = e.z + uz * d - ux * (i - 2) * 2; m.y = $2('manY')(m.x, m.z); } });
+  const q0 = sq[0], put = (q, d) => { q.men.forEach((m, i) => { if (!m.dead) { m.x = e.x + ux * d + uz * (i - 2) * 2; m.z = e.z + uz * d - ux * (i - 2) * 2; m.y = $2('manY')(m.x, m.z); } }); const p = $2('railOf')(e.x + ux * d, e.z + uz * d); q.ri = p.ri; q.s = p.s; q.tp = null; };   // the squad's place on its road moved with its men: else they walk back to where it was
   put(q0, 150);   // a free squad brought 150 m short of the bridge's end on this bank: the walk is not what is tested here
   const seen = new Set(), watch = () => { for (const e of S.glog.l[t]) seen.add(e.s); };
   const r = $2('genCmd')(t, { c: 'man', k: 'demolish', x: b.x, z: b.z }, 'sys');
@@ -151,7 +154,8 @@ for (const era of ['modern', 'ww2']) {
   ok(!c2.ok && c2.why === 'whole', 'cross at a bridge that stands: refused (whole)');
   C.mcd = {};
   const c3 = $2('genCmd')(t, { c: 'man', k: 'cross', x: b.x, z: b.z }, 'sys'), op2 = C.ops.find(o => o.k === 'tra' && !o.over);
-  if (op2 && op2.sq[0]) { put(op2.sq[0], 120); const p = $2('railOf')(e.x, e.z); $2('opTake')(op2, op2.sq[0], { k: 'move', ri: p.ri, s: p.s, x: e.x, z: e.z, R: 4, fast: 1 }); }   // brought near as above
+  if (op2 && op2.sq[0]) { put(op2.sq[0], 120); const p = $2('railOf')(e.x, e.z);   // brought near as above
+    $2('opTake')(op2, op2.sq[0], { k: 'move', ri: p.ri, s: p.s, x: e.x, z: e.z, R: 4, fast: 1 }); }   // brought near as above
   ok(c3.ok && op2 && op2.b === b.i, 'cross (the general\'s command) at it: a squad takes a pontoon there (' + (c3.why || 'ok') + ')');
   const tc = S.t; let tp = null; g2.run(420, () => { if ($2('brOpen')(b) && tp === null) tp = S.t; return tp === null; }); g2.run(8);
   ok(tp !== null && op2 && op2.over && tp - tc > 120, 'the pontoon is laid and the crossing open ' + (tp === null ? '-' : Math.round(tp - tc)) + ' s later (2 to 4 min of it the laying); the manoeuvre ends');
@@ -164,10 +168,19 @@ console.log('-- the AI chooses them --');
   g3.run(60);
   const b = L.find(b => b.c === 1 && b.ends.some(e => $3('brHome')(0, e)));
   const far = b.ends.find(e => !$3('brHome')(0, e));
-  C.known.push(...[0, 1].map(i => ({ team: 1, kind: 'tank', sx: far.x + 60 * i, sz: far.z + 40, dead: false, seenT: S.t, man: false })));
-  const X = { t: 0, C, sq: S.squads.filter(q => q.team === 0), free: $3('manFree')(S.squads.filter(q => q.team === 0 && !q.net && q.live > 0 && !q.state)), room: 3 };
+  /* enemy tanks known at the far end, as many as outweigh what of its own holds this bank (how much that is at 60 s depends on the seed and the population caps) */
+  const BRa = $3('BR').ai, eH = b.ends.find(e => $3('brHome')(0, e)), mine = $3('brOwn')(0, eH, BRa.foe, true);
+  let nk = 0; while (nk < 2 || ($3('brFoe')(C, far, BRa.near, false) * BRa.held <= mine && nk < 20)) { C.known.push({ team: 1, kind: 'tank', sx: far.x + 30 * (nk % 4), sz: far.z + 40 + 20 * (nk >> 2), dead: false, seenT: S.t, man: false }); nk++; }
+  const X = { t: 0, C, sq: S.squads.filter(q => q.team === 0), free: [], room: 3 };
+  const home = $3('BR').ai.reach, e = b.ends.find(e => $3('brHome')(0, e));
+  ok(!$3('MANG').dem(C, X).some(c => c.res.b === b), 'no free squad on its bank: no demolition (nobody to carry the charges)');
+  /* which squads are free at 60 s depends on the seed and on every other system: a squad of its own made free near the home end, as the general would have one */
+  const q = S.squads.filter(q => q.team === 0 && q.live > 0 && !q.net && q.job !== 'fpost').sort((a, c) => $3('hdist')(a.men.find(m => !m.dead), e) - $3('hdist')(c.men.find(m => !m.dead), e))[0];
+  const ux = (e.x - far.x) / $3('hdist')(e, far), uz = (e.z - far.z) / $3('hdist')(e, far);   // back from the far end, on dry land
+  q.men.forEach((m, i) => { if (!m.dead) { m.x = e.x + 80 * ux + 3 * i * uz; m.z = e.z + 80 * uz - 3 * i * ux; } }); X.free = [q];
+  ok($3('brHome')(0, q.men.find(m => !m.dead)) && $3('hdist')(q.men.find(m => !m.dead), e) < home, 'a free squad of its own on the home bank, within reach of the bridge');
   const cand = $3('MANG').dem(C, X).filter(c => c.res.b === b);
-  ok(cand.length === 1 && cand[0].sc >= $3('MAN').min, 'two enemy tanks known at the far end, nobody of its own across: demolition is a candidate (score ' + (cand[0] ? cand[0].sc.toFixed(2) : '-') + ')');
+  ok(cand.length === 1 && cand[0].sc >= $3('MAN').min, nk + ' enemy tanks known at the far end (more than its own on this bank hold), nobody of its own across: demolition is a candidate (score ' + (cand[0] ? cand[0].sc.toFixed(2) : '-') + ')');
   C.known.length = 0;
   ok(!$3('MANG').dem(C, X).some(c => c.res.b === b), 'with the enemy far from the bridge it is not');
   for (const c of L) $3('hitObj')(c.o, 1e5, null); g3.step(dt);

@@ -1,5 +1,9 @@
 # cf-mapa-cidades: cidades nos mapas (não testado)
 
+## Testado em 1cedd86: ok (parte)
+- Navegador, mapa do General em 1280 e 1920 px (Assistir, moderna): aparecem os nomes das aldeias e vilas (Aldeia do Açude, Aldeia da Várzea, Aldeia de Alto, Aldeia da Capela) e os do modo conquista (Vila do Moinho, Vila das Oliveiras). Não vi lote de instalação da sede desenhado. Nenhum erro no console.
+- **Continua sem teste:** as pegadas tingidas no minimapa (não conferidas de perto); o mapa de tiro (artilharia, M) e o mapa do drone com zoom; o fade dos nomes com o zoom; WW2; partida online com dois humanos; mapas antigos sem `T.net`; a orientação das pegadas em povoados longe de estrada. Os rótulos ficam amontoados perto dos pontos de conquista no mapa do General: é estético e não foi mexido.
+
 ## O que mudou
 - `Céu de Ferro 3D.html`: novas `burgAng`, `drawTownsFoot`, `townLabel`, `drawTownNames` (antes de `mapImg`).
 - `mapImg` assa a pegada de cada lugar construído (`T.burgs`: vila-sede, vila, aldeia, povoado) como retângulo tingido (ru × rv) girado ao longo da estrada mais próxima. Vale para o minimapa (`mapCv`), o mapa de tiro/artilharia (`mapBig`), o mapa do drone e o mapa do General (`genImg`), que usam `mapImg`.

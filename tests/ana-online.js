@@ -76,6 +76,7 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   h2.close(); g2.close(); g.close();
   for (const n of list('ww2')) fs.unlinkSync(path.join(DIR, 'ww2', n));
   const C = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: 5, ana: true }), $ = C.$, Net = $('Net');
+  C.newState('ww2', 'tiger', { cls: 'tank' });   // the battlefield built once before it connects: a first newState in the welcome can outlast the relay's 10 s heartbeat on a loaded machine (1006)
   await new Promise((res, rej) => { Net.ui.welcome = () => { C.newState('ww2', 'tiger', { net: true, cls: 'tank', host: Net.host === Net.id }); res(); }; Net.ui.refused = c => rej(new Error(c)); Net.connect('ww2', 'Host', 'tank', 'tiger'); });
   const S = () => $('S'); let i = 0;
   for (; i < 60 * 40; i++) { C.step(1 / 60); Net.tick(1 / 60); if (i === 60 * 32) S().cq.T = .1; if (i % 4 === 0) await new Promise(r => setImmediate(r)); }

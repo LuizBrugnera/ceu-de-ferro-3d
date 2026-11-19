@@ -588,6 +588,12 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
               <button class="tab" role="tab" type="button" data-wx="neblina" aria-selected="false"><b>Neblina</b><span>baixa</span></button>
               <button class="tab" role="tab" type="button" data-wx="variavel" aria-selected="false"><b>Variável</b><span>muda</span></button>
             </div>
+            <p class="hg-setl">Câmera das armas (tecla ` alterna tela cheia)</p>
+            <div class="seg sky-seg" id="wcams" role="tablist" aria-label="Câmera das armas">
+              <button class="tab" role="tab" type="button" data-wc="0" aria-selected="false"><b>Desligada</b><span>sem câmera</span></button>
+              <button class="tab" role="tab" type="button" data-wc="1" aria-selected="true"><b>Ligada</b><span>bombas e mísseis</span></button>
+              <button class="tab" role="tab" type="button" data-wc="2" aria-selected="false"><b>Com artilharia</b><span>obuses e morteiros</span></button>
+            </div>
             <h3>General da IA</h3>
             <p class="hg-setl">Personalidade</p>
             <div class="seg sky-seg gen-seg" id="pers" role="tablist" aria-label="Personalidade do general da IA">
@@ -31354,6 +31360,7 @@ addEventListener('keydown', e => {
   }
 });
 const skyKeys = () => [['6', 'Visão noturna, na época atual: liga e desliga. À noite, a olho nu se vê a 30% do alcance; com visão noturna, a 60%; a mira térmica dos blindados e das aeronaves vê a 80%'],
+  ['`', 'Câmera da arma: ao soltar uma bomba ou disparar um míssil ou foguete, uma janela no canto o segue até o impacto; essa tecla a leva à tela cheia e de volta (liga e desliga em Partida)'],
   ['7', 'Sinalizador (a pé ou em veículo de solo): ilumina uns ' + SKY.ill[0][0] + ' m por ' + SKY.ill[0][1] + ' s à sua frente, para os dois lados; ' + SKY.me.n + ' por vida. O clarão do seu tiro também revela você']];
 /* the hangar: the sky and the weather of the match, kept for the next visit */
 let skyPre = SKY.def, wxPre = SKY.wxDef;
@@ -31995,6 +32002,112 @@ ecoUnpack = (g => K => {
   if (!K || !Array.isArray(K.mm)) return;
   try { const L = [0, 1].map(t => (K.mm[t] ? mmUnpack(t, K.mm[t]) : null)); S.gmem = L; } catch (e) { /* a broken memory: the general starts without one */ }
 })(ecoUnpack);
+/* ---------- the weapon camera (not tested, see docs/nao-testado/cf-camera-bomba.md) ----------
+   A bomb let go, a rocket or a missile fired by the LOCAL player (S.my; nobody else's, online or off) is followed from behind and above in an inset
+   in the corner until it ends (its gone flag), then the view stays on the burst for WCAM.linger s. Backquote (`) swaps the inset with the full screen;
+   the main view's controls keep working, and a missile steered by hand (L, P.las) shows the laser spot in the inset so the pilot can steer by it.
+   mode: 0 off, 1 bombs, rockets and guided missiles, anti-tank rockets (default), 2 the same and howitzer and mortar rounds as well. It renders the same
+   scene with a second camera into a small render target, at hz frames a second, and the quad of it is drawn in a scissored corner of the canvas. */
+const WCAM = { key: 'ceu-de-ferro-3d-camarma', mode: 1, full: false, w: null, end: 0, seen: new WeakSet(), hz: 15, last: 0, linger: 2, inset: [384, 216], big: 960,
+  cp: null, h: null, p: null, d: null, rt: null, cam: null, sc: null, oc: null, kind: '' };
+try { const m = localStorage.getItem(WCAM.key); if (m === '0' || m === '1' || m === '2') WCAM.mode = +m; } catch (e) {}
+for (const b of document.querySelectorAll('.tab[data-wc]')) b.addEventListener('click', () => { WCAM.mode = +b.dataset.wc; if (!WCAM.mode) WCAM.w = null; try { localStorage.setItem(WCAM.key, String(WCAM.mode)); } catch (e) {} buildHangar(); });
+buildHangar = (g => () => { g(); for (const b of document.querySelectorAll('.tab[data-wc]')) b.setAttribute('aria-selected', String(+b.dataset.wc === WCAM.mode)); })(buildHangar);
+addEventListener('keydown', e => {
+  if (e.code !== 'Backquote' || e.repeat || playMode !== 'play' || !WCAM.w || /INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) return;
+  WCAM.full = !WCAM.full; WCAM.fit(); e.preventDefault();
+});
+/* the kind of weapon a flying thing is, for the camera: '' when it is not one it follows */
+WCAM.what = (o, list) => {
+  if (!o.by || o.by !== S.my || (o.o && o.o.frag)) return '';
+  if (list === S.missiles) return o.bomb ? 'BOMBA GUIADA' : o.sam ? 'MÍSSIL' : o.gnd ? 'MÍSSIL' : 'MÍSSIL';
+  if (o.k === 'bomb') return 'BOMBA';
+  if (o.k === 'rocket' || o.k === 'heat') return 'FOGUETE';
+  if (o.k === 'he' && WCAM.mode === 2) return 'PROJÉTIL';
+  return '';
+};
+/* a new weapon of mine in the air takes the camera */
+WCAM.scan = () => {
+  for (const list of [S.bombs, S.missiles]) for (const o of list) {
+    if (WCAM.seen.has(o)) continue;
+    WCAM.seen.add(o);
+    const k = WCAM.what(o, list); if (!k || o.gone) continue;
+    WCAM.w = o; WCAM.end = 0; WCAM.kind = k; WCAM.cp = null; WCAM.h = null; WCAM.p = { x: o.x, y: o.y, z: o.z }; WCAM.d = { x: 0, y: -.3, z: 0 };
+  }
+};
+WCAM.fit = () => {
+  if (!WCAM.rt) return;
+  const W = WCAM.full ? WCAM.big : WCAM.inset[0], H = WCAM.full ? Math.max(120, Math.round(WCAM.big * ch / cw)) : WCAM.inset[1];
+  WCAM.rt.setSize(W, H); WCAM.cam.aspect = WCAM.full ? cw / ch : W / H; WCAM.cam.updateProjectionMatrix(); WCAM.last = 0;
+};
+WCAM.rect = () => {
+  if (WCAM.full) return { x: 0, y: 0, w: cw, h: ch };
+  const w = Math.round(clamp(cw * .3, 200, 440)); return { x: 12, y: 58, w, h: Math.round(w * 9 / 16) };
+};
+/* where the eye goes: behind the weapon along its heading, above it, never into the ground; frozen once the weapon has ended */
+WCAM.place = () => {
+  const o = WCAM.w, c = WCAM.cam;
+  if (!WCAM.end) {
+    const vx = o.vx !== undefined ? o.vx : o.d ? o.d.x : 0, vy = o.vy !== undefined ? o.vy : o.d ? o.d.y : 0, vz = o.vz !== undefined ? o.vz : o.d ? o.d.z : 0, V = Math.hypot(vx, vy, vz) || 1;
+    WCAM.p = { x: o.x, y: o.y, z: o.z }; WCAM.d = { x: vx / V, y: vy / V, z: vz / V };
+    const hl = Math.hypot(vx, vz);
+    if (hl > 1) { const n = { x: vx / hl, z: vz / hl }; WCAM.h = WCAM.h ? { x: WCAM.h.x + (n.x - WCAM.h.x) * .15, z: WCAM.h.z + (n.z - WCAM.h.z) * .15 } : n; }
+    else if (!WCAM.h) WCAM.h = { x: 1, z: 0 };
+    const hn = Math.hypot(WCAM.h.x, WCAM.h.z) || 1, dist = o.k === 'he' ? 18 : o.k === 'heat' ? 8 : 11;
+    const tx = o.x - WCAM.h.x / hn * dist, tz = o.z - WCAM.h.z / hn * dist, ty = Math.max(o.y + 3.5, hgt(tx, tz) + 2);
+    if (!WCAM.cp) WCAM.cp = { x: tx, y: ty, z: tz }; else { WCAM.cp.x += (tx - WCAM.cp.x) * .4; WCAM.cp.y += (ty - WCAM.cp.y) * .4; WCAM.cp.z += (tz - WCAM.cp.z) * .4; }
+    if (o.gone || o.dead || (o.life !== undefined && o.life <= 0 && o.k)) WCAM.end = S.t;
+  }
+  c.position.set(WCAM.cp.x, WCAM.cp.y, WCAM.cp.z); c.up.set(0, 1, 0);
+  c.lookAt(WCAM.p.x + WCAM.d.x * 25, WCAM.p.y + WCAM.d.y * 25, WCAM.p.z + WCAM.d.z * 25);
+  c.fov = WCAM.end ? 50 : 62; c.updateProjectionMatrix(); c.updateMatrixWorld();
+};
+/* after the main view: the second camera into the small target (at hz), then its picture into the corner of the canvas */
+WCAM.render = () => {
+  if (!WCAM.mode || playMode !== 'play' || !S || !S.my) { WCAM.w = null; return; }
+  WCAM.scan();
+  if (!WCAM.w) return;
+  if (WCAM.w.by !== S.my) { WCAM.w = null; return; }
+  if (!WCAM.rt) {
+    WCAM.rt = new THREE.WebGLRenderTarget(WCAM.inset[0], WCAM.inset[1], { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true });
+    WCAM.cam = new THREE.PerspectiveCamera(62, 16 / 9, 1, 30000);
+    WCAM.sc = new THREE.Scene(); WCAM.oc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    WCAM.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicMaterial({ map: WCAM.rt.texture, depthTest: false, depthWrite: false })));
+    WCAM.fit();
+  }
+  if (WCAM.end && S.t - WCAM.end > WCAM.linger) { WCAM.w = null; return; }
+  WCAM.place();
+  const now = performance.now();
+  if (now - WCAM.last >= 1000 / WCAM.hz) {
+    WCAM.last = now;
+    const cp = skyDome.position.clone(), sc0 = sparks.material.uniforms.scale.value, c = WCAM.cam;
+    skyDome.position.copy(c.position);
+    sparks.material.uniforms.scale.value = WCAM.rt.height / (2 * Math.tan(c.fov * Math.PI / 360));
+    if (wo && wo.bt) { const R = COV7.see + COV7.tile * .75; for (const me of wo.bt) { const k = me.userData.c; me.visible = (k.x - c.position.x) * (k.x - c.position.x) + (k.z - c.position.z) * (k.z - c.position.z) < R * R; } }
+    const old = renderer.getRenderTarget(); renderer.setRenderTarget(WCAM.rt); renderer.render(scene, c); renderer.setRenderTarget(old);
+    skyDome.position.copy(cp); sparks.material.uniforms.scale.value = sc0;
+  }
+  const r = WCAM.rect();
+  renderer.autoClear = false; renderer.setScissorTest(true);
+  renderer.setViewport(r.x, ch - r.y - r.h, r.w, r.h); renderer.setScissor(r.x, ch - r.y - r.h, r.w, r.h);
+  renderer.render(WCAM.sc, WCAM.oc);
+  renderer.setScissorTest(false); renderer.setViewport(0, 0, cw, ch); renderer.autoClear = true;
+};
+WCAM.hud = () => {
+  if (!WCAM.w || !WCAM.cam || playMode !== 'play' || !S || !S.my) return;
+  const r = WCAM.rect(), P = S.my, u = clamp(cw / 1000, .62, 1), acc = S.modern ? '#63d2e6' : '#e6b53a';
+  hx.strokeStyle = acc; hx.lineWidth = 2; hx.strokeRect(r.x, r.y, r.w, r.h);
+  const t = WCAM.kind + (WCAM.end ? ' · IMPACTO' : ''), sub = WCAM.full ? '` VOLTA À VISTA NORMAL' : '` TELA CHEIA';
+  hx.textBaseline = 'top'; txt(t, r.x + 8, r.y + 6, 11 * u, acc, 'left'); txt(sub, r.x + r.w - 8, r.y + 6, 10 * u, '#ffffff', 'right');
+  if (!WCAM.end && WCAM.w.target && P.las && WCAM.w.target === P.las) {   // steered by hand: where the laser spot is, seen from the missile
+    const v = new THREE.Vector3(P.las.x, P.las.y + 2, P.las.z).applyMatrix4(WCAM.cam.matrixWorldInverse);
+    if (v.z < 0) { v.applyMatrix4(WCAM.cam.projectionMatrix); const x = r.x + (v.x * .5 + .5) * r.w, y = r.y + (-v.y * .5 + .5) * r.h;
+      if (x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h) { hx.strokeStyle = '#ff5a3c'; hx.lineWidth = 1.5; hx.strokeRect(x - 6, y - 6, 12, 12); hx.beginPath(); hx.moveTo(x - 10, y); hx.lineTo(x + 10, y); hx.moveTo(x, y - 10); hx.lineTo(x, y + 10); hx.stroke(); } }
+    txt('GUIA À MÃO: O LASER É O QUADRADO', r.x + r.w / 2, r.y + r.h - 16 * u, 10 * u, '#ff5a3c', 'center');
+  }
+};
+render3d = (g => () => { g(); try { WCAM.render(); } catch (e) { WCAM.w = null; WCAM.mode = 0; renderer.setScissorTest(false); renderer.autoClear = true; } })(render3d);
+drawHud = (g => () => { g(); try { WCAM.hud(); } catch (e) { /* the inset's hud only */ } })(drawHud);
 function boot() {
   try {
     if (typeof THREE === 'undefined') throw new Error('three');

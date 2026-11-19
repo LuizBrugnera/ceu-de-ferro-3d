@@ -29843,6 +29843,550 @@ DRILLS.push({ id: 'escolta-ca', cls: 'inf', s: 'anticarro inimigo perto do carro
     const t = d.of; if (t && !t.dead && t !== A.tgt && known(A, m, t)) A.tgt = t;
     if (S.t - (d.at || 0) > 5) d.re = 1;   // he moves: the places again
   } });
+/* ---------- the guerrilla mind of the Insurgents' general (cf-guerrilha-mais; NOT TESTED, see docs/nao-testado/cf-guerrilha-mais.md) ----------
+   The captain: "adicione na mente do general insurgente táticas de guerrilha" and "e guerra não convencional": 23 tactics (GRL.nm, in the order
+   of the request), on top of the Insurgents' doctrine (P7, INS) and the general's strategies (STG). Only a side of the Insurgents (insT) whose
+   general is the AI, on the host (or solo), in a match of points (S.cq, map version 4): the USA and Russia keep their own doctrine.
+   Every GRL.every s the side scores each tactic from what it knows (grlSit: STG's situation and the guerrilla's own: the night, the villages it
+   holds and those whose people hate the enemy, a village of its own under attack, its weapon caches, the enemy's radios, trucks and landed
+   helicopters, abandoned vehicles) times the personality's weight (GRL.per: 'ins' the Insurgents' own, the others if the match gave the side
+   another) times a taste drawn once a match; the best GRL.top that fit (score GRL.min or more) are active, the ones already active counted
+   GRL.swap times better (hysteresis). Each choice and its reason go to the general's log (kind grl) and the AAR ("Táticas de guerrilha").
+   What an active tactic does reuses what the general already has:
+     man: the weight of each manoeuvre kind the side draws (mmMan wrapped: gue raid inf emb itd blk fnt dep flk cut trn);
+     doc: the doctrine's numbers (atk: the odds an assault wants, wd: the withdrawal, amb, def), through perDoc (stgDoc builds on it);
+     mix: the production plan (perMix);
+     act: one direct action of the side every GRL.act s at most, each tactic with its own wait (GRL.cd), through genCmd as 'ai' (fort mineat,
+       mineap, bunker; fire; dpol; man raid, infiltrate, harass, demolish; sabot; mil; sup) or a short move of free squads (grlGo: a manual
+       operation of the AI's own that ends after its life and gives them back to their posts);
+     and a few rules of its own: the disguise kept with less calm (mis), the false uniform (fal: grade, as the disguise is), the booby-trapped
+     abandoned vehicles (arm: S.grlBT), the propaganda that wears the enemy's tickets down (psi), the roadblocks' toll (blq), the squads that
+     scatter and meet again after a blow (dsp) and the prepared ways out of the villages (tun).
+   Tunnels (tactic 23) are not made: the ground has no underground and the soldiers no way through it; the prepared escape routes are.
+   No random number but the taste, drawn once a match. GRL.on 0 leaves all of it out. */
+const GRL = { on: 1, tick: 5, every: 15, top: 5, min: .35, swap: 1.3, act: 12, fail: 25, taste: [.85, 1.15], cap: [.3, 3],
+  nm: { evt: 'Evitar a batalha campal', emc: 'Emboscada complexa', ass: 'Assédio (atirar e sair)', not: 'Incursão noturna', slg: 'Sabotagem da logística',
+    esc: 'Esconderijos de armas nas vilas', mis: 'Mistura com a população', dsp: 'Dispersar e reagrupar', enx: 'Enxame', isc: 'Iscas e desvio',
+    urb: 'Defesa urbana', blq: 'Bloqueios de estrada', rec: 'Recrutamento', cac: 'Caça a alvos de valor', dsg: 'Guerra de desgaste', ret: 'Retaliação rápida',
+    inf: 'Infiltração atrás das linhas', sab: 'Sabotagem de instalações', psi: 'Guerra psicológica', fal: 'Uniforme e bandeira falsos', cmd: 'Cortar o comando',
+    arm: 'Armadilhas explosivas', tun: 'Rotas de fuga preparadas' },
+  per: {
+    ins: { evt: 1.3, emc: 1.4, ass: 1.2, not: 1.2, slg: 1.3, esc: 1.1, mis: 1.3, dsp: 1.1, enx: 1, isc: 1, urb: 1, blq: 1.1, rec: 1.2, cac: 1.1, dsg: 1.3, ret: 1.2, inf: 1.1, sab: 1.2, psi: 1.1, fal: 1, cmd: 1.1, arm: 1.2, tun: 1 },
+    gue: { evt: 1.4, emc: 1.3, ass: 1.3, not: 1.2, slg: 1.2, mis: 1.2, dsp: 1.2, enx: 1, dsg: 1.3, inf: 1.2, ret: 1.1 },
+    ret: { evt: 1.2, emc: 1.3, urb: 1.5, arm: 1.4, tun: 1.3, esc: 1.2, rec: 1.2, not: .8, inf: .7, enx: .7, ret: .8 },
+    blz: { enx: 1.5, not: 1.3, inf: 1.4, ret: 1.4, cac: 1.2, evt: .6, urb: .6, tun: .7, dsg: .7, esc: .8 },
+    art: { ass: 1.6, cac: 1.3, cmd: 1.3, isc: 1.2, emc: 1.1, enx: .8 },
+    log: { slg: 1.6, esc: 1.5, blq: 1.4, sab: 1.3, cmd: 1.2, dsg: 1.1 } },
+  man: { evt: { dep: 1.3, gue: 1.2, flk: .8, cut: .6, trn: .6 }, emc: { emb: 1.8, itd: 1.3 }, ass: { gue: 1.6 }, not: { raid: 1.8, inf: 1.4 }, slg: { itd: 1.6, blk: 1.4, raid: 1.2 },
+    enx: { raid: 1.3, inf: 1.3, flk: 1.2, cut: 1.2 }, isc: { fnt: 2, gue: 1.2 }, urb: { dep: 1.3 }, blq: { blk: 1.8 }, cac: { raid: 1.4 },
+    dsg: { gue: 1.3, raid: 1.2, emb: 1.2, flk: .8, cut: .7, trn: .7 }, inf: { inf: 1.8, raid: 1.3 }, sab: { raid: 1.3 }, cmd: { raid: 1.3 } },
+  doc: { evt: { atk: 1.3, wd: [.15] }, dsg: { atk: 1.2 }, emc: { amb: 1.3 }, urb: { def: 1.15 } },   // a number: times; [v]: plus
+  mix: { dsg: { squad: 1 }, evt: { tank: -1 }, slg: { car: 1 }, urb: { squad: 1 } },
+  cd: { evt: 30, emc: 30, ass: 60, not: 90, slg: 90, esc: 150, enx: 120, isc: 90, urb: 90, rec: 120, cac: 90, ret: 90, inf: 150, sab: 120, psi: 120, cmd: 90, arm: 60 },
+  evt: { r: 500, k: 2.5, n: 2, T: 120 },
+  ret: { r: 700, v: 2, lost: 120, far: 1500, weak: 4 },
+  ass: { n: 2 }, enx: { n: 3 }, cac: { n: 3, heli: 6, mem: 30 },
+  esc: { max: 3, near: 400, ring: [120, 200, 280] },
+  urb: { thr: 1500, out: [120, 260] },
+  dsp: { off: [350, 500], T: 180, keep: 30, ks: { raid: 1, gue: 1, emb: 1, itd: 1, inf: 1 } },
+  tun: { r: 260, lo: .5, fd: 300, n: 2, T: 120, every: 60 },
+  mis: { calm: 12, near: 100 }, fal: { calm: 20, near: 220 },
+  psi: { tk: .25, floor: .3 }, blq: { en: 5, mt: 4 },
+  arm: { max: 3, plant: 300, r: 3.5, blast: 10, dmg: 320, every: .5 } };
+const grlOn = t => !!(GRL.on && S && S.cq && !S.cq.ph && S.T.mv >= 4 && !(S.demo && !S.watch) && (!S.net || S.host) && insT(t) && S.cmd && S.cmd[t] && !S.cmd[t].dk && (genBy(t, 'atk') === 'ai' || genBy(t, 'def') === 'ai'));
+const grlAct = C => (C && C.grl && C.grl.on ? C.grl.act : null);
+const grlHas = (C, k) => { const A = grlAct(C); return !!(A && A[k]); };
+const grlHasT = (t, k) => !!(S && S.cmd && isSide(t) && S.cmd[t] && grlHas(S.cmd[t], k));
+/* the product of what the active tactics of side C say of key k in table T (GRL.man), within GRL.cap */
+function grlMul(C, T, k) {
+  const A = grlAct(C); if (!A) return 1;
+  let v = 1; for (const s in A) { const m = T[s]; if (m && m[k]) v *= m[k]; }
+  return clamp(v, GRL.cap[0], GRL.cap[1]);
+}
+const grlW = (C, k) => {
+  const P = S.per && S.per[C.t], W = GRL.per[P] || GRL.per.ins;
+  const T = C.grlTs || (C.grlTs = Object.fromEntries(Object.keys(GRL.nm).map(s => [s, GRL.taste[0] + (GRL.taste[1] - GRL.taste[0]) * Math.random()])));
+  return (W[k] || 1) * (T[k] || 1);
+};
+/* the side's free squads (a manoeuvre's), and a known enemy's place as the side knows it */
+const grlFree = t => manFree(S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state));
+const grlAt = (o, t) => ({ x: sX(o, t), z: sZ(o, t) });
+const grlOk = r => !!(r && r.ok);
+const grlNear = p => gNear(p.x, p.z);
+/* the enemy's things of value the side knows of: { k, o, x, z, val, nm } (the raid's assets, the landed helicopters, the radio men, the landed radios) */
+function grlTargets(C) {
+  const t = C.t, out = mbRaidAssets(t).filter(a => insFoe(t, a.o));
+  for (const p of S.planes) if (!p.dead && p.heli && insFoe(t, p) && p.y - hgt(p.x, p.z) < GRL.cac.heli && S.t - sT(p, t) < GRL.cac.mem && Number.isFinite(sX(p, t))) out.push({ k: 'heli', o: p, x: sX(p, t), z: sZ(p, t), val: 5, nm: 'o helicóptero inimigo pousado' });
+  for (const m of S.men) if (!m.dead && !m.in && insFoe(t, m) && m.def && m.def.rad && S.t - sT(m, t) < GRL.cac.mem && Number.isFinite(sX(m, t))) out.push({ k: 'radm', o: m, x: sX(m, t), z: sZ(m, t), val: 3, nm: 'o operador de rádio inimigo' });
+  for (const b of S.rad || []) if (!b.dead && insFoe(t, b) && spotted(b, t)) out.push({ k: 'radb', o: b, x: b.x, z: b.z, val: 3, nm: 'o rádio pousado inimigo' });
+  return out;
+}
+/* what side C knows of the war now, for its guerrilla: STG's situation (stgSit) and the guerrilla's own */
+function grlSit(C) {
+  const t = C.t, X = stgSit(C), Q = S.cq, B = S.T.burgs || [];
+  X.night = !!(S.sky && S.sky.L < SKY.dark);
+  const tw = Q.p.filter(p => p.tw), mine = tw.filter(p => p.hold === t), pv = C.grlPv || (C.grlPv = Q.p.map(p => p.hold));
+  Q.p.forEach((p, i) => { if (p.tw && pv[i] === t && p.hold !== t) C.grlLost = { p, T: S.t }; pv[i] = p.hold; });
+  X.hit = null;
+  for (const p of mine) { const v = cmdKnown(C, p.x, p.z, GRL.ret.r); if (v >= GRL.ret.v && (!X.hit || v > X.hit.v)) X.hit = { p, v, nm: gName(p) }; }
+  if (!X.hit && C.grlLost && S.t - C.grlLost.T < GRL.ret.lost) X.hit = { p: C.grlLost.p, v: 0, lost: 1, nm: gName(C.grlLost.p) };
+  X.twThr = mine.filter(p => cmdKnown(C, p.x, p.z, GRL.urb.thr) > 0).length;
+  X.mine = mine;
+  X.caches = S.sup.filter(b => !b.dead && b.team === t && insVil(b.x, b.z, 100)).length;
+  X.recr = [];
+  B.forEach((b, bi) => { if (!civHates(bi, t) && foes(t).some(e => civHates(bi, e)) && S.civs && S.civs.some(o => !o.dead && !o.gone && !o.net && o.g && o.g.b === b && o.mode < 4)) X.recr.push(bi); });
+  X.tg = grlTargets(C);
+  X.hv = X.tg.filter(a => a.k === 'heli' || a.k === 'rad' || a.k === 'radm' || a.k === 'radb' || a.k === 'art').length;
+  X.radT = X.tg.filter(a => a.k === 'rad' || a.k === 'radm' || a.k === 'radb' || (a.k === 'eco' && a.o.k === 'hq')).length;
+  X.inst = X.tg.filter(a => a.k === 'sup' || a.k === 'eco').length;
+  X.free = grlFree(t).length;
+  X.myOps = C.ops.filter(o => !o.over && (o.k === 'atk' || o.k === 'raid' || o.k === 'inf')).length;
+  X.manLive = C.ops.filter(o => !o.over && o.man && GRL.dsp.ks[o.k]).length;
+  X.amb = C.ops.filter(o => !o.over && (o.k === 'emb' || o.k === 'itd')).length;
+  X.infOps = C.ops.filter(o => !o.over && (o.k === 'inf' || o.k === 'raid')).length;
+  X.aband = S.units.filter(u => !u.dead && !u.gone && u.left > 0 && parked(u) && !u.grlBT).length;
+  X.br = brs().filter(b => !brDown(b)).length;
+  return X;
+}
+/* each tactic's score (0..2; under GRL.min it does not fit now) and why, from the situation X */
+function grlScore(C, X, k) {
+  const g = v => gN(v), R = X.R, tw = X.mine.length;
+  switch (k) {
+    case 'evt': return [.4 + (R < 1 ? .9 * (1 - R) + .3 : 0), 'força ' + g(R) + ' contra o inimigo conhecido: só lutar com vantagem local, recuar quando ele concentra'];
+    case 'emc': return [X.hab ? .6 + .25 * Math.min(3, X.hab) + (X.sap ? .2 : 0) : .2 + (X.amb ? .3 : 0), X.hab + ' hábito(s) de estrada do inimigo' + (X.amb ? ', ' + X.amb + ' emboscada(s) armada(s)' : '') + ': IED abre, fogo pega a coluna parada, saída rápida'];
+    case 'ass': return [.35 + .2 * Math.min(3, X.inst + X.art) + (X.oArt ? .3 : 0), X.inst + ' instalação(ões) e ' + X.art + ' canhão(ões) inimigos conhecidos, ' + X.oArt + ' morteiro(s) nosso(s): atirar e sair'];
+    case 'not': return [X.night ? .9 + .15 * Math.min(4, X.tg.length) : .05, X.night ? 'é noite e há ' + X.tg.length + ' alvo(s) conhecido(s) na retaguarda inimiga' : 'é dia'];
+    case 'slg': return [.3 + .3 * Math.min(3, X.sup + X.trk / 2) + (X.hab ? .2 : 0), X.sup + ' base(s) de suprimento e ' + X.trk + ' caminhão(ões) inimigos conhecidos: minar as estradas de suprimento, derrubar pontes'];
+    case 'esc': return [tw > X.caches ? .5 + .3 * Math.min(2, tw - X.caches) : .1, tw + ' vila(s) nossa(s) e ' + X.caches + ' esconderijo(s) de armas nelas'];
+    case 'mis': return [.3 + .25 * Math.min(3, tw) + (R < 1 ? .2 : 0), tw + ' vila(s) nossa(s): andar sem uniforme entre os civis'];
+    case 'dsp': return [.45 + .2 * Math.min(3, X.manLive), X.manLive + ' golpe(s) em curso: depois de cada um, separar e reagrupar'];
+    case 'enx': return [X.tg.length && X.free >= 3 ? .45 + .15 * Math.min(4, X.free) : .1, X.free + ' esquadra(s) livre(s) e ' + X.tg.length + ' alvo(s) conhecido(s): vários grupos pequenos no mesmo alvo'];
+    case 'isc': return [.3 + (X.myOps ? .6 : 0), X.myOps ? X.myOps + ' golpe(s) nosso(s) em curso: um ataque falso puxa a reação para longe' : 'nenhum golpe a encobrir'];
+    case 'urb': return [tw ? .4 + .3 * Math.min(2, X.twThr) + (R < 1 ? .3 : 0) : .05, tw + ' vila(s) nossa(s), ' + X.twThr + ' com inimigo por perto: fazer o inimigo pagar caro para entrar'];
+    case 'blq': return [.3 + (X.hab ? .3 : 0) + (tw ? .2 : 0) + (X.eco < 1 ? .2 : 0), 'postos de controle: imposto na estrada e emboscada (economia ' + g(X.eco) + ')'];
+    case 'rec': return [X.recr.length ? .7 + .3 * Math.min(2, X.recr.length) : .05, X.recr.length + ' vila(s) revoltada(s) contra o inimigo'];
+    case 'cac': return [X.hv ? .6 + .3 * Math.min(3, X.hv) : .1, X.hv + ' alvo(s) de valor conhecidos (rádios, artilharia, helicópteros pousados)'];
+    case 'dsg': return [.5 + (X.tkr < 1 ? .4 : 0) + (R < 1 ? .3 : 0), 'tíquetes ' + g(X.tkr) + ' e força ' + g(R) + ' do inimigo: perdas e economia dele valem mais que pontos'];
+    case 'ret': return [X.hit ? 1.6 : .05, X.hit ? (X.hit.lost ? 'o inimigo tomou ' : 'o inimigo ataca ') + X.hit.nm : 'nenhuma vila nossa atacada'];
+    case 'inf': return [X.inst ? .5 + .25 * Math.min(3, X.inst) : .2, X.inst + ' instalação(ões) inimiga(s) conhecida(s) atrás da linha'];
+    case 'sab': return [X.sap && (X.inst || X.br) ? .5 + .25 * Math.min(3, X.inst) + (X.br ? .1 : 0) : .1, X.inst + ' instalação(ões) e ' + X.br + ' ponte(s) para sabotar' + (X.sap ? '' : ', sem minas nem cargas nesta partida')];
+    case 'psi': return [tw ? .5 + .2 * Math.min(3, tw) : .1, tw + ' vila(s) nossa(s) para a propaganda'];
+    case 'fal': return [X.infOps ? 1 : .4, X.infOps ? X.infOps + ' grupo(s) atrás da linha inimiga: chegar perto sem ser reconhecido' : 'sem grupo atrás da linha agora'];
+    case 'cmd': return [X.radT ? .7 + .3 * Math.min(3, X.radT) : .1, X.radT + ' rádio(s) ou QG inimigo(s) conhecido(s)'];
+    case 'arm': return [.35 + (X.aband ? .3 : 0) + (X.sap && X.br ? .2 : 0) + (X.hab ? .1 : 0), X.aband + ' veículo(s) abandonado(s) e ' + X.br + ' ponte(s) para armadilhar'];
+    case 'tun': return [tw ? .4 + (R < 1 ? .5 : 0) + .2 * Math.min(2, X.twThr) : .05, tw + ' vila(s) nossa(s): rotas de fuga preparadas (túneis não existem no terreno)'];
+  }
+  return [0, ''];
+}
+/* each look: the active tactics of side C, logged when they change; the doctrine is built again with them */
+function grlPick(C, X) {
+  const t = C.t, st = C.grl, cur = st.act;
+  const l = Object.keys(GRL.nm).map(k => { const [b, why] = grlScore(C, X, k); return { k, b, v: b * grlW(C, k), why }; }).filter(c => c.b >= GRL.min);
+  l.sort((a, b) => b.v * (cur[b.k] ? GRL.swap : 1) - a.v * (cur[a.k] ? GRL.swap : 1));
+  const top = l.slice(0, GRL.top), act = {};
+  for (const c of top) act[c.k] = { v: c.v, why: c.why, T: cur[c.k] ? cur[c.k].T : S.t };
+  const add = top.filter(c => !cur[c.k]), gone = Object.keys(cur).filter(k => !act[k]);
+  st.act = act; st.l = l.slice(0, 9).map(c => ({ k: c.k, v: c.v, why: c.why, on: !!act[c.k] }));
+  for (const c of add) {
+    const alt = l.filter(o => !act[o.k]).slice(0, 2).map(o => GRL.nm[o.k].toLowerCase() + ' ' + gN(o.v)).join(', ');
+    gLog(t, 'grl', 'Tática de guerrilha: ' + GRL.nm[c.k] + ' — ' + c.why + ' (nota ' + gN(c.v) + (alt ? '; fora por ora: ' + alt : '') + ')', null, 'grl' + c.k);
+  }
+  for (const k of gone) gLog(t, 'grl', 'Tática deixada: ' + GRL.nm[k] + ' (' + (l.some(o => o.k === k) ? 'outras servem mais agora' : 'não serve mais à situação') + ')', null, 'grlx' + k);
+  if (add.length || gone.length) { C.stgB = (C.stgB || 0) + 1; stgDoc(C); }
+}
+/* a short move of squads qs of side C to P (each by its own way: way(q) its points before P), as a manual operation of the AI's own that ends
+   after life s and gives them back to their posts */
+function grlGo(C, qs, P, life, why, way) {
+  if (!qs.length) return null;
+  const op = gUsr(C, 'move', P.x, P.z), p = railOf(P.x, P.z); op.grl = { T: S.t + life, why };
+  for (const q of qs) {
+    const L = mbLead(q); if (!L) continue;
+    const via = (way && way(q)) || [], pts = [{ x: L.x, z: L.z }], F = via.concat([P]);
+    let ok = true;
+    for (const a of F) { const b = pts[pts.length - 1], f = footPath(C, b.x, b.z, a.x, a.z); if (!f) { ok = false; break; } pts.push(...f); }
+    gTake(op, q, Object.assign({ k: 'move', ri: p.ri, s: p.s, x: P.x, z: P.z, R: 14, quiet: 1, fast: 1 }, ok && pts.length > 1 ? { wp: polyOf(pts) } : {}));
+  }
+  return op;
+}
+/* a place to hide and meet near F, away from K: a village or wood (insRefuge), else the nearest point the side holds */
+function grlHide(t, F, K) {
+  const H = insRefuge(F, K); if (H) return H;
+  let b = null, bd = 3000; for (const p of gPts()) if (p.hold === t && hdist(p, F) < bd) { bd = hdist(p, F); b = p; }
+  return b ? { x: b.x, z: b.z } : null;
+}
+/* the enemy's centre of weight near (x, z) as side C knows it, else (x, z) itself pushed toward the enemy's base */
+function grlFoeAt(C, x, z, r) {
+  if (cmdKnown(C, x, z, r) > 0) return { x: KN.x, z: KN.z };
+  const e = lsFoeBase(C.t, x, z); return { x: x + (e.x - x) * .2, z: z + (e.z - z) * .2 };
+}
+/* a field of IEDs across road edge e of the network, at its middle (or where it passes nearest near); null when its own mines or bases are too near (insIedSite's rules) */
+function grlRoad(C, e, near) {
+  const t = C.t, E = S.T.net && S.T.net.e[e], L = E && E.smp; if (!L || L.length < 2) return null;
+  let i = L.length >> 1;
+  if (near) { let bd = 1e9; L.forEach((p, j) => { const d = hdist(p, near); if (d < bd) { bd = d; i = j; } }); }
+  const a = L[Math.max(0, i - 1)], b = L[Math.min(L.length - 1, i + 1)], p = L[i];
+  if (mines().some(o => !o.gone && o.team === t && hdist(o, p) < INS.ied.apart) || (S.base || []).some(B => B && hdist(B, p) < INS.ied.base) || !gMapOk(p.x, p.z)) return null;
+  return { x: p.x, z: p.z, a: Math.atan2(-(b.z - a.z), b.x - a.x) };
+}
+function grlIed(C, s, why, cmd) {
+  const t = C.t, r = genCmd(t, { c: 'fort', k: 'mineat', x: Math.round(s.x), z: Math.round(s.z), a: s.a, why }, 'ai'); if (!grlOk(r)) return false;
+  if (cmd && insCmdL().filter(c => c.team === t).length < INS.ied.max) insCmdL().push({ team: t, x: s.x, z: s.z, T: S.t, armed: false });
+  return true;
+}
+/* a target of value: the best of X.tg that f lets by, by value and nearness to the side's base */
+function grlBest(C, X, f) {
+  const B = S.base[C.t]; let best = null, bs = 0;
+  for (const a of X.tg) { if (f && !f(a)) continue; const s = a.val / (1 + hdist(B, a) / 5000); if (s > bs) { bs = s; best = a; } }
+  return best;
+}
+const grlBombs = t => S.units.reduce((a, u) => a + (!u.dead && u.team === t && u.def && u.def.bomb === 'car' ? 1 : 0), 0) + S.men.reduce((a, m) => a + (!m.dead && m.team === t && m.def && m.def.bomb === 'man' ? 1 : 0), 0);
+const grlRaid = (t, a, n, why) => genCmd(t, { c: 'man', k: 'raid', x: Math.round(a.x), z: Math.round(a.z), n, why }, 'ai');
+const grlFire = (t, a, n) => genCmd(t, { c: 'fire', k: 'he', x: Math.round(a.x), z: Math.round(a.z), n }, 'ai');
+/* the direct actions: GRLDO[k](C, X) does one thing and logs it, true when it did */
+const GRLDO = {
+  evt(C, X) {   // the squad facing a mass falls back to cover
+    const t = C.t, K = GRL.evt, out = [];
+    for (const q of S.squads) {
+      if (q.team !== t || q.net || !(q.live > 0) || q.state || q.lift || q.rd || (q.op && !q.op.over) || q.ord.k === 'assault' || out.length >= K.n) continue;
+      const L = mbLead(q); if (!L) continue;
+      const foe = cmdKnown(C, L.x, L.z, K.r); if (foe <= 0) continue;
+      const F = { x: KN.x, z: KN.z }, own = S.men.reduce((a, m) => a + (!m.dead && m.team === t && Math.abs(m.x - L.x) < K.r && Math.abs(m.z - L.z) < K.r ? CMD.val.inf : 0), 0);
+      if (foe < K.k * Math.max(1, own)) continue;
+      const H = grlHide(t, L, F); if (!H || hdist(H, L) < 150) continue;
+      out.push({ q, H, foe, own });
+    }
+    if (!out.length) return false;
+    for (const o of out) {
+      grlGo(C, [o.q], o.H, K.T, 'evitar a batalha campal');
+      gLog(t, 'grl', GRL.nm.evt + ': esquadra ' + grlNear(mbLead(o.q)) + ' recua para ' + grlNear(o.H) + ' — inimigo com força ' + gN(o.foe) + ' contra ' + gN(o.own) + ' nossa ali', o.H, null);
+    }
+    return true;
+  },
+  emc(C) {   // the IED opens the ambush; the mortar comes down on the column once it is sprung
+    const t = C.t;
+    for (const op of C.ops) {
+      if (op.over || (op.k !== 'emb' && op.k !== 'itd') || !op.kz) continue;
+      if (!op.grlI && !op.sprung) {
+        op.grlI = 1; const s = grlRoad(C, op.e, op.kz);
+        if (s && grlIed(C, s, 'IED que abre a emboscada ' + op.nm, true)) { gLog(t, 'grl', GRL.nm.emc + ': IED de comando na zona de morte da emboscada ' + op.nm + '; as esquadras pegam a coluna parada e saem pela rota de fuga', s, 'grlemc' + op.id); return true; }
+      }
+      if (op.sprung && !op.grlF) {
+        op.grlF = 1;
+        if (grlOk(grlFire(t, op.kz, 3))) { gLog(t, 'grl', GRL.nm.emc + ': morteiro na coluna parada da emboscada ' + op.nm, op.kz, 'grlemf' + op.id); return true; }
+      }
+    }
+    return false;
+  },
+  ass(C, X) {   // a couple of mortar rounds on what the enemy holds, and the mortar moves (its own relocation)
+    const t = C.t, l = X.tg.filter(a => a.k === 'sup' || a.k === 'eco' || a.k === 'art').sort((a, b) => b.val - a.val);
+    const cl = gueClusters(C); for (const k of cl.slice(0, 2)) l.push({ x: k.x, z: k.z, nm: 'o inimigo concentrado ' + gNear(k.x, k.z) });
+    for (const a of l) if (grlOk(grlFire(t, a, GRL.ass.n))) { gLog(t, 'grl', GRL.nm.ass + ': ' + GRL.ass.n + ' tiros de morteiro em ' + a.nm + ' ' + grlNear(a) + ', e o morteiro muda de posição', a, null); return true; }
+    return false;
+  },
+  not(C, X) {   // at night, a small group against a depot, a FOB or the guns
+    if (!X.night) return false;
+    const t = C.t, a = grlBest(C, X, a => a.k === 'sup' || a.k === 'eco' || a.k === 'art' || a.k === 'mort'); if (!a) return false;
+    if (!grlOk(grlRaid(t, a, 1, 'incursão noturna'))) return false;
+    gLog(t, 'grl', GRL.nm.not + ': um grupo pequeno contra ' + a.nm + ' ' + grlNear(a) + ' no escuro', a, null); return true;
+  },
+  slg(C, X) {   // IEDs on the enemy's supply roads, the bridge it needs down, its supply base raided
+    const t = C.t;
+    for (const o of C.known) {
+      if (o.dead || o.man || tk(o) !== 'truck' || !insFoe(t, o) || !Number.isFinite(sX(o, t))) continue;
+      const e = habEdge(sX(o, t), sZ(o, t)), s = e >= 0 && grlRoad(C, e);
+      if (s && grlIed(C, s, 'IED na estrada de suprimento do inimigo', true)) { gLog(t, 'grl', GRL.nm.slg + ': IED na estrada por onde passam os caminhões inimigos ' + grlNear(s), s, null); return true; }
+    }
+    const sup = X.tg.filter(a => a.k === 'sup');
+    if (brOn()) for (const b of brs()) {
+      if (brDown(b) || !sup.some(a => hdist(a, b) < 2500)) continue;
+      const r = genCmd(t, { c: 'man', k: 'demolish', x: Math.round(b.x), z: Math.round(b.z), why: 'cortar o suprimento do inimigo' }, 'ai');
+      if (grlOk(r)) { gLog(t, 'grl', GRL.nm.slg + ': derrubar a ' + brName(b).toLowerCase() + ', na linha de suprimento do inimigo', b, null); return true; }
+    }
+    const a = grlBest(C, X, a => a.k === 'sup'); if (a && grlOk(grlRaid(t, a, 1, 'sabotagem da logística'))) { gLog(t, 'grl', GRL.nm.slg + ': incursão contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    return false;
+  },
+  esc(C, X) {   // a weapon cache (a supply base) hidden in a village of ours that has none
+    const t = C.t, K = GRL.esc; if (X.caches >= K.max || !X.mine.length) return false;
+    const free = grlFree(t); if (!free.length) return false;
+    for (const p of X.mine) {
+      if (S.sup.some(b => !b.dead && b.team === t && hdist(b, p) < K.near)) continue;
+      const e = lsFoeBase(t, p.x, p.z), a = headTo(p.x, p.z, e.x, e.z);
+      for (const r of K.ring) for (let i = 0; i < 8; i++) {
+        const x = p.x + Math.cos(a + Math.PI + i * TAU / 8) * r, z = p.z - Math.sin(a + Math.PI + i * TAU / 8) * r;
+        if (siteWhy(t, x, z, a)) continue;
+        const q = free.slice().sort((u, v) => hdist(mbLead(u), p) - hdist(mbLead(v), p))[0], rp = railOf(x, z);
+        const res = genCmd(t, { c: 'sup', x: Math.round(x), z: Math.round(z) }, 'ai', { O: { k: 'build', ri: rp.ri, s: rp.s, x, z, a, R: 9 }, q });
+        if (!grlOk(res)) return false;
+        gLog(t, 'grl', GRL.nm.esc + ': esconderijo de armas em ' + gName(p) + ' para reabastecer longe da base', { x, z }, null); return true;
+      }
+    }
+    return false;
+  },
+  enx(C, X) {   // several small groups on the same target, the mortar on it too
+    const t = C.t, a = grlBest(C, X, a => a.k !== 'radm' && a.k !== 'radb'); if (!a) return false;
+    const r = grlRaid(t, a, MANT.raid.n[1], 'enxame'); if (!grlOk(r)) return false;
+    const f = grlOk(grlFire(t, a, GRL.enx.n));
+    gLog(t, 'grl', GRL.nm.enx + ': grupos pequenos contra ' + a.nm + ' ' + grlNear(a) + ' por caminhos diferentes' + (f ? ', com o morteiro ao mesmo tempo' : ''), a, null); return true;
+  },
+  isc(C, X) {   // while a blow of ours is under way, a false one elsewhere draws the enemy's reaction
+    const t = C.t, real = C.ops.find(o => !o.over && (o.k === 'atk' || o.k === 'raid' || o.k === 'inf')); if (!real) return false;
+    const R = real.O && real.O.x !== undefined ? real.O : real.tx !== undefined ? { x: real.tx, z: real.tz } : real.kz; if (!R) return false;
+    if (!C.gue) {
+      const r = genCmd(t, { c: 'man', k: 'harass', n: 1, why: 'isca: puxar a reação do inimigo' }, 'ai');
+      if (grlOk(r)) { gLog(t, 'grl', GRL.nm.isc + ': um fustigamento puxa a reação do inimigo enquanto o golpe real vai ' + grlNear(R), R, null); return true; }
+    }
+    const far = gueClusters(C).filter(k => hdist(k, R) > 2000)[0];
+    if (far && grlOk(grlFire(t, far, 2))) { gLog(t, 'grl', GRL.nm.isc + ': fogo ' + grlNear(far) + ' para desviar a atenção do golpe real ' + grlNear(R), far, null); return true; }
+    return false;
+  },
+  urb(C, X) {   // each village of ours in turn: its defence policy, a nest at its edge toward the enemy, a booby-trapped entry
+    const t = C.t, U = C.grlU || (C.grlU = {}), P = gPts(), K = GRL.urb;
+    const l = X.mine.slice().sort((a, b) => cmdKnown(C, b.x, b.z, K.thr) - cmdKnown(C, a.x, a.z, K.thr));
+    for (const p of l) {
+      const pi = P.indexOf(p), u = U[pi] || (U[pi] = { n: 0 }); if (pi < 0 || u.n > 2) continue;
+      const e = grlFoeAt(C, p.x, p.z, K.thr), a = headTo(p.x, p.z, e.x, e.z), at = d => ({ x: Math.round(p.x + Math.cos(a) * d), z: Math.round(p.z - Math.sin(a) * d) });
+      const step = u.n++;
+      if (step === 0 && grlOk(genCmd(t, { c: 'dpol', pi, inf: 2, qrf: 2, why: 'defesa urbana' }, 'ai'))) { gLog(t, 'grl', GRL.nm.urb + ': ' + gName(p) + ' com duas esquadras e reação sempre', p, null); return true; }
+      if (step === 1) { const s = at(K.out[0]); if (grlOk(genCmd(t, Object.assign({ c: 'fort', k: 'bunker', a, why: 'prédio fortificado na vila' }, s), 'ai'))) { gLog(t, 'grl', GRL.nm.urb + ': ninho de metralhadora na borda de ' + gName(p) + ' voltada para o inimigo', s, null); return true; } }
+      if (step === 2 && sapOn()) { const s = at(K.out[1]); if (grlOk(genCmd(t, Object.assign({ c: 'fort', k: 'mineap', a, why: 'armadilhas na entrada da vila' }, s), 'ai'))) { gLog(t, 'grl', GRL.nm.urb + ': armadilhas explosivas na entrada de ' + gName(p), s, null); return true; } }
+    }
+    return false;
+  },
+  rec(C, X) {   // a village that hates the enemy arms a militia of ours; a village of ours that supports us is defended
+    const t = C.t, B = S.T.burgs, Rc = C.grlR || (C.grlR = {});
+    for (const bi of X.recr) {
+      if ((Rc[bi] || 0) > S.t) continue; Rc[bi] = S.t + CIV.mil.every;
+      const b = B[bi], r = genCmd(t, { c: 'mil', x: Math.round(b.x), z: Math.round(b.z), why: 'recrutamento' }, 'ai'); if (!grlOk(r)) continue;
+      const P = gPts(), p = P.find(p => p.hold === t && hdist(p, b) < 300);
+      if (p) genCmd(t, { c: 'dpol', pi: P.indexOf(p), qrf: 2, why: 'proteger a vila que nos apoia' }, 'ai');
+      gLog(t, 'grl', GRL.nm.rec + ': ' + civName(b) + ', revoltada contra o inimigo, vira milícia nossa' + (p ? '; a vila passa a ser defendida' : ''), b, null); return true;
+    }
+    return false;
+  },
+  cac(C, X) {   // the officers, radios, landed helicopters and guns: a raid where a group can reach, else the mortar
+    const t = C.t, a = grlBest(C, X, a => a.k === 'heli' || a.k === 'rad' || a.k === 'radm' || a.k === 'radb' || a.k === 'art' || a.k === 'mort'); if (!a) return false;
+    if ((a.k === 'rad' || a.k === 'art' || a.k === 'mort') && grlOk(grlRaid(t, a, 1, 'caçar alvo de valor'))) { gLog(t, 'grl', GRL.nm.cac + ': incursão contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    if (grlOk(grlFire(t, a, GRL.cac.n))) { gLog(t, 'grl', GRL.nm.cac + ': fogo em ' + a.nm + ' ' + grlNear(a) + ' (achado pelos drones e pelas patrulhas)', a, null); return true; }
+    return false;
+  },
+  ret(C, X) {   // the enemy hits a village of ours: a weak target of its own elsewhere, at once
+    const t = C.t, H = X.hit; if (!H) return false;
+    let best = null, bs = 0;
+    for (const a of X.tg) { if (hdist(a, H.p) < GRL.ret.far) continue; const s = (a.val || 1) / (1 + cmdKnown(C, a.x, a.z, 400)); if (s > bs) { bs = s; best = a; } }
+    if (!best) for (const o of C.known) {
+      if (o.dead || !insFoe(t, o) || !Number.isFinite(sX(o, t))) continue;
+      const p = grlAt(o, t), v = cmdKnown(C, p.x, p.z, 400); if (hdist(p, H.p) < GRL.ret.far || v > GRL.ret.weak) continue;
+      const s = 1 / (1 + v); if (s > bs) { bs = s; best = { x: p.x, z: p.z, nm: o.name || 'um alvo inimigo isolado', o }; }
+    }
+    if (!best) return false;
+    const r = best.k && best.k !== 'heli' && best.k !== 'radm' && best.k !== 'radb' ? grlRaid(t, best, 1, 'retaliação rápida') : null;
+    const ok = grlOk(r) || grlOk(grlFire(t, best, 3));
+    if (ok) gLog(t, 'grl', GRL.nm.ret + ': o inimigo ' + (H.lost ? 'tomou ' : 'ataca ') + H.nm + '; golpe logo em ' + best.nm + ' ' + grlNear(best), best, 'grlret');
+    return ok;
+  },
+  inf(C, X) {   // a small group, disguised, walks to an installation behind the enemy's line
+    const t = C.t, a = grlBest(C, X, a => a.k === 'sup' || a.k === 'eco' || a.k === 'art'); if (!a) return false;
+    const r = genCmd(t, { c: 'man', k: 'infiltrate', x: Math.round(a.x), z: Math.round(a.z), why: 'infiltração atrás das linhas' }, 'ai'); if (!grlOk(r)) return false;
+    gLog(t, 'grl', GRL.nm.inf + ': grupo pequeno, sem uniforme, a caminho de ' + a.nm + ' ' + grlNear(a), a, null); return true;
+  },
+  sab(C, X) {   // sappers with charges against a plant, a mine, a depot, a radio; else a bridge from our bank
+    const t = C.t;
+    for (const a of X.tg.filter(a => a.k === 'eco' || a.k === 'sup' || a.k === 'rad').sort((p, q) => q.val - p.val)) {
+      const r = genCmd(t, { c: 'sabot', x: Math.round(a.x), z: Math.round(a.z), why: 'sabotagem' }, 'ai');
+      if (grlOk(r)) { gLog(t, 'grl', GRL.nm.sab + ': sapadores com cargas contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    }
+    if (brOn()) for (const b of brs()) {
+      if (brDown(b) || !b.ends.some(e => !brHome(t, e)) || !b.ends.some(e => brHome(t, e))) continue;
+      const r = genCmd(t, { c: 'man', k: 'demolish', x: Math.round(b.x), z: Math.round(b.z), why: 'sabotagem' }, 'ai');
+      if (grlOk(r)) { gLog(t, 'grl', GRL.nm.sab + ': derrubar a ' + brName(b).toLowerCase() + ' por dentro', b, null); return true; }
+    }
+    return false;
+  },
+  psi(C) {   // a shock action: the car bomb or the bomber goes now (insBomb), and the propaganda (grlPsi) runs on its own
+    if (!insAI(C.t, 'atk') || (C.bombT || 0) <= S.t) return false;
+    const n = grlBombs(C.t); C.bombT = S.t; insBomb(C); if (grlBombs(C.t) <= n) return false;
+    gLog(C.t, 'grl', GRL.nm.psi + ': ação de choque para abalar o moral do inimigo', null, 'grlpsi');
+    return true;
+  },
+  cmd(C, X) {   // the enemy's radio net and HQ: a raid on a radio vehicle or the HQ, else fire on its radio men and landed radios
+    const t = C.t, a = grlBest(C, X, a => a.k === 'rad' || a.k === 'radm' || a.k === 'radb' || (a.k === 'eco' && a.o.k === 'hq')); if (!a) return false;
+    if ((a.k === 'rad' || a.k === 'eco') && grlOk(grlRaid(t, a, 1, 'cortar o comando'))) { gLog(t, 'grl', GRL.nm.cmd + ': incursão contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    if (grlOk(grlFire(t, a, 3))) { gLog(t, 'grl', GRL.nm.cmd + ': fogo em ' + a.nm + ' ' + grlNear(a) + ' para calar a rede de rádio inimiga', a, null); return true; }
+    return false;
+  },
+  arm(C, X) {   // an abandoned vehicle near our men is booby-trapped; else the bank end of a bridge toward the enemy
+    const t = C.t, K = GRL.arm, L = S.grlBT || (S.grlBT = []);
+    if (L.filter(b => b.team === t).length < K.max) for (const u of S.units) {
+      if (u.dead || u.gone || !(u.left > 0) || !parked(u) || u.grlBT) continue;
+      const m = S.men.find(m => !m.dead && !m.in && m.team === t && Math.abs(m.x - u.x) < K.plant && Math.abs(m.z - u.z) < K.plant && hdist(m, u) < K.plant); if (!m) continue;
+      u.grlBT = 1; L.push({ u, team: t, by: m, T: S.t });
+      gLog(t, 'grl', GRL.nm.arm + ': ' + (u.name || 'veículo abandonado') + ' ' + grlNear(u) + ' armadilhado', u, null); return true;
+    }
+    if (!sapOn() || !brOn()) return false;
+    for (const b of brs()) {
+      if (brDown(b) || b.grlA) continue;
+      const e = b.ends.find(e => brHome(t, e)), f = b.ends.find(e => !brHome(t, e)); if (!e || !f || cmdKnown(C, f.x, f.z, 2000) <= 0) continue;
+      b.grlA = 1;
+      if (grlOk(genCmd(t, { c: 'fort', k: 'mineap', x: Math.round(e.x), z: Math.round(e.z), a: headTo(e.x, e.z, f.x, f.z), why: 'armadilha na ponte' }, 'ai'))) { gLog(t, 'grl', GRL.nm.arm + ': armadilhas na cabeceira da ' + brName(b).toLowerCase(), e, null); return true; }
+    }
+    return false;
+  } };
+/* every GRL.tick s, for an active tactic, what runs on its own: the scatter after a blow, the ways out of the villages, the propaganda, the toll */
+function grlKeep(C, X, e) {
+  const t = C.t, A = C.grl.act;
+  if (A.dsp) grlDsp(C); else C.grlDq = null;
+  if (A.tun) grlTun(C);
+  const Q = S.cq, m = e / 60;
+  if (A.psi && cqSim() && Q && !Q.ph) {
+    const n = (X ? X.mine : towns().filter(p => p.hold === t)).filter(p => { const b = insVil(p.x, p.z, 150); return !b || !civHates(S.T.burgs.indexOf(b), t); }).length;
+    if (n) for (const f of foes(t)) if (Q.tk[f] > Q.tk0 * GRL.psi.floor) { const d = GRL.psi.tk * n * m; Q.tk[f] -= d; C.grlPsi = (C.grlPsi || 0) + d; }
+    if (n) gLog(t, 'grl', GRL.nm.psi + ': propaganda em ' + n + ' vila(s) abala o moral do inimigo (' + gN(C.grlPsi || 0) + ' tíquetes até agora)', null, 'grlpsis');
+  }
+  if (A.blq && S.eco && ecoSim() && S.eco.d[t]) {
+    const n = C.ops.filter(o => !o.over && o.k === 'blk').length, d = S.eco.d[t];
+    if (n) { d.en = Math.min(ECO.cap.en, d.en + GRL.blq.en * n * m); d.mt = Math.min(ECO.cap.mt, d.mt + GRL.blq.mt * n * m); gLog(t, 'grl', GRL.nm.blq + ': ' + n + ' posto(s) de controle cobrando imposto na estrada', null, 'grlblq'); }
+  }
+}
+/* dsp: the squads of a blow just over go, each by its own way (a side step of GRL.dsp.off m, left and right in turn), to one hidden meeting place */
+function grlDsp(C) {
+  const t = C.t, K = GRL.dsp, L = C.grlDq; if (!L || !L.length) return;
+  C.grlDq = [];
+  for (const d of L) {
+    if (S.t - d.T > K.keep) continue;
+    const qs = d.qs.filter(q => q.live > 0 && !q.state && !q.net && !(q.op && !q.op.over) && mbLead(q)); if (!qs.length) continue;
+    const H = grlHide(t, d.at, grlFoeAt(C, d.at.x, d.at.z, 800)); if (!H) continue;
+    let i = 0;
+    grlGo(C, qs, H, K.T, 'dispersar e reagrupar', q => {
+      const Ld = mbLead(q), dx = H.x - Ld.x, dz = H.z - Ld.z, l = Math.hypot(dx, dz) || 1, o = K.off[i % K.off.length] * (i % 2 ? -1 : 1); i++;
+      if (qs.length < 2 || l < 400) return [];
+      const p = { x: Ld.x + dx / 2 - dz / l * o, z: Ld.z + dz / 2 + dx / l * o };
+      return gMapOk(p.x, p.z) && hgt(p.x, p.z) > S.T.WL + .5 ? [p] : [];
+    });
+    gLog(t, 'grl', GRL.nm.dsp + ': depois de ' + d.nm + ', ' + qs.length + (qs.length > 1 ? ' grupos se separam por rotas diferentes' : ' grupo sai por outra rota') + ' e se juntam ' + grlNear(H), H, null);
+  }
+}
+/* tun: each village of ours has a way out (away from the enemy, to cover); a squad there worn down under fire takes it */
+function grlTun(C) {
+  const t = C.t, K = GRL.tun, E = C.grlEsc || (C.grlEsc = {}), P = gPts(); let n = 0, made = 0;
+  for (const p of P) {
+    if (p.hold !== t || !p.tw) continue;
+    const pi = P.indexOf(p); let w = E[pi];
+    if (!w || S.t - w.T > K.every) { const H = grlHide(t, p, grlFoeAt(C, p.x, p.z, 1500)); w = E[pi] = H && hdist(H, p) > 250 ? { x: H.x, z: H.z, T: S.t } : { T: S.t }; if (H) made++; }
+    if (!Number.isFinite(w.x) || n >= K.n) continue;
+    for (const q of S.squads) {
+      if (q.team !== t || q.net || !(q.live > 0) || q.state || (q.op && !q.op.over) || q.fd > K.fd || n >= K.n) continue;
+      const L = mbLead(q); if (!L || hdist(L, p) > K.r || manLive(q) >= Math.max(2, (q.n0 || q.live) * K.lo)) continue;
+      grlGo(C, [q], w, K.T, 'rota de fuga'); n++;
+      gLog(t, 'grl', GRL.nm.tun + ': esquadra desgastada sai de ' + gName(p) + ' pela rota preparada até ' + grlNear(w), w, null);
+    }
+  }
+  if (made) gLog(t, 'grl', GRL.nm.tun + ': rotas de fuga preparadas nas vilas nossas (túneis não: o terreno não tem subsolo)', null, 'grltun');
+}
+/* the booby-trapped vehicles: an enemy soldier at one (to get in, to look) sets it off */
+function grlTrapStep(dt) {
+  const L = S.grlBT; if (!L || !L.length || (S.grlBTt = (S.grlBTt || 0) - dt) > 0) return;
+  S.grlBTt = GRL.arm.every;
+  const K = GRL.arm;
+  for (const b of L) {
+    const u = b.u; if (u.dead || u.gone || !(u.left > 0)) { b.gone = true; continue; }
+    const m = S.men.find(m => !m.dead && insFoe(b.team, m) && Math.abs(m.x - u.x) < K.r && Math.abs(m.z - u.z) < K.r && hdist(m, u) < K.r); if (!m) continue;
+    if (roeHeld(b.team, u.x, u.z, K.blast, m)) continue;
+    const by = b.by && !b.by.dead ? b.by : S.men.find(o => !o.dead && o.team === b.team); if (!by) continue;
+    b.gone = true; u.grlBT = 0;
+    explode(u.x, hgt(u.x, u.z) + 1, u.z, K.blast, K.dmg, by, b.team, 1, 0);
+    for (let i = 0; i < 8; i++) puff(u.x, hgt(u.x, u.z) + 1, u.z, 'fire', 1.5, rand(-6, 6), rand(3, 12), rand(-6, 6));
+    gLog(b.team, 'grl', GRL.nm.arm + ': armadilha detonada em ' + (u.name || 'veículo abandonado') + ' ' + grlNear(u), u, null);
+  }
+  S.grlBT = L.filter(b => !b.gone);
+}
+/* each GRL.tick s, side C: the tactics every GRL.every s, what runs on its own, and one direct action every GRL.act s */
+function grlTick(C, e) {
+  const t = C.t, st = C.grl || (C.grl = { on: 0, act: {}, T: 0, aT: 0, cd: {}, l: [] });
+  if (!st.on) { st.on = 1; st.T = 0; }
+  let X = null;
+  if (S.t >= st.T) { st.T = S.t + GRL.every; try { X = grlSit(C); grlPick(C, X); } catch (er) { grlErr('pick', er); return; } }
+  try { grlKeep(C, X, e); } catch (er) { grlErr('keep', er); }
+  if (S.t < st.aT) return;
+  const ks = Object.keys(st.act).sort((a, b) => st.act[b].v - st.act[a].v);
+  for (const k of ks) {
+    const f = GRLDO[k]; if (!f || (st.cd[k] || 0) > S.t) continue;
+    X = X || grlSit(C);
+    let ok = false;
+    try { ok = f(C, X); } catch (er) { grlErr(k, er); }   // NOT TESTED: a tactic that throws is skipped, never the host's step
+    if (ok) { st.cd[k] = S.t + (GRL.cd[k] || 60); st.aT = S.t + GRL.act; return; }
+    st.cd[k] = S.t + GRL.fail;
+  }
+}
+/* a tactic that threw: said once on the console (a key a match), the game goes on */
+function grlErr(k, er) { const E = S.grlE || (S.grlE = {}); if (E[k]) return; E[k] = 1; console.warn('guerrilha (' + k + '):', er); }
+/* the temporary moves of a side end after their life (also when the chair is a person's now) */
+function grlOps(C) {
+  for (const op of C.ops) if (op.k === 'usr' && op.grl && !op.over && S.t > op.grl.T) opEnd(C, op);
+}
+function grlStep(dt) {
+  if ((S.net && !S.host) || S.over || !S.cmd) return;
+  try { grlTrapStep(dt); } catch (er) { grlErr('trap', er); }
+  if ((S.grlT = (S.grlT || 0) - dt) > 0) return;
+  const e = GRL.tick - S.grlT; S.grlT = GRL.tick;
+  for (const t of insSides()) {
+    const C = S.cmd[t]; if (!C) continue;
+    grlOps(C);
+    if (!grlOn(t)) { if (C.grl && C.grl.on) { C.grl.on = 0; C.grl.act = {}; C.grlDq = null; C.stgB = (C.stgB || 0) + 1; stgDoc(C); gLog(t, 'grl', 'Táticas de guerrilha suspensas: o comando está com uma pessoa ou o modelo', null, 'grloff'); } continue; }
+    grlTick(C, e);
+  }
+}
+insStep = (g => dt => { g(dt); if (GRL.on) grlStep(dt); })(insStep);
+/* the hooks: the doctrine (perDoc), the manoeuvres' draw (mmMan), the production mix (perMix), the end of a blow (opEnd: dsp), the disguise and
+   the false uniform (grade), a new match (ecoInit), the state for the MCP (genState) and the AAR (anaReport) */
+perDoc = (g => C => {
+  const D = g(C), A = C && !C.dk ? grlAct(C) : null; if (!A) return D;
+  const o = Object.assign({}, D);
+  for (const s in A) { const m = GRL.doc[s]; if (!m) continue; for (const k in m) if (k in o) o[k] = Array.isArray(m[k]) ? o[k] + m[k][0] : o[k] * m[k]; }
+  if (o.wd !== undefined) o.wd = clamp(o.wd, 0, .95);
+  return o;
+})(perDoc);
+mmMan = (g => (C, all) => {
+  g(C, all);
+  if (!grlAct(C)) return;
+  for (const c of all) { const m = grlMul(C, GRL.man, c.k); if (m !== 1) { c.v *= m; c.why += ' · guerrilha ×' + gN(m); } }
+})(mmMan);
+perMix = (g => (t, f, why) => {
+  g(t, f, why);
+  const C = S.cmd && S.cmd[t], A = grlAct(C); if (!A || (S.eco && S.eco.ctl && S.eco.ctl[t] !== 'ai')) return;
+  for (const s in A) { const m = GRL.mix[s]; if (!m) continue; for (const k in m) if (k in f) { f[k] = Math.max(0, f[k] + m[k]); why[k] += ' · ' + GRL.nm[s].toLowerCase(); } }
+})(perMix);
+opEnd = (g => (C, op) => {
+  const was = !op.over && op.man && GRL.dsp.ks[op.k] && C && C.grl && C.grl.on && C.grl.act.dsp ? op.sq.filter(q => q.op === op && q.live > 0) : null;
+  g(C, op);
+  if (was && was.length) (C.grlDq || (C.grlDq = [])).push({ qs: was, at: op.tx !== undefined ? { x: op.tx, z: op.tz } : op.kz || mbLead(was[0]) || S.base[C.t], T: S.t, nm: (GEN.man[op.k] || 'o golpe').toLowerCase() });
+})(opEnd);
+/* mis: the disguise with less calm and nearer (a soldier of the side in a village); fal: a group of a raid or an infiltration, and the side's
+   cars and trucks, recognized late (at most grade 1) out of GRL.fal.near m while they have not fired for GRL.fal.calm s */
+function grlHid(a, t) {
+  if (!t.def || a.team === t.team || !insT(t.team) || !S.cmd || !S.cmd[t.team] || !S.cmd[t.team].grl || !S.cmd[t.team].grl.on) return false;
+  const A = S.cmd[t.team].grl.act;
+  if (t.man && !t.in && t.def.fac === 'insurgentes') {
+    if (A.mis && S.t - shotAt(t) >= GRL.mis.calm) {
+      if (S.t >= (t.grlVT || 0)) { t.grlVT = S.t + INS.dis.every; t.grlV = !!insVil(t.x, t.z, INS.dis.pad); }
+      if (t.grlV && hdist(a, t) > GRL.mis.near) return true;
+    }
+    return !!(A.fal && t.sq && t.sq.op && !t.sq.op.over && (t.sq.op.k === 'inf' || t.sq.op.k === 'raid') && S.t - shotAt(t) >= GRL.fal.calm && hdist(a, t) > GRL.fal.near);
+  }
+  return !!(A.fal && !t.man && (t.kind === 'car' || t.kind === 'truck') && S.t - shotAt(t) >= GRL.fal.calm && hdist(a, t) > GRL.fal.near);
+}
+grade = (g => (a, t) => { const k = g(a, t); return k >= 2 && GRL.on && t && t.team >= 0 && S.fac && S.fac[t.team] === 2 && grlHid(a, t) ? 1 : k; })(grade);
+ecoInit = (g => () => { S.grlBT = null; S.grlT = 0; return g(); })(ecoInit);
+function grlView(t) {
+  const C = S.cmd && S.cmd[t], st = C && C.grl; if (!st || !st.on) return null;
+  return { act: Object.keys(st.act).map(k => ({ k, nm: GRL.nm[k], v: st.act[k].v, why: st.act[k].why })), l: st.l, psi: C.grlPsi || 0, traps: (S.grlBT || []).filter(b => b.team === t).length };
+}
+genState = (g => t => { const o = g(t); if (o) o.grl = grlView(t); return o; })(genState);
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  R.grl = ev.filter(e => e.k === 'lg' && e.c === 'grl').slice(-60).map(e => ({ t: e.t, s: e.s, x: String(e.x).slice(0, 200) }));
+  return R;
+})(anaReport);
+/* ===== end of the guerrilla mind ===== */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -33657,7 +34201,7 @@ ANA.done = R => {
   $('#btnAar').hidden = false;
 };
 const AARK = { inf: 'Infantaria', mil: 'Milícia', car: 'Viatura', truck: 'Caminhão', rad: 'Rádio', lav: 'Blindado leve', aa: 'Antiaérea', art: 'Artilharia', tank: 'Carro de combate', heli: 'Helicóptero', fighter: 'Caça', cas: 'Ataque ao solo', drone: 'Drone' };
-const AARD = { atk: 'ataque', def: 'defesa', amb: 'emboscada', fire: 'fogo', rq: 'requisição', eng: 'engenharia', rf: 'reforço', stg: 'estratégia' };
+const AARD = { atk: 'ataque', def: 'defesa', amb: 'emboscada', fire: 'fogo', rq: 'requisição', eng: 'engenharia', rf: 'reforço', stg: 'estratégia', grl: 'guerrilha' };
 /* a side's colour and class in the review, by its index (0 the Blue/USA, 1 the Red/Russia, 2 the Insurgents), whoever looks at it */
 const AARC = ['#6fc3b2', '#e2604f', '#d8a84a'], aarCol = s => AARC[s] || FOE, aarK = s => ['f', 'e', 'i'][s] || 'e', aarSd = R => anaSides((R && R.ns) || 2);
 const aarOrd = i => i + 1 + 'º';
@@ -33766,6 +34310,14 @@ aarShow = (g => (R, sub) => {
   const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
   for (const d of R.stg) { const li = aarEl('li'); li.append(aarEl('b', aarK(d.s), mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
   b.append(aarEl('h3', '', 'Estratégias do general'), ol);
+})(aarShow);
+/* the Insurgents' guerrilla tactics (GRL) in the review (cf-guerrilha-mais; NOT TESTED) */
+aarShow = (g => (R, sub) => {
+  g(R, sub);
+  if (!R || !R.grl || !R.grl.length) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), mm = s => (s / 60 | 0) + ':' + String(Math.round(s % 60)).padStart(2, '0'), ol = aarEl('ol', 'aar-dec');
+  for (const d of R.grl) { const li = aarEl('li'); li.append(aarEl('b', aarK(d.s), mm(d.t) + ' · ' + N(d.s))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); }
+  b.append(aarEl('h3', '', 'Táticas de guerrilha'), ol);
 })(aarShow);
 
 /* ---------- conquest: the strip, the capture bar, the marks, the result and the requisition ---------- */
@@ -34571,7 +35123,7 @@ function genLog(V) {
   if (GV.sig.log === sg) return; GV.sig.log = sg;
   const prev = GV.seen; GV.seen = last ? last.t : 0; ol.replaceChildren();
   if (!L.length) { ol.appendChild(gE('li', '', V.cmd || !V.net ? 'Nenhuma ordem ainda.' : 'Ordens do comandante: só no anfitrião da sala.')); return; }
-  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG', help: 'AJUDA', radio: 'RÁDIO', stg: 'EST' };
+  const BD = { ord: 'ORD', atk: 'ATQ', def: 'DEF', amb: 'EMB', fire: 'FOGO', rq: 'REQ', rf: 'REF', eng: 'ENG', rep: 'INFO', eco: 'LOG', help: 'AJUDA', radio: 'RÁDIO', stg: 'EST', grl: 'GUE' };
   for (let i = L.length - 1; i >= 0; i--) {
     const e = L[i], li = gE('li', 'k-' + e.k + (e.t > prev && prev ? ' fresh' : '')), row = e.x !== undefined ? gE('button') : gE('div');
     if (e.x !== undefined) { row.type = 'button'; row.addEventListener('click', () => { GV.cx = e.x; GV.cz = e.z; GV.ping = { x: e.x, z: e.z, T: performance.now() }; GV.drawT = 0; }); }

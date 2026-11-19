@@ -9,7 +9,7 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
   - Nota = valor do objetivo × chance (razão, exposição, ângulo) − custo (minutos da maior caminhada, perdas esperadas pela exposição).
   - A nota é multiplicada pelo gosto do lado (`PR.pw`: o `w` da personalidade, o `MANW` da doutrina e o `taste` da partida).
   - Sorteio entre os 3 melhores, com peso no quadrado da nota. O diário registra "Procedimento do assalto a X: ... (nota; também avaliados ...)". `C.prEv` guarda a última avaliação.
-- **P1 Fixar e flanquear (padrão)**. Exige 2 ou mais esquadras e uma abordagem a ≥ 60° do eixo, com exposição ≤ 0,6 × a do eixo + 10 pontos e comprimento ≤ 1,8×.
+- **P1 Fixar e flanquear (padrão)**. Exige 2 ou mais esquadras e uma abordagem a ≥ 45° do eixo, com exposição ≤ 0,8 × a do eixo + 15 pontos e comprimento ≤ 2,2× (`prFlankOk`; eram 60°, 0,6 × + 10 e 1,8× até o cf-manobra-fix).
   - A fixação vai para a reunião do eixo; a manobra (1 esquadra, ou 2 com 4 ou mais) vai para a do flanco.
   - Reunidas, a manobra anda em silêncio até a posição de assalto e a fixação ocupa em silêncio a base de fogo, a 300-450 m (estado novo `mv`).
   - A hora H é a chegada da manobra. Na hora H há fogo e fumaça, com a cortina virada para o lado da manobra. A manobra assalta e a fixação atira da base (`overwatch`). A fixação entra quando o combate chega ao objetivo.

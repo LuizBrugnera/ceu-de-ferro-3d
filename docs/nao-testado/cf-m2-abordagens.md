@@ -7,13 +7,13 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
 
 - **Planejador de abordagens** (`AP`, `apBuild`, no `Céu de Ferro 3D.html`, logo depois do mapa tático M1). Faz um Dijkstra no mapa tático do lado (células de 200 m). O custo de cada célula sobe com a vigilância e a força inimiga e cai na mata e na estrada. Água só se atravessa por ponte ou vau de pé. A busca parte do ponto do lado mais perto do objetivo (ou da estrada, 1,5 km antes). Num anel de 300-500 m em volta do objetivo, a célula mais barata de cada um dos 8 setores vira candidata, e as 3 melhores com 60° ou mais entre si são as abordagens. Cada abordagem leva ângulo, comprimento, minutos, exposição, mata, parte sobre o eixo, posição de assalto e reunião fora da vista (a 600-1200 m). O plano fica em cache por 20 s e é calculado aos pedaços (600 células por pedaço) dentro do plano do comandante (`apWork`).
 - **Assalto livre do eixo** (`atkFit`, `cmdAttack`, `atkOpen` → `atkAp`):
-  - As esquadras livres vêm de qualquer estrada até 4,5 km (`apPool`).
+  - As esquadras livres vêm de qualquer estrada a até 2 km de uma reunião do plano (`apPool`, `AP.pool`; eram 4,5 km do objetivo até o cf-manobra-fix).
   - O elemento principal vai pela abordagem mais barata. Com 2 esquadras ou mais, o segundo vai pela seguinte, se ela tiver até 1,8× o comprimento da primeira.
   - Cada esquadra anda em silêncio (`quiet`) e correndo (`fast`) até a reunião, pelo caminho da árvore da busca (`apWalk`).
   - Na hora H, cada esquadra segue a sua abordagem, passa pela posição de assalto e entra no objetivo. A cobertura (`overwatch`) fica na posição de assalto.
-  - A reunião espera a caminhada mais longa (`op.formT`, até `CMD.formMax`).
+  - A reunião espera a caminhada mais longa (`op.formT`, até `AP.form` = 400 s) e depois segue com as esquadras que chegaram, duas ou mais; uma esquadra perdida no caminho é substituída por outra livre, até 2 por assalto (`apRefill`).
   - Na primeira vez, `cmdAttack` pede as abordagens (gate `ap`) e abre o assalto (ou a campanha) no turno seguinte.
-- **Economia de forças** (`apQuiet`, `apLend`, `apFloor`): um posto de linha ou de mata quieto empresta a sua esquadra. Quieto quer dizer sem inimigo conhecido a 1,2 km e sem tiro há 3 min.
+- **Economia de forças** (`apQuiet`, `apLend`, `apFloor`): um posto quieto de pouco valor (linha, mata, `fpost`, `mil`, `garr`, `egd`) empresta a sua esquadra. Quieto quer dizer sem inimigo conhecido a 1,2 km e sem tiro há 3 min.
   - Empresta no máximo 2 esquadras por assalto.
   - Um ponto guarnecido mantém outra esquadra nele, e cada estrada mantém pelo menos 1 posto.
   - O `opFree` devolve a esquadra à ordem que ela tinha.
@@ -59,7 +59,7 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
 
 ## Riscos
 
-- Esquadras de longe (até 4,5 km) demoram, e um assalto com reunião longa pode ficar parado até `CMD.formMax` (900 s).
+- Esquadras de longe demoravam, e um assalto com reunião longa ficava parado até `CMD.formMax` (900 s); desde o cf-manobra-fix o raio é 2 km de uma reunião e a espera, 400 s.
 - Os postos emprestados deixam a linha mais fina. O piso é 1 posto por estrada, com outro defensor no ponto guarnecido.
 - Ondas de rádio (`cnP`): a ordem com o caminho chega atrasada; o `apIn` e o `apOrd` leem `cnOrd`.
 - Com o mapa M1, a vigilância perto de um ponto é alta. Por isso a exposição das abordagens perto do anel fica entre 24% e 60%: a "exposição baixa" do protótipo não se repete.

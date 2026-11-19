@@ -1,11 +1,17 @@
 'use strict';
-/* Rocks and bushes (COVERS, map version 6): where they stand and that every client builds the same ones under the same ids, with map 5
+/* Rocks, bushes and trees (COVERS, TREES: map version 6): where they stand and that every client builds the same ones under the same ids, with map 5
    left as it was; a line of sight past a rock and through a bush, the same for a player's eyes and the AI's (sees, and the AI's meter);
    who is in a bush is made out closer, from the ground and from an aircraft, and sees out; rounds stop at a rock and go through a bush;
-   a hull is stopped by a rock and crushes a bush; and the AI soldier picks the side of a rock away from the enemy, or a bush */
+   a hull is stopped by a rock and crushes a bush; the AI soldier picks the side of a rock away from the enemy, or a bush; the trees,
+   some bigger and some broadleaves, and a wood that hides who is deep in it from the ground and who is under its canopy from the air */
 const H = require('./harness'), { ok, done } = H, C = H.load({ mapv: 6 }), $ = C.$;
 console.log('page: ' + H.PAGE);
 if (!$('typeof COVERS !== "undefined"')) { console.log('no COVERS table: a page before map version 6'); process.exit(0); }
+{   /* the whole page script compiles, the scene too (which the harness leaves out): a name declared twice there only shows in a browser */
+  const html = require('fs').readFileSync(H.PAGE, 'utf8'), i = html.indexOf("<script>\n'use strict';"), j = html.indexOf('</script>', i);
+  let err = null; try { new (require('vm').Script)(html.slice(i + 8, j)); } catch (e) { err = e; }
+  ok(i > 0 && !err, 'the page script compiles' + (err ? ': ' + err.message : ''));
+}
 const COVERS = $('COVERS'), COVER = $('COVER'), MAN = $('MAN'), NDYN = $('NDYN'), NECO = $('NECO');
 let S, T;
 const fresh = era => { C.seed(7); S = C.sandbox(era); T = S.T; return S; };
@@ -163,5 +169,62 @@ for (const era of ['ww2', 'modern']) {
   C.FAKE = { x: q.x, y: q.y + 40, z: q.z, team: 1, dead: false }; $('dNear = () => globalThis.FAKE');   // a drone over him
   A.dsh = 0; $('dHide')(q, A, null); C.WAS_ = was; $('dNear = globalThis.WAS_');
   ok(A.bx !== undefined && C.footD(B.o, A.bx, A.bz) < 1.5, era + ': a soldier with a drone over him in the open runs into the nearest bush');
+}
+console.log('-- the trees: bigger ones, broadleaves, and woods that hide from the ground and from the air --');
+/* the middle of a dense wood on level ground, and the way out of it to open level ground: { w, ux, uz, edge } with edge m to its edge */
+function deep(min) {
+  const N = T.N, wd = $('woodAt');
+  for (let j = 2; j < N - 1; j++) for (let i = 2; i < N - 1; i++) {
+    const x = T.x0 + i * T.cx, z = T.z0 + j * T.cz;
+    if (!wd(x, z) || !flat(x, z, 60)) continue;
+    for (let a = 0; a < 8; a++) {
+      const ux = Math.cos(a * Math.PI / 4), uz = Math.sin(a * Math.PI / 4); let e = 0;
+      while (e < 700 && wd(x + ux * e, z + uz * e)) e += 4;
+      if (e < min || e > 400) continue;
+      const vx = x + ux * (e + 160), vz = z + uz * (e + 160);
+      if (wd(vx, vz) || !flat(vx, vz, 10) || C.near(vx, vz, 6).length || !$('los')({ x: vx, z: vz }, C.hgt(vx, vz) + 2.7, { x: x + ux * (e - 8), z: z + uz * (e - 8) }, C.hgt(x + ux * (e - 8), z + uz * (e - 8)) + 1)) continue;
+      return { w: { x, z }, ux, uz, edge: e, vx, vz };
+    }
+  }
+  return null;
+}
+for (const era of ['ww2', 'modern']) {
+  fresh(era);
+  const tr = T.objs.filter(o => o.k === 'tree'), big = tr.filter(o => o.sc > 1.6 + 1e-9), leaf = tr.filter(o => o.v), C5 = H.load({ mapv: 5 }), T5 = C5.sandbox(era).T, t5 = T5.objs.filter(o => o.k === 'tree');
+  const T2 = H.load({ mapv: 6, seed: 3 }).sandbox(era).T, tr2 = T2.objs.filter(o => o.k === 'tree');
+  console.log('   ' + era + ': ' + tr.length + ' trees, ' + big.length + ' grown past the largest of before (up to ' + (Math.max(...tr.map(o => o.h))).toFixed(0) + ' m high, against ' + Math.max(...t5.map(o => o.h)).toFixed(0) + '), ' + leaf.length + ' broadleaves');
+  ok(big.length > tr.length * .05 && leaf.length > tr.length * .25 && leaf.length < tr.length * .6 && Math.max(...tr.map(o => o.sc)) <= $('TREES').max, era + ': some trees much bigger, conifers and broadleaves');
+  ok(t5.length === tr.length && t5.every(o => !o.v && o.sc <= 1.6) && t5.every((o, i) => o.id === tr[i].id && o.x === tr[i].x && o.z === tr[i].z), era + ': map 5 keeps its trees as they were, map 6 the same trees in the same places');
+  ok(tr2.every((o, i) => o.sc === tr[i].sc && o.v === tr[i].v), era + ': another client grows the same trees');
+  const D = deep(70); if (!ok(!!D, era + ': a dense wood with open level ground beside it')) continue;
+  const { w, ux, uz, edge, vx, vz } = D, sees = $('sees'), hid = $('hid');
+  const ai = man(1, vx, vz, 0, true), me = man(1, vx + uz * 2, vz - ux * 2, 0, false), t = man(0, w.x, w.z, 0);
+  look(ai, t); look(me, t);
+  const inner = [sees(ai, t), sees(me, t)], ki = tk(ai, t, 20);
+  const set = (x, z) => { t.x = x; t.z = z; t.y = $('manY')(x, z); t.cv = null; };
+  set(w.x + ux * (edge - 10), w.z + uz * (edge - 10)); look(ai, t);
+  const rim = [sees(ai, t), sees(me, t)], kr = tk(ai, t, 20);
+  set(w.x, w.z); const old = !$('woodCut')(ai.x, $('eyeY')(ai), ai.z, t.x, $('bodyY')(t), t.z);
+  console.log('   ' + era + ': a soldier standing ' + edge.toFixed(0) + ' m inside a wood, from 160 m out: the AI knows it in ' + f1(ki) + '; 10 m inside, in ' + f1(kr));
+  ok(!inner[0] && !inner[1] && ki === Infinity, era + ': deep in the wood, neither the AI nor the player\'s soldier sees it');
+  ok(rim[0] && rim[1] && kr < Infinity, era + ': at the edge of the wood both see it, and the AI makes it out');
+  ok(!old, era + ': it is the wood between them that hides it');
+  ok($('los')(t, $('eyeY')(t), { x: w.x + ux * 20, z: w.z + uz * 20 }, C.hgt(w.x + ux * 20, w.z + uz * 20) + 1.5), era + ': in the wood one sees the next man 20 m off');
+  /* from the air */
+  const pl = (ai, d) => { const p = C.addPlane(S.E.sides[1].fighter, 1, w.x - uz * d, C.hgt(w.x, w.z) + d * .45, w.z + ux * d, 0, ai); p.v = { x: 0, y: 0, z: 0 }; return p; };
+  const tank = Object.keys($('TANKS')).find(id => $('TANKS')[id].era === era), u = C.addVehicle('tank', tank, 0, w.x, w.z, 0);
+  const pa = pl(true, 1000), pm = pl(false, 1000), kt = tk(pa, u, 20), tin = [hid(pa, u), hid(pm, u)];
+  const ox = vx + uz * 20, oz = vz - ux * 20, u2 = C.addVehicle('tank', tank, 0, ox, oz, 0), pa2 = C.addPlane(S.E.sides[1].fighter, 1, ox - uz * 1000, C.hgt(ox, oz) + 450, oz + ux * 1000, 0, true), pm2 = C.addPlane(S.E.sides[1].fighter, 1, ox - uz * 1000, C.hgt(ox, oz) + 450, oz + ux * 1000, 0, false); pa2.v = pm2.v = { x: 0, y: 0, z: 0 };
+  const tout = [hid(pa2, u2), hid(pm2, u2)], ko = tk(pa2, u2, 20);
+  console.log('   ' + era + ': a tank in the wood from an aircraft ' + $('dist')(pa, u).toFixed(0) + ' m off: the AI pilot knows it in ' + f1(kt) + '; on open ground ' + f1(ko));
+  ok(tin[0] && tin[1] && kt === Infinity, era + ': a tank under the canopy is hidden from the pilot and from the AI pilot at 1 km');
+  ok(!tout[0] && !tout[1] && ko < Infinity, era + ': on open ground both can make it out');
+  const pc = pl(true, 330), pmc = pl(false, 330);
+  ok(!hid(pc, u) && !hid(pmc, u), era + ': flying over it, inside ' + $('TREES').air + ' m, both can');
+  S.units = [];
+  set(w.x, w.z); const ps = pl(true, 650), pms = pl(false, 650), vR = $('visR')(t), ks = tk(ps, t, 20);
+  ok(hid(ps, t) && hid(pms, t) && ks === Infinity && $('dist')(ps, t) < vR * MAN.air, era + ': a soldier standing in the wood, ' + $('dist')(ps, t).toFixed(0) + ' m from an aircraft: hidden from both pilots by the canopy (it would be made out to ' + (vR * MAN.air).toFixed(0) + ' m without it, ' + (vR * MAN.air * $('TREES').canopy).toFixed(0) + ' under it)');
+  const lone = tr.find(o => o.sc > 1.8 && !$('woodAt')(o.x, o.z) && S.os[o.id] < 2);
+  if (lone) { const q = man(0, lone.x + lone.rd + 1.5, lone.z, 0); ok($('canopy')(q), era + ': under the crown of a lone big tree is under a canopy too'); }
 }
 done();

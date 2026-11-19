@@ -20,7 +20,14 @@ Com 2 lados nada muda.
 - `SIDEMAX = 3`: o máximo de lados de uma partida (corta `gn`/`gk` do `welcome`).
 - A constante `SIDES = [-1, 1]` da parte 3D (esquerda e direita, nas rodas, lagartas e asas) passou a se chamar `LRS`, para o nome `SIDES` ficar com os lados do jogo. O `lsN` do P6c já testava `typeof SIDES === 'function'` e agora usa este.
 
-Não são do P0, e sim do P1 (o mapa, ainda em curso): `dsOf`, `foeOn`, `myRoutes` e `R.ends`.
+**A frente pelas estradas (seção 4.2 do plano), junto do `endS`:**
+- `R.ends = [lado em s = len, lado em s = 0]` de cada estrada principal. Quem o define é o mapa versão 7 (P1). Uma estrada sem ele é a de hoje: a base 0 em s = len e a base 1 em s = 0.
+- `dsOf(t, ri)`: o sentido de `t` ao longo da estrada (hoje, `t ? 1 : -1`).
+- `endS(t, ri, d)`: `d` metros a partir da ponta de `t`. Lê `R.ends` quando existe.
+- `foeOn(t, ri)`: o lado na outra ponta, ou −1 quando `t` não é ponta dessa estrada.
+- `myRoutes(t)`: as estradas de que `t` é ponta.
+
+Estrada sem `R.ends` dá exatamente as fórmulas de antes, inclusive para um `t` que não é 0 nem 1. O P6a, P6b e P6c já chamavam esses nomes. O `main` quebrava sem eles desde o #76. O P1 só precisa pôr `R.ends` nas estradas e não deve redefinir os nomes.
 
 **As cópias dos outros pacotes agora usam estes ajudantes.** Cada pacote tinha escrito a sua versão da mesma regra, e agora todas chamam o P0. O resultado é igual com 2 lados:
 - P3: `sdsOf` chama `SIDES()`;
@@ -55,7 +62,7 @@ O servidor, o MCP e os testes de relay já foram alargados pelo P5 (`ts(room, s)
 ## O que rodou (smoke)
 
 - `node --check` no script da página: ok.
-- Partida IA × IA de 20 s no harness (economia ligada, semente 7), na Frente atual e em 1944, comparada com o `main` de agora:
+- Partida IA × IA de 20 s no harness (economia ligada, semente 7), na Frente atual e em 1944, comparada com o `main` de agora (`cd55a83`, com os três ajudantes de 2 lados postos à mão, porque o `main` quebra sem eles):
   - mesmos números de soldados, veículos e aviões;
   - mesmos tíquetes;
   - mesma soma das posições dos soldados.
@@ -65,14 +72,11 @@ O servidor, o MCP e os testes de relay já foram alargados pelo P5 (`ts(room, s)
 - `tests/all.sh` não rodou: o capitão voltou à regra de sem testes neste pacote.
 - O Chrome (chrome-devtools-axi) não abriu nesta máquina ("socket hang up").
 
-## O `main` está quebrado até o P1 entrar (não é deste pacote)
+## O `main` quebrado desde o #76
 
-O `main` de agora chama `dsOf`, `foeOn` e `myRoutes` diretamente (por exemplo em `spawnPlayer`, `addUnit` e `lineS`). Esses ajudantes são do P1, que ainda não entrou. Sem eles, a página quebra no primeiro quadro (`ReferenceError: dsOf is not defined`), com ou sem o P0. Para o smoke, as duas cópias (o `main` e o P0) receberam a mesma versão de 2 lados desses três:
-- `dsOf`: `t ? 1 : -1`;
-- `foeOn`: `1 - t`;
-- `myRoutes`: todas as estradas.
+O `main` chama `dsOf`, `foeOn` e `myRoutes`, que ninguém definia. A página quebra no primeiro quadro: `ReferenceError: dsOf is not defined`. O P0 define os três (acima), e a página do P0 roda sem nenhum remendo.
 
-O P0 não os define, porque o P1 vai defini-los com `const` e um nome repetido quebraria a página.
+Para comparar, a cópia do `main` recebeu a versão de 2 lados desses três (`t ? 1 : -1`, `1 - t`, todas as estradas). Também havia um conserto em curso (`cf-hotfix-main`) com versões guardadas, definidas só se faltarem. Se ele entrar antes, as versões dele saem no merge e ficam estas.
 
 ## O que não foi testado (caminhos de N = 3)
 

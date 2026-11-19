@@ -96,6 +96,17 @@ console.log('   delta past an AI ' + aa.def.name + ': ' + shots + ' rounds and m
 ok(shots > 10 || o.end === 'shot', 'air defence takes the delta as its target and fires at it (the hit is a matter of chance)');
 fresh(); o = C.addDrone('fpv', 1, P.x + 30, P.y + 20, P.z, 0, null, null); C.explode(o.x + 4, o.y, o.z, 15, 60, P, 0, true); ok(o.dead, 'a burst beside it brings a quad down');
 
+console.log('-- a supply base: a drone that runs into it strikes the building (an AI loitering munition dives on one), it has no hull --');
+for (const k of ['fpv', 'owa', 'rec']) {
+  fresh(); const x = P.x + 200, z = P.z, b = C.addSup(S.T.nid + 40, 1, x, z, 0, 1), hp0 = S.oh[b.id];
+  o = C.addDrone(k, 0, x - 30, b.y + 3, z, 0, P, null); o.t0 = S.t - 10; o.link = o.lq = 1;
+  if (k === 'owa') { o.armed = true; o.nav = { st: 'dive', x, z, tgt: b, pt: { x, y: b.y + 1, z }, T: 0, look: 0 }; }
+  let err = null; try { C.run(5, () => { if (k !== 'owa') o.v = { x: 10, y: -.3, z: 0 }; return !o.gone; }); } catch (e) { err = e; }
+  console.log('   ' + k + ': ' + (err ? 'threw ' + err.message : (o.end || 'alive') + ', base ' + hp0 + ' -> ' + S.oh[b.id].toFixed(0) + (b.dead ? ' (destroyed)' : '')));
+  ok(!err && o.gone && (k === 'rec' ? o.end === 'crash' && S.oh[b.id] === hp0 : o.end === 'boom' && S.oh[b.id] < hp0) && (k !== 'owa' || b.dead),
+    k === 'fpv' ? 'an FPV goes off on it and hurts the building' : k === 'owa' ? 'a loitering munition diving on it destroys it' : 'a recon quad without a warhead is lost against it and leaves it whole');
+}
+
 console.log('-- AI: a battle with operators --');
 const S2 = C.newState('modern', 'abrams', { cls: 'tank' }); S = S2; let launched = 0, kinds = {}, peak = 0;
 const ops0 = S.men.filter(m => m.def.drone).length;

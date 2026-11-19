@@ -22,6 +22,18 @@ const COVER = {
     for (let r = 0; r < 3; r++) for (let s = -36; s <= 36; s += 6) { const p = along(a, b, 1 - (d + r * 7) / L, s + (r % 2) * 3), o = $('woodTree')(T, p.x, p.z, 1); S.os[o.id] = 0; S.oh[o.id] = o.hp; l.push(o); }
     return () => { for (const o of l) { T.objs.splice(T.objs.indexOf(o), 1); delete T.byId[o.id]; $('cellsOf')(T, o, k => { G.c[k] = G.c[k].filter(q => q !== o); }); } T.fid -= l.length; };
   },
+  rock(a, b, d) { return COVER.low(a, b, d, 'rock'); },
+  bush(a, b, d) { return COVER.low(a, b, d, 'bush'); },
+  low(a, b, d, k) {   // a row of rocks or bushes (#32's cover, OBJ.rock a wall, OBJ.bush a veil) 3 m high across the line, d m short of the target
+    const L = Math.hypot(b.x - a.x, b.z - a.z), G = T.grid, l = [], w = [1e9, 1e9, -1e9, -1e9];
+    for (let s = -12; s <= 12; s += 3) {
+      const p = along(a, b, 1 - d / L, s), o = Object.assign(C.addObj(T, T.fid++, k, p.x, p.z, 0, 0, 3, 0, 2), { sc: 2 });
+      $('cellsOf')(T, o, c => { (G.c[c] || (G.c[c] = [])).push(o); G.f[c] |= o.K.veil ? 1 : 3; }); S.os[o.id] = 0; S.oh[o.id] = o.hp; l.push(o);
+      w[0] = Math.min(w[0], o.x - o.r); w[1] = Math.min(w[1], o.z - o.r); w[2] = Math.max(w[2], o.x + o.r); w[3] = Math.max(w[3], o.z + o.r);
+    }
+    T.walls.push(w);
+    return () => { for (const o of l) { T.objs.splice(T.objs.indexOf(o), 1); delete T.byId[o.id]; $('cellsOf')(T, o, c => { G.c[c] = G.c[c].filter(q => q !== o); }); } T.walls.splice(T.walls.indexOf(w), 1); T.fid -= l.length; };
+  },
   hill(a, b, d, top, w) {   // a ridge top m high (14) and some 4 w m across (w 20), square to the line
     const L = Math.hypot(b.x - a.x, b.z - a.z), p = along(a, b, 1 - d / L), ux = (b.x - a.x) / L, uz = (b.z - a.z) / L;
     C.H0 = $('hgt'); C.RIDGE = (x, z) => { const s = (x - p.x) * ux + (z - p.z) * uz; return (top || 14) * Math.exp(-(s * s) / (2 * (w || 20) * (w || 20))); };
@@ -39,6 +51,7 @@ console.log('the seeker\'s line itself');
     const off = COVER[k](a, t, 40), los = C.los(a, a.y, t, t.y + 2.5), sl = $('seekLine')(a, a.y, t, t.y + 2.5, true); off();
     ok(!sl, k + ': the seeker\'s line is cut (the sight rule alone ' + (los ? 'sees through it' : 'is cut too') + ')');
   }
+  for (const k of ['rock', 'bush']) { const off = COVER[k](a, t, 20), sl = $('seekLine')(a, a.y, t, t.y + 2.5, true); off(); ok(!sl, k + ' (the map\'s new cover): the seeker\'s line is cut'); }
   ok($('seekLine')(a, a.y, t, t.y + 2.5, true), 'with the cover gone it is open again');
 }
 
@@ -67,9 +80,9 @@ for (const k of [null].concat(KINDS)) {
 }
 
 console.log('the AI: an anti-tank soldier (Javelin) and a T-72 at 600 m, left to itself for 20 s');
-for (const k of [null].concat(KINDS)) {
+for (const k of [null].concat(KINDS, ['rock', 'bush'])) {
   fresh(); const t = C.addVehicle('tank', 't72', 1, B.x + 600, B.z, 0), m = C.addMan('blueAT', 0, B.x, B.z, 0); t.ai = null; t.inv = 0; t.hp = 1e6; m.ai = $('manBrain')(0); m.ai.gx = m.x; m.ai.gz = m.z;
-  const off = k ? COVER[k]({ x: m.x, z: m.z }, t, 40) : () => {}; let fired = 0, lock = 0;
+  const off = k ? COVER[k]({ x: m.x, z: m.z }, t, k === 'rock' || k === 'bush' ? 20 : 40) : () => {}; let fired = 0, lock = 0;
   C.run(20, () => { if (m.arms[1] && m.arms[1].lock === t) lock++; if (S.missiles.length) { fired = S.t; return false; } });
   off();
   console.log('  ' + (k || 'clear') + ': ' + (fired ? 'fired at ' + f1(fired) + ' s' : 'held its fire') + ', frames it had a lock ' + lock);

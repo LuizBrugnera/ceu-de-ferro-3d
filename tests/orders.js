@@ -250,7 +250,7 @@ console.log('-- a fire request among civilians in sight: the rules of engagement
   const n = new Map(); for (const c of S.civs) if (c.g && c.g.b) n.set(c.g, (n.get(c.g) || 0) + 1);
   const g = [...n.keys()].sort((a, b) => n.get(b) - n.get(a))[0], b = g.b, Cm = $('cmdOf')(0);
   const L = S.civs.filter(c => c.g === g && !c.dead && !c.gone && !c.in).slice(0, 6), p = { x: L[0].x, z: L[0].z };
-  C.addUnit('art', 0, b.x > S.W / 2 ? b.x - 3000 : b.x + 3000, b.z, S.E.sides[S.fac[0]].art, true);
+  const art = C.addUnit('art', 0, b.x > S.W / 2 ? b.x - 3000 : b.x + 3000, b.z, S.E.sides[S.fac[0]].art, true);
   const pin = () => L.forEach((o, i) => { if (o.dead) return; o.mode = 2; o.goal = null; o.v = { x: 0, y: 0, z: 0 }; o.in = null; o.x = p.x + (i % 3) * 3; o.z = p.z + Math.floor(i / 3) * 3; o.sn = [S.t, -1e9]; });
   const live = () => Cm.fm.filter(M => !M.dead && S.t < M.T && M.k === 'he'), clear = () => { for (const M of Cm.fm) M.dead = true; };
   pin(); C.run(.05, pin); pin();
@@ -265,6 +265,15 @@ console.log('-- a fire request among civilians in sight: the rules of engagement
   clear(); pin();
   r = C.genCmd(0, { c: 'ord', k: 'fire', x: p.x, z: p.z, n: 3 }, 'me');
   ok(r.ok && live().length === 1 && live()[0].usr, 'and the verb fire of an order of theirs, the same (' + (r.why || 'accepted') + ')');
+  clear(); pin();
+  /* a 'create N' fire order: once a new battery is in range its strike goes through the same rules, by whoever ordered it */
+  art.mis = Object.assign(art.mis || {}, { d: 'w21t' });
+  const made = by => { const o = { k: 'w21p', id: 'w21t' + by, d: 'w21t', v: 'fire', by, team: 0, T0: S.t, sq: [], veh: [], over: false, kz: p, done: new Set(), c: { c: 'ord', k: 'fire', x: p.x, z: p.z } }; Cm.ops.push(o); $('OPS').w21p(Cm, o); return o; };
+  const n1 = S.glog.l[0].length, o1 = made('me');
+  ok(o1.over && live().length === 1 && live()[0].usr && S.glog.l[0].slice(n1).some(e => /civis à vista e alvo não identificado/.test(e.s)), 'a person\'s create-N fire there: the new battery\'s strike is theirs (M.usr), with the warning');
+  clear(); C.genCtl(0, 'mcp', { eco: 0, atk: 0, def: 0, sup: 0 }); pin();
+  const n2 = S.glog.l[0].length, o2 = made('mcp');
+  ok(o2.over && live().length === 0 && S.glog.l[0].slice(n2).some(e => e.s.includes($('GEN').no.roe)), 'a model\'s create-N fire there: no strike, and the log says why (roe)');
   clear(); C.genCtl(0, 'me'); pin();
   r = C.genCmd(0, { c: 'req', k: 'fire', x: p.x, z: p.z, n: 3 }, 'ai');
   ok(r.ok && live().length === 1 && !live()[0].usr, 'the AI\'s own fire request: queued, its battery\'s rules weigh it when it fires (' + (r.why || 'accepted') + ')');

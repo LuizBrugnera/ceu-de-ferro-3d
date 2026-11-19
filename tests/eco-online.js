@@ -59,6 +59,8 @@ const res = d => { const o = {}; for (const k in d.res) if (d.res[k].length) o[k
   ok(g2.got.ecs.length > 0 && g2.got.ecs.every(s => s === 1) && g2.got.gen.length > 0 && g2.got.gen.every(s => s === 1) && g1.got.ecs.every(s => s === 0) && g1.got.gen.every(s => s === 0), 'each guest got only its own side\'s ecs and gen (' + g1.got.ecs.length + ' and ' + g2.got.ecs.length + ' ecs)');
   const rh = host.ecoVM(0).rows, rg = g1.ecoVM(0).rows, inst = r => (r.find(x => x.label === 'Instalações') || {}).value;
   ok(rh.length === rg.length && rh.every((r, i) => r.label === rg[i].label) && inst(rh) === inst(rg) && !!inst(rg), 'ecoVM runs on the guest: the same rows, "Instalações: ' + inst(rg) + '"');
+  const pg = g1.S.eco.d[0], ph = host.$('popOf')(0);
+  ok(rg.some(r => r.label === 'Plano de produção') && pg.pop && pg.pop.men === ph.men && pg.pop.air === ph.air && Object.keys(pg.pp.f).length >= 7, 'the production plan reaches the guest through the relay (ecs pp, po): ' + (rg.find(r => r.label === 'Teto de população') || {}).value);
 
   console.log('-- a site goes down; a guest hurts one --');
   const pow = host.S.eco.l.find(e => e.team === 1 && e.k === 'pow'), fab = host.S.eco.l.find(e => e.team === 1 && e.k === 'fab');

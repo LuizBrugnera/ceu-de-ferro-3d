@@ -112,6 +112,7 @@ function salvo(c, S, p, n) {
 {
   const E = H.load({ seed: 6, eco: true }), S3 = ecoState(E, 'modern'); S = S3; T = S3.T;
   const p = flat(3, E), d = S3.eco.d[0]; d.en = 1000; d.mt = 1000; const D = build(6, 0, p.x, p.z, 0, E); d.mt = POSTS.dome.mt * 3 + 5;
+  S3.eco.ctl[0] = 'me'; d.q = []; E.$('ECO').hq.mt = 0; S3.eco.l = S3.eco.l.filter(e => e.team !== 0);   // the dome's metal alone: no production and no income meanwhile
   const r = salvo(E, S3, p, 10); E.run(60);
   ok(D.ds === 3 && d.mt < POSTS.dome.mt, 'every interceptor costs ' + POSTS.dome.mt + ' metal; with none left the dome is silent (' + D.ds + ' shots at 10 rounds with metal for 3)');
   const G = H.load({ seed: 7, eco: true }), S4 = ecoState(G, 'modern'); S = S4; T = S4.T;

@@ -47,7 +47,7 @@ function bridge(env) {
   /* the seat is claimed on connect: the host and everyone see gctl */
   const st0 = await b.call('seat', { action: 'status' });
   ok(!st0.isError && st0.json.heldByMe === true && st0.json.side === 1, 'the bridge claimed side 1\'s seat on connect');
-  h.send({ t: 'ecs', s: 1, T: 33.5, v: [10, 20, 3, 4, 5, 6, 7, 8], c: 2, q: [4, 2, 1, 40, 0], r: [1, 2], kp: [], ms: [], ls: [], sl: [1, 100, 200, 9], kn: [5, 1, 300, 400, 12, 0], gd: [], sc: [], tg: 0 });
+  h.send({ t: 'ecs', s: 1, T: 33.5, v: [10, 20, 3, 4, 5, 6, 7, 8], c: 2, q: [4, 2, 1, 40, 0], r: [1, 2], kp: [], ms: [], ls: [], sl: [1, 100, 200, 9], kn: [5, 1, 300, 400, 12, 0], gd: [], sc: [], tg: 0, pp: [6, 5, 3, 9, 2, 2], po: [0, 120, 24, 8, 90, 12, 5, 100] });
   h.send({ t: 'gen', s: 1, T: 33.5, v: { doc: 'x', post: { k: 'att', s: 'text' }, road: null, ops: [], fm: [], sc: [], hit: null, focus: null, thr: null, want: null, gate: '', atkT: 0, ev: [], evT: -1 }, q: [1, 2, 3, 4, 5, 6] });
   h.send({ t: 'glog', s: 1, T: 33.5, e: [[30, 'eco', 'built a mine', 1, 2, null, null]] });
   h.send({ t: 'ecs', s: 0, T: 99, v: [0, 0, 0, 0, 0, 0, 0, 0], c: 0, q: [], r: [], kp: [], ms: [], ls: [], sl: [], kn: [], gd: [], sc: [], tg: 0 });   // the other side: relay does not route it here
@@ -57,6 +57,8 @@ function bridge(env) {
   ok(!gs.isError && j && j.link.connected && j.link.seatHeldByMe && j.economy && j.economy.stock.en === 10 && j.economy.stock.mt === 20 && j.economy.controller === 'mcp' && j.economy.queue[0].id === 4 && j.economy.knownEnemySites[0].id === 5, 'get_state: the economy panel decoded');
   ok(j.economy.ageSeconds >= 0 && j.economy.ageSeconds < 5 && j.general.ageSeconds >= 0 && j.general.view.post.k === 'att' && j.general.squads[0].sqId === 1 && j.log.lines[0].text === 'built a mine' && j.log.ageSeconds >= 0, 'get_state: gen view-model, squads, log, each with an age in seconds');
   const gl = await b.call('get_log', { lines: 5 }); ok(gl.json && gl.json.lines.length === 1, 'get_log returns the log lines');
+  const PP = j.economy.productionPlan;
+  ok(PP && PP.posture === 'attack' && PP.populationBudget.men === 120 && PP.populationOut.vehicles === 12 && PP.fieldWantedVsOut.tank.wanted === 5 && PP.fieldWantedVsOut.tank.out === 3 && PP.fieldWantedVsOut.fighter.wanted === 2, 'get_state: the production plan the relay passed in ecs (posture, budget, wanted vs out by kind)');
 
   const bs = await b.call('build_site', { kind: 'mine', x: 120.5, z: -40 });
   ok(!bs.isError && bs.json.accepted === true && bs.json.id === 77 && seenCmd.length === 1 && JSON.stringify(seenCmd[0].c) === '{"c":"build","k":"mine","x":120.5,"z":-40}' && seenCmd[0].s === 1 && seenCmd[0].g === 1 && seenCmd[0].d === 'eco', 'build_site: gcmd reaches the host as {c: build, k, x, z} from the MCP (g 1, side 1), and the gres comes back');
@@ -64,6 +66,14 @@ function bridge(env) {
   ok(!pu.isError && JSON.stringify(Object.entries(seenCmd[1].c).sort()) === JSON.stringify(Object.entries({ c: 'make', k: 'abrams', n: 2, why: 'need armour' }).sort()), 'produce_unit maps to make {k, n, why}');
   const sd = await b.call('set_site_defence', { id: 7, infantry: 2, anti_air: 1 }); ok(!sd.isError && JSON.stringify(seenCmd[2].c) === '{"c":"def","id":7,"inf":2,"aa":1}', 'set_site_defence maps to def {id, inf, aa}');
   const sp = await b.call('set_priority', { id: 3, position: 0 }); ok(!sp.isError && JSON.stringify(seenCmd[3].c) === '{"c":"prio","id":3,"p":0}', 'set_priority maps to prio {id, p}');
+  const last = () => JSON.stringify(Object.entries(seenCmd[seenCmd.length - 1].c).sort());
+  const ppl = await b.call('set_production_plan', { kind: 'tank', count: 6, why: 'blindados' }); ok(!ppl.isError && last() === JSON.stringify(Object.entries({ c: 'pplan', k: 'tank', n: 6, why: 'blindados' }).sort()), 'set_production_plan maps to pplan {k, n, why}');
+  const dsp = await b.call('dispatch_units', { kind: 'tank', count: 2, mission: 'defend', pi: 3, latitude: 0, roe: 'return', h_hour: 60 });
+  ok(!dsp.isError && last() === JSON.stringify(Object.entries({ c: 'disp', k: 'tank', n: 2, mk: 'defend', pi: 3, lat: 0, roe: 'return', H: 60 }).sort()), 'dispatch_units maps to disp {k, n, mk, pi, lat, roe, H}, through the relay\'s keys');
+  const asg = await b.call('assign_mission', { ids: [3, 4], mission: 'recon', x: 100, z: -20, r: 200, break_off: .3 });
+  ok(!asg.isError && last() === JSON.stringify(Object.entries({ c: 'mis', ids: [3, 4], mk: 'recon', x: 100, z: -20, r: 200, brk: .3 }).sort()), 'assign_mission maps to mis {ids, mk, x, z, r, brk}');
+  const nb = seenCmd.length, bad2 = [await b.call('dispatch_units', { kind: 'tank' }), await b.call('assign_mission', { ids: [], mission: 'recon', x: 1, z: 1 }), await b.call('set_production_plan', { kind: 'tank' })];
+  ok(bad2.every(r => r.isError) && seenCmd.length === nb, 'dispatch_units without an area, assign_mission without squads and set_production_plan without a count are refused locally');
   const n0 = seenCmd.length;
   const inv = [await b.call('build_site', { kind: 'castle', x: 1, z: 1 }), await b.call('produce_unit', { kind: 'Abrams' }), await b.call('produce_unit', { kind: 'x', count: 9 }), await b.call('scout', { x: 'a', z: 1 }), await b.call('send_command', { command: { c: 'x', key: 1 } }), await b.call('send_command', { command: { c: 'draw' } })];
   ok(inv.every(r => r.isError) && seenCmd.length === n0, 'invalid inputs are refused locally with isError, nothing sent');
@@ -76,6 +86,7 @@ function bridge(env) {
   const av = await b.call('ask_view'); ok(!av.isError && av.json.data.stock.en === 9 && seenAsk[1].q.q === 'view', 'ask_view returns the host\'s view');
   const gq = await b.call('send_command', { question: { q: 'pool', x: 10, z: 20 } }); ok(!gq.isError && seenAsk[2].q.q === 'pool' && seenAsk[2].q.x === 10, 'send_command passes a question (gask pool)');
   const gh = await b.call('get_state', { from_host: true }); ok(!gh.isError && seenAsk[3].q.q === 'state' && gh.json.data.stock.en === 9, 'get_state from_host asks the host for the whole picture (gask state)');
+  const gp = await b.call('get_production_plan'); ok(!gp.isError && seenAsk[seenAsk.length - 1].q.q === 'plan', 'get_production_plan: the relay passes gask plan to the host');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

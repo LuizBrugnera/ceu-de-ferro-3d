@@ -2073,10 +2073,12 @@ radScan = (g => () => dispatch(-1, { kind: 'support', why: 'rádio da frente' },
 postGarr = (g => f => dispatch(f.team, { kind: 'garrison', why: 'guarnição do posto' }, () => g(f)))(postGarr);
 civTake = (g => (w, t) => dispatch(t, { kind: 'garrison', why: 'milícia da vila' }, () => g(w, t)))(civTake);
 demoKeepAlive = (g => () => dispatch(-1, { why: 'demonstração' }, g))(demoKeepAlive);
-/* Dispatch on the clock of today (F1: the same battle as before): per side the base AA, the planes and the columns, each by an order with its mission */
+/* Dispatch: the opening, then with an economy the general's (gpStep), else on the classic clocks: per side the base AA, the planes and the columns,
+   each by an order with its mission */
 function director(dt) {
   misTick(dt);
   const first = !S.dir, D = S.dir || (S.dir = [0, 1].map(() => ({ air: 0, col: 0, fix: 0, ri: 1 }))), R = S.T.routes, inf = !S.net || Net.inf, sb = !S.net || Net.sb;
+  if (!first && gpOn()) { gpMeter(); for (let t = 0; t < 2; t++) gpStep(t, D[t], dt); return; }   // the general fields what its plan wants (F2); the clocks below only with no economy
   for (let t = 0; t < 2; t++) {
     const T = D[t], side = S.E.sides[S.fac[t]], b = S.base[t], n = Math.min(S.humans[t], 3), ds = t ? 1 : -1;
     const cnt = (l, f) => l.reduce((a, o) => a + (o.team === t && !o.dead && !!o.ai && f(o) ? 1 : 0), 0), need = k => (cqFree(t, k) ? Math.max(0, DIR[k][n] - cnt(S.units, u => u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq))) : 0);
@@ -2096,6 +2098,153 @@ function director(dt) {
     if (first) { T.air = DIR.air; if (S.net && Net.inf && !S.took) dispatch(t, { why: 'abertura' }, () => deploy(t)); }   // not again under a host that took the battle over
   }
   if (first && S.eco) S.eco.open = false;
+}
+/* ---------- the General's production (phase F2 of the General's design: D5 A, D6 A) ----------
+   Where the economy gates what enters (ecoGate), the general fields what it means to, each by an order with its mission, instead of the director's clocks:
+   - the production plan (gpPlan, with the economy's turn, every ECO.ai.every s): per kind of mix, how many the side wants in the field, from its posture
+     (st: 0 attack, 1 hold, 2 defend; gpStance reads the commander) by GP.mix, plus the answer to the enemy it knows (aircraft lately: AA and fighters;
+     armour: tanks; artillery: attack planes), fitted to its population budget. A person or the MCP sets a kind's count with pplan (S.eco.d[t].ppo);
+     the AI's economy makes what the field lacks over and above the reserve it keeps (ecoAI, ECO.ai.wp the weight of a kind short of its field).
+   - Dispatch (gpStep, every GP.dt s): a mission is open while a kind has fewer in the field than the plan and the budget has room; what the reserve
+     has ready for it goes at once (an event, not a clock). Aircraft one each GP.air s; ground vehicles and the squads they carry leave as a column:
+     the first ready waits up to GP.form s for others (forming up), a side's columns GP.gap s apart (the road ahead clears). The base's AA at once.
+   - the population budget (popOf): GP.pop a side, less GP.hum for each human on it (up to 3), times S.popK. Online the host's AI frame budget (AIB)
+     moves S.popK: down by meter.dn while over budget, back up by meter.up while well under (avg under low of it), every meter.every s, never under
+     meter.min. popUse: what the side's AI has out (soldiers, cargo aboard included; ground vehicles but the fixed AA; aircraft and helicopters).
+   - the safety floor: a side with no squad in its reserve, no unit order under way and fewer than floor.men soldiers out for floor.t s gets a squad from
+     its HQ, free, to hold the base, and the general's log says why.
+   With no economy (the demo, an older server, ECO.on 0) the classic director runs: DIR's caps and clocks, CQ.ai's waits, HDIR's and POOL's and RUNS's
+   waits; these are no longer how a side with an economy fields anything. cap: IAI.cap while a side has an economy (two budgets), cap0: without */
+const GP = { pop: { men: 120, veh: 24, air: 8 }, hum: { men: 8, veh: 2, air: 1 }, cap: 240, cap0: IAI.cap, gnd: .75,
+  meter: { every: 10, min: .5, dn: .1, up: .05, low: .6 },
+  mix: { tank: [5, 4, 3], lav: [2, 2, 1], aa: [2, 2, 3], art: [1, 1, 2], truck: [3, 2, 2], squad: [3, 2, 2], fighter: [2, 2, 2], cas: [3, 2, 1], heli: [2, 1, 1], lift: [1, 1, 0] },
+  foe: { aa: 2, fighter: 1, arm: .5, armMax: 3, art: 1 }, max: 20,
+  veh: ['tank', 'lav', 'aa', 'art', 'truck'], fly: ['fighter', 'cas', 'heli', 'lift'],
+  dt: .5, form: 12, gap: 20, air: 3, lift: 30, run: 8,
+  floor: { t: 180, men: 8 },
+  st: ['Ofensiva', 'Equilíbrio', 'Defensiva'],
+  why: { air: 'aviação inimiga ativa', arm: ' blindados inimigos conhecidos', art: 'artilharia inimiga conhecida', set: 'ordem do general', st: ['postura ofensiva', 'postura equilibrada', 'postura defensiva'] } };
+const gpOn = () => ecoGate();
+/* the soldiers a side may have out: its budget with an economy, else half the cap as before */
+const sideMen = t => (gpOn() ? popOf(t).men : IAI.cap * FIELD.side);
+function popOf(t) {
+  const n = Math.min(S.humans ? S.humans[t] || 0 : 0, 3), k = S.popK || 1, o = {};
+  for (const c in GP.pop) o[c] = Math.max(c === 'men' ? GP.floor.men : 1, Math.round((GP.pop[c] - GP.hum[c] * n) * k));
+  return o;
+}
+function popUse(t) {
+  let men = 0, veh = 0, air = 0;
+  for (const m of S.men) if (m.team === t && !m.dead && m.ai && !m.net && m !== S.my) men++;
+  for (const u of S.units) if (u.team === t && !u.dead && !u.net) { if (u.cargo) men += u.cargo.length; if (u.ai && !u.fixed) veh++; }
+  for (const p of S.planes) if (p.team === t && !p.dead && p.ai && !p.net) { air++; if (Array.isArray(p.cargo)) men += p.cargo.length; }
+  return { men, veh, air };
+}
+/* what side t has out of a kind of the plan, as the director counted it: a column's, not a parked, fetching or requisitioned one */
+function gpHave(t, k) {
+  if (k === 'squad') return squadsOf(t);
+  if (k === 'heli' || k === 'lift') return heliCount(t, p => !!p.def[k === 'heli' ? 'atk' : 'lift']);
+  if (k === 'fighter' || k === 'cas') return S.planes.reduce((a, p) => a + (p.team === t && !p.dead && !!p.ai && !p.heli && p.role === k ? 1 : 0), 0);
+  return S.units.reduce((a, u) => a + (u.team === t && !u.dead && !!u.ai && u.kind === k && !u.fixed && !u.fld && !u.rqa && !(k === 'truck' && !u.cargo && u.sq) ? 1 : 0), 0);
+}
+/* the posture the plan is drawn for: 2 defend (a strong enemy at a town, or every road on the defensive), 0 attack (an assault or counter-attack on,
+   force asked for one, or the aggressive doctrine), else 1 */
+function gpStance(t) {
+  const C = S.cmd && S.cmd[t]; if (!C) return 1;
+  if (C.thr > 2 || (C.post.length && C.post.every(p => p === 'def'))) return 2;
+  if (C.ops.some(o => (o.k === 'atk' || o.k === 'ctr') && !o.over) || C.want || C.doc === CMD.doc.aggressive) return 0;
+  return 1;
+}
+const gpKinds = () => Object.keys(GP.mix).filter(k => ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era));
+/* side t's production plan, kept in S.eco.d[t].pp: { st, f: the field it wants by kind, why: the reason of each, set: the kinds a command fixed } */
+function gpPlan(t) {
+  const d = S.eco.d[t], C = S.cmd && S.cmd[t], st = gpStance(t), P = popOf(t), M = GP.mix, W = GP.why, f = {}, why = {}, set = {}, o = d.ppo || {};
+  for (const k of gpKinds()) { f[k] = M[k][st]; why[k] = W.st[st]; }
+  const kn = C ? C.known.filter(e => !e.dead) : [], arm = kn.filter(e => !e.man && (tk(e) === 'tank' || tk(e) === 'lav')).length, art = kn.filter(e => !e.man && tk(e) === 'art').length;
+  if (C && C.airT !== undefined && S.t - C.airT < ECO.ai.airMem) for (const k of ['aa', 'fighter']) if (k in f) { f[k] += GP.foe[k]; why[k] = W.air; }
+  if (arm && 'tank' in f) { f.tank += Math.min(GP.foe.armMax, Math.ceil(arm * GP.foe.arm)); why.tank = arm + W.arm; }
+  if (art && 'cas' in f) { f.cas += GP.foe.art; why.cas = W.art; }
+  for (const k in o) if (k in f) { f[k] = o[k]; why[k] = W.set; set[k] = 1; }
+  const fit = (ks, cap) => {   // over the budget: one fewer of the kind that has the most, never one a command fixed, until it fits
+    for (let n = ks.reduce((a, k) => a + (f[k] || 0), 0); n > cap; n--) {
+      let b = null; for (const k of ks) if (f[k] > 0 && !set[k] && (!b || f[k] > f[b])) b = k;
+      if (!b) break; f[b]--;
+    }
+  };
+  fit(GP.veh.filter(k => k in f), Math.floor(P.veh * GP.gnd)); fit(GP.fly.filter(k => k in f), P.air);
+  return (d.pp = { st, f, why, set, T: S.t });
+}
+/* what the plan shows (the panel, the question plan, the MCP): every kind with the field wanted, what is out, in reserve and queued, and why */
+function gpView(t) {
+  const E = S.eco; if (!E) return null;
+  const d = E.d[t], sim = ecoSim(), pp = d.pp || (sim ? gpPlan(t) : null); if (!pp) return null;
+  const P = sim ? popOf(t) : d.pop || popOf(t), U = sim ? popUse(t) : d.pu || { men: 0, veh: 0, air: 0 }, k0 = Object.keys(pp.f);
+  return { st: pp.st, stance: GP.st[pp.st] || '', pop: P, use: U, k: sim ? S.popK || 1 : d.pk || 1, on: sim ? gpOn() : !!d.pop,
+    kinds: k0.map(k => ({ k, name: ECO.tx.u[k], field: pp.f[k], have: pp.h ? pp.h[k] || 0 : gpHave(t, k), res: (d.res[k] || []).length, q: d.q.filter(q => q.k === k).length, why: pp.why ? pp.why[k] || '' : '', set: !!(pp.set && pp.set[k]) })) };
+}
+/* the host's AI over its frame budget shrinks every side's budget; well under it, grows it back */
+function gpMeter() {
+  if (!(S.net && S.host) || S.t < (S.popT || 0)) return;
+  S.popT = S.t + GP.meter.every;
+  const st = AIB.stat(), M = GP.meter, k = S.popK || 1; if (st.n < 60) return;
+  const k2 = !st.ok ? Math.max(M.min, k - M.dn) : st.avg < AIB.avg * M.low && st.worst <= AIB.worst ? Math.min(1, k + M.up) : k;
+  if (k2 === k) return;
+  S.popK = k2; for (const t of [0, 1]) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: o anfitrião está ' + (k2 < k ? 'acima' : 'folgado no') + ' orçamento de IA', null, 'pop');
+}
+/* the missions a Dispatch order fielded (its id) take what the order says beyond the birth: latitude, ROE, break-off, H-hour */
+function gpMis(id, c) {
+  if (!id) return 0;
+  let n = 0;
+  for (const l of [S.units, S.planes, S.squads]) for (const o of l) if (o.mis && o.mis.d === id && !o.dead) {
+    const M = o.mis; n++;
+    if (c.lat === 0 || c.lat === 1 || c.lat === 2) M.lat = c.lat;
+    if (c.roe === 'hold' || c.roe === 'return' || c.roe === 'free') M.roe = c.roe;
+    if (Number.isFinite(c.brk)) M.brk = clamp(c.brk, 0, 1);
+    if (Number.isFinite(c.H)) M.when = { H: S.t + clamp(c.H, 0, GENC.H[1]), until: M.when.until };
+    if (o.men) for (const m of o.men) m.mis = M;
+  }
+  return n;
+}
+/* Dispatch of side t (T: its director's record): the floor, the base's AA, aircraft and helicopters, columns */
+function gpStep(t, T, dt) {
+  if ((T.gpA = (T.gpA || 0) - dt) > 0) return;
+  T.gpA = GP.dt;
+  const d = S.eco.d[t], pp = d.pp || gpPlan(t), F = pp.f, P = popOf(t), U = popUse(t), b = S.base[t], side = S.E.sides[S.fac[t]], R = S.T.routes, ds = t ? 1 : -1, res = k => (d.res[k] || []).length;
+  pp.h = {}; for (const k in F) pp.h[k] = gpHave(t, k);
+  if (T.flT === undefined) T.flT = S.t;
+  if (res('squad') || d.q.some(q => q.cat !== 'site' && q.p > 0 && !q.why) || U.men >= GP.floor.men) T.flT = S.t;
+  else if (S.t - T.flT >= GP.floor.t && (!S.net || Net.inf)) {   // the safety floor: a squad of the HQ to hold the base
+    T.flT = S.t;
+    const O = post(t, 'base', 0), r = R[O.ri], p = routeAt(r, clamp(O.s, 0, r.len));
+    dispatch(t, { kind: 'defend', why: 'piso de segurança: defender a base', area: { x: b.x, z: b.z, r: 900 } }, () => fieldSquad(t, 'base', 0, O, p.x - p.dz * 14, p.z + p.dx * 14));
+    gLog(t, 'rf', 'Sem reserva nem produção há ' + Math.round(GP.floor.t / 60) + ' min: o quartel-general manda uma esquadra defender a base', b, 'floor');
+  }
+  if (!S.units.some(u => u.team === t && !u.dead && u.fixed && !u.es) && ecoUse(t, 'aaf')) dispatch(t, { why: 'antiaérea da base', area: { x: b.x, z: b.z, r: 900 } }, () => addUnit('aa', t, b.x + (t ? -420 : 420), b.z + (t ? -170 : 170), null, true));
+  if (S.t >= (T.gpAir || 0)) for (const role of ['fighter', 'cas']) {
+    if (pp.h[role] >= (F[role] || 0) || U.air >= P.air || !ecoUse(t, role)) continue;
+    const x = b.x + rand(-600, 600), z = b.z + rand(-1500, 1500);
+    dispatch(t, { why: (role === 'cas' ? 'apoio aéreo à frente' : 'superioridade aérea') + ': ' + (pp.why[role] || ''), area: { x: S.W / 2, z: 0, r: 3000 } }, () => addPlane(side[role], t, x, hgt(x, z) + rand(700, 1300), z, headTo(x, z, S.W / 2, 0), true, role));
+    T.gpAir = S.t + GP.air; break;
+  }
+  const inf = !S.net || Net.inf, sb = !S.net || Net.sb, need = k => Math.max(0, (F[k] || 0) - (pp.h[k] || 0)), nq0 = inf ? need('squad') : 0;
+  let nt = Math.min(need('tank'), res('tank')), na = Math.min(need('aa'), res('aa')), nar = Math.min(need('art'), res('art')), ntr = Math.min(need('truck'), res('truck')), nq = Math.min(nq0, res('squad'), Math.max(0, res('truck') - ntr));
+  if (!(nt + na + nar + nq) || S.t < (T.gpCol || 0)) { T.gpF = 0; return; }   // trucks alone wait for a column to go with
+  if (!T.gpF) T.gpF = S.t + GP.form;
+  const all = nt >= need('tank') && na >= need('aa') && nar >= need('art') && nq >= nq0;
+  if (S.t < T.gpF && !all) return;
+  let room = Math.max(0, P.veh - U.veh);   // the budget's room, the heavier first
+  const take = n => { const k = Math.min(n, room); room -= k; return k; };
+  nt = take(nt); na = take(na); nar = take(nar); nq = Math.min(nq, Math.floor(Math.max(0, P.men - U.men) / SQUAD[S.era].length)); ntr = take(Math.max(ntr, nq)); nq = Math.min(nq, ntr);
+  T.gpF = 0; T.gpCol = S.t + GP.gap;
+  if (!(nt + na + nar + nq)) return;
+  const ri = S.cq ? (T.ri = S.T.mv >= 4 ? colAxis(t) : (T.ri + 1) % R.length) : 0, r = R[ri];
+  const c = ecoCol(t, nt, na, ntr, nar, nq, ri, sb ? entryS(t, ri) : r.len / 2 - ds * DIR.back);
+  if (c) dispatch(t, { by: MIS.col, why: 'coluna pela rota ' + (ri + 1) + ': ' + (nt ? pp.why.tank : na ? pp.why.aa : pp.why.squad || ''), target: { ri, s: c.s0 } }, () => spawnColumn(t, c.nt, c.na, c.ntr, ri, c.s0, c.nar, c.nsq));
+}
+/* the helicopters by the plan: an attack one at once when the plan wants more out and the reserve has one, a transport run with a squad likewise */
+function gpHeli(t, D) {
+  const d = S.eco.d[t], pp = d.pp || gpPlan(t), F = pp.f, P = popOf(t), U = popUse(t);
+  if (S.t >= (D.gpT || 0) && heliCount(t, p => p.def.atk) < (F.heli || 0) && U.air < P.air && ecoUse(t, 'heli')) { heliAir(t, S.E.sides[S.fac[t]].heli); D.gpT = S.t + GP.air; }
+  if (S.t >= (D.gpL || 0) && heliCount(t, p => p.def.lift) < (F.lift || 0) && U.air < P.air && (!S.net || Net.inf)) { D.gpL = S.t + GP.lift; heliLiftRun(t); }
 }
 
 /* ---------- effects ---------- */
@@ -4943,6 +5092,7 @@ function startSite(t, x, z, a) {
 }
 /* it is destroyed: the ammunition in it goes up, on every client for what is its own */
 function supDown(b, by, quiet) {
+  if (b.prog >= 1 && !b.dead && cqSim() && !S.cq.ph) S.cq.tk[b.team] -= CQ.sup;   // a finished base lost costs its side's morale (D25 A)
   b.dead = true; b.deadT = S.t; dropObj(b.o); S.fld[b.team].bT = S.t + BLD.ai.again; S.fld[b.team].bk = Math.min(450, (S.fld[b.team].bk || 0) + 150);
   if (quiet) return;
   explode(b.x, b.y + 1.5, b.z, BLD.boom[0], BLD.boom[1] * (b.prog < 1 ? .3 : 1), by, -1, false, 0);
@@ -6073,14 +6223,14 @@ function trnPlan(t, sq) {
   POOL.kinds.forEach((k, i) => {
     if (mine.some(u => u.kind === k && parked(u) && Math.abs(u.s - s0) < 120) || S.t < (F.pool || (F.pool = [0, 0]))[i]) return;
     if (!ecoUse(t, k)) return; const u = addUnit(k, t, 0, 0, null, false, ri, s0 - ds * 14 * i, -ds * POOL.lane, 0);
-    u.fld = 1; u.ai.park = 1; F.pool[i] = S.t + POOL.again;
+    u.fld = 1; u.ai.park = 1; F.pool[i] = S.t + (gpOn() ? GP.run : POOL.again);
   });
   if (S.t < (F.runT || 0)) return;
   const runs = mine.filter(u => u.run), n = k => runs.reduce((a, u) => a + (u.run.k === k ? 1 : 0), 0);
-  if (n('patrol') < RUNS.patrol && men + RUNS.men <= IAI.cap * FIELD.side && ecoUse(t, 'car', 'squad')) {
+  if (n('patrol') < RUNS.patrol && men + RUNS.men <= sideMen(t) && ecoUse(t, 'car', 'squad')) {
     const O = post(t, 'road', F.pk = ((F.pk || 0) + 1) % 2), a = entryS(t, O.ri, O.e);
     errand(t, 'car', O.ri, a, [{ s: O.a, k: 'turn' }, { s: O.e, k: 'turn' }], { cargo: SQUAD[S.era].slice(0, RUNS.men) }).run.k = 'patrol';
-    F.runT = S.t + RUNS.again; return;
+    F.runT = S.t + (gpOn() ? GP.run : RUNS.again); return;
   }
   const paid = n('fetch') >= RUNS.fetch;   // the planner's own ride is out: one more is requisitioned (CMD.rq)
   if (paid && (!S.cq || n('fetch') >= RUNS.fetch + CMD.rq.ride)) return;
@@ -6089,7 +6239,7 @@ function trnPlan(t, sq) {
     if (q.lift || q.col || (q.op && q.op.man) || q.fd < FIELD.dbl || Math.abs(to - q.s) < FIELD.ride * 1.5 || (to - q.s) * (at - q.s) <= 0 || runs.some(u => u.run.q === q)) continue;
     const kind = q.live <= car.seats.pax ? 'car' : 'truck', e = paid ? rqAI(t, kind, q.ri) : null; if (paid && !e) return; if (!paid && !ecoUse(t, kind)) return;
     const a = e ? e.s : entryS(t, q.ri), u = errand(t, kind, q.ri, a, [{ s: q.s, k: 'load', q }, { s: to - Math.sign(to - q.s) * FIELD.drop, k: 'drop' }, { s: a, k: 'bye' }]);
-    u.run.k = 'fetch'; u.run.q = q; if (e) u.rqa = 1; F.runT = S.t + RUNS.again; return;
+    u.run.k = 'fetch'; u.run.q = q; if (e) u.rqa = 1; F.runT = S.t + (gpOn() ? GP.run : RUNS.again); return;
   }
 }
 
@@ -8342,6 +8492,7 @@ function heliStep(dt) {
   if (S.net && (!S.host || !Net.hl)) return;
   for (let t = 0; t < 2; t++) {
     const D = H.d[t], n = Math.min(S.humans[t], 3);
+    if (gpOn()) { gpHeli(t, D); continue; }
     if ((D.air -= dt) <= 0 && cqFree(t, 'heli') && heliCount(t, p => p.def.atk) < HDIR.atk[n] && ecoUse(t, 'heli')) { heliAir(t, side(t).heli); D.air = HDIR.air; }
     if ((D.lift -= dt) <= 0) { D.lift = HDIR.every; if (HDIR.lift[n] && (!S.net || Net.inf)) heliLiftRun(t); }
   }
@@ -8652,7 +8803,7 @@ function fortStep(dt) {
   const sim = !S.net || S.host, T = S.T;
   while (S.flog < S.olog.length) { const id = S.olog[S.flog++], o = T.byId[id]; if (o && o.k === 'tree' && id >= 30300 && S.os[id] > 1) S.wcut[nodeAt(T, o.x, o.z)]++; }
   for (const f of S.forts) {
-    if (S.os[f.id] > 1) { fortDrop(f); continue; }
+    if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
     if (!sim || f.prog >= 1) continue;
     let n = 0; for (const m of S.men) if (builds(m, f)) n++;
     f.n = n = Math.min(n, BLD.max);
@@ -11452,7 +11603,7 @@ function* planJob(t) {
   fortPlan(t, sq);
   cmdReq(C);
   yield; live();
-  if (S.t < F.next || S.men.length + Q > IAI.cap || men + Q > IAI.cap * FIELD.side) return;
+  if (S.t < F.next || S.men.length + Q > IAI.cap || men + Q > sideMen(t)) return;
   for (const [job, n, k0] of cmdPosts(C, sq, have)) for (let k = k0 || 0; k < (k0 || 0) + n; k++) if (!(have[job] || []).includes(k) && reinforce(t, job, k)) { F.next = S.t + (C.thr > 2 || C.want ? C.doc.reinf * .6 : C.doc.reinf); gLog(t, 'rf', 'Reforço a caminho: ' + (GEN.job[job] || job)); return; }
 }
 /* online: the host tells the room what each side's commander is at, for the players' maps (cmd, when the server knows it: welcome cmd 1) */
@@ -11470,7 +11621,10 @@ const cueOf = t => (S.net && !S.host ? S.cue && S.cue[t] : S.cmd && S.cmd[t] && 
    The side with more weight moves c its way, 1 in t s per unit of superiority up to max, only on a point it holds or one linked to a
    point it holds; even weights stop it. c past 0 loses the point (lost tickets), c at the end takes it (took back). Empty, it settles
    back in idle s; cut off from its side's base it goes neutral in cut s. A main base taken ends the match.
-   len: the presets, [name, minutes on the clock, tickets a side, times era for the larger map]. cost: tickets a loss costs, by kind (tk: a radio vehicle is rad, not the car it is built as). bleed: tickets a minute the side
+   len: the presets, [name, minutes on the clock, tickets a side, times era for the larger map]. cost: tickets a loss costs, by kind (tk: a radio vehicle is rad, not the car it is built as),
+   times lk where the economy runs. Tickets are morale (D25 A): a lost unit is paid for by the economy that made it, so lk is 0 and a loss costs none
+   (1: the old rule, which also holds with no economy);
+   what moves them is the bleed, the points, a site, a finished supply base or a dome lost (ECO.site[k].tk, sup, dome). bleed: tickets a minute the side
    with fewer points loses, by the margin. low: the share of its tickets under which a side's players wait longer to come back, wait
    [s always, s more at none]. cd: s before the player may have again what was lost, by kind, times k of the preset; ai: s before the
    director replaces a loss of that kind. next: online, s from the result to the next match. safe, spawn: a held point is a place to
@@ -11478,7 +11632,7 @@ const cueOf = t => (S.net && !S.host ? S.cue && S.cue[t] : S.cmd && S.cmd[t] && 
 const CQ = {
   r: [170, 230, 260], w: { inf: 1, tank: 1.5, lav: 1.5, aa: .75, car: .5, truck: .5 }, t: 60, max: 4, idle: 240, cut: 300,
   len: [['Curta', 30, 480], ['Padrão', 45, 720], ['Longa', 60, 960]], def: 1, era: { ww2: 1, modern: 1.5 },
-  cost: { inf: 1, car: 2, truck: 2, rad: 5, lav: 4, aa: 4, art: 4, tank: 6, heli: 8, plane: 10 }, bleed: [0, 2, 4, 7, 10], lost: 10, took: 4,
+  cost: { inf: 1, car: 2, truck: 2, rad: 5, lav: 4, aa: 4, art: 4, tank: 6, heli: 8, plane: 10 }, lk: 0, sup: 5, dome: 10, bleed: [0, 2, 4, 7, 10], lost: 10, took: 4,
   low: .25, wait: [4, 6],
   cd: { inf: 10, car: 20, truck: 20, rad: 90, lav: 45, aa: 50, art: 60, tank: 90, fighter: 90, cas: 120, atk: 120, lift: 60, k: [.75, 1, 1.25] },
   ai: { tank: 90, aa: 50, art: 60, truck: 20, lav: 45, car: 20, rad: 150, fighter: 90, cas: 120, heli: 120 },
@@ -11547,16 +11701,18 @@ function cqTied(t) {
   return seen;
 }
 const cqKind = o => (o.man ? 'inf' : o.kind ? tk(o) : o.heli ? 'heli' : 'plane');
+/* the tickets a loss of kind k costs its side: none where the economy pays for the loss (tickets are morale, CQ.lk 0); with no economy the old rule */
+const cqLk = k => (CQ.cost[k] || 0) * (ecoSim() ? CQ.lk : 1);
 /* a loss, counted once, where the match is kept */
 function cqDead(o) {
   const Q = S.cq, k = cqKind(o);
   if (!cqSim() || Q.ph || o.cqd || o.team === undefined) return;
-  o.cqd = 1; Q.tk[o.team] -= (o.mil ? CIV.mil.cost : CQ.cost[k]) || 0; Q.lost[o.team][o.man ? 0 : o.kind ? 1 : 2]++;
+  o.cqd = 1; Q.tk[o.team] -= (o.mil ? CIV.mil.cost * (ecoSim() ? CQ.lk : 1) : cqLk(k)) || 0; Q.lost[o.team][o.man ? 0 : o.kind ? 1 : 2]++;
   if (o.ai || o.aid) { const r = o.kind ? k : o.heli ? 'heli' : o.role; Q.rd[o.team][r] = S.t + (CQ.ai[r] || 0); }
   cmdLoss(o);
 }
-/* is the director free to replace a loss of that kind on side t */
-const cqFree = (t, k) => !S.cq || !(S.t < (S.cq.rd[t][k] || 0));
+/* is the director free to replace a loss of that kind on side t: always where the general produces (the time to make it is the wait) */
+const cqFree = (t, k) => !S.cq || gpOn() || !(S.t < (S.cq.rd[t][k] || 0));
 /* what the player lost comes back after a while: cdKey the model, cdOf how long, cdLeft what is left of it */
 const cdKey = (cls, model) => cls + ':' + model;
 function cdOf(cls, model) {
@@ -12458,9 +12614,9 @@ const NECO = 24;   // world-object ids after NDYN: the economy's sites
 const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start: { en: 400, mt: 400 },
   res0: { squad: 2, truck: 2, tank: 1, aa: 1, fighter: 1, cas: 1 },
   hq: { en: .6, mt: .4, inf: 1, air: 1, def: 1 },
-  site: { pow: { en: 20, mt: 80, t: 60, out: { en: 1 }, hp: 300, box: [14, 10, 6], tk: 5, max: 4 },
-    mine: { en: 60, mt: 20, t: 60, out: { mt: .8 }, hp: 260, box: [9, 9, 9], tk: 5, max: 4 },
-    fab: { en: 100, mt: 150, t: 90, out: {}, hp: 480, box: [26, 14, 7], tk: 10, max: 2 } },
+  site: { pow: { en: 20, mt: 80, t: 60, out: { en: 1 }, hp: 300, box: [14, 10, 6], tk: 8, max: 4 },
+    mine: { en: 60, mt: 20, t: 60, out: { mt: .8 }, hp: 260, box: [9, 9, 9], tk: 8, max: 4 },
+    fab: { en: 100, mt: 150, t: 90, out: {}, hp: 480, box: [26, 14, 7], tk: 15, max: 2 } },
   // [en, mt, s, category, era only]
   unit: { squad: [25, 15, 20, 'inf'], car: [10, 10, 12, 'veh'], truck: [10, 10, 12, 'veh'], lav: [25, 35, 30, 'veh', 'modern'],
     aa: [15, 25, 30, 'veh'], art: [15, 25, 35, 'veh'], tank: [20, 40, 45, 'veh'], rad: [20, 30, 35, 'veh'], aaf: [15, 25, 30, 'def'],
@@ -12481,7 +12637,7 @@ const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start:
     want: { pow: [2, 3, 4], mine: [2, 3, 4], fab: [1, 2, 2] },
     res: { squad: 2, car: 1, truck: 2, lav: 1, aa: 3, art: 1, tank: 1, rad: 1, aaf: 1, fighter: 1, cas: 2, heli: 1, lift: 0, drone: 1 },
     w: { squad: 3, car: 1, truck: 2, lav: 2, aa: 4, art: 2, tank: 3, rad: 1, aaf: 2, fighter: 3, cas: 3, heli: 3, lift: 1, drone: 1 },
-    wm: 2, wl: 1, mem: 60, lost: 120, air: 4, arm: 3, airMem: 90,
+    wm: 2, wl: 1, wp: 1, mem: 60, lost: 120, air: 4, arm: 3, airMem: 90,
     def: { fab: [1, 1], pow: [0, 0], mine: [0, 0] }, thr: 2, near: 900,
     find: 2, stale: 300, scout: 150, ahead: 1500,
     look: [[.92, .15], [.80, -.30], [.75, .70], [.90, .85], [.65, .20]],     // side 0 looks here in side 1's half; side 1 mirrored
@@ -12634,8 +12790,9 @@ function ecoSpot(t, k) {
 /* the match begins: the economy exists only where it is asked for (solo conquest, a watch match; online from slice 4), each side with its mine on
    its first deposit, a usina and a fabrica at the best spots, all built, and the starting reserve */
 function ecoInit() {
-  S.eco = null;
+  S.eco = null; IAI.cap = GP.cap0; S.popK = 1;
   if (!(ECO.on && S.cq && (!S.demo || S.watch) && (!S.net || Net.eco))) return;
+  IAI.cap = GP.cap;   // with an economy each side has its population budget (GP.pop); the cap holds both
   const E = (S.eco = { open: true, acc: 0, seq: 1, ctl: ['ai', 'ai'], l: [], dep: ecoDeps(), sim: !S.net || !!S.host,
     d: [0, 1].map(() => ({ en: ECO.start.en, mt: ECO.start.mt, inc: { en: 0, mt: 0 }, use: { en: 0, mt: 0 }, bill: { en: 0, mt: 0 }, ba: { en: 0, mt: 0 }, pa: { en: 0, mt: 0 },
       q: [], res: {}, keep: Object.assign({}, ECO.ai.res), miss: {}, lost: {}, kn: {}, sc: null, tg: null, aiT: 1, dead: [], n0: {}, made: 0, lk: [] })) });
@@ -12710,6 +12867,7 @@ function ecoStep(dt) {
     const w = Math.min(1, e / 60);
     for (const r of ['en', 'mt']) { d.use[r] += (pay[r] / e * 60 - d.use[r]) * w; d.bill[r] += (d.ba[r] / e * 60 - d.bill[r]) * w; d.ba[r] = 0; }
     for (const [m, mem] of [[d.miss, ECO.ai.mem], [d.lost, ECO.ai.lost]]) for (const k in m) { m[k] = m[k].filter(T => S.t - T < mem); if (!m[k].length) delete m[k]; }
+    if (S.t >= (d.ppT || 0)) { d.ppT = S.t + ECO.ai.every; gpPlan(t); }   // the production plan, whoever holds the economy
     if (E.ctl[t] === 'ai' && S.t >= d.aiT) { d.aiT = S.t + ECO.ai.every; for (const c of ecoAI(t, ecoView(t))) genCmd(t, c, 'ai'); }
     for (const s of E.l) {   // a finished site with a fixed AA asked for and none within reach: one from the reserve, a little toward the enemy
       if (s.team !== t || s.dead || s.prog < 1 || !s.gd.aa || S.units.some(u => !u.dead && u.fixed && u.kind === 'aa' && u.team === t && hdist(u, s) < ECO.gd.r) || !ecoUse(t, 'aaf')) continue;
@@ -12886,7 +13044,8 @@ function ecoView(t) {
     sl: d.dead.filter(q => S.t - q[2] < 300).map(q => ({ k: q[3], ago: ecoR(S.t - q[2]) })),
     air: C && C.airT !== undefined ? ecoR(S.t - C.airT) : -1, arm: known.filter(o => !o.man && (tk(o) === 'tank' || tk(o) === 'lav')).length,
     sc: d.sc ? { x: ecoR(d.sc.x), z: ecoR(d.sc.z), left: ecoR(Math.max(0, d.sc.T - S.t)) } : null, tg: d.tg === null ? null : d.tg,
-    lk: ECO.ai.look.map((l, i) => (typeof d.lk[i] === 'number' ? ecoR(S.t - d.lk[i]) : 99999)), costs };
+    lk: ECO.ai.look.map((l, i) => (typeof d.lk[i] === 'number' ? ecoR(S.t - d.lk[i]) : 99999)), costs,
+    pp: d.pp && E.sim ? { st: d.pp.st, f: Object.assign({}, d.pp.f), h: Object.fromEntries(Object.keys(d.pp.f).map(k => [k, gpHave(t, k)])), why: Object.assign({}, d.pp.why) } : null };
 }
 /* the mechanical general's economy: from the view, ecoAsk and the tables alone, at most two commands, each with its reason. Writes nothing */
 function ecoAI(t, V) {
@@ -12924,10 +13083,11 @@ function ecoAI(t, V) {
       const c = V.costs[k]; if (ECO.site[k]) continue;
       if (c[3] === 'veh' ? !fab : !V.hq.slots[c[3] === 'inf' ? 'inf' : c[3]]) continue;
       const miss = V.miss[k] || 0, lost = V.lost[k] || 0, air = (k === 'aa' || k === 'aaf') && V.air >= 0 && V.air < A.airMem, arm = k === 'tank' && V.arm > 0;
-      const want = (V.keep[k] || 0) + Math.min(2, miss) + (k === 'aaf' ? (V.hq.aa ? 0 : 1) + S0.filter(s => s.gd.aa && !s.aa).length : 0);
+      const gap = V.pp && V.pp.f[k] !== undefined ? Math.max(0, V.pp.f[k] - (V.pp.h[k] || 0)) : 0;   // the plan's field over what is out (F2)
+      const want = (V.keep[k] || 0) + gap + Math.min(2, miss) + (k === 'aaf' ? (V.hq.aa ? 0 : 1) + S0.filter(s => s.gd.aa && !s.aa).length : 0);
       if ((V.res[k] || 0) + queued(k) >= want) continue;
-      const sc = (A.w[k] || 1) + A.wm * miss + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0);
-      if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
+      const sc = (A.w[k] || 1) + A.wm * miss + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap);
+      if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : gap ? 'plano de produção: ' + (V.pp.why[k] || 'mais em campo') : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
     }
     if (best) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
   }
@@ -12954,6 +13114,11 @@ function ecoVM(t, all) {
   rows.push({ label: 'Instalações', value: ks.length ? ks.map(k => n(k, V.sites.filter(s => s.k === k).length)).join(', ') + (bd ? ' (' + bd + ' em obra)' : '') : 'nenhuma' });
   if (!ECO.gate) rows.push({ label: 'Custo do que entrou em campo', value: V.bill.en + ' E + ' + V.bill.mt + ' M por min' });
   else { const rk = Object.keys(V.res); rows.push({ label: 'Reserva', value: rk.length ? rk.map(k => V.res[k] + ' ' + tx.u[k].toLowerCase()).join(', ') : 'vazia' }); }
+  const G = gpView(t);
+  if (G && G.on) {   // the production plan (F2): in the field / wanted, and the population budget
+    rows.push({ label: 'Plano de produção', value: G.stance + ' · ' + G.kinds.filter(o => o.field || o.have).map(o => o.name.toLowerCase() + ' ' + o.have + '/' + o.field).join(', ') });
+    rows.push({ label: 'Teto de população', value: 'soldados ' + G.use.men + '/' + G.pop.men + ' · veículos ' + G.use.veh + '/' + G.pop.veh + ' · aeronaves ' + G.use.air + '/' + G.pop.air + (G.k < 1 ? ' (' + Math.round(G.k * 100) + '%)' : '') });
+  }
   V.q.slice(0, 6).forEach((q, i) => rows.push({ label: 'Fila ' + (i + 1), value: (ECO.site[q.k] ? tx.nm[q.k] : tx.u[q.k]) + ' · ' + (q.why ? 'parado: ' + tx.st[q.why] : Math.round(q.p * 100) + '%') }));
   rows.push({ label: 'Comando econômico', value: V.ctl === 'ai' ? 'IA' : V.ctl === 'me' ? 'Jogador' : 'MCP' });
   return { sites, dep, q: V.q, rows };
@@ -13254,7 +13419,14 @@ function ecsOf(t) {
   for (const id of Object.keys(d.kn).slice(0, 24)) { const k = d.kn[id]; kn.push(+id, ESK.indexOf(k.k), R(k.x), R(k.z), R(S.t - k.T), k.dead ? 1 : 0); }
   for (const e of E.l) if (e.team === t && !e.dead && (e.gd.inf || e.gd.aa) && gd.length < 72) gd.push(e.id, e.gd.inf, e.gd.aa);
   return { v: [d.en, d.mt, d.inc.en, d.inc.mt, d.use.en, d.use.mt, d.bill.en, d.bill.mt].map(R), c: Math.max(0, enetCtl.indexOf(E.ctl[t])), q, r, kp, ms, ls, sl, kn, gd,
-    sc: d.sc ? [R(d.sc.x), R(d.sc.z), R(Math.max(0, d.sc.T - S.t))] : [], tg: d.tg || 0 };
+    sc: d.sc ? [R(d.sc.x), R(d.sc.z), R(Math.max(0, d.sc.T - S.t))] : [], tg: d.tg || 0, ...ecsPlan(t) };
+}
+/* the production plan in ecs (F2), for the side's guests and its MCP bridge: pp [kind, field, out] each, po [posture, budget, out, scale %] */
+function ecsPlan(t) {
+  const G = gpView(t); if (!G) return {};
+  const I = ecoI(), pp = [];
+  for (const o of G.kinds) if (I.indexOf(o.k) >= 0) pp.push(I.indexOf(o.k), o.field, o.have);
+  return { pp, po: [G.st, G.pop.men, G.pop.veh, G.pop.air, G.use.men, G.use.veh, G.use.air, Math.round(G.k * 100)] };
 }
 /* the commander-dependent fields of a view model, numbers to a tenth */
 function genPick(V) {
@@ -13418,6 +13590,8 @@ Net.rx.ecs = m => {
   const gd = A(m.gd); for (const e of E.l) if (e.team === m.s) { e.gd = { inf: 0, aa: 0 }; for (let i = 0; i + 2 < gd.length; i += 3) if (gd[i] === e.id) e.gd = { inf: gd[i + 1], aa: gd[i + 2] }; }
   const sc = A(m.sc); d.sc = sc.length === 3 ? { x: sc[0], z: sc[1], T: S.t + sc[2] } : null;
   d.tg = m.tg || null; d.rT = typeof m.T === 'number' ? m.T : undefined;
+  const pp = A(m.pp), po = A(m.po);   // the production plan (F2): [kind, field, out] each, and [posture, budget men veh air, out men veh air, scale %]
+  if (po.length === 8) { d.pp = { st: po[0], f: {}, h: {}, why: {}, set: {} }; d.pop = { men: po[1], veh: po[2], air: po[3] }; d.pu = { men: po[4], veh: po[5], air: po[6] }; d.pk = po[7] / 100; for (let i = 0; i + 2 < pp.length; i += 3) if (I[pp[i]]) { d.pp.f[I[pp[i]]] = pp[i + 1]; d.pp.h[I[pp[i]]] = pp[i + 2]; } }
 };
 Net.rx.gen = m => {
   if (!enetG() || (m.s !== S.me && !S.spec) || !m.v || typeof m.v !== 'object') return;
@@ -13461,6 +13635,7 @@ function genAnswer(s, q) {
     return { ok: true, why: '', id: 0, r };
   }
   if (q.q === 'pool' || q.q === 'amb' || q.q === 'fire') return { ok: true, why: '', id: 0, r: genQuery(s, q) };
+  if (q.q === 'plan') return { ok: true, why: '', id: 0, r: gpView(s) || { off: 1 } };   // the production plan (F2)
   if (q.q === 'view') return { ok: true, why: '', id: 0, r: { eco: S.eco ? ecoView(s) : null, gen: genPick(genVM(s, false)), log: glogRows(s).slice(-20) } };
   return no('shape');
 }
@@ -13908,6 +14083,73 @@ const GC = {
   } }
 };
 for (const k of ['build', 'make', 'cancel', 'prio', 'scrap', 'def', 'keep', 'scout', 'strike']) GC[k] = { d: 'eco', f: gEcoCmd };
+/* ---- the General's production (F2) in the funnel: pplan, disp, mis; the question plan ----
+   pplan { k: a kind of the plan, n: how many it wants in the field (0..GP.max; -1: the plan's own again); k auto: every kind its own again } (eco).
+   disp { k: GPC.kinds, n: 1..GPC.n, mk: the mission's kind (MIS: attack defend ...), pi | x,z (r): the area, lat 0-2, roe hold|return|free, H: s to its
+   H-hour, brk, why }: from the reserve, now, by one order with that mission: aircraft from the base, ground units as a column on the road nearest the
+   area; refused off (no general production), kind, map, pop (over the budget) or res (nothing in the reserve) (atk).
+   mis { ids: squads, mk, pi | x,z (r), lat, roe, H, brk, why }: the squads take that mission there: defend, garrison and reserve hold the spot, attack
+   assaults it, recon observes it, the rest move to it, as the person's own orders do (atk). The answers are the funnel's: an order's or operation's id */
+const GPC = { kinds: ['tank', 'aa', 'art', 'truck', 'squad', 'fighter', 'cas', 'heli'], n: 4, mis: ['attack', 'defend', 'ambush', 'recon', 'escort', 'garrison', 'patrol', 'interdict', 'support', 'cap', 'cas', 'lift', 'build', 'reserve'],
+  go: { defend: 'move', garrison: 'move', reserve: 'move', attack: 'assault', recon: 'recon' } };
+function gpArea(c) {
+  let x = c.x, z = c.z;
+  if (c.pi !== undefined) { const P = gAtkP({ pi: c.pi }); if (!P) return null; x = P.x; z = P.z; }
+  return gMapOk(x, z) ? { x, z, r: Number.isFinite(c.r) ? clamp(c.r, 50, 3000) : MIS.r } : null;
+}
+GC.pplan = { d: 'eco', f(t, c) {
+  if (!S.eco || !ecoSim()) return gBad('off');
+  const d = S.eco.d[t], o = d.ppo || (d.ppo = {});
+  if (c.k === 'auto') { d.ppo = {}; gpPlan(t); gLog(t, 'eco', 'Plano de produção: tudo pela postura e pelo inimigo conhecido', S.base[t], 'ppauto'); return gYes(); }
+  if (!gpKinds().includes(c.k)) return gBad('kind');
+  if (!Number.isInteger(c.n) || c.n < -1 || c.n > GP.max) return gBad('shape');
+  if (c.n < 0) delete o[c.k]; else o[c.k] = c.n;
+  const pp = gpPlan(t);
+  gLog(t, 'eco', 'Plano de produção: ' + ECO.tx.u[c.k].toLowerCase() + (c.n < 0 ? ' volta ao plano (' + pp.f[c.k] + ' em campo)' : ', ' + pp.f[c.k] + ' em campo') + (c.why ? ': ' + c.why : ''), S.base[t], 'pp' + c.k);
+  return gYes();
+} };
+GC.disp = { d: 'atk', f(t, c) {
+  if (!gpOn()) return gBad('off');
+  const k = c.k, u = ECO.unit[k]; if (!GPC.kinds.includes(k) || !u || (u[4] && u[4] !== S.era)) return gBad('kind');
+  if (c.mk !== undefined && !GPC.mis.includes(c.mk)) return gBad('kind');
+  const A = gpArea(c); if (!A) return gBad('map');
+  const n = Number.isInteger(c.n) ? clamp(c.n, 1, GPC.n) : 1, P = popOf(t), U = popUse(t), side = S.E.sides[S.fac[t]], b = S.base[t], air = u[3] === 'air';
+  if (air ? U.air + n > P.air : k === 'squad' ? U.men + n * SQUAD[S.era].length > P.men : U.veh + n > P.veh) return gBad('pop');
+  const M = Object.assign({ why: c.why || 'despacho do general: ' + ECO.tx.u[k].toLowerCase(), area: A }, c.mk ? { kind: c.mk } : { by: MIS.col }), was = new Set(S.planes);
+  let id = 0, got = 0;
+  dispatch(t, M, () => {
+    if (air) for (let i = 0; i < n && ecoUse(t, k); i++, got++) {
+      if (k === 'heli') { heliAir(t, side.heli); continue; }
+      const x = b.x + (t ? -300 : 300), z = b.z + (i - (n - 1) / 2) * 400;   // abreast along the base: a command draws no random number
+      addPlane(side[k], t, x, hgt(x, z) + 900, z, headTo(x, z, A.x, A.z), true, k);
+    } else {
+      const p = railOf(A.x, A.z), N = { tank: 0, aa: 0, art: 0, truck: 0, squad: 0 }; N[k] = n;
+      const col = ecoCol(t, N.tank, N.aa, N.truck, N.art, N.squad, p.ri, entryS(t, p.ri));
+      if (col) { got = col.nt + col.na + col.nar + (k === 'squad' ? col.nsq : k === 'truck' ? col.ntr : 0); spawnColumn(t, col.nt, col.na, col.ntr, p.ri, col.s0, col.nar, col.nsq); }
+    }
+    id = S.dsp.cur.id;
+  });
+  for (const p of S.planes) if (!was.has(p) && p.team === t && p.mis && p.mis.d !== id) { Object.assign(p.mis, { kind: c.mk || p.mis.kind, area: A, why: M.why }); if (!id) id = p.mis.d; p.mis.d = id; }   // a helicopter comes by its own order: it is this one's
+  if (!got) return gBad('res');
+  gpMis(id, c);
+  gLog(t, 'rf', 'Despacho: ' + got + ' × ' + ECO.tx.u[k].toLowerCase() + ' com missão ' + (c.mk || MIS.cls[k] || 'reserve') + ' ' + gNear(A.x, A.z) + (c.why ? ': ' + c.why : ''), A, 'disp' + id);
+  return gYes(id);
+} };
+GC.mis = { d: 'atk', f(t, c, by) {
+  if (!GPC.mis.includes(c.mk)) return gBad('kind');
+  const A = gpArea(c); if (!A) return gBad('map');
+  const r = GC[GPC.go[c.mk] || 'move'].f(t, { x: A.x, z: A.z, ids: c.ids }, by); if (!r.ok) return r;
+  for (const q of gSqs(t, c.ids)) if (q.op && q.op.id === r.id && q.mis) {
+    const M = q.mis; Object.assign(M, { kind: c.mk, area: A, why: c.why || M.why });
+    if (c.lat === 0 || c.lat === 1 || c.lat === 2) M.lat = c.lat;
+    if (c.roe === 'hold' || c.roe === 'return' || c.roe === 'free') M.roe = c.roe;
+    if (Number.isFinite(c.brk)) M.brk = clamp(c.brk, 0, 1);
+    if (Number.isFinite(c.H)) M.when = { H: S.t + clamp(c.H, 0, GENC.H[1]), until: M.when.until };
+  }
+  return r;
+} };
+Object.assign(GEN.cn, { pplan: 'plano de produção', disp: 'despacho com missão', mis: 'missão' });
+Object.assign(GEN.no, { pop: 'Acima do teto de população do lado' });
 /* the journal and the side effects of a command's end */
 function gDone(t, c, by, G, r) {
   if (GEN.jr) {
@@ -13943,6 +14185,7 @@ function genQuery(t, q) {
   if (!q || typeof q !== 'object' || (t !== 0 && t !== 1)) return gBad('shape');
   if (q.q === 'state') return genState(t);
   if (q.q === 'spots' || q.q === 'why') return ecoAsk(t, q);
+  if (q.q === 'plan') return gpView(t) || { off: 1 };
   if (q.q === 'pool') {
     const A = gAtkPlan(t, { x: q.x, z: q.z });
     if (A.why) return { ok: false, why: A.why };
@@ -15062,7 +15305,7 @@ function debrisMesh(o) {
   m.position.set(-b[0], -b[1], -b[2]); if (d.clip) w.scale.setScalar(1 - d.clip + .1); w.add(m); return w;
 }
 /* --- soldiers: one instanced box per limb, posed on a rig that is reused for each of them. MCOL: uniform and helmet by era and side --- */
-const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = IAI.cap + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
+const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = Math.max(IAI.cap, GP.cap) + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
 let gMen = null, rig = null;
 /* a supply base: the pad and the corner posts of a site, walls that rise as it is built, then the roof, the stores beside it, the sandbags
    and a mast with a flag in the colour of friend or foe; burnt and flat when it is destroyed */
@@ -17395,7 +17638,7 @@ function buildHangar() {
   $('#classes').hidden = coarse; $('#ctrls').hidden = coarse || !air; $('#netBox').hidden = !pvp; $('#btnLaunch').textContent = pvp ? 'Entrar na sala' : GO[k] || 'Avançar';
   fleet({ tabs: $('#classes'), box: $('#planes'), cls: k, model: id, pre: 'plane-', pick(c, m) { if (m) { if (c === k && m === id) return; sel[era][c] = m; } else { if (c === cls) return; cls = c; netStatus(''); } Net.close(); buildHangar(); }, again: buildHangar });
   const o = { pvp, aim: mouseAim(), side: ERAS[era].sides[d.side].name, k, id,
-    swap: ['H', 'Trocar de avião, ' + (fleetIds('heli').length ? 'helicóptero, ' : '') + 'tanque, antiaérea, artilharia, transporte ou soldado sem sair da partida, entre os do seu lado. ' + (pvp ? 'Abandonar um veículo inteiro conta como uma queda, e a batalha não para enquanto você escolhe' : 'Abandonar um veículo inteiro custa os tíquetes de uma perda') + '. O que foi perdido só volta depois da sua contagem: um soldado em ' + CQ.cd.inf + ' s, um tanque em ' + CQ.cd.tank + ' s, um avião de ataque em ' + CQ.cd.cas + ' s'],
+    swap: ['H', 'Trocar de avião, ' + (fleetIds('heli').length ? 'helicóptero, ' : '') + 'tanque, antiaérea, artilharia, transporte ou soldado sem sair da partida, entre os do seu lado. ' + (pvp ? 'Abandonar um veículo inteiro conta como uma queda, e a batalha não para enquanto você escolhe' : 'Abandonar um veículo inteiro conta como uma perda') + '. O que foi perdido só volta depois da sua contagem: um soldado em ' + CQ.cd.inf + ' s, um tanque em ' + CQ.cd.tank + ' s, um avião de ataque em ' + CQ.cd.cas + ' s'],
     rad: k === 'inf' ? ['O', 'Pousar o rádio onde você está, ou recolher a menos de 4 m dele. Com ele nas costas você mesmo é o ponto de entrada da infantaria do seu lado; pousado, ele continua valendo enquanto você estiver a menos de ' + RAD.range + ' m e nenhum inimigo chegar a ' + RAD.near + ' m dele'] : ['O', 'Parado: levantar a antena (' + RAD.deploy + ' s) e virar ponto de entrada da infantaria, com ' + RAD.cap[2] + ' entradas e reabastecimento para quem está ao lado. Com a antena no alto o veículo não anda; O de novo recolhe'],
     req: ['U', 'A pé dentro de um depósito (a base principal, uma base de suprimento pronta ou um ponto seu com base de suprimento): requisitar um veículo ali mesmo. Custa tíquetes, menos do que perdê-lo, tem estoque por depósito e um intervalo de ' + RQ.cool + ' s; aeronaves só na base principal'],
     esc: ['Esc', 'Soltar o mouse' + (pvp ? '' : ' e pausar') + '. Clique no jogo para voltar'],
@@ -17554,7 +17797,7 @@ function swapNote() {
   if (!P.dead && P.def.lo && (sw.cls === 'plane' || sw.cls === 'heli') && sw.sel[sw.cls] === S.model && !LO.off(P.id) && LO.key(LO.mine(P.id)) !== LO.key(P.def.lo)) return 'Carga nova escolhida para ' + P.def.name + ': ela entra quando você rearmar, ' + (P.heli ? 'pousado e parado ao lado da sua base' : 'baixo sobre a sua pista') + '. Não é preciso trocar de aeronave.';
   if (cd > 0) return DEFS[k][id].name + ' foi perdido há pouco e volta em ' + Math.ceil(cd) + ' s. ' + (P.dead ? 'Confirme para esperar por ele, ou entre agora com outro.' : 'Escolha outro.') + wait;
   if (P.dead) return (S.hold ? 'A volta espera a sua escolha. ' : 'Sem mexer aqui, você volta em ' + Math.max(1, Math.ceil(Math.max(S.respawn, cdLeft(S.cls, S.model)))) + ' s com ' + DEFS[S.cls][S.model].name + '. ') + 'Escolha outro da ' + S.E.sides[S.fac[S.me]].name + ' e confirme.' + wait;
-  return (S.net ? 'A batalha continua e você está exposto. ' : 'Jogo pausado. ') + 'Trocar abandona ' + it + ': custa os tíquetes de uma perda' + (S.net ? ', conta como uma queda, e o abate vai para quem acertou você nos últimos ' + DMG.credit + ' s.' : ', e o que foi abandonado entra em contagem.') + wait;
+  return (S.net ? 'A batalha continua e você está exposto. ' : 'Jogo pausado. ') + 'Trocar abandona ' + it + ': conta como uma perda' + (S.net ? ', conta como uma queda, e o abate vai para quem acertou você nos últimos ' + DMG.credit + ' s.' : ', e o que foi abandonado entra em contagem.') + wait;
 }
 function drawSwap() {
   const P = S.my, side = S.fac[S.me], dep = sw.rq && P.man && !P.dead ? rqDepot(P) : null, cs = fleetCls(side).filter(c => swapIds(c).length && !(sw.rq && (c === 'inf' || ((c === 'plane' || c === 'heli') && !(dep && dep.k === 1))))), why = swapWhy(), note = $('#swapNote');
@@ -17723,7 +17966,7 @@ function aarShow(R, sub) {
   b.append(aarChart(R));
   const tk = [0, 1].filter(s => R.tickets[s]).map(s => { const x = R.tickets[s]; return Object.assign([N(s), Math.round(x.start), Math.round(x.loss), Math.round(x.bleed), Math.round(x.ptLost - x.ptTook), Math.round(x.other), Math.round(x.end)], { cls: s ? 'e' : 'f' }); });
   b.append(aarTable(tk, ['Lado', 'Início', 'Perdas', 'Sangria', 'Pontos', 'Outros', 'Fim']));
-  b.append(aarEl('p', 'aar-note', 'Perdas: o custo em tíquetes de cada unidade perdida. Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: requisições, instalações e o resto.'));
+  b.append(aarEl('p', 'aar-note', 'Perdas: o custo em tíquetes de cada unidade perdida (nenhum: os tíquetes são o moral, e a perda é paga pela economia). Sangria: ter menos pontos. Pontos: perdidos menos retomados. Outros: instalações, bases de suprimento, requisições e o resto.'));
   b.append(aarEl('h3', '', 'Decisões que mais pesaram'));
   if (!R.dec.length) b.append(aarEl('p', 'aar-note', 'Nenhuma decisão do general registrada.'));
   else { const ol = aarEl('ol', 'aar-dec'); for (const d of R.dec) { const li = aarEl('li'); li.append(aarEl('b', d.s ? 'e' : 'f', mm(d.t) + ' · ' + N(d.s) + ' · ' + (AARD[d.c] || d.c) + ' · ' + (d.swing > 0 ? '+' : '') + Math.round(d.swing))); li.append(document.createTextNode(' ' + d.x)); ol.append(li); } b.append(ol);
@@ -17852,7 +18095,7 @@ function openReq() {
 }
 Net.ui.req = why => { if (!sw.on || !sw.rq) { if (why) S.banner = { text: 'Requisição recusada', sub: RQ.why[why], life: 3 }; return; } if (why) { sw.msg = RQ.why[why]; drawSwap(); } else closeSwap(); };
 Net.ui.rematch = () => { if (playMode === 'play' && S && S.net) launch(true); };
-const CQBRIEF = pvp => 'A partida é de conquista: ' + 'os dois lados disputam uma cadeia de pontos entre as bases. Fica com o ponto quem tem mais gente dentro dele (soldados a pé contam mais, veículos de solo contam, aeronaves não capturam), e só se toma um ponto ligado a outro que já é seu. Cada perda custa tíquetes do lado, ter menos pontos faz os tíquetes escorrerem, e perde quem ficar sem tíquetes, quem perder a base principal ou quem tiver menos pontos quando o relógio de ' + CQ.len[matchLen][1] + ' min acabar. Pontos seus sem disputa também são lugar de entrada para as classes de solo' + (pvp ? '. Ao fim, a sala começa outra partida sozinha.' : '.');
+const CQBRIEF = pvp => 'A partida é de conquista: ' + 'os dois lados disputam uma cadeia de pontos entre as bases. Fica com o ponto quem tem mais gente dentro dele (soldados a pé contam mais, veículos de solo contam, aeronaves não capturam), e só se toma um ponto ligado a outro que já é seu. Os tíquetes são o moral do lado: perder unidades não os gasta, mas ter menos pontos faz os tíquetes escorrerem, e perder pontos, instalações e bases de suprimento custa tíquetes, e perde quem ficar sem tíquetes, quem perder a base principal ou quem tiver menos pontos quando o relógio de ' + CQ.len[matchLen][1] + ' min acabar. Pontos seus sem disputa também são lugar de entrada para as classes de solo' + (pvp ? '. Ao fim, a sala começa outra partida sozinha.' : '.');
 /* radios on the screen: a mark with the entries left over each of my side's within 1500 m, and the state of the one I carry or drive */
 function radHud(P, u, ink, acc, y0) {
   for (const r of S.rl || []) {

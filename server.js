@@ -429,7 +429,8 @@ RX.eco = (c, m) => {
 RX.ecs = (c, m) => {
   if (!host(c) || !sd(m.s) || !num(m.T) || !vec(m.v, 8) || !int(m.c, 0, 2) || !ints(m.q, 60, 5) || ![m.r, m.kp, m.ms, m.ls].every(l => ints(l, 40, 2)) || !ints(m.sl, 40, 4)
     || !ints(m.kn, 144, 6) || !ints(m.gd, 72, 3) || !(Array.isArray(m.sc) && (m.sc.length === 0 || vec(m.sc, 3))) || !int(m.tg, 0, 1e6)) return;
-  castSide(c, { t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, m.s);
+  const pl = ints(m.pp, 60, 3) && vec(m.po, 8);   // the production plan (F2), optional: [kind, field, out] each and [posture, budget, out, scale %]
+  castSide(c, Object.assign({ t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, pl && { pp: m.pp, po: m.po }), m.s);
 };
 /* the commander's view of side s: top-level fields checked, their insides are the host's (it is trusted with the whole battle) */
 RX.gen = (c, m) => {
@@ -458,7 +459,8 @@ RX.gclaim = (c, m) => {
   gctl(room);
 };
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
-  ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n' };
+  ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
+  mk: 'w', lat: 'i', roe: 'w', brk: 'n' };   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
 function gcmdOf(c) {
   if (!c || !rec(c) || typeof c.c !== 'string' || !/^[a-z]{2,8}$/.test(c.c) || c.c === 'draw') return null;
   const o = { c: c.c };
@@ -482,7 +484,7 @@ RX.gcmd = (c, m) => {
 };
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
-  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
+  if (!q || !rec(q) || !['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan'].includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
   c.ga = now;
   const o = { q: q.q }; if (typeof q.k === 'string' && /^[a-z0-9]{1,10}$/.test(q.k)) o.k = q.k; for (const k of ['x', 'z', 'a']) if (num(q[k]) && Math.abs(q[k]) < 1e5) o[k] = q[k];
   if (!h) return send(c.ws, { t: 'gres', n, ok: false, why: 'host', id: 0 });

@@ -10,6 +10,7 @@ node tests/squads.js        # pelotões: caminhão, desembarque, comportamento, 
 node tests/mission.js       # contrato de missão e Despacho: toda unidade nasce com u.mis, a IA só entra em campo por ordem, relatórios rep (PARITY=<página antiga>: a mesma batalha)
 node tests/help.js          # cérebro de unidade e pedidos de ajuda (F5): crenças só do que a escada de percepção viu, utilidade (dever, recuo), ROE e latitude, cada pedido (fogo, limpar, reparo, munição, antiaérea, fogo indireto, carona), quem responde por utilidade, limites, recusa, veto e subida ao general, o jogador no rádio, o anfitrião online e batalhas só de IA (SECS=150)
 node tests/help-relay.js    # servidor: hlp do anfitrião só ao lado de cada um, hask e hacc do convidado ao anfitrião
+node tests/production.js    # produção pelo general: plano por postura e inimigo conhecido, teto de população, despacho por evento, piso de segurança, pplan/disp/mis e a pergunta plan, tíquetes como moral
 node tests/field.js         # infantaria de campo: quem começa onde, ordens (guardar, patrulhar, assaltar, escoltar), reforços do planejador, caminhão sob ameaça, conquista: reforços do diretor, tíquetes, captura, ligação, relógio (SECS=240)
 node tests/bases.js         # bases de suprimento: onde pode, construção, kit e limite, reabastecimento por classe, entrada, tiros para destruir por arma, carga, IA que constrói, guarda, refaz, recua e ataca
 node tests/world.js         # casas, árvores, base e carcaças: o que para na parede, tabela de dano, estágios, colisão, visão, IA nas vilas (DRIVE=300)

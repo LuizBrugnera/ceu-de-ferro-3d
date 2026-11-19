@@ -27,7 +27,7 @@ console.log('-- where it exists --');
 {
   load(); watch('ww2');
   ok(!!S.rec && res(0, 'arv') === 1 && res(1, 'amb') === 1 && S.eco.d[0].keep.arv === 1 && S.eco.d[1].keep.amb === 1 && !!$('ECO').unit.arv, 'with the economy: each reserve starts with a recovery vehicle and an ambulance and keeps one of each');
-  ok(!Object.keys($('TRNS')).some(id => $('TRNS')[id].svc) && $('TRNS').bergep && $('TRNS').m88a2.kind === 'car', 'the recovery vehicles and ambulances are no player\'s pick, but the AI can field them');
+  ok(Object.keys($('TRNS')).filter(id => $('TRNS')[id].svc).every(id => $('TRNS')[id].svc !== 'arv') && $('TRNS').bergep && $('TRNS').m88a2.kind === 'car' && Object.keys($('TRNS')).includes('kfz31') && Object.keys($('TRNS')).includes('opelw'), 'the recovery vehicles are no player\'s pick (the AI fields them); the ambulances and repair trucks are');
   load({ eco: 0 }); watch('ww2'); ok(!S.rec && !$('ECO').unit.arv, 'with no economy: none of it, and no such kinds to produce');
   load(); REC.on = 0; watch('ww2'); ok(!S.rec, 'nor with REC.on 0');
 }

@@ -21780,9 +21780,10 @@ newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !
        and puts the mortars on the enemy's way in at H.
    M4.on 0 (or no tactical map: TM.on 0) leaves all four out. M4S(): the counts of the match (tests and measurement read them). No random number */
 const M4 = { on: 1, seen: .3, wet: .5, bend: .35, step: 50, cap: 4,
-  doc: { cautious: { emb: 1.1, itd: 1, grd: 1.3 }, balanced: {}, aggressive: { emb: 1.2, itd: 1.2, grd: .8 } } };
+  doc: { cautious: { emb: 1.1, itd: 1, grd: 1.3 }, balanced: {}, aggressive: { emb: 1.2, itd: 1.2, grd: .8 } },
+  per: { ret: { grd: 1.4, emb: 1.1 }, blz: { emb: .8, itd: .9, grd: .6 }, gue: { emb: 1.8, itd: 1.5, grd: .8 }, art: { itd: 1.2 }, log: { itd: 1.6, grd: 1.2 } } };
 Object.assign(MANT, {
-  emb: { w: 1, h: .4, top: 3, n: [2, 4], max: 2, lead: 60, win: 90, hold: 240, waits: 2, far: 900, near: 4, walk: 4500, exp: .6, t: [25, 40], out: 60, back: 380, sec: 260, T: 1500, cd: 90 },
+  emb: { w: 1, h: .4, top: 3, n: [2, 4], max: 2, lead: 60, win: 90, hold: 240, waits: 2, far: 600, near: 4, walk: 4500, exp: .6, t: [25, 40], out: 60, back: 380, sec: 260, T: 1500, cd: 90 },
   itd: { w: .9, n: 2, fire: 3, at: 10, T: 1500, cd: 150 },
   grd: { w: .8, max: 2, near: [500, 3000], ratio: 1.3, pen: 4, alt: 2, enemy: 800, foe: 2, pts: 4, walk: 4500, every: 30, T: 900, cd: 90, again: 300 },
   p11: { lat: .8, fire: 3, back: 200 } });
@@ -21793,12 +21794,11 @@ Object.assign(GEN.mfem, { emb: 1, itd: 1, grd: 1 });
 Object.assign(GEN.mtag, { emb: 'EMB', itd: 'ITD', grd: 'GRD' });
 Object.assign(GEN.mlg, { emb: 'pontilhado da chegada escondida até a zona de morte, barra ao longo da estrada', itd: 'como a emboscada, na estrada de suprimento, com a mira do fogo na hora prevista', grd: 'quadrado no entroncamento ou na ponte guardada' });
 Object.assign(GEN.cn, { ambush: 'emboscada planejada', interdict: 'interdição da logística', guard: 'guardar rua alternativa' });
-Object.assign(PERS.ret.w, { grd: 1.4, emb: 1.1 }); Object.assign(PERS.blz.w, { emb: .8, itd: .9, grd: .6 }); Object.assign(PERS.gue.w, { emb: 1.8, itd: 1.5, grd: .8 });
-Object.assign(PERS.art.w, { itd: 1.2 }); Object.assign(PERS.log.w, { itd: 1.6, grd: 1.2 });
-const M4S = () => S.m4s || (S.m4s = { emb: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0 }, itd: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0, fire: 0 }, grd: { open: 0, held: 0, fell: 0, foe: 0 }, p11: 0 });
+const M4S = () => S.m4s || (S.m4s = { emb: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0 }, itd: { arm: 0, set: 0, early: 0, sprung: 0, ok: 0, miss: 0, found: 0, fire: 0 }, grd: { open: 0, held: 0, fell: 0, foe: 0 }, p11: 0, why: {} });
+const m4w = k => { const w = M4S().why; w[k] = (w[k] || 0) + 1; return null; };   // why a candidate was not made, counted (the tests and the probes read it)
 const m4On = C => !!(M4.on && TM.on && C && C.tm && S.T.mv >= 4 && S.T.net && S.T.tms && S.cq);
-/* the weight of kind k for side C: its doctrine's (M4.doc) times its personality's (PERS.w) */
-const m4W = (C, k) => ((M4.doc[docK(C)] || {})[k] || 1) * ((perOf(C.t) || { w: {} }).w[k] || 1);
+/* the weight of kind k for side C: its doctrine's (M4.doc) times its personality's (M4.per: PERS.w keeps the kinds the match's taste is drawn for) */
+const m4W = (C, k) => ((M4.doc[docK(C)] || {})[k] || 1) * ((S.per && M4.per[S.per[C.t]] || {})[k] || 1);
 const m4Cell = (M, x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
 /* the cells a walk may not enter: water, but where a bridge stands (or a pontoon carries) */
 function tmWet(Z) {
@@ -21924,12 +21924,13 @@ const embBusy = (C, ei) => C.man.some(o => !o.over && (o.k === 'emb' || o.k === 
 const embLive = C => C.man.filter(o => !o.over && (o.k === 'emb' || o.k === 'itd')).length;
 /* a candidate on edge ei: the site, the assault squad and its hidden walk, the pass it makes; null when none */
 function embCand(C, X, k, ei, H, lo, hi) {
-  const K = MANT.emb, site = embSite(C, ei, lo, hi); if (!site) return null;
-  const qs = embSquads(X.free, site, 1, K.walk); if (!qs.length) return null;
+  const K = MANT.emb, site = embSite(C, ei, lo, hi); if (!site) return m4w(k + ':site');
+  const qs = embSquads(X.free, site, 1, K.walk); if (!qs.length) return m4w(k + ':sq');
   const L = m4Lead(qs[0]), way = tmWalk(C, L.x, L.z, site.pos[0].x, site.pos[0].z);
-  if (!way || way.len > K.walk * 1.3 || way.exp > K.exp) return null;
+  if (!way) return m4w(k + ':way');
+  if (way.len > K.walk * 1.3 || way.exp > K.exp) return m4w(k + ':exp');
   const eta = way.len / MAN.pace, Tp = embPass(H, eta);
-  if (Tp >= 0 && Tp - S.t > K.far) return null;
+  if (Tp >= 0 && Tp - S.t - eta > K.far) return m4w(k + ':far');   // no longer than MANT.emb.far s lying in wait for it
   return { site, q: qs[0], way, eta, Tp, H };
 }
 const embKm = v => gN(Math.round(v / 100) / 10) + ' km', embPc = v => Math.round(v * 100) + '%';
@@ -22102,8 +22103,8 @@ const grdKey = c => (c.b !== undefined ? 'b' + c.b : 'n' + c.node);
 const grdSay = c => c.nm + ' (' + (c.d1 === Infinity ? 'sem ela o inimigo não chega a ' + gName(c.P) : 'sem ela o inimigo roda ' + embKm(c.d1) + ' em vez de ' + embKm(c.d0) + ' até ' + gName(c.P)) + (c.alt ? ', pelo flanco' : '') + ')';
 MANG.grd = (C, X) => {
   const t = X.t, K = MANT.grd, out = [];
-  if (!m4On(C) || !X.free.length || C.man.filter(o => !o.over && o.k === 'grd').length >= K.max) return out;
-  const cd = C.m4cd || {}, busy = new Set(C.man.filter(o => !o.over && o.k === 'grd').map(o => o.key));
+  if (!m4On(C) || !X.free.length || C.ops.filter(o => !o.over && o.k === 'grd').length >= K.max) return out;
+  const cd = C.m4cd || {}, busy = new Set(C.ops.filter(o => !o.over && o.k === 'grd').map(o => o.key));
   for (const c of grdSites(C)) {
     if (out.length >= 2) break;
     const key = grdKey(c); if (busy.has(key) || S.t < (cd[key] || 0)) continue;
@@ -22118,8 +22119,8 @@ MANO.grd = (t, C, spec, by, R) => {
   const K = MANT.grd, ai = by === 'ai';
   let c = R && R.res && R.res.c;
   if (!c) { const a = manAt(spec); if (!a) return gBad('at'); c = grdSites(C).filter(o => hdist(o, a) < 800).sort((x, y) => hdist(x, a) - hdist(y, a))[0]; if (!c) return gBad('at'); }
-  if (C.man.some(o => !o.over && o.k === 'grd' && o.key === grdKey(c))) return gBad('busy');
-  if (ai && C.man.filter(o => !o.over && o.k === 'grd').length >= K.max) return gBad('max');
+  if (C.ops.some(o => !o.over && o.k === 'grd' && o.key === grdKey(c))) return gBad('busy');
+  if (ai && C.ops.filter(o => !o.over && o.k === 'grd').length >= K.max) return gBad('max');
   const all = S.squads.filter(q => q.team === t && !q.net && q.live > 0 && !q.state), pool = ai ? manFree(all) : all.filter(q => q.live >= 2 && !q.lift && !q.rd && !(q.op && !q.op.over && q.op.man));
   const q = (R && R.res && R.res.q && pool.includes(R.res.q) && R.res.q) || embSquads(pool, c, 1, ai ? K.walk : 1e9)[0]; if (!q) return gBad('sq');
   const L = m4Lead(q), way = tmWalk(C, L.x, L.z, c.x, c.z) || footPath(C, L.x, L.z, c.x, c.z) || tripOf(L.x, L.z, c.x, c.z, { mode: 'foot', team: t }); if (!way) return gBad('path');
@@ -22127,6 +22128,7 @@ MANO.grd = (t, C, spec, by, R) => {
   const op = manOpen(C, 'grd', spec, by, { key: grdKey(c), pi: c.pi, x: c.x, z: c.z, kz: { x: c.x, z: c.z }, ri: r.ri, nm: c.nm, st: 'go', path: way, exp: X.exp, r: c.r, d0: c.d0, d1: c.d1, n0: manLive(q) });
   if (!Number.isFinite(spec.T)) op.Tmax = clamp(way.len / MAN.pace + K.T, 120, MAN.life);
   opTake(op, q, { k: 'hold', ri: r.ri, s: r.s, x: c.x, z: c.z, R: 10, wp: way, fast: 1 });
+  C.man = C.man.filter(o => o !== op);   // a guard is a post, not a manoeuvre on the move: in C.ops (it runs, ends and is shown as one) but it takes none of the side's live manoeuvres (manMax, MAN.share)
   C.m4cd = C.m4cd || {}; C.m4cd[op.key] = S.t + K.again; M4S().grd.open++;
   gLog(t, 'def', 'Guarda da rua alternativa: esquadra a caminho de ' + grdSay(c) + '; chegada por ' + embKm(way.len) + ' com ' + embPc(X.exp) + ' à vista', c);
   return gYes(op.id);
@@ -22181,6 +22183,11 @@ OPS.qrf = (g => (C, op) => {
   return g(C, op);
 })(OPS.qrf);
 /* ===== end P11 ===== */
+/* M4B: M4's own time (its candidates, doors, ops and the counter-flank), per call, read only (the tests and the probes measure it) */
+const M4B = { ms: 0, n: 0, worst: 0, stat() { return { calls: M4B.n, ms: Math.round(M4B.ms * 100) / 100, worst: Math.round(M4B.worst * 100) / 100 }; } };
+const m4T = f => function () { const a = AIB.now(); try { return f.apply(this, arguments); } finally { const d = AIB.now() - a; M4B.ms += d; M4B.n++; if (d > M4B.worst) M4B.worst = d; } };
+for (const T of [MANG, MANO, OPS]) for (const k of ['emb', 'itd', 'grd']) T[k] = m4T(T[k]);
+p11 = m4T(p11);
 
 /* the view's entry (genManOp): an ambush's hidden way and its killing ground along the road, a guard's way and the junction or bridge it holds (drawn by gManOp, after the scene) */
 genManOp = (g => (C, op) => {

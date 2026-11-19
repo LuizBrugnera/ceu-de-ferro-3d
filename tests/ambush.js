@@ -16,8 +16,8 @@ const freeOf = ($, S, t) => $('manFree')(S.squads.filter(q => q.team === t && !q
 const Xof = ($, S, Cm) => { Cm.fpT = -1; const sq = S.squads.filter(q => q.team === Cm.t && !q.net && q.live > 0 && !q.state); return { t: Cm.t, C: Cm, sq, free: $('manFree')(sq), room: 9, doc: 'balanced', ds: Cm.t ? 1 : -1, live: Cm.man }; };
 /* side 0 ready to plan: its look, its map, nothing else of its own making */
 function ready(C, S, $) {
-  C.run(2); const Cm = $('cmdOf')(0);
   for (const t of [0, 1]) $('cmdOf')(t).mnT = 1e9;   // no manoeuvre of the commanders' own choosing while a test drives them
+  C.run(2); const Cm = $('cmdOf')(0);
   $('cmdSense')(Cm, S.squads.filter(q => q.team === 0 && !q.net && q.live > 0 && !q.state)); $('tmNow')(0);
   return Cm;
 }
@@ -83,13 +83,16 @@ console.log('-- P7: the ambush on the busiest road the side knows, reached unsee
   const r = $('genCmd')(0, { c: 'man', k: 'ambush', x: c.spec.x, z: c.spec.z, why: c.spec.why }, 'ai', { spec: c.spec, res: c.res }), op = Cm.ops.find(o => o.k === 'emb' && !o.over);
   ok(r.ok && op && op.e === A && op.by === 'ai' && op.nsq >= 2, 'opened through genCmd as the AI: ' + (op ? op.nsq : 0) + ' squads (' + (op ? op.sq.map(q => q.er).join(', ') : '') + ')' + (r.ok ? '' : ' ' + r.why));
   const qs = op.sq, asl = qs.find(q => q.er === 'asl');
-  ok(qs.every(q => q.op === op && !!q.tp && (q.er === 'sec' ? q.ord.k === 'observe' && q.ord.quiet : q.ord.k === 'ambush' && q.ord.op === op)), '  each squad on its own hidden way: assault and support to lie in ambush, the pickets to watch, silent');
+  const oq = q => $('cnOrd')(q);   // the order as sent: it reaches the squad by radio
+  ok(qs.every(q => q.op === op && !!oq(q).wp && (q.er === 'sec' ? oq(q).k === 'observe' && oq(q).quiet : oq(q).k === 'ambush' && oq(q).op === op)), '  each squad on its own hidden way: assault and support to lie in ambush, the pickets to watch, silent');
   ok(has(S, 0, /^Emboscada planejada (linear|em L) na estrada .*: \d esquadras .*à vista \(direto \d+%\), próxima passagem prevista em ~\d+ s/), '  the log: "' + logs(S, 0).find(x => /^Emboscada planejada/.test(x)) + '"');
   ok($('opNew')(0, { c: 'ambush', x: s.x, z: s.z }, 'ai').why === 'busy' || $('opNew')(0, { c: 'ambush', x: s.x, z: s.z }, 'ai').why === 'cd', 'a second on the same road is refused');
   /* run: the squads walk there, it is armed before the pass, two vehicles spring it, it is out within 60 s */
   let set = null, spr = null, back = null;
-  const truck = (x, z) => { const u = C.addVehicle('truck', null, 1, x, z, 0); u.seenT = -999; return u; };
+  const truck = (x, z) => { const u = C.addVehicle('truck', null, 1, x, z, 0); u.seenT = -999; mine.push(u); return u; };
+  const mine = [];
   for (let i = 0; i < 9000 && !op.over; i++) {
+    for (const o of S.men.concat(S.units)) if (o.team === 1 && !o.dead && !mine.includes(o)) o.dead = true;   // nobody of the enemy's but the column it waits for
     C.step(1 / 10);
     if (op.st === 'set' && set === null) { set = S.t; truck(s.x, s.z); truck(s.x + s.dx * 20, s.z + s.dz * 20); }
     if (op.sprung && spr === null) spr = S.t;
@@ -111,9 +114,9 @@ console.log('-- P7: honest, only the traffic it saw --');
   ok(Cm.hu.every(v => v === 0) && $('MANG').emb(Cm, Xof($, S, Cm)).length === 0, 'an enemy column takes the road four times, nobody sees it: no traffic, no ambush');
   const D = $('cmdOf')(1); habits(S, D, [[A, 9, [S.t - 360, S.t - 240, S.t - 120]]]);
   ok($('MANG').emb(Cm, Xof($, S, Cm)).length === 0, 'the other side\'s habits never reach this side');
-  for (let k = 0; k < 4; k++) { S.t += 130; for (const u of vs) { const p = e.smp[k % e.smp.length]; u.x = u.sx = p.x; u.z = u.sz = p.z; u.seenT = S.t; if (!Cm.known.includes(u)) Cm.known.push(u); } $('habSense')(Cm); }
+  for (let k = 0; k < 5; k++) { S.t += 130; for (const u of vs) { const p = e.smp[k % e.smp.length]; u.x = u.sx = p.x; u.z = u.sz = p.z; u.seenT = S.t; if (!Cm.known.includes(u)) Cm.known.push(u); } $('habSense')(Cm); }
   const Hh = $('habOf')(Cm, A), L = $('MANG').emb(Cm, Xof($, S, Cm));
-  ok(Hh.h >= .4 && L.length === 1 && L[0].res.site.e === A, 'seen four times: habit ' + Hh.h.toFixed(2) + ', one each ~' + Math.round(Hh.per) + ' s: that road is the ambush\'s');
+  ok(Hh.h >= .4 && L.length === 1 && L[0].res.site.e === A, 'seen five times: habit ' + Hh.h.toFixed(2) + ', one each ~' + Math.round(Hh.per) + ' s: that road is the ambush\'s');
   const keep = JSON.stringify(L.map(c => [c.res.site.e, c.res.site.s, c.sc.toFixed(4)]));
   for (const u of S.units) if (u.team === 1 && !u.dead && !Cm.known.includes(u)) { u.x += 300; u.z -= 200; }
   ok(JSON.stringify($('MANG').emb(Cm, Xof($, S, Cm)).map(c => [c.res.site.e, c.res.site.s, c.sc.toFixed(4)])) === keep, 'enemy units nobody sees move: the same plan');
@@ -153,9 +156,9 @@ console.log('-- P8: the alternate street, a junction whose loss makes the enemy 
   ok(r >= K.ratio && Math.abs(Math.min(r, 4) - c.r) < 1e-6, 'held, ' + c.nm + ' forces the enemy\'s way from ' + $('gName')(c.O) + ' to ' + $('gName')(c.P) + ' to ' + (without ? (without.c / 1000).toFixed(1) + ' km instead of ' + (base.c / 1000).toFixed(1) + ' km' : 'none at all') + (c.alt ? ' round our main road (its flank)' : '') + ' (×' + (r === Infinity ? '∞' : r.toFixed(2)) + ', ' + K.ratio + ' or more)');
   ok(L.every(o => hdist(o, o.P) >= K.near[0] && hdist(o, o.P) <= K.near[1] && o.P.hold === 0 && Q.filter(p => p.hold === 1).every(p => hdist(p, o) >= K.enemy)), '  all of them ' + K.near[0] + ' to ' + K.near[1] + ' m from a point we hold, none within ' + K.enemy + ' m of an enemy point');
   const G = $('MANG').grd(Cm, Xof($, S, Cm));
-  ok(G.length >= 1 && G[0].spec.c === 'guard' && G[0].sc > 0 && /guardar .* (sem ela o inimigo|pelo flanco)/.test(G[0].why), 'a candidate: "' + (G[0] && G[0].why) + '" (note ' + (G[0] ? G[0].sc.toFixed(2) : '-') + ')');
+  ok(G.length >= 1 && G[0].spec.c === 'guard' && G[0].sc > 0 && /^guardar .*\((sem ela o inimigo|.*pelo flanco)/.test(G[0].why), 'a candidate: "' + (G[0] && G[0].why) + '" (note ' + (G[0] ? G[0].sc.toFixed(2) : '-') + ')');
   const R = $('genCmd')(0, { c: 'man', k: 'guard', x: G[0].spec.x, z: G[0].spec.z }, 'ai', { spec: G[0].spec, res: G[0].res }), op = Cm.ops.find(o => o.k === 'grd' && !o.over), q = op && op.sq[0];
-  ok(R.ok && op && q.ord.k === 'hold' && !!q.tp && hdist(q.ord, G[0].res.c) < 1 && has(S, 0, /^Guarda da rua alternativa: esquadra a caminho de/), 'opened through genCmd: a squad walks unseen to hold it (' + (op ? (op.path.len / 1000).toFixed(1) + ' km, ' + Math.round(op.exp * 100) + '% seen' : '-') + ')');
+  ok(R.ok && op && $('cnOrd')(q).k === 'hold' && !!$('cnOrd')(q).wp && hdist($('cnOrd')(q), G[0].res.c) < 1 && has(S, 0, /^Guarda da rua alternativa: esquadra a caminho de/), 'opened through genCmd: a squad walks unseen to hold it (' + (op ? (op.path.len / 1000).toFixed(1) + ' km, ' + Math.round(op.exp * 100) + '% seen' : '-') + ')');
   const P = Q[op.pi]; P.hold = 1; $('OPS').grd(Cm, op);
   ok(op.over && q.op !== op && has(S, 0, /Guarda de .* encerrada: o ponto .* caiu/), 'the point it guards falls: given up, the squad given back');
   P.hold = 0; Cm.m4g = null;
@@ -172,7 +175,8 @@ console.log('-- P11: the counter-flank --');
   const ax = Math.atan2(src.z - P.z, src.x - P.x), at = a => ({ x: P.x + Math.cos(a) * 420, z: P.z + Math.sin(a) * 420 });
   const qrf = (ang) => {
     for (const o of Cm.ops) if (o.k === 'qrf' && !o.over) $('opEnd')(Cm, o);
-    Cm.thb = []; const e = at(ang), u = $('addMan')('rifleman', 1, e.x, e.z); for (let i = 0; i < 4; i++) $('addMan')('rifleman', 1, e.x + i * 6, e.z); for (const m of S.men) if (m.team === 1 && hdist(m, e) < 40) { m.seenT = S.t; m.sx = m.x; m.sz = m.z; }
+    for (const m of S.men) if (m.team === 1 && m.m4t) { m.dead = true; Cm.known = Cm.known.filter(o => o !== m); }   // the last case's enemy is gone
+    Cm.thb = []; const e = at(ang), u = $('addMan')('rifleman', 1, e.x, e.z); for (let i = 0; i < 4; i++) $('addMan')('rifleman', 1, e.x + i * 6, e.z); for (const m of S.men) if (m.team === 1 && hdist(m, e) < 40) { m.m4t = 1; m.seenT = S.t; m.sx = m.x; m.sz = m.z; }
     $('cmdSense')(Cm, S.squads.filter(q => q.team === 0 && !q.net && q.live > 0 && !q.state)); $('tmNow')(0); $('thbSense')(Cm);
     const I = Cm.thb.find(I => I.k === 'pt' && hdist(I, P) < 50); if (!I) return null;
     const r = $('genCmd')(0, { c: 'qrf', id: I.id }, 'ai'); return r.ok ? Cm.ops.find(o => o.k === 'qrf' && !o.over) : null;
@@ -184,8 +188,8 @@ console.log('-- P11: the counter-flank --');
   ok(op && op.p11 && fl.length >= 1 && $('M4S')().p11 === n0 + 1 && has(S, 0, /^Contra-flanco em .*: o inimigo vem pelo flanco \(\d+° do eixo\)/), 'the enemy on the flank (90°): a counter-flank: "' + logs(S, 0).find(x => /^Contra-flanco/.test(x)) + '"');
   if (op && fl.length) {
     const q = fl[0], L = $('m4Lead')(q), I = op.I, look = (sd) => { const ux = (I.x - I.kx) / (hdist(I, { x: I.kx, z: I.kz }) || 1), uz = (I.z - I.kz) / (hdist(I, { x: I.kx, z: I.kz }) || 1), T = $('THB'), x = I.kx + ux * T.stage - uz * sd * T.flank, z = I.kz + uz * T.stage + ux * sd * T.flank; return { x, z, v: $('tmExp')(Cm, $('polyOf')([L, { x, z }])).exp + Cm.tm.v[$('m4Cell')(Cm.tm, x, z)] }; };
-    const s1 = look(1), s2 = look(-1), pick = hdist(q.ord, s1) < hdist(q.ord, s2) ? s1 : s2, other = pick === s1 ? s2 : s1;
-    ok(pick.v <= other.v + 1e-9 && (!!q.tp || q.ord.wp === undefined), '  the flank goes round the side the enemy sees less (' + pick.v.toFixed(2) + ' against ' + other.v.toFixed(2) + ')' + (q.tp ? ', by the hidden walk' : ''));
+    const s1 = look(1), s2 = look(-1), pick = hdist($('cnOrd')(q), s1) < hdist($('cnOrd')(q), s2) ? s1 : s2, other = pick === s1 ? s2 : s1;
+    ok(pick.v <= other.v + 1e-9 && (!!$('cnOrd')(q).wp || $('cnOrd')(q).fast === undefined), '  the flank goes round the side the enemy sees less (' + pick.v.toFixed(2) + ' against ' + other.v.toFixed(2) + ')' + ($('cnOrd')(q).wp ? ', by the hidden walk' : ''));
     S.t = op.H; const nf = Cm.fm.length; $('OPS').qrf(Cm, op);
     ok(op.p11.f === 1 && (Cm.fm.length > nf || !$('gFireSrc')(0, 'he', op.p11.x, op.p11.z)) && hdist(op.p11, { x: I.kx, z: I.kz }) > 150, '  at H the mortars go on its way in, ' + Math.round(hdist(op.p11, { x: I.kx, z: I.kz })) + ' m behind it' + (Cm.fm.length > nf ? '' : ' (no tube in reach)'));
   }
@@ -200,7 +204,7 @@ console.log('-- a person and the MCP: the same doors --');
   const r = $('genCmd')(0, { c: 'man', k: 'ambush', x: p.x, z: p.z, n: 2, why: 'teste' }, 'me'), op = Cm.ops.find(o => o.k === 'emb' && !o.over);
   ok(r.ok && op && op.by === 'me' && op.nsq === 2 && op.Tp === -1, 'man k=ambush x z n 2 by a person: an ambush on the road there, no timetable known (' + r.why + ')');
   ok($('genCmd')(0, { c: 'man', k: 'cancel', id: op.id }, 'me').ok && op.over, '  cancelled as any manoeuvre');
-  ok($('genCmd')(0, { c: 'man', k: 'ambush', x: 5, z: S.HW - 5 }, 'me').why === 'at', '  far from any road: refused (at)');
+  Cm.mcd = {}; ok($('genCmd')(0, { c: 'man', k: 'ambush', x: 5, z: S.HW - 5 }, 'me').why === 'at', '  far from any road: refused (at)');
   const G = $('grdSites')(Cm)[0], g = $('genCmd')(0, { c: 'man', k: 'guard', x: G.x + 100, z: G.z }, 'me');
   ok(g.ok && Cm.ops.some(o => o.k === 'grd' && !o.over && o.by === 'me'), 'man k=guard near a junction worth it: held (' + G.nm + ')');
   const V = $('genVM')(0, false), mo = V && V.ops ? V.ops.filter(o => o.k === 'grd') : [];

@@ -8,6 +8,8 @@ Pacote P1 do plano `cf-3-lados-plano` (seção 7): o mapa da Frente atual com o 
   - O mapa de 3 lados só é gerado com `genTerrain('modern', mv >= 9, 3)` (`triOf`). Em 2 lados nada muda além do número da versão.
   - A chave do cache de terreno ganha `:3` no mapa de 3 lados.
   - `newState(era, model, { N: 3 })` passa `o.N` para `genTerrain`. **Ninguém passa `N: 3` ainda**: quem liga isso é o P0/P4/P5 (`S.N`, a sala, o hangar).
+  - Para ligar: o P0/P4 deve passar `N: 3` em `newState` (solo) e, online, o `ns` do `welcome` do servidor (P5 já manda `ns`; a página ainda não lê). A sala de 3 lados também precisa da versão 9 do mapa (`Net.mv`).
+- A main já trouxe `dsOf`/`endS`/`foeOn`/`myRoutes` no mesmo formato pelo P6a; no merge ficou a versão do P6a em `frontR`, `cqLine` e `cqNext`.
 - **`RN.tri`** (dados novos):
   - base B2 em `P(.67, -.85)`, a vila nova K em `P(.80, -.62)`;
   - estradas novas classe 1 (secundária, retas, sem curvas pré-calculadas): B2–HS2, HS2–K, K–JSE;

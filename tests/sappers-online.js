@@ -5,8 +5,12 @@
    every mine (the other side's hidden ones too) and never reuses an id */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const all = [], dt = 1 / 60;
-async function client(name, cls, model) {
-  const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5 }), $ = c.$, Net = $('Net');
+/* an instance of the page with its map already made. The map takes seconds (a good deal more on a loaded machine), and made on the
+   welcome it holds up the one thread every client of the test shares: the server's ping goes unanswered, it drops them all after 10 to
+   20 s, and every one plays on alone as its own host. So every instance is made, map and all, before the first of them connects */
+const make = name => { const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + 5 }); c.genTerrain('modern', c.$('MAPV')); return c; };
+async function client(name, cls, model, c) {
+  c = c || make(name); const $ = c.$, Net = $('Net');
   c.name = name; c.$ = $; c.Net = Net; c.on = true;
   await new Promise((res, rej) => {
     Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); res(); };
@@ -43,7 +47,8 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
 
 (async () => {
   await N.start(); console.log('server: ' + N.SERVER + '\npage:   ' + H.PAGE);
-  const host = await client('Host', 'tank', 'abrams'), g1 = await client('Azul', 'inf', 'blueEng'), g2 = await client('Verm', 'inf', 'redEng'), g3 = await client('Fuzil', 'inf', 'redRifle');
+  const pre = ['Host', 'Azul', 'Verm', 'Fuzil', 'Novo'].map(make);
+  const host = await client('Host', 'tank', 'abrams', pre[0]), g1 = await client('Azul', 'inf', 'blueEng', pre[1]), g2 = await client('Verm', 'inf', 'redEng', pre[2]), g3 = await client('Fuzil', 'inf', 'redRifle', pre[3]);
   const T = host.S.T, hd = host.$('hdist'), SAP = host.$('SAP'), FORT = host.$('FORT');
   await run(1);
   ok([host, g1, g2, g3].every(c => c.Net.sap) && host.S.host, 'the server knows the sappers (sap)');
@@ -136,7 +141,7 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   host.Net.close(); host.on = false;
   const took = await until(() => g1.S.host, 6000); await run(2);
   ok(took && has(g1, hid) && has(g2, hid) && has(g3, hid), 'the host leaves: the next host (side 0) has the other side\'s hidden mine, and that side still has it from him');
-  const g4 = await client('Novo', 'inf', 'blueRifle'); away(g4);
+  const g4 = await client('Novo', 'inf', 'blueRifle', pre[4]); away(g4);
   const nm = g1.$('mineLay')(0, 0, p.x - 40, p.z + 60);
   const got = await until(() => has(g4, nm)); await run(1);
   console.log('   the new host\'s first mine: id ' + (nm && nm.id) + ' (ids used before: up to ' + used + ')');

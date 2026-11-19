@@ -10,14 +10,17 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
   - `envelop` (`env`, P2): o mesmo, com duas manobras (`ap` e `ap2`).
   - `turn` (`trn`, P3): `n` esquadras (padrão 2) vão pelo caminho mais seguro até o entroncamento ou cabeceira de ponte mais perto (até 800 m) e se entrincheiram ali. Recuam quando o inimigo conhecido ali tem mais que o dobro.
   - `penet` (`pen`, P5): `n` esquadras (padrão 3, mínimo 2) assaltam juntas um trecho da frente. Depois de entrar, seguem até o gargalo mais forte (camada `k`) a 0,3-1,5 km além, rumo à base inimiga, e seguram 60 s. São canceladas se a brecha fecha antes de entrarem.
-  - `ambush` (`pam`, P7): emboscada em qualquer estrada (perto de x,z, até 400 m, ou na aresta `e` da rede). Fica no lado da estrada com mais ocultação e menos vigilância inimiga. Forma `f`: `lin` ou `l` (a última esquadra fecha a saída). Silêncio e disparo como as emboscadas do comandante (`cmdSquad`, `cmdSpring`). Depois do disparo, recua 250 m para longe da estrada. A janela é `H` (a vida da operação, padrão 600 s). No máximo 2 por lado.
-  - `guard` (`grd`, P8): uma esquadra se entrincheira no entroncamento ou ponte do nosso flanco. Com `f=mine`, também manda um campo minado anticarro ali (ordem `fort`).
-- **Chaves novas do `man`**: `ap`, `ap2`, `f`, `e` e `ids`. Para `fixflank`, `envelop` e `penet`, `H` é a hora H; para `ambush`, `turn` e `guard`, é a vida.
+  - `ambush` e `guard` são as manobras do **M4** (`emb` e `grd`, PR #49): o M7 não tem implementação própria delas. Ele só liga a elas o que o jogador e o MCP pedem:
+    - `ambush` com `e` (uma aresta da rede de estradas): vira o meio da aresta, e o M4 escolhe o sítio, a forma (linear ou em L) e as esquadras;
+    - `guard` com `f=mine`: depois que o M4 abre a guarda, sai também um campo minado anticarro ali (ordem `fort`);
+    - `H` é a vida das duas.
+    (Antes do M4 chegar, o M7 tinha uma emboscada `pam` e uma guarda própria; foram tiradas no merge para não sobrescrever as do M4.)
+- **Chaves novas do `man`**: `ap`, `ap2`, `f`, `e` e `ids` (`ids` vale para `fixflank`, `envelop`, `turn` e `penet`; o M4 escolhe as esquadras dele sozinho). Para `fixflank`, `envelop` e `penet`, `H` é a hora H; para `ambush`, `turn` e `guard`, é a vida.
 - **Relay** (`server.js`): `GK` aceita `ap`, `ap2`, `f`, `e`, e o `welcome` traz `man2: 1`. Com um servidor antigo, a página recusa as manobras novas antes de enviar (`Net.man2`).
 - **MCP** (`mcp-general.js`, versão 2.1.0): 5 ferramentas novas: `get_tactical_map`, `plan_approaches`, `order_maneuver`, `plan_ambush` e `guard_route`. `GK` foi espelhado, e o texto do `send_command` e as instruções foram atualizados. O `MCP.md` também foi atualizado.
 - **Visão de General**, aba Campanha > Manobras:
   - os 6 botões novos;
-  - a escolha da abordagem (Auto, A1-A3), da forma da emboscada (Linear, Em L) e da guarda (Posto, Minas);
+  - a escolha da abordagem (Auto, A1-A3) e da guarda (Posto, Minas) (os botões de emboscada e guarda já eram do M4);
   - 3 chips de camada: Vigilância, Tráfego inimigo, Gargalos;
   - "Ver abordagens": clique num ponto inimigo (pergunta `gask ap`). Em cada abordagem aparece "Fixar e flanquear por An" (um clique) e "Envolver".
 - **Mapa**: camada nova "Abordagens e manobras" (`gAp`). Desenha as 3 abordagens em cores, com minutos, % à vista e ângulo, mais o caminho e o alvo das manobras novas em curso (`genManOp` ganhou `path`/`to` para elas).
@@ -27,8 +30,9 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
 
 - Nenhuma manobra nova foi executada numa partida: nem a abertura, nem as fases (`go`/`fire`/`hit`, `exp`, `set`/`fire`/`back`), nem o fim.
 - A posição de cada esquadra, os caminhos (`apWalk`, `footPath`, `gWay`) e o efeito do `quiet`/`fast` nas ordens `overwatch`, `hold` e `ambush`.
-- O disparo da emboscada planejada por `cmdSpring` (ela usa `op.site` com `dx`, `dz` e `ri`, como as do comandante).
+- A ponte com o M4: `ambush` com `e` (meio da aresta) e `guard` com minas (`genCmd` `fort` logo depois da guarda aberta).
 - O campo minado da guarda (`genCmd` `fort` aninhado dentro de outro `genCmd`).
+- O M2, o M4 e o M7 juntos numa partida (os três disputam as esquadras livres).
 - O relay com as chaves novas, o `man2` no `welcome` e um convidado mandando as manobras pela rede.
 - As 5 ferramentas MCP contra um anfitrião real.
 - O painel e a camada no navegador: botões, cliques no mapa, desenho, largura em 1280 e 1920 px e telefone.
@@ -40,9 +44,9 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
 - **Hora H**: se a manobra nunca chega (`q.at` falso), a hora H só vem pelo atraso de 1,3× + 60 s. Uma caminhada calculada errada pode atrasar demais.
 - **Fixação**: com só uma abordagem, ou com a escolhida igual à mais perto do eixo, a fixação vai para o lugar de reunião do eixo (`pl.f`), que pode estar longe ou exposto.
 - **Esquadras do jogador**: o "pool" pega postos de linha, mata, estrada, guarnição, assalto e emboscada fora de operação. Isso pode desguarnecer um ponto, porque não tem o piso de defesa do `apFloor`.
-- **Emboscada em L**: a posição da última esquadra é aproximada (60 m além da zona, 20 m da estrada) e pode cair em cima da estrada.
+- **Esquadras disputadas**: o M7 e o M4 usam regras diferentes para escolher esquadras livres. Uma ordem do jogador pode tirar esquadras de uma emboscada ou guarda que o M4 ainda vai armar.
 - **`penet`**: o ponto-chave escolhido pela camada `k` estática pode estar atrás de um rio.
-- **`guard` com minas**: o `fort` pode recusar ("em cima da estrada"). O log diz, mas o posto segue sem minas.
+- **`guard` com minas**: o `fort` pode recusar ("em cima da estrada"). O log diz, mas a guarda segue sem minas.
 - **Limites**: `manMax` (o limite de manobras simultâneas por doutrina) e o tempo de espera de 20 s também valem para o jogador. Ele pode receber `max` cedo.
 - **Partida em rede**: um relay antigo sem `man2` faz a página recusar as manobras novas. Um relay novo com uma página antiga: a página antiga ignora as chaves.
 
@@ -59,14 +63,14 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
    - o log "em posição";
    - as trincheiras;
    - em `penet`, "explora até o ponto-chave".
-6. Emboscada: chip "Tráfego inimigo", escolha uma estrada quente, botão "Emboscada planejada" (Linear e Em L). Espere um veículo inimigo passar: "Emboscada disparada", depois "recua 250 m".
+6. Emboscada (M4) pelo M7: chip "Tráfego inimigo", escolha uma estrada quente e mande `plan_ambush {edge}` pelo MCP. O log do M4 deve mostrar "Emboscada planejada … na estrada …". Guarda com minas: botão Minas + "Guarda da rua alternativa". Espere a guarda e um campo minado (ou a linha "minas recusadas").
 7. Recusas: ponto próprio (`own`), longe de estrada (`amb`), sem esquadra (`sq`), terceira emboscada (`max`).
 8. MCP: `CEU_URL=ws://localhost:8080 node mcp-general.js` (veja `MCP.md`) e chame, nesta ordem:
    - `get_tactical_map {layer:"v"}`;
    - `plan_approaches {x,z}`;
    - `order_maneuver {kind:"fixflank", point:i, approach:1}`;
-   - `plan_ambush {x,z, form:"l"}`;
+   - `plan_ambush {edge}`;
    - `guard_route {x,z, with:"mine"}`.
 9. Relay: um convidado (segunda aba) manda as manobras. Com um `server.js` antigo, a página deve dizer "O servidor desta sala é antigo: sem as manobras novas".
-10. Rode `tests/approaches.js`, `tests/approaches-relay.js` e `tests/tmap.js` para ver que o M1 e o M2 seguem bons. Depois escreva um `tests/m7.js` que abra cada manobra com `genCmd(t, {c:'man', k, …}, 'sys')` numa batalha semeada e confira as fases.
+10. Rode `tests/approaches.js`, `tests/approaches-relay.js`, `tests/ambush.js` (M4) e `tests/tmap.js` para ver que o M1 e o M2 seguem bons. Depois escreva um `tests/m7.js` que abra cada manobra com `genCmd(t, {c:'man', k, …}, 'sys')` numa batalha semeada e confira as fases.
 11. Largura: Visão de General em 1280 e 1920 px. A linha nova de botões (`#gcM7`) não pode estourar a coluna.

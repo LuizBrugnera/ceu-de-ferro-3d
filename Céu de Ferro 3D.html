@@ -6261,8 +6261,9 @@ const foeBase = (t, x, z) => {
    bush corridors (COV7: hedgerows, river banks, wood margins), 8 the dirt roads (RN.d8, class 3: parallels, links between the axes, farm and
    forest tracks), 9 the three-sided modern map (RN.tri: the insurgent base B2, the roads R_EI and R_RI, the seat at HS2, the points of
    three sides). A room's version is its first player's, told in welcome (Net.mv). Version 9 changes nothing on a two-sided map: the third
-   side's map is built only for genTerrain(era, mv >= 9, n 3) on the modern front */
-let MAPV = 9;
+   side's map is built only for genTerrain(era, mv >= 9, n 3) on the modern front; 10 the undergrowth (UG: brush in and around the woods,
+   along the river, the field edges and in lanes between the woods and the towns, a field and not objects) */
+let MAPV = 10;
 const TERRAIN = {};
 function hash2(i, j, s) { const n = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); }
 function vnoise(x, z, s) {
@@ -6622,6 +6623,7 @@ function genTerrain(eraId, mv, n) {
   if (tri) triNet(T);   // map version 9, three sides: the roads to side 2's base
   if (mv >= 6) { treesV6(T, eraId, sd); coverTerrain(T, eraId, sd); }   // map version 6: the trees grown and the rocks and bushes, last, so that no other id moves
   if (mv >= 7) coverV7(T, eraId, sd);   // map version 7: the bush corridors, after the rest of the cover
+  if (mv >= 10) ugGen(T, eraId, sd);   // map version 10: the undergrowth (a field: no ids)
   return (TERRAIN[ck] = T);
 }
 function hgtT(T, x, z) {
@@ -8844,6 +8846,7 @@ function bump(u, x, z, cx, cz) {
       BUMP.x += PUSH.x; BUMP.z += PUSH.z; if (vn < 0) u.sp *= 1 - .25 * vn * vn;
     }
   }
+  if (S.T.ug) { const g = ugAt(BUMP.x, BUMP.z); if (g >= UG.thr) slow = Math.min(slow, 1 - UG.slow * g); }   // map version 10: the undergrowth slows a hull a little (UG)
   if (slow < 1) u.sp = clamp(u.sp, -u.def.spd * slow, u.def.spd * slow);
   return BUMP;
 }
@@ -9555,8 +9558,9 @@ function coverAt(x, z, c) {
     const d = o.K.sight && !(o.K.rock && S.os[o.id] > 1) ? footD(o, x, z) || (o.B && S.os[o.id] < 2 ? 9 : 0) : 9; if (d < bd) { bd = d; b = o; }
   }
   if (b) { c.c = COVER.wall[0]; c.p = COVER.wall[1]; c.x = b.x - x; c.z = b.z - z; }
-  else if (kindAt(x, z) === 1) { c.c = COVER.wood[0]; c.p = COVER.wood[1]; c.all = true; }
+  else if (kindAt(x, z) === 1) { c.c = COVER.wood[0]; c.p = COVER.wood[1]; c.all = true; if (S.T.ug && ugAt(x, z) >= UG.thr) c.c = UG.cov.wood; }   // map version 10: a wood with brush hides more (UG)
   else if (v) { c.c = COVER.bush[0]; c.all = !vd; c.b = 1; c.x = v.x - x; c.z = v.z - z; }   // a bush (COVERS): it hides, it does not stop
+  else if (S.T.ug && ugAt(x, z) >= UG.thr) { c.c = UG.cov.c; c.all = true; c.b = 1; c.x = c.z = 0; }   // the undergrowth (UG, map version 10): as a bush, from every side
   return c;
 }
 function cover(m) {
@@ -9878,7 +9882,7 @@ ORD.move = (q, O) => O.s;   // map version 4: a walk to a place (O.wp the way, O
    along: q.ts, the way is kept in O.trp); an order that brings its own way (O.wp: a path of the commander's) walks that, on any axis */
 function setOrd(q, O) {
   const R = S.T.routes, r = R[q.ri], e = Math.min(q.s, r.len - q.s), net = S.T.mv >= 4;
-  let tp = net && O.wp ? orgPoly(O.wp) : null;   // the commander's way, its corners rounded once (ORG)
+  let tp = net && O.wp ? orgPoly(ugPoly(O.wp, q.team)) : null;   // the commander's way, over the brush (UG, map version 10) and its corners rounded, once (ORG)
   if (O.ri !== undefined && O.ri !== q.ri) {
     const sw = net && !tp ? swNear(q.ri, q.s, O.ri) : null;
     if (sw) { q.ri = O.ri; q.s = sw.sj; }
@@ -10398,7 +10402,7 @@ function hideAt(x, z, r) {
   for (let k = 0; k < 13; k++) {
     const a = k * 2.4, R = k ? r * Math.sqrt(k / 12) : 0, px = clamp(x + Math.cos(a) * R, 100, S.W - 100), pz = clamp(z + Math.sin(a) * R, -S.HW + 100, S.HW - 100), h = hgt(px, pz);
     if (h < S.T.WL + 1) continue;
-    const nb = near(px, pz, 10), sc = (kindAt(px, pz) === 1 ? 2 : 0) + (nb.some(o => o.K.sight && S.os[o.id] < 2) ? 1.5 : 0) + (nb.some(o => o.K.veil && S.os[o.id] < 2 && footD(o, px, pz) < 4) ? 1.5 : 0) + clamp((h - h0) / 10, -1, 1.5) - (routeDist(S.T, px, pz) < 40 ? 2 : 0);
+    const nb = near(px, pz, 10), sc = (kindAt(px, pz) === 1 ? 2 : 0) + (nb.some(o => o.K.sight && S.os[o.id] < 2) ? 1.5 : 0) + (nb.some(o => o.K.veil && S.os[o.id] < 2 && footD(o, px, pz) < 4) ? 1.5 : 0) + (S.T.ug ? 1.5 * ugAt(px, pz) : 0) + clamp((h - h0) / 10, -1, 1.5) - (routeDist(S.T, px, pz) < 40 ? 2 : 0);
     if (sc > bs) { bs = sc; best = { x: px, z: pz }; }
   }
   return best || { x, z };
@@ -10499,7 +10503,7 @@ function dHide(m, A, q) {
   if (!g) { const b = near(m.x, m.z, G.cover).filter(o => o.B && S.os[o.id] < 2).sort((a, c) => hdist(a, m) - hdist(c, m))[0]; if (b) g = bldBays(b, m.x, m.z)[0]; }
   if (!g) for (const f of S.forts) if (f.prog >= 1 && f.team === m.team && hdist(f, m) < G.cover) { g = fortSlots(f).find(p => !p.by || p.by === m || p.by.dead) || null; if (g) break; }
   if (!g) { const b = near(m.x, m.z, G.cover).filter(o => o.K.veil && S.os[o.id] < 2).sort((a, c) => hdist(a, m) - hdist(c, m))[0]; if (b) g = { x: b.x, z: b.z }; }   // into a bush (COVERS)
-  if (!g) for (let k = 0; k < 12 && !g; k++) { const a = k * TAU / 6, R = k < 6 ? G.cover * .4 : G.cover * .8, x = m.x + Math.cos(a) * R, z = m.z + Math.sin(a) * R; if (kindAt(x, z) === 1) g = { x, z }; }
+  if (!g) for (let k = 0; k < 12 && !g; k++) { const a = k * TAU / 6, R = k < 6 ? G.cover * .4 : G.cover * .8, x = m.x + Math.cos(a) * R, z = m.z + Math.sin(a) * R; if (kindAt(x, z) === 1 || (S.T.ug && ugAt(x, z) >= UG.thr)) g = { x, z }; }   // a wood, or the undergrowth (UG)
   if (!g) {   // in the open: apart from the others and from vehicles
     let ax = 0, az = 0;
     for (const o of q ? q.men : []) if (o !== m && !o.dead && hdist(o, m) < 25) { ax += m.x - o.x; az += m.z - o.z; }
@@ -15924,6 +15928,177 @@ function coverV7(T, era, sd) {
   const H = K.share; put(R, H.row); put(B, H.bank / (H.bank + H.edge)); put(E, 1);   // what a kind leaves goes to the next
   T.cvn = (T.cvn || 0) + n; T.cv7 = n; T.nid += n;
 }
+/* ---------- the undergrowth (UG, map version 10) ----------
+   Brush that is not a world object (the ids are spent: see COV7), but a field over the map, the same on every client from the map's seed:
+   T.ug = { c, nx, nz, HW, d: the density a cell of cell m (0 to 255), f: its flags (1 water, 2 a road, 4 a town, an airfield or the border) }.
+   It grows: in every dense wood (kind 1), wood[0] to wood[1] by a noise of nz m; out from a wood's margin over edge.w m, thinning to nothing
+   (edge.d at the margin); on low ground along the river (bank.w m from its middle, less than bank.up m over the water); along the field edges
+   (the lines every 330 m of x and 260 m of z the fields are cut by, row.w m wide, a stretch between two crossings by the era's row.p odds); and
+   in lanes: each wood (a group of wood nodes of the terrain's grid) and each town is joined to its nearest neighbours, n of them at most, by
+   the shortest way over the dry ground (a Dijkstra from all of them at once, where two fronts meet), when it is max m or less, a lane w m wide
+   with a wobble of wob m, so that a soldier can go from wood to wood, and from the woods to the towns, under brush. None on water, roads,
+   in towns, at an airfield or within the map's border.
+   What it does (thr: the density from which a cell is brush):
+   - it hides a soldier in it as a bush does (coverAt: cov.c of his concealment, from every side; in a wood with brush cov.wood);
+   - a hull in it keeps 1 - slow x the density of its speed (bump), as in a bush;
+   - a soldier walks through it as through grass;
+   - the tactical map's cover (tmStatic: the cell's share of brush) and the foot paths (fpCells, footPath, tmWalk) read it, and a foot way a
+     squad is given (setOrd, the hidden walk) is laid again over it (ugPoly): an A* over its cells within way.r m of the way, a cell costing
+     cell x (1 - way.k x density) x (1 + way.v x the enemy's watch on the side's map), water only where the way already crossed it (a bridge);
+     kept only if no longer than way.stretch x the way given.
+   The scene draws it near the eye (ugTiles): tiles of draw.tile m within draw.see m, up to draw.per low bushes a cell by its density, made
+   draw.make tiles a frame, the far ones dropped. UG.on 0 leaves the field out of a new terrain (a measurement's control) */
+const UG = { on: 1, cell: 25, thr: .3, road: 9, base: 1500, border: 120, nz: 170,
+  wood: [.5, .95], edge: { w: 95, d: .85 }, bank: { w: 330, up: 9, d: .75 }, row: { w: 9, d: .75, p: { ww2: .6, modern: .45 } },
+  lane: { w: 36, d: .8, max: 2600, n: 3, wob: 40 },
+  cov: { c: .6, wood: .64 }, slow: .15, fp: .5, tm: .4,
+  way: { r: 170, min: 120, max: 9000, cells: 200000, k: .7, v: 3, stretch: 1.5 },
+  draw: { see: 850, tile: 400, per: 3, make: 2, keep: 1.4, r: [1.1, 2.5], h: [.8, 1.7] } };
+function ugGen(T, era, sd) {
+  if (!UG.on) return;
+  const K = UG, c = K.cell, W = T.W, HW = T.HW, nx = Math.ceil(W / c), nz = Math.ceil(2 * HW / c), n = nx * nz, N = T.N, M = N + 1;
+  const f = new Uint8Array(n), dw = new Float32Array(n).fill(1e9), lane = new Uint8Array(n), d = new Uint8Array(n);
+  const near = (x, z, r) => { const l = T.rg.get(T.rk(x, z)); if (!l) return false; for (let i = 0; i < l.length; i += 2) { const a = l[i], ex = l[i + 1].x - a.x, ez = l[i + 1].z - a.z, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (ex * ex + ez * ez || 1), 0, 1); if (Math.hypot(x - a.x - ex * t, z - a.z - ez * t) < r) return true; } return false; };
+  const field = (x, z) => { const k = T.kind[nodeAt(T, x, z)]; return k >= 2 && k <= 4; };
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {   // what cannot grow brush, and the woods
+    const x = (i + .5) * c, z = -HW + (j + .5) * c, k = j * nx + i, kd = T.kind[nodeAt(T, x, z)];
+    if (hgtT(T, x, z) < T.WL + .5) f[k] |= 1;
+    if (near(x, z, K.road)) f[k] |= 2;
+    if (kd === 8 || x < K.border || x > W - K.border || Math.abs(z) > HW - K.border) f[k] |= 4;
+    if (kd === 1) dw[k] = 0;
+  }
+  const disc = (x, z, r) => { const i0 = Math.max(0, Math.floor((x - r) / c)), i1 = Math.min(nx - 1, Math.floor((x + r) / c)), j0 = Math.max(0, Math.floor((z + HW - r) / c)), j1 = Math.min(nz - 1, Math.floor((z + HW + r) / c)); for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot((i + .5) * c - x, -HW + (j + .5) * c - z) <= r) f[j * nx + i] |= 4; };
+  for (const b of T.bases) disc(b.x, b.z, K.base);   // the airfields, and the towns as cityFar has them
+  for (const b of T.burgs || []) disc(b.x, b.z, b.ru + 90);
+  const dg = c * Math.SQRT2;   // how far each cell is from a wood (two passes of a chamfer)
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; let v = dw[k]; if (i) v = Math.min(v, dw[k - 1] + c); if (j) { v = Math.min(v, dw[k - nx] + c); if (i) v = Math.min(v, dw[k - nx - 1] + dg); if (i + 1 < nx) v = Math.min(v, dw[k - nx + 1] + dg); } dw[k] = v; }
+  for (let j = nz - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) { const k = j * nx + i; let v = dw[k]; if (i + 1 < nx) v = Math.min(v, dw[k + 1] + c); if (j + 1 < nz) { v = Math.min(v, dw[k + nx] + c); if (i + 1 < nx) v = Math.min(v, dw[k + nx + 1] + dg); if (i) v = Math.min(v, dw[k + nx - 1] + dg); } dw[k] = v; }
+  /* the lanes, over the terrain's nodes: the woods' groups and the towns are the sources of one Dijkstra; where two fronts meet is a way between them */
+  const L = K.lane, lab = new Int32Array(M * M).fill(-1), dist = new Float64Array(M * M).fill(Infinity), par = new Int32Array(M * M).fill(-1), done = new Uint8Array(M * M);
+  const nX = k => T.x0 + (k % M) * T.cx, nZ = k => T.z0 + (k / M | 0) * T.cz, inMap = k => { const x = nX(k), z = nZ(k); return x > K.border && x < W - K.border && Math.abs(z) < HW - K.border; };
+  const dry = k => T.h[k] >= T.WL + 1 && T.kind[k] !== 8;
+  let nc = 0;
+  for (let k = 0; k < M * M; k++) {
+    if (T.kind[k] !== 1 || lab[k] >= 0 || !inMap(k)) continue;
+    const st = [k]; lab[k] = nc;
+    while (st.length) { const u = st.pop(), ui = u % M, uj = u / M | 0; for (const [di, dj] of DIR8) { const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= M || j >= M) continue; const v = j * M + i; if (T.kind[v] === 1 && lab[v] < 0 && inMap(v)) { lab[v] = nc; st.push(v); } } }
+    nc++;
+  }
+  for (const w of T.towns || []) { const k = nodeAt(T, w.x, w.z); if (lab[k] < 0) lab[k] = nc++; }
+  const hk = [], hv = [], less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
+  const push = (g, v) => { hk.push(g); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
+  const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
+  for (let k = 0; k < M * M; k++) if (lab[k] >= 0) { dist[k] = 0; push(0, k); }
+  const pairs = new Map();
+  while (hk.length) {
+    const u = pop(); if (done[u]) continue; done[u] = 1;
+    const ui = u % M, uj = u / M | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= M || j >= M) continue;
+      const v = j * M + i; if (!inMap(v) || !dry(v)) continue;
+      const s = Math.hypot(di * T.cx, dj * T.cz);
+      if (done[v] && lab[v] >= 0 && lab[v] !== lab[u]) {   // two fronts meet
+        const a = Math.min(lab[u], lab[v]), b = Math.max(lab[u], lab[v]), key = a * 65536 + b, l = dist[u] + s + dist[v], o = pairs.get(key);
+        if (l <= L.max && (!o || l < o.l)) pairs.set(key, { a, b, l, key, u, v });
+      }
+      if (!done[v] && dist[u] + s < dist[v] && dist[u] + s <= L.max) { dist[v] = dist[u] + s; lab[v] = lab[u]; par[v] = u; push(dist[v], v); }
+    }
+  }
+  const cnt = new Int32Array(nc), way = (u, v) => { const A = []; for (let k = u; k >= 0; k = par[k]) A.push(k); A.reverse(); for (let k = v; k >= 0; k = par[k]) A.push(k); return A; };
+  let nl = 0;
+  for (const P of [...pairs.values()].sort((p, q) => p.l - q.l || p.key - q.key)) {
+    if (cnt[P.a] >= L.n && cnt[P.b] >= L.n) continue;
+    cnt[P.a]++; cnt[P.b]++; nl++;
+    const A = way(P.u, P.v);
+    let pts = A.map((k, i) => { const x = nX(k), z = nZ(k); if (!i || i === A.length - 1) return { x, z }; const o = (hash2(k, nl, sd + 141) - .5) * 2 * L.wob; return { x: x + o * .7, z: z - o * .7 }; });
+    for (let r = 0; r < 2; r++) { const q = [pts[0]]; for (let i = 0; i + 1 < pts.length; i++) { const p = pts[i], o = pts[i + 1]; q.push({ x: .75 * p.x + .25 * o.x, z: .75 * p.z + .25 * o.z }, { x: .25 * p.x + .75 * o.x, z: .25 * p.z + .75 * o.z }); } q.push(pts[pts.length - 1]); pts = q; }
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1], q = pts[i], l = Math.hypot(q.x - p.x, q.z - p.z), m = Math.max(1, Math.ceil(l / (c / 2)));
+      for (let s = 0; s <= m; s++) {
+        const x = p.x + (q.x - p.x) * s / m, z = p.z + (q.z - p.z) * s / m, R = L.w / 2 * (.75 + .5 * hash2(Math.round(x / 40), Math.round(z / 40), sd + 142)), i0 = Math.max(0, Math.floor((x - R) / c)), i1 = Math.min(nx - 1, Math.floor((x + R) / c)), j0 = Math.max(0, Math.floor((z + HW - R) / c)), j1 = Math.min(nz - 1, Math.floor((z + HW + R) / c));
+        for (let j = j0; j <= j1; j++) for (let ii = i0; ii <= i1; ii++) if (Math.hypot((ii + .5) * c - x, -HW + (j + .5) * c - z) <= R) lane[j * nx + ii] = 1;
+      }
+    }
+  }
+  /* the density */
+  const rx = T.rx || (() => -1e9), R = K.row;
+  let nb = 0;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+    const k = j * nx + i; if (f[k]) continue;
+    const x = (i + .5) * c, z = -HW + (j + .5) * c, rv = Math.abs(x - rx(z)), ax = Math.round(x / 330), az = Math.round(z / 260);
+    const bank = rv < K.bank.w && hgtT(T, x, z) < T.WL + K.bank.up;
+    const rowX = Math.abs(x - ax * 330) < R.w / 2 && hash2(ax, Math.floor(z / 260), sd + 143) < R.p[era] && (field(x - 25, z) || field(x + 25, z));
+    const rowZ = Math.abs(z - az * 260) < R.w / 2 && hash2(Math.floor(x / 330) + 500, az, sd + 143) < R.p[era] && (field(x, z - 25) || field(x, z + 25));
+    if (dw[k] >= K.edge.w && !bank && !rowX && !rowZ && !lane[k]) continue;   // nothing grows here: no noise to draw
+    const nn = fbm(x / K.nz, z / K.nz, sd + 140);
+    let v = 0;
+    if (dw[k] === 0) v = K.wood[0] + (K.wood[1] - K.wood[0]) * clamp((nn - .25) * 2, 0, 1);
+    else if (dw[k] < K.edge.w) v = K.edge.d * (1 - dw[k] / K.edge.w) * (.55 + .7 * nn);
+    if (bank) v = Math.max(v, K.bank.d * (.45 + .8 * nn) * (1 - .5 * rv / K.bank.w));
+    if (rowX || rowZ) v = Math.max(v, R.d * (.7 + .4 * nn));
+    if (lane[k]) v = Math.max(v, L.d * (.75 + .4 * nn));
+    d[k] = Math.round(clamp(v, 0, 1) * 255);
+    if (v >= K.thr) nb++;
+  }
+  T.ug = { c, nx, nz, HW, d, f, lanes: nl, woods: nc, n: nb };
+}
+/* the undergrowth's density at x z, 0 to 1 (0 on a map without it) */
+function ugAt(x, z, T) {
+  const U = (T || S.T).ug; if (!U) return 0;
+  const i = Math.floor(x / U.c), j = Math.floor((z + U.HW) / U.c);
+  return i < 0 || j < 0 || i >= U.nx || j >= U.nz ? 0 : U.d[j * U.nx + i] / 255;
+}
+/* foot way p laid again over the undergrowth (in place, once: the same array stays the way everyone holds), for side t; see UG */
+function ugPoly(p, t) {
+  const T = S.T, U = T.ug, K = UG.way;
+  if (!U || !p || p.ug || p.length < 2 || !(p.len >= K.min) || p.len > K.max) return p;
+  p.ug = 1;
+  const c = U.c, R = K.r, nx = U.nx, nz = U.nz, ci = x => clamp(Math.floor(x / c), 0, nx - 1), cj = z => clamp(Math.floor((z + U.HW) / c), 0, nz - 1);
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const o of p) { x0 = Math.min(x0, o.x); x1 = Math.max(x1, o.x); z0 = Math.min(z0, o.z); z1 = Math.max(z1, o.z); }
+  const i0 = ci(x0 - R), i1 = ci(x1 + R), j0 = cj(z0 - R), j1 = cj(z1 + R), w = i1 - i0 + 1, h = j1 - j0 + 1, n = w * h;
+  if (n > K.cells) return p;
+  const mask = new Uint8Array(n), rc = Math.ceil(R / c); let wet = false;
+  for (let s = 0; s <= p.len; s += c) {   // the corridor round the way, and whether the way crosses water (by a bridge)
+    const o = routeAt(p, s), oi = ci(o.x) - i0, oj = cj(o.z) - j0;
+    if (U.f[(oj + j0) * nx + oi + i0] & 1) wet = true;
+    for (let b = Math.max(0, oj - rc); b <= Math.min(h - 1, oj + rc); b++) for (let a = Math.max(0, oi - rc); a <= Math.min(w - 1, oi + rc); a++) if ((a - oi) * (a - oi) + (b - oj) * (b - oj) <= rc * rc) mask[b * w + a] = 1;
+  }
+  const C = S.cmd && S.cmd[t], M = C && C.tm, V = M ? M.v : null;
+  const cost = q => {
+    const gi = q % w + i0, gj = (q / w | 0) + j0, k = gj * nx + gi, fl = U.f[k];
+    if (fl & 1 && !(wet && fl & 2)) return Infinity;
+    let v = c * (1 - K.k * U.d[k] / 255);
+    if (V) v *= 1 + K.v * V[m4Cell(M, (gi + .5) * c, -U.HW + (gj + .5) * c)];
+    return v;
+  };
+  const a = (cj(p[0].z) - j0) * w + ci(p[0].x) - i0, b = (cj(p[p.length - 1].z) - j0) * w + ci(p[p.length - 1].x) - i0;
+  const g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
+  const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
+  const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
+  const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w2 = i; if (l < m && less(l, w2)) w2 = l; if (r < m && less(r, w2)) w2 = r; if (w2 === i) break; swap(i, w2); i = w2; } return v; };
+  const bi = b % w, bj = b / w | 0, hh = q => { const dx = Math.abs(q % w - bi), dz = Math.abs((q / w | 0) - bj); return (1 - K.k) * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };
+  mask[a] = mask[b] = 1; g[a] = 0; push(hh(a), a);
+  while (hk.length) {
+    const u = pop(); if (done[u]) continue; done[u] = 1; if (u === b) break;
+    const ui = u % w, uj = u / w | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= w || j >= h) continue;
+      const v = j * w + i; if (!mask[v] || done[v]) continue;
+      const k = v === b ? c : cost(v); if (k === Infinity) continue;
+      const nv = g[u] + k * (di && dj ? 1.414 : 1); if (nv < g[v]) { g[v] = nv; via[v] = u; push(nv + hh(v), v); }
+    }
+  }
+  if (g[b] === Infinity) return p;
+  let pts = [];
+  for (let v = b, k = 0; v !== -1; v = via[v], k++) if (v === b || v === a || k % 2 === 0) pts.push({ x: (v % w + i0 + .5) * c, z: -U.HW + ((v / w | 0) + j0 + .5) * c });
+  pts.reverse(); pts[0] = { x: p[0].x, z: p[0].z }; if (pts.length < 2) return p; pts[pts.length - 1] = { x: p[p.length - 1].x, z: p[p.length - 1].z };
+  { const q = [pts[0]]; for (let i = 0; i + 1 < pts.length; i++) { const e = pts[i], o = pts[i + 1]; q.push({ x: .75 * e.x + .25 * o.x, z: .75 * e.z + .25 * o.z }, { x: .25 * e.x + .75 * o.x, z: .25 * e.z + .75 * o.z }); } q.push(pts[pts.length - 1]); pts = q; }
+  const q = polyOf(pts); if (!(q.len > 0) || q.len > K.stretch * p.len) return p;
+  const keep = Object.assign({}, p); p.length = 0; for (const o of q) p.push(o); p.len = q.len;
+  for (const k in keep) if (isNaN(+k) && k !== 'len') p[k] = keep[k];   // what the way carried (exp, wood, thr, cost...)
+  return p;
+}
 
 /* a work's record f and its object f.o, under the id its owner gave it: a faces the enemy, the object lies across it. Its object is found
    by id like the terrain's own (T.byId), so that the host's word on its stage and a guest's hits on it need nothing of their own */
@@ -17223,19 +17398,25 @@ function fpCells(T) {
     }
     road[j * nx + i] = r / (n * n); wood[j * nx + i] = w / (n * n); water[j * nx + i] = v / (n * n);
   }
-  return (T.fpc = { G, nx, nz, road, wood, water });
+  let ub = null;
+  if (T.ug) {   // map version 10: the share of the cell under brush (UG), as much cover as a wood
+    const U = T.ug, cn = new Float32Array(nx * nz); ub = new Float32Array(nx * nz);
+    for (let j = 0; j < U.nz; j++) for (let i = 0; i < U.nx; i++) { const q = Math.min(nz - 1, (j * U.c) / G | 0) * nx + Math.min(nx - 1, (i * U.c) / G | 0); cn[q]++; if (U.d[j * U.nx + i] >= UG.thr * 255) ub[q]++; }
+    for (let q = 0; q < ub.length; q++) ub[q] = cn[q] ? ub[q] / cn[q] : 0;
+  }
+  return (T.fpc = { G, nx, nz, road, wood, water, ub });
 }
 function footPath(C, x0, z0, x1, z1) {
   if (C.fpT !== S.t) { C.fpT = S.t; C.fpN = 0; }
   if (C.fpN >= difOf(C.t).fp) return null;   // the difficulty's depth (W17): MAN.fp at Normal
   C.fpN++;
   const T = S.T, F = fpCells(T), G = F.G, nx = F.nx, nz = F.nz, K = MANT.thr, ci = (x, z) => clamp((z + S.HW) / G | 0, 0, nz - 1) * nx + clamp(x / G | 0, 0, nx - 1);
-  const thr = k => (C.inf && C.inf.length === nx * nz ? Math.max(0, -C.inf[k]) : 0), cost = k => G * (1 + K.k * thr(k) + K.kz * (C.kz && C.kz.length === nx * nz ? C.kz[k] : 0) + (F.road[k] > 0 ? .5 : 0) - .3 * F.wood[k]) + (F.water[k] > K.wet && (!F.road[k] || (S.brw && S.brw[k])) && !(S.bpw && S.bpw[k]) ? 20 * G : 0);   // S.brw: a cell whose bridge has fallen is water again (W20)
+  const thr = k => (C.inf && C.inf.length === nx * nz ? Math.max(0, -C.inf[k]) : 0), cost = k => G * (1 + K.k * thr(k) + K.kz * (C.kz && C.kz.length === nx * nz ? C.kz[k] : 0) + (F.road[k] > 0 ? .5 : 0) - (F.ub ? UG.fp * Math.max(F.wood[k], F.ub[k]) : .3 * F.wood[k])) + (F.water[k] > K.wet && (!F.road[k] || (S.brw && S.brw[k])) && !(S.bpw && S.bpw[k]) ? 20 * G : 0);   // S.brw: a cell whose bridge has fallen is water again (W20)
   const a = ci(x0, z0), b = ci(x1, z1), n = nx * nz, g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
   const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
   const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
-  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return .7 * G * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost is .7 G
+  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return (F.ub ? 1 - UG.fp : .7) * G * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost is .7 G (map version 10: 1 - UG.fp)
   g[a] = 0; push(h(a), a);
   while (hk.length) {
     const u = pop(); if (done[u]) continue; done[u] = 1; if (u === b) break;
@@ -26910,6 +27091,11 @@ function tmStatic(T) {
   for (const o of T.houses || []) { const i = o.x / c | 0, j = (o.z + HW) / c | 0; if (i >= 0 && j >= 0 && i < nx && j < nz) bld[j * nx + i] = Math.min(1, bld[j * nx + i] + .2); }
   const bush = new Float32Array(n);   // map version 7: the bushes (COV7.tm of them in a cell is a cell full of them)
   if (T.mv >= 7) for (const o of T.objs) if (o.k === 'bush') { const i = o.x / c | 0, j = (o.z + HW) / c | 0; if (i >= 0 && j >= 0 && i < nx && j < nz) bush[j * nx + i] = Math.min(1, bush[j * nx + i] + 1 / COV7.tm); }
+  if (T.ug) {   // map version 10: the undergrowth, as the cell's share of brush and the half of its densest lane (UG)
+    const U = T.ug, sh = new Float32Array(n), hi = new Float32Array(n), cn = new Float32Array(n);
+    for (let j = 0; j < U.nz; j++) for (let i = 0; i < U.nx; i++) { const q = Math.min(nz - 1, (j * U.c) / c | 0) * nx + Math.min(nx - 1, (i * U.c) / c | 0), v = U.d[j * U.nx + i] / 255; cn[q]++; if (v >= UG.thr) sh[q]++; if (v > hi[q]) hi[q] = v; }
+    for (let q = 0; q < n; q++) if (cn[q]) bush[q] = Math.max(bush[q], clamp(sh[q] / cn[q] + .5 * hi[q], 0, 1));
+  }
   const fold = new Float32Array(n), o = new Float32Array(n), scr = new Float32Array(n);
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     let s = 0, k = 0;
@@ -27124,12 +27310,12 @@ function tmWalk(C, x0, z0, x1, z1, K) {
   if (C.fpN >= difOf(C.t).fp) return null;
   C.fpN++;
   const c = M.c, nx = M.nx, nz = M.nz, n = nx * nz, V = M.v, F = M.f, wet = tmWet(Z);
-  const cost = K ? k => (wet[k] ? Infinity : K.cost(k, c, V, F, Z)) : k => (wet[k] ? Infinity : c * (1 + 4 * V[k] + 2 * F[k] / (F[k] + 3)) * (Z.wood[k] > .5 ? .75 : 1) * (Z.road[k] > .1 ? .85 : 1));
+  const ug = !!S.T.ug, cost = K ? k => (wet[k] ? Infinity : K.cost(k, c, V, F, Z)) : k => (wet[k] ? Infinity : c * (1 + 4 * V[k] + 2 * F[k] / (F[k] + 3)) * (ug ? 1 - UG.tm * Z.o[k] : Z.wood[k] > .5 ? .75 : 1) * (Z.road[k] > .1 ? .85 : 1));   // map version 10: the cover of the cell, brush and all (UG)
   const a = m4Cell(M, x0, z0), b = m4Cell(M, x1, z1), g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
   const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
   const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
-  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return (K ? K.lo : .6375) * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost
+  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return (K ? K.lo : ug ? (1 - UG.tm) * .85 : .6375) * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost
   g[a] = 0; push(h(a), a);
   while (hk.length) {
     const u = pop(); if (done[u]) continue; done[u] = 1; if (u === b) break;
@@ -27158,16 +27344,20 @@ function tmWalk(C, x0, z0, x1, z1, K) {
    again every again s); nor in a hurry (an assault at a run, a withdrawal, an operation whose H-hour is within hurry s or past, a squad late to
    it); nor for the orders that live on the road (kinds: the ones it is given for); nor if the hidden way is longer than stretch x the
    straight line plus 300 m. Every every s, on the host; the squad's think walks it as any trip (squadTrip), and a new setOrd of the same order
-   puts it back on it (q.hw). Vehicles keep the road (M5). HIDE.on 0 leaves it out */
-const HIDE = { on: 1, every: 2, min: 250, max: 6000, look: 1200, thr: .12, again: 12, retry: 3, hurry: 30, stretch: 1.9,
+   puts it back on it (q.hw). Vehicles keep the road (M5). HIDE.on 0 leaves it out.
+   Map version 10 (the undergrowth, UG): the enemy counts as near also where the side's map leans to him (its front l under lean), whatever
+   it knows of his strength; the cover weighs ug instead of o, the road roadU, and the way is then laid over the brush itself (ugPoly) */
+const HIDE = { on: 1, every: 2, min: 200, max: 7000, look: 1800, thr: .06, lean: -.05, again: 12, retry: 3, hurry: 30, stretch: 2.1,
   kinds: { hold: 1, move: 1, ambush: 1, overwatch: 1, observe: 1, flank: 1, assault: 1, mortar: 1 },
-  k: { v: 6, f: 3, road: .8, o: .55 } };
-const hideK = { lo: 1 - HIDE.k.o, cost: (k, c, V, F, Z) => c * (1 + HIDE.k.v * V[k] + HIDE.k.f * F[k] / (F[k] + 3) + (Z.road[k] > .1 ? HIDE.k.road : 0)) * (1 - HIDE.k.o * Z.o[k]) };
+  k: { v: 6, f: 3, road: .8, roadU: 1.4, o: .55, ug: .72 } };
+const hideO = () => (S.T.ug ? HIDE.k.ug : HIDE.k.o);
+const hideK = { get lo() { return 1 - hideO(); }, cost: (k, c, V, F, Z) => c * (1 + HIDE.k.v * V[k] + HIDE.k.f * F[k] / (F[k] + 3) + (Z.road[k] > .1 ? (S.T.ug ? HIDE.k.roadU : HIDE.k.road) : 0)) * (1 - hideO() * Z.o[k]) };
 /* the enemy anywhere within look m of the line from a to b on side C's map: the highest of its watch and its strength */
 function hideThreat(C, ax, az, bx, bz) {
   const M = C.tm, c = M.c, L = HIDE.look, i0 = Math.max(0, (Math.min(ax, bx) - L) / c | 0), i1 = Math.min(M.nx - 1, (Math.max(ax, bx) + L) / c | 0), j0 = Math.max(0, (Math.min(az, bz) - L + S.HW) / c | 0), j1 = Math.min(M.nz - 1, (Math.max(az, bz) + L + S.HW) / c | 0);
   let hi = 0;
-  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = j * M.nx + i; hi = Math.max(hi, M.v[q], M.f[q] / (M.f[q] + 3)); }
+  const lean = S.T.ug && M.l ? HIDE.lean : -Infinity;   // map version 10: a cell that leans to the enemy is contested
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = j * M.nx + i; hi = Math.max(hi, M.v[q], M.f[q] / (M.f[q] + 3), M.l && M.l[q] < lean ? HIDE.thr : 0); }
   return hi;
 }
 /* why squad q walks its order O by the road (a word), or '' when it should go hidden */
@@ -27194,7 +27384,7 @@ function hideStep() {
     if (O.hx === undefined) { const p = O.x !== undefined ? O : routeAt(S.T.routes[O.ri !== undefined ? O.ri : q.ri], clamp(O.s || 0, 0, S.T.routes[O.ri !== undefined ? O.ri : q.ri].len)); O.hx = p.x; O.hz = p.z; }
     const why = hideWhy(q, O, L), X = HIDES();
     if (why) { q.hw = { O, T: S.t + HIDE.again }; X.road[why] = (X.road[why] || 0) + 1; continue; }
-    const way = orgPoly(tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK));   // the grid's steps rounded (ORG)
+    const way = orgPoly(ugPoly(tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK), q.team));   // over the brush (UG, map version 10), the grid's steps rounded (ORG)
     if (!way) { q.hw = { O, T: S.t + HIDE.retry }; X.none++; continue; }   // no budget this tick, or no way
     if (way.len > HIDE.stretch * Math.hypot(O.hx - L.x, O.hz - L.z) + 300) { q.hw = { O, T: S.t + HIDE.again }; X.long++; continue; }
     q.hw = { O, way }; q.tp = way; q.ts = 0; q.at = false; X.go++;
@@ -30204,6 +30394,7 @@ function buildWorld() {
   if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
   scene.add(wo.rocks, ...wo.bt);
+  if (T.ug) { const g = new THREE.IcosahedronGeometry(1, 0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: mat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
   cityScene();
   vegBuild();
   const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }), cg = new THREE.IcosahedronGeometry(1, 1);
@@ -31184,9 +31375,48 @@ function bushTiles() {
   const p = camera.position, R = COV7.see + COV7.tile * .75;
   for (const me of wo.bt) { const c = me.userData.c; me.visible = (c.x - p.x) * (c.x - p.x) + (c.z - p.z) * (c.z - p.z) < R * R; }
 }
+/* the undergrowth near the eye (UG, map version 10): its tiles within draw.see m are made, draw.make a frame, the nearest first; those past
+   keep x that are dropped. A tile is an instanced mesh of low bushes, up to draw.per a cell of the field by its density, each placed, sized,
+   turned and tinted by the dice of where it stands, so that every client and every visit draws the same brush */
+function ugTiles() {
+  const U = S.T && S.T.ug, G = wo && wo.ug; if (!U || !G) return;
+  const D = UG.draw, p = camera.position, TL = D.tile, R = D.see + TL * .75, X = R * D.keep, HW = U.HW, eye = Math.max(0, p.y - hgt(p.x, p.z));
+  for (const [k, me] of G.tiles) {
+    const c = me.userData.c, d2 = (c.x - p.x) * (c.x - p.x) + (c.z - p.z) * (c.z - p.z) + eye * eye;
+    if (d2 > X * X) { scene.remove(me); me.geometry.dispose(); me.dispose(); G.tiles.delete(k); } else me.visible = d2 < R * R;
+  }
+  if (eye > R) return;
+  const want = [], i0 = Math.max(0, Math.floor((p.x - R) / TL)), i1 = Math.floor((p.x + R) / TL), j0 = Math.max(0, Math.floor((p.z + HW - R) / TL)), j1 = Math.floor((p.z + HW + R) / TL);
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const k = i * 4096 + j; if (G.tiles.has(k) || G.none.has(k)) continue;
+    const cx = (i + .5) * TL, cz = -HW + (j + .5) * TL, d2 = (cx - p.x) * (cx - p.x) + (cz - p.z) * (cz - p.z) + eye * eye;
+    if (d2 < R * R) want.push([d2, i, j, k]);
+  }
+  want.sort((a, b) => a[0] - b[0]);
+  const mx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3(), sc = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0), cc = new THREE.Color();
+  for (const [, ti, tj, k] of want.slice(0, D.make)) {
+    const L = [], n = Math.round(TL / U.c), WL = S.T.WL;
+    for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
+      const gi = ti * n + a, gj = tj * n + b; if (gi >= U.nx || gj >= U.nz) continue;
+      const d = U.d[gj * U.nx + gi] / 255; if (d < .12) continue;
+      const m = Math.floor(d * D.per + hash2(gi, gj, 151));
+      for (let e = 0; e < m; e++) {
+        const h = s => hash2(gi * 7 + e, gj * 5 + s, 152), x = (gi + h(1)) * U.c, z = -HW + (gj + h(2)) * U.c, y = hgt(x, z);
+        if (y < WL + .3) continue;
+        L.push([x, y, z, (D.r[0] + (D.r[1] - D.r[0]) * h(3)) * (.6 + .5 * d), (D.h[0] + (D.h[1] - D.h[0]) * h(4)) * (.7 + .5 * d), h(5) * 6.283, .72 + .36 * h(6)]);
+      }
+    }
+    if (!L.length) { G.none.add(k); continue; }
+    const g = G.geo.clone(), me = new THREE.InstancedMesh(g, G.mat, L.length);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3((ti + .5) * TL, L.reduce((s, o) => s + o[1], 0) / L.length, -HW + (tj + .5) * TL), TL * .75 + 40);
+    L.forEach((o, i) => { mx.compose(v.set(o[0], o[1] - .15, o[2]), q.setFromAxisAngle(UP, o[5]), sc.set(o[3], o[4], o[3])); me.setMatrixAt(i, mx); me.setColorAt(i, cc.setScalar(o[6])); });
+    me.instanceMatrix.needsUpdate = true; if (me.instanceColor) me.instanceColor.needsUpdate = true;
+    me.userData.c = g.boundingSphere.center; G.tiles.set(k, me); scene.add(me);
+  }
+}
 /* the world, then in a seat that shows it my own model around the eye: same camera, depth cleared, a near plane close enough for a cockpit */
 function render3d() {
-  bushTiles();
+  bushTiles(); ugTiles();
   renderer.render(scene, camera);
   if (!camSt.body) return;
   camera.layers.set(1); camera.near = .06; camera.far = 150; camera.updateProjectionMatrix(); renderer.autoClearColor = false;

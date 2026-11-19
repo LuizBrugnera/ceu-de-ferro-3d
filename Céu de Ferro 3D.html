@@ -468,7 +468,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
   </header>
   <aside class="gen-panel gen-r" id="genR">
     <div class="seg gen-side gen-tabs" id="genTabs" role="tablist" aria-label="Painel do general" hidden><button class="tab" role="tab" type="button" data-gt="sit" aria-selected="true"><b>Situação</b></button><button class="tab" role="tab" type="button" data-gt="prod" aria-selected="false" title="Produção, plano, reserva, instalações, jazidas, logística e recuperação (F1; N passa de aba)"><b>Produção</b></button><button class="tab" role="tab" type="button" data-gt="mis" aria-selected="false" title="Missões, despacho da reserva, pedidos de apoio e operações (F2; Shift+M: missão às selecionadas; Shift+K: despacho)"><b>Missões</b></button><button class="tab" role="tab" type="button" data-gt="camp" aria-selected="false" title="Doutrina, campanhas com hora H comum, manobras, postura e alvos (F3)"><b>Campanha</b></button><button class="tab" role="tab" type="button" data-gt="def" aria-selected="false" title="Quadro de ameaças, política de defesa, postos, obras e minas (F4)"><b>Defesa</b></button></div>
-    <section class="gen-econ" id="genEcon" hidden><h3 title="Nenhuma unidade entra em campo sem o general: a fábrica produz, a reserva guarda e o despacho manda cada uma com uma missão">Economia do general</h3><p class="gc-note">Toda unidade sai da fábrica do general e entra em campo por um despacho com missão.</p><div class="ge-res" id="geRes"></div><p class="ge-line" id="geQ"></p><ul class="ge-disp" id="geDisp"></ul></section>
+    <section class="gen-econ" id="genEcon" hidden><h3 title="Nenhuma unidade entra em campo sem o general: a fábrica produz, a reserva guarda e o despacho manda cada uma com uma missão">Economia do general</h3><p class="gc-note">Toda unidade sai da fábrica do general e entra em campo por um despacho com missão.</p><div class="ge-res" id="geRes"></div><p class="ge-line" id="geQ"></p><p class="ge-line" id="geWk" title="O que as obras (bases de suprimento, trincheiras, parapeitos, postos, minas) custaram no último minuto, contra o orçamento de obras da IA; os limites crescem com a economia e os pontos tomados" hidden></p><ul class="ge-disp" id="geDisp"></ul></section>
     <section><h3>Postura</h3><p class="gen-post" id="genPost"></p><p class="gen-why" id="genWhy"></p><p class="gen-doc" id="genDoc"></p><p class="gen-doc" id="genPer" hidden></p><p class="gen-doc" id="genNet" hidden></p><ul class="gen-roads" id="genRoads"></ul></section>
     <section><h3>Forças</h3><table class="gen-forces" id="genForces"></table><p class="gen-lost" id="genLost"></p><canvas id="genTk" width="280" height="56" aria-hidden="true"></canvas></section>
     <section><h3>Avaliação dos objetivos</h3><p class="gen-gate" id="genGate"></p><ol class="gen-eval" id="genEval"></ol></section>
@@ -3595,8 +3595,10 @@ const OBJ = {
    ai: a site lies back m behind the side's line and off m beside the road; again: s before a lost one is replaced; the builders must
    have no enemy within quiet m; guard: the ring its guards keep; a squad with a man out of magazines or under hp of its health, with no
    enemy within quiet m, and a vehicle under hp, fall back to a base within fall m along their road; raid: an assault squad goes for a
-   spotted enemy base this near. cas, tank: what a spotted base costs an attack plane as a target, m, and a tank; GAI.art.val.sup a battery */
-const BLD = { cap: 3, bots: 2, kit: 1, time: 70, help: .5, max: 6, reach: 8, still: 1.2, hurt: 4, decay: [25, .012], soft: 2.5,
+   spotted enemy base this near. cas, tank: what a spotted base costs an attack plane as a target, m, and a tank; GAI.art.val.sup a battery.
+   cap and bots are the floors: a side may have supCap(t) (BMR, up to BMR.sup.max with the points it holds and its economy), its AI builds
+   up to supBots(t). cost: [en, mt] paid when the site begins, where the economy is on (siteWhy says 'cost' when the side is short) */
+const BLD = { cap: 3, bots: 2, cost: [50, 80], kit: 1, time: 70, help: .5, max: 6, reach: 8, still: 1.2, hurt: 4, decay: [25, .012], soft: 2.5,
   put: [7, 13], size: [10, 7, 3.4], slope: .2, road: 16, pad: 2, apart: 350, main: 1350, foe: 220, r: 70, safe: 300, spawn: 16, boom: [16, 55], ruin: 40, keep: 120, cool: 10, far: 30,
   charge: { n: 1, reach: 8, fuse: 5, dmg: 150 },
   ai: { back: 260, off: 34, again: 45, quiet: 500, guard: 14, hp: .5, fall: 1600, raid: 1200 }, cas: 2500, tank: 500 };
@@ -7723,7 +7725,8 @@ function siteWhy(t, x, z, a) {
   for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
   for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
-  return S.sup.reduce((n, b) => n + (b.team === t && !b.dead ? 1 : 0), 0) >= BLD.cap ? 'cap' : '';
+  if (S.sup.reduce((n, b) => n + (b.team === t && !b.dead ? 1 : 0), 0) >= supCap(t)) return 'cap';
+  return ecoSim() && S.eco.d[t] && (S.eco.d[t].en < BLD.cost[0] || S.eco.d[t].mt < BLD.cost[1]) ? 'cost' : '';
 }
 /* side t's lot for a supply base in its seat town that x z lies in (map version 5), or undefined */
 const supLot = (t, x, z) => (S.T.lots || []).find(l => l.team === t && l.k === 'dep' && Math.hypot(l.x - x, l.z - z) < Math.min(l.w, l.d) / 2);
@@ -7747,6 +7750,7 @@ function startSite(t, x, z, a) {
   if ((S.net && !(S.host && Net.sb)) || siteWhy(t, x, z, a)) return null;
   while (i < NDYN && (S.wob[i] || S.sup.some(b => b.id === T.nid + i))) i++;
   if (i >= NDYN) return null;
+  bmrPayNow(t, BLD.cost, 'sup');
   Net.bq = true; return addSup(T.nid + i, t, x, z, a, .02);
 }
 /* it is destroyed: the ammunition in it goes up, on every client for what is its own */
@@ -7827,10 +7831,11 @@ function spawnBase() {
    holds; beside the road, on the first place that siteWhy lets through */
 function aiSite(t) {
   const A = BLD.ai, R = S.T.routes, ds = t ? 1 : -1, fr = frontR(), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];
-  if ((S.net && !Net.sb) || mine.length >= BLD.bots) return null;
+  if ((S.net && !Net.sb) || mine.length >= supBots(t)) return null;
   const bk = S.fld[t].bk || 0;   // after a loss the next one lies farther back
   for (const l of S.T.lots || []) if (l.team === t && l.k === 'dep' && !siteWhy(t, l.x, l.z, l.a)) { const p = railOf(l.x, l.z); return { k: 'build', ri: p.ri, s: p.s, x: l.x, z: l.z, a: l.a, R: 9 }; }   // the seat town's depot lot first
   for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
+  tries.push(...bmrSupTries(t, mine));   // then behind the points it holds, the most forward first (BMR)
   for (const ri of axesFrom(fr)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds * (A.back + bk + k * 70), sd * A.off]);
   for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);
   for (const [ri, s, off] of tries) {
@@ -7850,15 +7855,15 @@ function planSup(t, sq, F) {
     if (q && q.ord.b !== b) setOrd(q, { k: b.prog < 1 ? 'build' : 'hold', ri: b.ri, s: b.s, x: b.x, z: b.z, a: b.a, R: b.prog < 1 ? 9 : A.guard, b });
     else if (q && q.ord.k === 'build' && b.prog >= 1) setOrd(q, Object.assign({}, q.ord, { k: 'hold', R: A.guard }));
   }
-  if (S.t >= F.bT && genBy(t, 'sup') === 'ai' && !sq.some(q => q.ord.k === 'build' && !q.ord.b)) {
-    const O = aiSite(t), q = O && sq.filter(q => free(q) && q.ri === O.ri && q.fd > A.quiet && Math.abs(q.s - O.s) < A.fall).sort((x, y) => Math.abs(x.s - O.s) - Math.abs(y.s - O.s))[0];
+  if (S.t >= F.bT && genBy(t, 'sup') === 'ai' && !sq.some(q => q.ord.k === 'build' && !q.ord.b) && bmrPay(t, BLD.cost, 'sup')) {   // within the works' budget (BMR)
+    const O = aiSite(t), q = O && sq.filter(q => free(q) && q.ri === O.ri && q.fd > BMR.sup.quiet && Math.abs(q.s - O.s) < A.fall).sort((x, y) => bmrKitOf(y) - bmrKitOf(x) || Math.abs(x.s - O.s) - Math.abs(y.s - O.s))[0];   // a squad with a build kit first
     if (q) genCmd(t, { c: 'sup', ri: O.ri, s: O.s, x: O.x, z: O.z, a: O.a, ids: [q.id] }, 'ai', { O, q });
   }
   for (const q of sq) {
     const O = q.ord, L = q.men.find(m => !m.dead);
     if (q.op && !(q.op.k === 'amb' && !q.op.sprung)) continue;   // on an operation of the commander's
     if (q.lift) continue;
-    if (O.k === 'build' && !O.b && q.at && L && hdist(L, O) < 30) { const b = startSite(t, O.x, O.z, O.a); if (b) O.b = b; else setOrd(q, { k: 'hold', ri: O.ri, s: O.s, x: O.x, z: O.z }); }
+    if (O.k === 'build' && !O.b && q.at && L && hdist(L, O) < 30) { const b = startSite(t, O.x, O.z, O.a); if (b) { O.b = b; bmrKitUse(q); } else setOrd(q, { k: 'hold', ri: O.ri, s: O.s, x: O.x, z: O.z }); }
     else if ((O.b && O.b.dead) || (O.raid && O.raid.dead)) setOrd(q, O.back || (O.raid ? (q.job === 'push' && post(t, 'push', q.jk)) || pushOrd(t) : { k: 'hold', ri: q.ri, s: q.s, x: O.x, z: O.z }));
     else if (O.raid) { if (q.at) for (const m of q.men) if (!m.dead && plant(m, O.raid)) break; }
     else if (O.k === 'supply') { if (q.men.every(whole)) setOrd(q, O.back); }
@@ -12644,14 +12649,18 @@ genState = (g => t => {
    escort); a squad holding a post with no enemy within quiet m digs in, `again` s apart, up to cap trenches and walls a side (a post
    has its own cap); a work the general ordered (O.dig) is begun with no enemy within oq m; an assaulting soldier
    with grenades closes on a dug-in enemy within close m to throw m and lobs one in from inside nade m, every `gap` s; art: what an
-   occupied trench is worth to a battery (GAI.art.val.trench) */
+   occupied trench is worth to a battery (GAI.art.val.trench).
+   BMR (construir mais): a side's caps are fortCap(t, k), the cap of the kind (and ai.cap for the planner's trenches and walls) times
+   bmrMul(t) (more with its economy and the points it holds); a squad digs with no enemy within dq m (quiet stays the posts' and the
+   others'), and a squad halted at its place (a move or a hold reached BMR.dig.halt s ago) digs too: a trench first, then a wall
+   (a supply base or a town: the wall first). cost: [en, mt] of a trench and a wall, paid as a post's (POSTS) */
 const WOODS = { open: 6, per: 400, max: 33000, ww2: { th: .62 }, modern: { th: .675 }, far: .09, reach: 1800, edge: 60, road: 110, tree: 60, town: 560, base: 1600,
   ride: { a: .5, gap: [430, 610], w: 7 }, belt: { off: [44, 56], step: 15, cell: 520, on: .45, base: 1750, town: 540 }, river: { step: 17, cell: 600, on: .6, rows: 2, road: 130 }, thin: [.25, .7], copse: { gap: 800, off: [330, 520, 720], near: 520, r: 115 }, gone: .6 };
-const FORT = { slots: 192, pre: 112, slope: .4, foe: 25, lap: .6, cool: 1.5,
-  trench: { k: 1, name: 'Trincheira', obj: 'trench', size: [14, 2.6], depth: 2.35, par: .25, time: 40, cap: 12, put: [5, 9], pad: 1.2, road: 11, min: .3, climb: 4, slow: .3, plank: [4.5, .6], conceal: .5, pitch: 2.6, blast: { in: 1.6, out: .1 } },
-  bags: { k: 2, name: 'Sacos de areia', obj: 'bags', size: [7, 1.3, 1.4], time: 12, cap: 16, put: [3, 6], pad: .4, road: 9, min: .5, near: 2.6, back: 1.8, conceal: .3, pitch: 2.2, shield: .3 },
+const FORT = { slots: 256, pre: 112, slope: .4, foe: 25, lap: .6, cool: 1.5,
+  trench: { k: 1, name: 'Trincheira', obj: 'trench', size: [14, 2.6], depth: 2.35, par: .25, time: 40, cap: 12, cost: [4, 6], put: [5, 9], pad: 1.2, road: 11, min: .3, climb: 4, slow: .3, plank: [4.5, .6], conceal: .5, pitch: 2.6, blast: { in: 1.6, out: .1 } },
+  bags: { k: 2, name: 'Sacos de areia', obj: 'bags', size: [7, 1.3, 1.4], time: 12, cap: 16, cost: [2, 5], put: [3, 6], pad: .4, road: 9, min: .5, near: 2.6, back: 1.8, conceal: .3, pitch: 2.2, shield: .3 },
   dig: { line: 2, off: 30, town: { r: 240, arc: 1.75, gap: 84 }, garr: 130 },
-  ai: { post: 40, seek: 90, rush: 30, quiet: 500, oq: 150, again: 20, cap: 6, nade: 27, throw: 20, close: 150, gap: 4, art: 1, rise: .5, look: .25 } };
+  ai: { post: 40, seek: 90, rush: 30, quiet: 500, dq: 300, oq: 150, again: 20, cap: 10, nade: 27, throw: 20, close: 150, gap: 4, art: 1, rise: .5, look: .25 } };
 FORT.K = [null, FORT.trench, FORT.bags];
 OBJ.trench = { hp: [150, 0], take: [0, 0, .35], dug: 1.5, veh: trenchBump };
 OBJ.bags = { hp: [36, 0], take: [1, 1, 1], crush: .7 };
@@ -12905,7 +12914,7 @@ function fortWhy(k, t, x, z, a, pre) {
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
   for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
   for (const f of S.forts) if (f.team === t && f.k === k && !f.pre) n++;
-  return n >= F.cap ? (k === 1 ? 'tcap' : 'bcap') : '';
+  return n >= fortCap(t, k) ? (k === 1 ? 'tcap' : 'bcap') : '';
 }
 /* a site begins: solo, or on the host, which alone gives out the ids */
 function fortStart(k, t, x, z, a) {
@@ -13079,17 +13088,20 @@ function fortPose(m) {
 /* the planner's hand: a squad holding its post with no enemy near and no work there yet starts one, a trench across the way to the enemy,
    or walls in a town and around a supply base it guards; its men, standing at the post, build it */
 function fortPlan(t, sq) {
-  const A = FORT.ai, e = S.base[1 - t]; let n = 0;
+  const A = FORT.ai, e = S.base[1 - t], cap = fortCap(t, 0); let n = 0;
   if (S.net && !Net.ft) return;
   for (const f of S.forts) if (f.team === t && !f.pre && f.k <= 2 && !f.F.cn) n++;   // the cap is the trenches' and walls'; a post has its own (F.cap), a radio relay its own (CNR)
   for (const q of sq) {
-    const O = q.ord, L = q.men.find(m => !m.dead), qd = O && O.dig ? A.oq : A.quiet;   // a work the general ordered there is dug with the enemy nearer
-    if (!L || O.k !== 'hold' || !q.at || O.x === undefined || q.fd < qd || S.t < (q.digT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, qd)) continue;
-    const k = O.dig ? O.dig.k : O.tw || O.b ? 2 : 1, a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
-    if (k <= 2 && n >= A.cap) continue;
-    if (S.forts.some(f => f.k === k && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;
+    const O = q.ord, L = q.men.find(m => !m.dead), qd = O && O.dig ? A.oq : A.dq, hT = bmrHalt(q);   // a work the general ordered there is dug with the enemy nearer
+    if (!L || !O || !q.at || O.x === undefined || q.fd < qd || S.t < (q.digT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, qd)) continue;
+    if (!(O.k === 'hold' || (O.k === 'move' && !O.dig && S.t - hT >= BMR.dig.halt)) || q.lift || q.rd) continue;   // holding, or halted a while where a move ended (BMR)
+    const a = O.dig ? O.dig.a : headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), R = O.b ? (O.R || 14) + 3 : 5;
+    const ks = O.dig ? [O.dig.k] : O.tw || O.b ? [2, 1] : [1, 2], k = ks.find(k => !S.forts.some(f => f.k === k && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post));
+    if (!k || (k <= 2 && !O.dig && n >= cap)) continue;
+    if (k !== ks[0] && S.forts.some(f => f.k === ks[0] && f.prog < 1 && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;   // the second only once the first is up
     q.digT = S.t + A.again;
-    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * R + ux * s * 9, z = O.z - Math.sin(a) * R + uz * s * 9; if (fortStart(k, t, x, z, a)) { if (k <= 2) n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
+    if (!O.dig && !bmrPay(t, FORT.K[k].cost, 'dig')) continue;   // its own work within the side's budget (BMR); an ordered one was budgeted when it was given
+    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * (k === 2 && ks[0] === 1 ? R + 3 : R) + ux * s * 9, z = O.z - Math.sin(a) * (k === 2 && ks[0] === 1 ? R + 3 : R) + uz * s * 9; if (fortStart(k, t, x, z, a)) { if (k <= 2) n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
   }
 }
 /* a battery's list: each trench with enemy soldiers in it that have been spotted */
@@ -18929,7 +18941,7 @@ function lgLost(o, c, n0) {
 }
 /* the logistics general of side t: the node that needs it most gets a convoy, or the airlift when its road is cut or too dangerous */
 function lgPlan(t) {
-  const L = S.lg, P = L.pri[t], out = L.cv.filter(c => c.t === t && c.c > 0).length; if (out >= LG.max) return;   // a truck on its way home empty is not one
+  const L = S.lg, P = L.pri[t], out = L.cv.filter(c => c.t === t && c.c > 0).length; if (out >= LG.max + Math.floor(S.sup.filter(b => b.team === t && !b.dead && b.prog >= 1).length / 3)) return;   // a truck on its way home empty is not one; one more at a time for every 3 supply bases (BMR)
   const d = S.eco.d[t], air = S.modern && (d.res.lift || []).length > 0 && d.mt >= LG.mtL;
   let best = null, bs = 0;
   for (const o of lgNodes(t)) {
@@ -19896,7 +19908,7 @@ genState = (g => t => {
      are given the verb once they are on foot, new batteries open the fire mission once they reach it (a pending op 'w21p', W21.pT s at most).
    fort {k, x z, a?, ids?, rt?}: the general picks the builder (an engineer first) unless it is named. trench, sandbag, atpost (anti-tank post),
      bunker (machine-gun nest) and post (observation tower) are dug where the builder stands once no enemy is near (fortPlan; their cost where
-     the economy is on, and none past the side's FORT.ai.cap works: fcap); aapos sets a fixed anti-aircraft gun there (one from the reserve where
+     the economy is on, and none past the side's fortCap(t, 0) works: fcap); aapos sets a fixed anti-aircraft gun there (one from the reserve where
      the economy is on, else at most W21.aaCap of them a side); mineat and mineap lay a field of W21.mf mines across the way to the enemy, one
      every W21.mT s (mineLay: SAP's rules); sup is the supply base (the sup order's).
    req {k: fire | recon | cas | lift, x z, n?, ids?, rt?}: a request for support. The general picks who answers: the mortars and batteries that
@@ -19922,7 +19934,7 @@ const W21 = { wp: 8, max: 9000, nmax: 6, live: 2, ring: 230, off: [0, .95, -.95]
   rq: { fire: 'fogo de artilharia', recon: 'reconhecimento', cas: 'apoio aéreo', lift: 'transporte' },
   jobs: { push: 1, held: 1, road: 1, line: 1, wood: 1, rec: 1, lp: 1, eng: 1 } };
 Object.assign(GEN.no, { mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até ' + W21.wp + ' pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até ' + W21.max / 1000 + ' km)',
-  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de ' + FORT.ai.cap + ' trincheiras e parapeitos do lado', postcap: 'Limite de postos deste tipo do lado', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
+  air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de trincheiras e parapeitos do lado (cresce com a economia e os pontos tomados)', postcap: 'Limite de postos deste tipo do lado (cresce com a economia e os pontos tomados)', esc: 'Nenhum veículo nosso perto dali para escoltar', cost: 'Faltam energia ou metal para a obra',
   mcap: 'Limite de minas do lado', mkn: 'No máximo ' + GPC.n + ' unidades novas por ordem' });   // (SAP comes after this block)
 Object.assign(GEN.cn, { ord: 'ordem ampla', fort: 'fortificar' });
 Net.rx.welcome = (old => m => { Net.rte = m.rte === 1; old(m); })(Net.rx.welcome);   // the relay passes rt (welcome rte: 1)
@@ -20132,7 +20144,7 @@ GC.fort = { d: 'def', f(t, c, by) {
     if (K >= 3 && S.net && !Net.sap) return gBad('off');
     const same = j => (K <= 2 ? j <= 2 : j === K);   // trenches and walls share the field works' cap; a post kind has its own (F.cap)
     const go = cmdOf(t).ops.filter(o => o.k === 'usr' && !o.over && o.v === 'fort' && opLive(o).some(q => q.ord && q.ord.dig && !(FORT.K[q.ord.dig.k] || {}).cn && same(q.ord.dig.k) && !S.forts.some(f => f.k === q.ord.dig.k && Math.abs(f.x - q.ord.x) < FORT.ai.post && Math.abs(f.z - q.ord.z) < FORT.ai.post))).length;
-    if (!F.cn && S.forts.reduce((n, f) => n + (f.team === t && !f.pre && !f.gone && !f.F.cn && same(f.k) ? 1 : 0), go) >= (K <= 2 ? FORT.ai.cap : F.cap)) return gBad(K <= 2 ? 'fcap' : 'postcap');   // the planner starts no more (fortPlan): said now, not left undone
+    if (!F.cn && S.forts.reduce((n, f) => n + (f.team === t && !f.pre && !f.gone && !f.F.cn && same(f.k) ? 1 : 0), go) >= fortCap(t, K <= 2 ? 0 : K)) return gBad(K <= 2 ? 'fcap' : 'postcap');   // the planner starts no more (fortPlan): said now, not left undone
     if (F.cost && ecoSim() && S.eco.d[t] && (S.eco.d[t].en < F.cost[0] || S.eco.d[t].mt < F.cost[1])) return gBad('cost');
   } else if (k === 'aapos') {
     if (ecoSim() ? ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length : S.units.filter(u => u.w21 && u.team === t && !u.dead).length + cmdOf(t).ops.filter(o => !o.over && o.bk === 'aapos').length >= W21.aaCap) return gBad(ecoSim() ? 'res' : 'max');   // those on their way count
@@ -20646,7 +20658,7 @@ arms = (g => (u, dt) => {
 const AID = { dt: .5,
   sap: { n: 1, back: 300, T: 420, retry: 120, walk: 3500, quiet: 300, foe: 250, reach: 3, lift: 40, fwd: 600 },
   field: { out: 160, line: 250, road: 500, r: 60, at: 7, ap: 12, redo: 900 },
-  post: { again: 60, apart: 150, max: 5 },
+  post: { again: 40, apart: 150, max: 5 },
   dome: { r: 2000, n: 6, mem: 240, see: 1200, again: 120, walk: 120, by: { base: 1, egd: 1, guard: 1, sap: 1, garr: 1 } },
   grad: { r: 90, mass: 4, veh: 2, again: 90, life: 150 },
   eco: { fwd: 1500 },
@@ -20876,20 +20888,22 @@ function aidPostKind(C, q) {
   if (j === 'guard' || j === 'egd') return 4;
   if (j === 'garr') return q.jk & 1 ? 4 : 5;
   if (j === 'wood') return 5;
+  if (j === 'eng') return aidArmour(C) ? 3 : 4;   // engineers and sappers on a defence, a guard or an ambush (BMR)
+  if (j === 'sap') return 4;
   return 0;
 }
 /* not a garrison that holds a village, nor a squad in a building: its houses and windows serve it better than a post */
 function aidPosts(C, A, sq) {
   const t = C.t, e = S.base[1 - t];
   if (S.net && !(Net.ft && Net.sap)) return;
-  if (S.forts.filter(f => f.team === t && f.k >= 3 && f.k <= 5 && !f.gone).length >= AID.post.max) return;
+  if (S.forts.filter(f => f.team === t && f.k >= 3 && f.k <= 5 && !f.gone).length >= bmrPostMax(t)) return;
   for (const q of sq) {
     const O = cnOrd(q), L = aidLead(q);
-    if (q.op || q.dome || (q.aidP && !q.aidP.gone) || !q.at || q.state || aidRide(q) || !L || O.k !== 'hold' || O.b || O.es || (O.tw && q.job === 'garr') || q.men.some(m => !m.dead && m.cbo) || O.x === undefined || q.fd < FORT.ai.quiet || S.t < (q.aidPT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, FORT.ai.quiet)) continue;
+    if ((q.op && !bmrOpBuilds(q)) || q.dome || (q.aidP && !q.aidP.gone) || !q.at || q.state || aidRide(q) || !L || O.k !== 'hold' || O.b || O.es || (O.tw && q.job === 'garr') || q.men.some(m => !m.dead && m.cbo) || O.x === undefined || q.fd < FORT.ai.dq || S.t < (q.aidPT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, FORT.ai.dq)) continue;
     const k = aidPostKind(C, q), F = FORT.K[k]; if (!k) continue;
     q.aidPT = S.t + AID.post.again;
     if (S.forts.some(f => f.team === t && f.k === k && !f.gone && hdist(f, O) < AID.post.apart)) continue;
-    if (!aidPay(t, F.cost)) continue;
+    if (!bmrPay(t, F.cost, 'post')) continue;
     const a = headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), men = q.men.filter(m => !m.dead && !m.in), need = Math.min(2, men.length);
     for (const m of men) for (const R of [4, 6]) for (const s of [0, 1, -1]) {   // a little ahead of where its men stand, so that they build it
       if (q.aidP) break;
@@ -24344,8 +24358,8 @@ GC.man.f = (f => function (t, c, by, R) {
    words back. A work lost is rebuilt AFP.redo s later with no known enemy within AFP.calm m of it; a refusal or a work given up waits
    AFP.again s. Each decision and refusal goes to the general's log (eng, "Plano de fortificação") and to C.afp.fl (the last AFP.log).
    No random number is drawn here */
-const AFP = { every: 15, start: 90, ops: 2, look: 24, reach: 2500, T: 480, redo: 120, again: 90, calm: 400, save: 90, cool: 120, log: 40, tries: 3,
-  tier: [3, 6], apr: [1, 2, 3], trf: 2, aa: { r: 700 }, near: 70,
+const AFP = { every: 10, start: 90, ops: 2, look: 24, reach: 2500, T: 480, redo: 120, again: 90, calm: 400, save: 90, cool: 120, log: 40, tries: 3,
+  tier: [3, 6], apr: [2, 4, 6], trf: 2, aa: { r: 700 }, near: 70,
   post: { out: 90, ahead: 300, off: [24, 34, 44], slide: [0, 15, -15] }, mine: { out: 260, step: 200, far: 1400, min: -200, max: 2500, road: 60, apart: 200 },
   thr: { r: 900, v: 3 }, choke: { min: .5, back: [300, 2500] },
   by: { eng: 0, base: 300, egd: 300, guard: 300, held: 500, road: 500, line: 700, wood: 700, garr: 900, sap: 900 } };
@@ -24406,6 +24420,7 @@ function afpWant(C, A) {
   const t = C.t, ds = t ? 1 : -1, e = S.base[1 - t], P = afpPlaces(t), out = [], arm = aidArmour(C);
   const tier = !ecoSim() ? 1 : (n => (n < AFP.tier[0] ? 0 : n < AFP.tier[1] ? 1 : 2))(aidSites(t).length);
   for (const p of P) {   // the AA umbrella
+    if (p.noaa && !(tier >= 2 && p.aa)) continue;   // a held point or a supply base (BMR): only the first, at tier 2
     const d = Math.hypot(e.x - p.x, e.z - p.z) || 1, c = clearOf(p.x + (e.x - p.x) / d * 40, p.z + (e.z - p.z) / d * 40, 3, {});
     out.push({ key: 'aa' + p.id, k: 'aapos', x: c.x, z: c.z, cx: p.x, cz: p.z, a: headTo(c.x, c.z, e.x, e.z), nm: 'sobre ' + p.nm, why: 'guarda-chuva antiaéreo sobre ' + p.nm, spot: () => c });
   }
@@ -24415,7 +24430,7 @@ function afpWant(C, A) {
     const ax = C.known.some(k => !k.dead && !k.man && (tk(k) === 'tank' || tk(k) === 'lav') && Math.abs(k.sx - o.x) < AFP.thr.r && Math.abs(k.sz - o.z) < AFP.thr.r);
     const hot = v >= AFP.thr.v || inc, L = hot ? thr : calm, why = s => s + ' ' + o.nm + (hot ? ' (ameaça nesse eixo)' : '');
     if (hot || arm) L.push({ key: 'at' + o.id, k: 'atpost', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('posto anticarro'), spot: () => afpSpot(t, 3, o.a, afpBeside(o, [-1, 1])) });
-    if (hot && sapOn()) { const k = ax || arm ? 'mineat' : 'mineap', m = afpMineAt(t, o.ri, o.s + ds * (AFP.mine.out - AFP.post.out), k); if (m) L.push({ key: 'mf' + o.id, k, x: m.x, z: m.z, a: m.a, nm: o.nm, why: why('campo minado'), spot: () => m }); }
+    if ((hot || (o.p.pt && tier >= 1 && i < BMR.afp.mines)) && sapOn()) { const k = ax || arm ? 'mineat' : 'mineap', m = afpMineAt(t, o.ri, o.s + ds * (AFP.mine.out - AFP.post.out), k); if (m) L.push({ key: 'mf' + o.id, k, x: m.x, z: m.z, a: m.a, nm: o.nm, why: why('campo minado'), spot: () => m }); }
     if (hot || i < AFP.apr[tier]) L.push({ key: 'mg' + o.id, k: 'bunker', x: o.x, z: o.z, a: o.a, nm: o.nm, why: why('ninho de metralhadora'), spot: () => afpSpot(t, 4, o.a, afpBeside(o, [1, -1])) });
   });
   out.push(...thr, ...calm);
@@ -24481,6 +24496,8 @@ function afpTry(C, A, it) {
     if (!A.save && S.t >= A.saveC) { const k = ECO.ai.keep; A.save = { en: F.cost[0] + k.en, mt: F.cost[1] + k.mt, T: S.t + AFP.save, key: it.key }; afpSay(C, A, it, 0, 'a economia poupa ' + F.cost[0] + ' de energia e ' + F.cost[1] + ' de metal para a obra'); }
     A.fn[it.key] = S.t + AFP.every; return false;
   }
+  const bc = F ? F.cost : afpMine(it.k) ? bmrMineCost() : null;
+  if (bc && !bmrPay(t, bc, 'afp')) { A.fn[it.key] = S.t + AFP.every; if (S.t >= (A.budT || 0)) { A.budT = S.t + 60; afpSay(C, A, it, 0, 'aguarda o orçamento de obras (' + Math.round(BMR.bud.share * 100) + '% da renda por minuto)'); } return false; }   // over the works' budget of the minute (BMR): later, without holding the economy
   const sp = it.spot(); if (!sp) return no('nenhum lugar livre ali');
   const q = afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + AFP.reach / 1000 + ' km');
   const mw = q.mis ? q.mis.why : undefined, r = genCmd(t, { c: 'fort', k: it.k, x: sp.x, z: sp.z, a: it.a, ids: [q.id], why: 'plano de fortificação: ' + it.why }, 'ai');
@@ -24517,7 +24534,7 @@ function afpPlan(t) {
   for (const it of W.out) if (A.have[it.key] && !afpHas(t, it) && !A.fo.some(o => o.key === it.key)) { delete A.have[it.key]; A.lost[it.key] = S.t; afpSay(C, A, it, 0, 'perdido; refazer quando o lugar estiver calmo'); }
   let n = AFP.tries;
   for (const it of W.out) {
-    if (A.fo.length >= AFP.ops) return;
+    if (A.fo.length >= bmrOps(t, A)) return;
     if (A.fo.some(o => o.key === it.key)) continue;
     if (afpHas(t, it)) { A.have[it.key] = 1; continue; }
     if (S.t < (A.fn[it.key] || 0)) continue;
@@ -24532,6 +24549,171 @@ ecoAI = (g => (t, V) => {
   if (!w || S.t > w.T || (V.stock.en >= w.en && V.stock.mt >= w.mt)) return out;
   return out.filter(o => o.c !== 'make' || /reforços pedidos/.test(o.why || ''));
 })(ecoAI);
+/* ---------- build more (BMR, não testado): the general and its units build more, and every work is paid and shown ----------
+   Caps. A side may have supCap(t) supply bases: BLD.cap, one more for every 1 / sup.pt points it holds (not a main base), one more at
+   economy tier 1 and another at tier 2 (bmrTier: the finished economy sites, AFP.tier), at most sup.max; its AI builds up to supBots(t)
+   (one short of the cap where a person may build one: solo on the player's side, and online). The field works' caps (trench, wall, the
+   three posts, and the planner's own trenches and walls FORT.ai.cap) are times bmrMul(t): 1, plus mul.tier a tier and mul.pt a point
+   held (at most 5), at most mul.max. The dome, the radio relay and the bridges keep their own caps. FORT.slots is 256 (144 works a match).
+   Money. Every work is paid where the economy is on: a supply base BLD.cost, a trench or a wall FORT.*.cost, a post its POSTS cost, a mine
+   of a minefield the general ordered (W21 mineat / mineap) mine [en, mt] each (the sappers' own mines and the player's come from the pouch,
+   as before). A side short of it cannot begin it (siteWhy / fortWhy 'cost', GC.fort 'cost'). The AI budgets: a work of its own goes only
+   when the economy keeps its reserve after it (aidPay) and what the works cost in the last bud.win s stays within bud.share of the income
+   a minute (at least bud.floor), both resources (bmrPay). Each payment goes to the side's ledger (d.wl: [t, en, mt, kind] of the last
+   window; d.wt the total, d.wn the works begun by kind) which the HUD, the General View, ecoView (works) and the ecs message (wk) show.
+   AI general. Its supply bases also go behind the points it holds, the most forward first, on the side's tied network (cqTied), none
+   within sup.near m of one of its bases (bmrSupTries, in aiSite); a squad with a build kit is picked first to build one and spends
+   it. Its fortification plan (AFP) also covers the points it holds (afp.pts[tier] of them, the most forward first) and its finished
+   supply bases (afp.fob[tier]): their approaches get the nest, the anti-tank post with armour known, and at tier 1 a minefield on the
+   most forward (afp.mines); only the first point gets an AA umbrella, at tier 2. It plans every AFP.every s with ops[tier] orders under way.
+   Units. A squad holding its place or halted where its move ended (dig.halt s) with no enemy within FORT.ai.dq m digs a trench and then
+   a wall (fortPlan); engineers and sappers on a defence, a guard or an ambush also build their post (aidPosts); a squad with a build
+   kit holding at a point it holds with no supply base of its side near sets one there (bmrKitSup), every kit.every s a side.
+   No random number is drawn here */
+const BMR = {
+  sup: { max: 8, pt: .5, quiet: 300, near: 650, back: [70, 150, 240], off: [34, 60] },
+  mul: { tier: .35, pt: .1, max: 2 },
+  bud: { share: .6, floor: [100, 160], win: 60 },
+  dig: { halt: 40 },
+  ops: [2, 3, 4],
+  afp: { pts: [1, 2, 4], fob: [0, 1, 2], mines: 1 },
+  kit: { every: 20, quiet: 350, near: 150, ring: [30, 55, 80] },
+  mine: [1, 4] };
+const bmrHeld = t => (S.cq ? S.cq.p.filter(p => p.base < 0 && p.hold === t) : []);
+const bmrTier = t => (!S.eco ? 1 : (n => (n < AFP.tier[0] ? 0 : n < AFP.tier[1] ? 1 : 2))(S.eco.l.filter(e => e.team === t && !e.dead && e.prog >= 1).length));
+const bmrMul = t => Math.min(BMR.mul.max, 1 + BMR.mul.tier * bmrTier(t) + BMR.mul.pt * Math.min(5, bmrHeld(t).length));
+function supCap(t) {
+  const T = bmrTier(t); return clamp(BLD.cap + Math.floor(bmrHeld(t).length * BMR.sup.pt) + (T >= 1 ? 1 : 0) + (T >= 2 ? 1 : 0), BLD.cap, BMR.sup.max);
+}
+const supBots = t => Math.max(BLD.bots, supCap(t) - (S.net || (S.me === t && !S.watch && !S.demo) ? 1 : 0));
+/* the cap of work kind k for side t; k 0: the planner's trenches and walls together */
+function fortCap(t, k) {
+  if (!k) return Math.round(FORT.ai.cap * bmrMul(t));
+  const F = FORT.K[k]; return k <= 5 ? Math.round(F.cap * bmrMul(t)) : F.cap;
+}
+const bmrPostMax = t => Math.max(AID.post.max, fortCap(t, 3) + fortCap(t, 4) + fortCap(t, 5));
+const bmrOps = (t, A) => BMR.ops[clamp(A.tier || 0, 0, 2)];
+const bmrMineCost = () => [BMR.mine[0] * W21.mf, BMR.mine[1] * W21.mf];
+const bmrOpBuilds = q => { const k = q.op && q.op.k, O = cnOrd(q); return k === 'amb' || k === 'grd' || (k === 'usr' && q.op.v !== 'fort' && !!O && (O.mk === 'defend' || O.mk === 'guard' || O.mk === 'ambush')); };
+/* when the squad reached its place under its present order (1e9 while it is not there) */
+function bmrHalt(q) {
+  if (q.bmO !== q.ord) { q.bmO = q.ord; q.bmA = 1e9; }
+  if (!q.at) q.bmA = 1e9; else if (q.bmA === 1e9) q.bmA = S.t;
+  return q.bmA;
+}
+/* ---- the ledger ---- */
+function bmrRec(t, c, k) {
+  if (!c || !S.eco || !S.eco.d[t]) return;
+  const d = S.eco.d[t], l = d.wl || (d.wl = []), w = d.wt || (d.wt = { en: 0, mt: 0 }), n = d.wn || (d.wn = {});
+  l.push([S.t, c[0], c[1], k]); w.en += c[0]; w.mt += c[1]; n[k] = (n[k] || 0) + 1;
+  while (l.length && S.t - l[0][0] > BMR.bud.win) l.shift();
+}
+function bmrPayNow(t, c, k) {
+  if (!c || !ecoSim() || !S.eco.d[t]) return;
+  const d = S.eco.d[t]; d.en -= c[0]; d.mt -= c[1]; bmrRec(t, c, k);
+}
+/* what the works cost side t in the last window, a minute's worth */
+function bmrSpend(t) {
+  const d = S.eco && S.eco.d[t], o = { en: 0, mt: 0 }; if (!d || !d.wl) return o;
+  for (const r of d.wl) if (S.t - r[0] <= BMR.bud.win) { o.en += r[1]; o.mt += r[2]; }
+  const k = 60 / BMR.bud.win; o.en *= k; o.mt *= k; return o;
+}
+const bmrBudget = t => { const d = S.eco.d[t], B = BMR.bud; return { en: Math.max(B.floor[0], B.share * d.inc.en), mt: Math.max(B.floor[1], B.share * d.inc.mt) }; };
+/* may the AI of side t pay c now: the reserve kept (aidPay) and the works' budget of the minute */
+function bmrPay(t, c) {
+  if (!c || !ecoSim() || !S.eco.d[t]) return true;
+  if (!aidPay(t, c)) return false;
+  const sp = bmrSpend(t), b = bmrBudget(t); return sp.en + c[0] <= b.en && sp.mt + c[1] <= b.mt;
+}
+/* every work begun is on the ledger (the POSTS wrapper has already paid it) */
+fortStart = (g => (k, t, x, z, a) => { const f = g(k, t, x, z, a), F = FORT.K[k]; if (f && F && F.cost && ecoSim()) bmrRec(t, F.cost, F.obj === 'post' || F.obj === 'tower' ? 'post' : k <= 2 ? 'field' : F.obj || 'work'); return f; })(fortStart);
+/* a minefield the general ordered: each mine is paid as it is laid; short of it, the field stops there */
+gBuildAt = (g => (C, op) => { const w = S.bmrMine; S.bmrMine = C.t; try { return g(C, op); } finally { S.bmrMine = w; } })(gBuildAt);
+mineLay = (g => (k, t, x, z) => {
+  const pay = S.bmrMine === t && ecoSim() && !!S.eco.d[t], c = BMR.mine;
+  if (pay && (S.eco.d[t].en < c[0] || S.eco.d[t].mt < c[1])) return null;
+  const o = g(k, t, x, z); if (o && pay) bmrPayNow(t, c, 'mine'); return o;
+})(mineLay);
+GC.fort.f = (f => function (t, c, by, R) {
+  if (!R && c && (c.k === 'mineat' || c.k === 'mineap') && ecoSim() && S.eco.d[t]) { const m = bmrMineCost(), d = S.eco.d[t]; if (d.en < m[0] || d.mt < m[1]) return gBad('cost'); }
+  return f.call(this, t, c, by, R);
+})(GC.fort.f);
+/* ---- supply bases behind the points held ---- */
+function bmrSupTries(t, mine) {
+  if (!S.cq) return [];
+  const A = BLD.ai, ds = t ? 1 : -1, R = S.T.routes, tied = cqTied(t), out = [];
+  const P = bmrHeld(t).filter(p => tied.has(p.i) && !mine.some(b => hdist(b, p) < BMR.sup.near)).sort((a, b) => ecoDepth(t, a.x, a.z) - ecoDepth(t, b.x, b.z));
+  for (const p of P) { if (!R[p.ri]) continue; for (const bk of BMR.sup.back) for (const off of BMR.sup.off) for (const sd of [1, -1]) out.push([p.ri, p.s - ds * (p.r + bk), sd * off]); }
+  return out;
+}
+const bmrKitOf = q => q.men.reduce((n, m) => n + (!m.dead && m.kit > 0 ? m.kit : 0), 0);
+function bmrKitUse(q) { const m = q.men.find(m => !m.dead && m.kit > 0); if (m) m.kit--; }
+/* a squad with a build kit at a point its side holds, quiet and with no base of its side near: it sets one there on its own */
+function bmrKitSup(t, sq) {
+  const F = S.fld[t]; if (!S.cq || !F || S.t < (F.bmK || 0) || (S.net && !(S.host && Net.sb)) || genBy(t, 'sup') !== 'ai') return;
+  F.bmK = S.t + BMR.kit.every;
+  const mine = S.sup.filter(b => b.team === t && !b.dead);
+  if (mine.length >= supBots(t) || sq.some(q => q.ord && q.ord.k === 'build' && !q.ord.b) || !bmrPay(t, BLD.cost)) return;
+  const P = bmrHeld(t).filter(p => !mine.some(b => hdist(b, p) < BMR.sup.near)), e = S.base[1 - t], own = S.base[t];
+  for (const q of sq) {
+    const O = q.ord, L = q.men.find(m => !m.dead);
+    if (!L || !O || O.k !== 'hold' || O.b || !q.at || q.op || q.lift || q.rd || q.state || q.fd < BMR.kit.quiet || !bmrKitOf(q) || !BLD.ai || !(q.job === 'eng' || q.job === 'line' || q.job === 'held' || q.job === 'road' || q.job === 'wood')) continue;
+    const p = P.find(p => hdist(L, p) < p.r + BMR.kit.near); if (!p) continue;
+    const a0 = headTo(L.x, L.z, own.x, own.z); let at = null;
+    for (const r of BMR.kit.ring) { for (let i = 0; i < 8 && !at; i++) { const an = a0 + (i & 1 ? 1 : -1) * Math.ceil(i / 2) * TAU / 8, x = L.x + Math.cos(an) * r, z = L.z - Math.sin(an) * r, a = headTo(x, z, e.x, e.z); if (!siteWhy(t, x, z, a)) at = { x, z, a }; } if (at) break; }
+    if (!at) continue;
+    const r = genCmd(t, { c: 'sup', x: at.x, z: at.z, a: at.a, ids: [q.id], why: 'kit de construção no ponto ' + p.L }, 'ai');
+    if (r && r.ok) { gLog(t, 'sup', 'A esquadra ' + (sqName(q) || '#' + q.id) + ' usa o kit de construção: base de suprimento no ponto ' + p.L + ' (' + p.name + ')', at, 'bmk' + q.id); return; }
+  }
+}
+fortPlan = (g => (t, sq) => { g(t, sq); bmrKitSup(t, sq); })(fortPlan);
+/* ---- the fortification plan covers the points held and the supply bases ---- */
+afpPlaces = (g => t => {
+  const out = g(t), T = bmrTier(t), e = S.base[1 - t];
+  bmrHeld(t).sort((a, b) => Math.hypot(a.x - e.x, a.z - e.z) - Math.hypot(b.x - e.x, b.z - e.z)).slice(0, BMR.afp.pts[T]).forEach((p, i) => {
+    if (out.some(o => Math.hypot(o.x - p.x, o.z - p.z) < 300)) return;
+    out.push({ id: 'pt' + p.i, x: p.x, z: p.z, ru: p.r, nm: 'a posição ' + p.L + ' (' + p.name + ')', pt: 1, noaa: 1, aa: i === 0 });
+  });
+  S.sup.filter(b => b.team === t && !b.dead && b.prog >= 1).sort((a, b) => Math.hypot(a.x - e.x, a.z - e.z) - Math.hypot(b.x - e.x, b.z - e.z)).slice(0, BMR.afp.fob[T]).forEach(b => {
+    if (out.some(o => Math.hypot(o.x - b.x, o.z - b.z) < 300)) return;
+    out.push({ id: 'sb' + b.id, x: b.x, z: b.z, ru: 40, nm: 'a base de suprimento ' + ecoNear(b.x, b.z), noaa: 1 });
+  });
+  return out;
+})(afpPlaces);
+/* ---- what the side sees: caps, counts, the works' spending and the crates ---- */
+function bmrView(t) {
+  const d = S.eco && S.eco.d[t], sim = ecoSim(), wk = !sim && d && Array.isArray(d.wkv) ? d.wkv : null;
+  const sp = sim ? bmrSpend(t) : { en: wk ? wk[0] : 0, mt: wk ? wk[1] : 0 }, b = sim && d ? bmrBudget(t) : null;
+  const n = k => S.forts.filter(f => f.team === t && !f.pre && !f.gone && (k ? f.k === k : f.k <= 2 && !f.F.cn)).length;
+  let cr = -1; if (S.lg && sim) cr = lgNodes(t).reduce((a, o) => a + Math.floor(o.lc || 0), 0); else if (wk && wk[2] >= 0) cr = wk[2];
+  return { spentLastMinute: { en: Math.round(sp.en), mt: Math.round(sp.mt) }, budgetPerMinute: b ? { en: Math.round(b.en), mt: Math.round(b.mt) } : null,
+    spentTotal: sim && d && d.wt ? { en: Math.round(d.wt.en), mt: Math.round(d.wt.mt) } : wk ? { en: wk[3], mt: wk[4] } : { en: 0, mt: 0 },
+    begun: sim && d && d.wn ? Object.assign({}, d.wn) : {}, crates: cr,
+    sup: { n: S.sup.filter(b => b.team === t && !b.dead).length, cap: supCap(t), ai: supBots(t), cost: BLD.cost.slice() },
+    field: { n: n(0), cap: fortCap(t, 0), trench: [n(1), fortCap(t, 1)], bags: [n(2), fortCap(t, 2)], cost: { trench: FORT.trench.cost.slice(), bags: FORT.bags.cost.slice() } },
+    posts: { atpost: [n(3), fortCap(t, 3)], bunker: [n(4), fortCap(t, 4)], tower: [n(5), fortCap(t, 5)] }, mine: BMR.mine.slice(), tier: bmrTier(t), mul: Math.round(bmrMul(t) * 100) / 100 };
+}
+ecoView = (g => t => Object.assign(g(t), { works: bmrView(t) }))(ecoView);
+ecsOf = (g => t => { const o = g(t), w = bmrView(t); o.wk = [w.spentLastMinute.en, w.spentLastMinute.mt, w.crates, w.spentTotal.en, w.spentTotal.mt, w.sup.n, w.sup.cap, w.field.n, w.field.cap].map(v => Math.round(v)); return o; })(ecsOf);
+Net.rx.ecs = (g => m => { g(m); if (S && S.eco && (m.s === 0 || m.s === 1) && Array.isArray(m.wk) && m.wk.every(v => Number.isFinite(v))) S.eco.d[m.s].wkv = m.wk.slice(0, 9); })(Net.rx.ecs);
+/* one line of the works for the General View and the economy rows */
+function bmrLine(t) {
+  const w = bmrView(t), s = w.spentLastMinute, n = v => Math.round(v);
+  return 'Obras: −' + n(s.en) + ' energia e −' + n(s.mt) + ' metal no último minuto' + (w.budgetPerMinute ? ' (orçamento ' + w.budgetPerMinute.en + '/' + w.budgetPerMinute.mt + ')' : '') +
+    ' · bases de suprimento ' + w.sup.n + '/' + w.sup.cap + ' · trincheiras e parapeitos ' + w.field.n + '/' + w.field.cap + ' · postos ' + (w.posts.atpost[0] + w.posts.bunker[0] + w.posts.tower[0]) + '/' + (w.posts.atpost[1] + w.posts.bunker[1] + w.posts.tower[1]) +
+    (w.crates >= 0 ? ' · caixas nos nós ' + w.crates : '');
+}
+ecoVM = (g => (t, all) => { const V = g(t, all); if (V && V.rows && S.eco) { const at = Math.max(0, V.rows.length - 1); V.rows.splice(at, 0, { label: 'Obras', value: bmrLine(t).replace(/^Obras: /, '') }); } return V; })(ecoVM);
+/* the HUD's lines under the supply bases: the general's stock with what comes in a minute, the crates, what the works cost */
+function bmrHud(t, R, y, u, ink) {
+  const d = S.eco && S.eco.d[t]; if (!d || t < 0 || S.demo && !S.watch) return y;
+  const n = v => Math.round(v), w = bmrView(t), s = w.spentLastMinute, inc = d.inc || { en: 0, mt: 0 }, use = d.use || { en: 0, mt: 0 };
+  y += 6 * u; txt('GENERAL · SUPRIMENTOS', R, y, 11 * u, ink, 'right'); y += 15 * u;
+  txt('ENERGIA ' + n(d.en) + '  +' + n(inc.en) + ' −' + n(use.en + s.en) + '/min', R, y, 12.5 * u, d.en < 60 ? FOE : ink, 'right'); y += 15 * u;
+  txt('METAL ' + n(d.mt) + '  +' + n(inc.mt) + ' −' + n(use.mt + s.mt) + '/min', R, y, 12.5 * u, d.mt < 60 ? FOE : ink, 'right'); y += 15 * u;
+  txt((w.crates >= 0 ? 'CAIXAS ' + w.crates + ' · ' : '') + 'OBRAS −' + n(s.en) + ' E −' + n(s.mt) + ' M/min', R, y, 11 * u, ink, 'right'); y += 15 * u;
+  return y;
+}
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -25430,7 +25612,7 @@ function fortScene() {
 let FWHY = null;
 function hudFort(P, u, ink, acc, disp) {
   const B = S.fm, k = B ? B.k : S.bm ? 0 : -1, dim = 'rgba(158,170,162,.95)', names = ['BASE', 'TRINCHEIRA', 'SACOS DE AREIA'];
-  FWHY = FWHY || Object.assign({}, BWHY, { fort: 'Em cima de outra trincheira ou barricada', tcap: 'Seu lado já cavou ' + FORT.trench.cap + ' trincheiras', bcap: 'Seu lado já ergueu ' + FORT.bags.cap + ' barricadas',
+  FWHY = FWHY || Object.assign({}, BWHY, { fort: 'Em cima de outra trincheira ou barricada', tcap: 'Seu lado já cavou o máximo de trincheiras', bcap: 'Seu lado já ergueu o máximo de barricadas',
     server: 'O servidor desta sala ainda não conhece trincheiras e sacos de areia: precisa ser reiniciado', wait: 'Aguardando o anfitrião' });
   if (k >= 0) {
     let x = cw / 2 - 150 * u;
@@ -26486,7 +26668,7 @@ const AAC = '#ff5cf4', isAA = (P, g) => !!P.q && g.kind === 'aa' && !g.dead && g
 addEventListener('keydown', e => { if (e.code === 'Digit5' && !e.repeat && playMode === 'play' && !sw.on && !GV.on && S && S.my && !S.my.kind && !S.my.man && S.my.def.flares && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) { AF.on = !AF.on; S.banner = { text: 'Flares automáticos ' + (AF.on ? 'ligados' : 'desligados'), sub: 'Tecla 5 liga e desliga', life: 2 }; } });
 addEventListener('keydown', e => { if (e.code === 'KeyI' && !e.repeat && !GV.on && S && S.my && S.my.kind && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.fixPri = S.fixPri ? 0 : 1; });
 const BWHY = { map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Em cima da estrada', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
-  cap: 'Seu lado já tem ' + BLD.cap + ' bases', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
+  cap: 'Seu lado já tem o máximo de bases (cresce com os pontos tomados e a economia)', cost: 'Seu lado não tem a energia e o metal desta obra', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
 /* ---------- missiles: what the player is shown ----------
    Top: the warning gear (S.rwr: a radar tracking, a radar missile launched or active, by name and clock; S.warn: a missile the vehicle
    knows of). Beside the centre, for a plane's missile slot: the seeker's word, the launch zone as a scale (rmin, the range no turn
@@ -26619,9 +26801,10 @@ function drawHud() {
   } else if (S.cq) { const s = S.cq.st; txt('ABATES ' + s.k + ' · CAPTURAS ' + s.c + ' · QUEDAS ' + s.d, R, y, 11 * u, ink, 'right'); y += 16 * u; }
   const sups = S.sup.filter(b => b.team === me && !b.dead);   // the side's supply bases: built or how far, and how far away
   if (sups.length) {
-    y += 6 * u; txt('BASES DE SUPRIMENTO ' + sups.length + '/' + BLD.cap, R, y, 11 * u, ink, 'right'); y += 15 * u;
+    y += 6 * u; txt('BASES DE SUPRIMENTO ' + sups.length + '/' + supCap(me), R, y, 11 * u, ink, 'right'); y += 15 * u;
     sups.forEach((b, i) => { const d = hdist(b, P); txt((i + 1) + ' · ' + (b.prog < 1 ? 'obra ' + Math.round(b.prog * 100) + '%' : spawnWhy(b, me) ? 'inimigo perto' : S.os[b.id] ? 'danificada' : 'pronta') + ' · ' + (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km'), R, y, 12.5 * u, b.prog < 1 ? ink : S.os[b.id] || spawnWhy(b, me) ? FOE : FRIEND, 'right'); y += 15 * u; });
   }
+  if (!mapV) y = bmrHud(me, R, y, u, ink);   // the general's stock, income, crates and what the works cost (BMR)
   if (!P.dead && P.kind && !P.man && S.dep && !mapV) {   // a ground vehicle at a base
     if (S.rearm > 0) { txt('REABASTECENDO', cw / 2, ch * .7, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
     else if (S.dep === 2) txt('BASE DE SUPRIMENTO: ABASTECIDO', cw / 2, ch * .7, 11 * u, ink, 'center');
@@ -29283,6 +29466,14 @@ function gorEcon(V) {
   $('#geQ').textContent = E.q.length ? 'Fila: ' + E.q.length + (E.q.length > 1 ? ' ordens' : ' ordem') + ', faltam ≈ ' + n(left.en) + ' energia e ' + n(left.mt) + ' metal' + (cur ? ' · agora: ' + nm(cur.k) + ' ' + n(cur.p * 100) + '%' : '') : 'Fila vazia: nada sendo produzido';
   gorFill('#geDisp', dl.length ? dl.map(s => { const li = gE('li', '', s); li.title = s; return li; }) : [gE('li', '', 'Nenhum despacho ainda')]);
 }
+/* the works' line under the queue (BMR): what the works cost the last minute, the caps and the crates */
+gorEcon = (g => V => {
+  g(V);
+  const t = gorEconSide(), el = $('#geWk'); if (!el) return;
+  const s = t >= 0 && S.eco ? bmrLine(t) : '';
+  if (el.textContent !== s) el.textContent = s;
+  if (el.hidden !== !s) el.hidden = !s;
+})(gorEcon);
 /* the unit card (W13: "o que vejo, o que decido"): one squad selected, its card at the top of the left panel; the host and solo read the
    sim (genCard), a guest asks the host (unit, every GORQT s) */
 function gorCard() {

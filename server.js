@@ -462,7 +462,8 @@ RX.ecs = (c, m) => {
   if (!host(c) || !sd(m.s) || !num(m.T) || !vec(m.v, 8) || !int(m.c, 0, 2) || !ints(m.q, 60, 5) || ![m.r, m.kp, m.ms, m.ls].every(l => ints(l, 40, 2)) || !ints(m.sl, 40, 4)
     || !ints(m.kn, 144, 6) || !ints(m.gd, 72, 3) || !(Array.isArray(m.sc) && (m.sc.length === 0 || vec(m.sc, 3))) || !int(m.tg, 0, 1e6)) return;
   const pl = ints(m.pp, 60, 3) && vec(m.po, 8);   // the production plan (F2), optional: [kind, field, out] each and [posture, budget, out, scale %]
-  castSide(c, Object.assign({ t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, pl && { pp: m.pp, po: m.po }), m.s);
+  const wk = ints(m.wk, 9, 1) && m.wk.length === 9;   // the works (BMR), optional: [en, mt spent the last minute, crates, en, mt spent in all, supply bases, their cap, field works, their cap]
+  castSide(c, Object.assign({ t: 'ecs', s: m.s, T: m.T, v: m.v, c: m.c, q: m.q, r: m.r, kp: m.kp, ms: m.ms, ls: m.ls, sl: m.sl, kn: m.kn, gd: m.gd, sc: m.sc, tg: m.tg }, pl && { pp: m.pp, po: m.po }, wk && { wk: m.wk }), m.s);
 };
 /* the commander's view of side s: top-level fields checked, their insides are the host's (it is trusted with the whole battle) */
 RX.gen = (c, m) => {

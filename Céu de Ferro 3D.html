@@ -5962,8 +5962,9 @@ const IAI = { sight: .3, think: .5, cap: 160, see: 650, fire: 380, lmg: 550, sof
    enemy there. reinf: s between a side's reinforcement squads, which enter main m from the main base or at a safe supply base and ride a truck when
    the post is more than ride m away, let off drop m short of it. A squad far from any enemy (dbl m) marches at pace m/s; esc: m an escort
    keeps behind the foremost vehicle of its column. line: online, where a side's line lies from the middle of a road. side: the share of
-   the cap one side may fill */
-const FIELD = { every: 3, reinf: 40, main: 1000, town: 430, held: 3, push: 750, esc: 30, pace: 3.6, dbl: 800, line: 900, wood: [150, 1100], road: [150, 900], base: 1500, ride: 500, drop: 120, side: .5,
+   the cap one side may fill. spare: the posts, in that order, that give a squad to the assault post (push) when the side is at its population
+   budget (pushFrom), one within spareR m of the post */
+const FIELD = { every: 3, reinf: 40, main: 1000, town: 430, held: 3, push: 750, esc: 30, pace: 3.6, dbl: 800, line: 900, wood: [150, 1100], road: [150, 900], base: 1500, ride: 500, drop: 120, side: .5, spare: ['held', 'road', 'wood'], spareR: 1500,
   posts: [['eng', 1], ['line', 2], ['garr', 2], ['mort', 1], ['wood', 1], ['road', 2], ['base', 1], ['push', 1], ['amb', 1]] };
 for (const era in INF) INF[era].forEach((l, side) => l.forEach(id => { const d = KITS[id]; Object.assign(d, { era, side, hp: MAN.hp, parts: [], arms: [d.arm, d.sp].filter(Boolean).map(a => SARMS[a]) }); }));
 DEFS.inf = KITS;
@@ -19391,8 +19392,35 @@ function* planJob(t) {
   fortPlan(t, sq);
   cmdReq(C);
   yield; live();
-  if (S.t < F.next || S.men.length + Q > IAI.cap || men + Q > sideMen(t)) return;
-  for (const [job, n, k0] of cmdPosts(C, sq, have)) for (let k = k0 || 0; k < (k0 || 0) + n; k++) if (!(have[job] || []).includes(k) && reinforce(t, job, k)) { F.next = S.t + (C.thr > 2 || C.want ? C.doc.reinf * .6 : C.doc.reinf); gLog(t, 'rf', 'Reforço a caminho: ' + (GEN.job[job] || job)); return; }
+  if (S.t < F.next) return;
+  const full = S.men.length + Q > IAI.cap || men + Q > sideMen(t);
+  const wait = () => S.t + (C.thr > 2 || C.want ? C.doc.reinf * .6 : C.doc.reinf);
+  for (const [job, n, k0] of cmdPosts(C, sq, have)) for (let k = k0 || 0; k < (k0 || 0) + n; k++) {
+    if ((have[job] || []).includes(k)) continue;
+    if (!full && reinforce(t, job, k)) { F.next = wait(); gLog(t, 'rf', 'Reforço a caminho: ' + (GEN.job[job] || job)); return; }
+    if (!full || job !== 'push') continue;
+    const was = pushFrom(C, sq, k);
+    if (was) { F.next = wait(); gLog(t, 'rf', 'Sem população para reforçar: uma esquadra de ' + (GEN.job[was] || was) + ' vai para o assalto'); return; }
+    if (C.want && S.men.length + Q <= IAI.cap && reinforce(t, job, k)) { F.next = wait(); gLog(t, 'rf', 'No teto de população e sem esquadra livre por perto: uma esquadra nova ainda vem para o assalto'); return; }
+  }
+}
+/* the assault post k of a side at its population budget (the cap, or popOf less a cut of S.popK): no new squad may enter for any other post, so
+   one it has comes off a post it may spare (FIELD.spare, in that order; the nearest of that post within FIELD.spareR m of the assault's place that
+   can get there as setOrd moves it: on that road, by a switch, by a walk of the network or near a road's end, else setOrd would hold it where it
+   stands). With none near, and the commander asking for force (C.want), a new squad still comes for it over the budget (planJob), as many as the
+   assault post has places (cmdPosts: about D.push) and never over the cap (IAI.cap): the side's squads may all stand kilometres from the
+   objective, and a walk there would take longer than the objective stays the same. Without
+   either a side over its budget asks for force it can never field, attacks nothing, loses nothing and stays over its budget the whole match
+   (issue #35). The post a squad left is refilled by a new squad once the budget has room again. Returns the job it came from, or null */
+function pushFrom(C, sq, k) {
+  const t = C.t, O = post(t, 'push', k); if (!O) return null;
+  const r = S.T.routes[O.ri], p = O.x !== undefined ? O : routeAt(r, clamp(O.s, 0, r.len)), d = q => { const L = q.men.find(m => !m.dead); return L ? hdist(L, p) : 1e9; };
+  const ok = q => d(q) <= FIELD.spareR && !q.op && !q.lift && q.live >= 3 && (q.ord.k === 'hold' || q.ord.k === 'observe' || q.ord.k === 'patrol') && !q.ord.b && !q.ord.es && !q.ord.T && !q.ord.tw;
+  const go = q => { const R = S.T.routes, e = Math.min(q.s, R[q.ri].len - q.s), net = S.T.mv >= 4; return O.ri === q.ri || (net && (!!swNear(q.ri, q.s, O.ri) || !!tripSq(q, O))) || e < 2000; };
+  for (const job of FIELD.spare) for (const q of sq.filter(q => q.job === job && ok(q)).sort((a, b) => d(a) - d(b)).slice(0, 3)) {
+    if (go(q)) { q.job = 'push'; q.jk = k; q.col = false; setOrd(q, O); return job; }
+  }
+  return null;
 }
 /* online: the host tells the room what each side's commander is at, for the players' maps (cmd, when the server knows it: welcome cmd 1) */
 {

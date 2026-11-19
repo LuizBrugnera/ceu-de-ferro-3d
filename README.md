@@ -17,7 +17,7 @@ Depois de atualizar o jogo, reinicie o servidor: a página nova funciona com um 
 
 ## Três jeitos de entrar
 
-No hangar há três botões (a época fica no alto, e o botão **Partida** ao lado guarda a duração, a hora do dia, o tempo e a personalidade e a dificuldade do general da IA, num painel só, com o resumo do que está escolhido):
+No hangar há três botões (a época fica no alto e abre em **Hoje** (1944 é um clique; MCP e servidor já usavam `modern` como padrão), e o botão **Partida** ao lado guarda a duração, a hora do dia, o tempo e a personalidade e a dificuldade do general da IA, num painel só, com o resumo do que está escolhido):
 
 - **Entrar na sala.** Você escolhe um veículo e joga a partida.
 - **General.** Você entra como soldado no quartel-general e assume o comando do seu lado.

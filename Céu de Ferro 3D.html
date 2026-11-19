@@ -11411,7 +11411,21 @@ function swim(u, dt) {
    the road where a side's soldiers enter, for whoever takes the wheel, lane m off its middle, replaced after again s.
    TCOL: wheeled armour a column brings by the number of its tanks, max on a side at once, each with a squad while the men on the map are
    under cap of IAI.cap; it lets the squad off at dis m of an enemy and fights on beside it. gun: how far a car's gun opens up */
-const RUNS = { patrol: 1, men: 3, fetch: 1, again: 30, lane: 10 }, POOL = { kinds: ['car', 'truck'], lane: 15, again: 60 };
+const RUNS = { patrol: 1, men: 3, fetch: 1, again: 30, lane: 10 }, POOL = { kinds: ['car', 'truck'], lane: 15, again: 60, near: 120 };
+/* the parked vehicles of the pool (u.pool) that are not its one of kind k at its place now (at: on the front road, by where the soldiers enter):
+   one left where a ride (MAN.ride) gave up, on the road that was the front before, or a second one at the place, empty and with no player (or guest)
+   within BODY.keep.near, goes back to the reserve (it was drawn from it) instead of standing there for the rest of the match */
+function poolTrim(t, k, at) {
+  const H = [S.my].concat(S.net ? [...Net.ghosts.values()] : []).filter(o => o && !o.dead);
+  let keep = null;
+  for (const u of S.units) {
+    if (!u.pool || u.team !== t || u.kind !== k || u.dead || u.gone || u.net || !parked(u) || u.left || u.trip || u.run || u.mr || u.gp || u.pid || u === S.my) continue;
+    if (at(u) && !keep) { keep = u; continue; }
+    if ((u.cargo && u.cargo.length) || (u.occ && u.occ.some(Boolean)) || H.some(o => hdist(o, u) < BODY.keep.near)) continue;
+    u.dead = u.gone = true;
+    if (ecoGate() && !S.eco.open && ECO.unit[k]) ecoBack(t, k, 1);
+  }
+}
 const TCOL = { lav: [0, 1, 1, 1, 2, 2], max: 2, cap: .85, dis: 450, gun: 500, sp: .012, inf: 600 };
 function errand(team, kind, ri, s0, legs, o) {
   const u = addUnit(kind, team, 0, 0, null, false, ri, s0, (team ? 1 : -1) * RUNS.lane, 0);
@@ -11507,9 +11521,11 @@ function trnPlan(t, sq) {
   const mine = S.units.filter(u => u.team === t && !u.dead && u.occ), s0 = endS(t, ri, SPAWN.inf);
   if (S.demo && !S.watch) return;
   POOL.kinds.forEach((k, i) => {
-    if (mine.some(u => u.kind === k && parked(u) && Math.abs(u.s - s0) < 120) || S.t < (F.pool || (F.pool = [0, 0]))[i]) return;
+    const at = u => u.ri === ri && Math.abs(u.s - s0) < POOL.near;
+    poolTrim(t, k, at);
+    if (mine.some(u => u.kind === k && parked(u) && (u.pool && u.trip ? true : at(u))) || S.t < (F.pool || (F.pool = [0, 0]))[i]) return;   // one out on a ride (MAN.ride) comes back to its place: no other in the meantime
     if (!ecoUse(t, k)) return; const u = addUnit(k, t, 0, 0, null, false, ri, s0 - ds * 14 * i, -ds * POOL.lane, 0);
-    u.fld = 1; u.ai.park = 1; F.pool[i] = S.t + (gpOn() ? GP.run : POOL.again);
+    u.fld = 1; u.ai.park = 1; u.pool = 1; F.pool[i] = S.t + (gpOn() ? GP.run : POOL.again);
   });
   if (S.t < (F.runT || 0)) return;
   const runs = mine.filter(u => u.run), n = k => runs.reduce((a, u) => a + (u.run.k === k ? 1 : 0), 0);
@@ -17553,7 +17569,7 @@ function rideGo(C, q, op, O, now) {
     if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - q.ts) / MAN.pace * K.gain)) { mrw('gain'); continue; }
     const home = { x: u.x, z: u.z }, p3 = tripOf(d.D.x, d.D.z, home.x, home.z, { mode: 'veh', team: q.team }); if (!p3) return false;
     const p = polyOf([...p1, ...d.p2, ...p3]), T = S.t + 1.6 * p.len / spd + K.wait;
-    q.rd = { u, st: 'call', wp, sP, D: d.D, sD: d.s, T, home }; mrd().go++;
+    q.rd = { u, st: 'call', wp, sP, D: d.D, sD: d.s, T, home, eta: S.t + Math.max(tu, ts) }; mrd().go++;
     u.trip = { p, s: 0, ri: p3.ri, s1: p3.s1, T, drop: false, back: null, gone: false, why: 'ride', rq: q, ev: [{ s: p1.len, k: 'pick' }, { s: p1.len + d.p2.len, k: 'drop' }] };
     return true;
   }
@@ -17562,7 +17578,11 @@ function rideGo(C, q, op, O, now) {
 /* a place along the vehicle's trip where it does something (tripMove) */
 function rideEv(u, E) {
   const q = u.trip && u.trip.rq, R = q && q.rd; if (!R || R.u !== u) return;
-  if (E.k === 'pick') { if (rideBoard(u, q) === 'wait') u.trip.ev.unshift(E); }   // the squad is not all there yet: the vehicle waits
+  if (E.k === 'pick') {   // the squad is not all there yet: the vehicle waits, MAN.ride.wait s past when the squad was due at most, then the squad walks on and the vehicle goes home
+    if (rideBoard(u, q) !== 'wait') return;
+    if (S.t > (R.eta || 0) + MAN.ride.wait) { mrw('late'); mrd().off++; manRideEnd(q); return; }
+    u.trip.ev.unshift(E);
+  }
   else if (E.k === 'drop' && u.mr === q) { const p = railOf(u.x, u.z); u.ri = p.ri; u.s = p.s; letOff(u, false); }
 }
 function rideBoard(u, q) {

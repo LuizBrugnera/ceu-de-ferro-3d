@@ -366,6 +366,8 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .gen-ord .go-row .chip{text-align:center;padding:4px 2px;min-width:0;white-space:nowrap}
 .gen-ord kbd{font:inherit;font-size:10px;color:var(--accent);border:1px solid var(--line);border-radius:2px;padding:0 3px;margin-left:2px}
 .gen-ord .chip:disabled{opacity:.4;cursor:not-allowed}
+.go-types{display:flex;flex-wrap:wrap;align-items:center;gap:3px 4px;color:var(--fg)}   /* W21: select by type, one short line */
+.gen-ord .go-types .chip{padding:1px 7px;font-size:11px}
 .go-sel,.go-hint,.go-plan{margin:0}
 .go-sel{color:var(--fg)}
 .go-hint{color:var(--accent)}
@@ -430,6 +432,13 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
       <section id="gcBuild"><h3>Construir (B)</h3><div class="gc-row" id="gcSites"></div></section>
       <section id="gcRes"><h3>Reserva</h3><div class="gc-grid" id="gcKeep"></div></section>
       <section id="gcReq"><h3>Requisições</h3><div class="gc-row" id="gcReqB"></div></section>
+      <section id="gcAsk"><h3 title="O general escolhe quem atende">Pedidos de apoio</h3><div class="gc-row" id="gcAskB">
+        <button class="chip" type="button" data-a="ask" data-k="fire" title="Fogo de artilharia: os morteiros e baterias que alcançam; clique no mapa">Artilharia</button>
+        <button class="chip" type="button" data-a="ask" data-k="smoke" title="Cortina de fumaça; clique no mapa">Fumaça</button>
+        <button class="chip" type="button" data-a="ask" data-k="recon" title="Reconhecimento: a esquadra livre mais perto; clique no mapa">Reconhecimento</button>
+        <button class="chip" type="button" data-a="ask" data-k="cas" title="Apoio aéreo: marca para os pilotos e foco aéreo; clique no mapa">Apoio aéreo</button>
+        <button class="chip" type="button" data-a="ask" data-k="lift" title="Transporte: as selecionadas (ou a mais perto) seguem e um caminhão livre as leva; clique no mapa">Transporte</button>
+      </div></section>
       <section id="gcDoc"><h3>Doutrina</h3><div class="gc-row" id="gcDocB"></div></section>
       <section id="gcPosts"><h3>Postos</h3><ul class="gc-list" id="gcPostL"></ul></section>
       <section id="gcOps"><h3>Operações (Delete cancela)</h3><ol class="gc-list" id="gcOpsL"></ol></section>
@@ -451,7 +460,19 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
       <button class="chip" type="button" data-o="rally" title="Ponto de reunião das esquadras de assalto (botão direito remove)">Reunião <kbd>P</kbd></button>
       <button class="chip" type="button" data-o="mark" title="Marcar um objetivo para os pilotos do seu lado (botão direito remove)">Marcar <kbd>M</kbd></button>
       <button class="chip" type="button" data-o="free" title="Devolver as esquadras selecionadas à IA">Devolver <kbd>X</kbd></button>
+      <button class="chip" type="button" data-o="rt" title="Rota: clique os pontos por onde as esquadras passam; vai com a próxima ordem">Rota <kbd>U</kbd></button>
+      <button class="chip" type="button" data-o="ord" title="Ordem ampla: atacar, defender, reconhecer, emboscar ou fogo; as esquadras decidem como">Ampla <kbd>J</kbd></button>
+      <button class="chip" type="button" data-o="fort" title="Fortificar: trincheira, sacos de areia ou base de suprimento; o general escolhe quem constrói">Fortificar <kbd>O</kbd></button>
     </div>
+    <div class="go-types" id="genSelT" role="group" aria-label="Selecionar por tipo"><span>Selecionar:</span>
+      <button class="chip" type="button" data-st="all" title="Selecionar todas as esquadras (Shift soma)">Todas</button>
+      <button class="chip" type="button" data-st="inf" title="Selecionar a infantaria (Shift soma)">Infantaria</button>
+      <button class="chip" type="button" data-st="mort" title="Selecionar os morteiros (Shift soma)">Morteiros</button>
+      <button class="chip" type="button" data-st="rec" title="Selecionar o reconhecimento (Shift soma)">Reconhecimento</button>
+      <button class="chip" type="button" data-st="eng" title="Selecionar a engenharia (Shift soma)">Engenharia</button>
+      <button class="chip" type="button" data-st="free" title="Selecionar as que não estão em operação (Shift soma)">Livres</button>
+    </div>
+    <div class="go-plan" id="genOpt" hidden></div>
     <p class="go-hint" id="genHint" hidden></p>
     <div class="go-plan" id="genPlan" hidden>
       <span class="go-pt" id="genPlanT"></span>
@@ -5184,7 +5205,7 @@ function aiSite(t) {
 /* the planner's hand on the bases of side t: a squad to build each unfinished site and to guard each finished one, a new site while the
    side is short of them, the charge of an assault squad that has reached an enemy base, and the squads that fall back to resupply */
 function planSup(t, sq, F) {
-  const A = BLD.ai, mine = S.sup.filter(b => b.team === t && !b.dead), free = q => q.ord.k === 'hold' && !q.ord.b && !q.halt && !q.lift && (q.job === 'eng' || q.job === 'line' || q.job === 'held');
+  const A = BLD.ai, mine = S.sup.filter(b => b.team === t && !b.dead), free = q => q.ord.k === 'hold' && !q.ord.b && !q.halt && !q.lift && !(q.op && q.op.k === 'usr') && (q.job === 'eng' || q.job === 'line' || q.job === 'held');   // a squad the general ordered by hand is his
   const whole = m => m.dead || (m.hp >= m.max * .9 && m.arms[0].res >= m.arms[0].d.mags - 1 && !(m.def.mort && m.arms[1].res < m.arms[1].d.n - 2)), low = m => !m.dead && (m.hp < m.max * A.hp || m.arms[0].res <= 0 || (!!m.def.mort && m.arms[1].mag + m.arms[1].res <= 2));
   if (S.net && !Net.sb) return;
   for (const b of mine) {
@@ -10789,7 +10810,7 @@ function rideBoard(u, q) {
   const E = INF[S.era][S.fac[q.team]];
   for (const m of men) { (u.cargo || (u.cargo = [])).push(Math.max(0, E.indexOf(m.id))); m.gone = true; }
   u.mr = q; R.st = 'ride'; q.live = men.length; q.at = false; mrd().boarded++;
-  gLog(q.team, 'atk', GEN.man[q.op.k] + ': esquadra embarca em ' + (u.kind === 'lav' ? 'blindado leve' : 'caminhão') + ' e segue por estrada ' + gN((R.sD - q.ts) / 1000) + ' km antes de continuar a pé', u);
+  gLog(q.team, 'atk', (GEN.man[q.op.k] || 'Transporte') + ': esquadra embarca em ' + (u.kind === 'lav' ? 'blindado leve' : 'caminhão') + ' e segue por estrada ' + gN((R.sD - q.ts) / 1000) + ' km antes de continuar a pé', u);
 }
 /* aboard: the squad is where its vehicle is (its men, gone, are put there), what the vehicle sees is what it sees */
 function manRideThink(q) {
@@ -10806,7 +10827,7 @@ function manLand(u, n) {
   const L = q.men.find(m => !m.dead);
   if (q.ord) { setOrd(q, q.ord); if (L && R && q.tp && q.tp === q.ord.wp && hdist(L, R.D) < MAN.ride.stub) q.ts = R.sD; }
   const M = mrd(), at = L && R && hdist(L, R.D) < MAN.ride.stub; M.landed++; if (at) M.planned++; else M.early++;
-  if (L && q.op) gLog(q.team, 'atk', GEN.man[q.op.k] + ': esquadra desembarca ' + (at ? 'no ponto previsto' : 'antes do ponto previsto') + ' e segue a pé', L);
+  if (L && q.op) gLog(q.team, 'atk', (GEN.man[q.op.k] || 'Transporte') + ': esquadra desembarca ' + (at ? 'no ponto previsto' : 'antes do ponto previsto') + ' e segue a pé', L);
   return q;
 }
 /* the ride is over before its end (the op is over or changed the squad's way, the vehicle was lost or gave its trip up, a contact, the time): a squad aboard is let off where the
@@ -10832,7 +10853,7 @@ function manRides(C) {
   const K = MAN.ride;
   for (const q of S.squads) if (q.rd && q.team === C.t && !q.net) rideCheck(q);
   for (const op of C.ops) {
-    if (!op.man || op.over) continue;
+    if (!(op.man || op.ride) || op.over) continue;   // W21: an abstract order's squads may ride too
     for (const q of op.sq) {
       const O = q.ord;
       if (q.rd || q.net || q.op !== op || q.state || q.lift || !O || !O.wp || !(O.fast || O.k === 'flank') || q.tp !== O.wp || S.t < (q.rdT || 0) || q.fd < FIELD.dbl || !q.live) continue;
@@ -13577,7 +13598,7 @@ function genVM(t, all) {
       if (op.k === 'atk') ops.push({ k: 'atk', id: op.id || 0, st: op.st, ri: op.ri, walk: !!op.walk, O: { x: op.O.x, z: op.O.z, nm: gName(op.O) }, fp: (op.fp || []).map(p => ({ x: p.x, z: p.z })), fs: op.fs !== undefined ? routeAt(R[op.ri], op.fs) : null,
         scr: op.scr || [], smk: !!op.smk, a2: op.a2 ? { x: op.a2.x, z: op.a2.z } : null, fl: op.fl, H: op.H ? op.H - S.t : null, n: opLive(op).length, live: opLive(op).reduce((a, q) => a + q.live, 0), why: op.why || '' });
       else if (op.k === 'amb') ops.push(ambOf(op));
-      else if (op.k === 'usr') ops.push({ k: 'usr', id: op.id, o: op.o, x: op.x, z: op.z, n: opLive(op).length });
+      else if (op.k === 'usr') ops.push({ k: 'usr', id: op.id, o: op.o, x: op.x, z: op.z, n: opLive(op).length, v: op.v, rt: op.rt ? op.rt.map(p => [Math.round(p.x), Math.round(p.z)]) : undefined });   // W21: the verb and the route of an abstract order
       else if (op.man) ops.push(genManOp(C, op));
       else if (op.k === 'ctr') { const q = op.sq[0]; ops.push({ k: 'ctr', id: op.id || 0, n: op.sq.length, from: lead(q), to: q && q.ord && q.ord.x !== undefined ? { x: q.ord.x, z: q.ord.z } : null }); }
     }
@@ -15244,7 +15265,7 @@ function gDone(t, c, by, G, r) {
     let cp = {}; try { cp = JSON.parse(JSON.stringify(c)) || {}; } catch (e) { cp = {}; }
     j.push({ T: S.t, t, by, c: cp, ok: !!r.ok, why: r.why || '' }); if (j.length > GEN.jr) j.shift();
   }
-  if (r.ok && by !== 'ai' && by !== 'sys' && G) gLog(t, 'ord', (by === 'mcp' ? 'Modelo: ' : 'General: ') + (GEN.cn[c.c] || c.c) + (c.why ? ': ' + c.why : ''), Number.isFinite(c.x) && Number.isFinite(c.z) ? { x: c.x, z: c.z } : null);
+  if (r.ok && by !== 'ai' && by !== 'sys' && G) gLog(t, 'ord', (by === 'mcp' ? 'Modelo: ' : 'General: ') + gCn(c) + (c.why ? ': ' + c.why : ''), Number.isFinite(c.x) && Number.isFinite(c.z) ? { x: c.x, z: c.z } : null);
   return r;
 }
 /* a command for side t's general from by ('ai', 'me', 'mcp', 'sys'); R the objects the AI resolved. Always { ok, why, id } */
@@ -15535,6 +15556,195 @@ genState = (g => t => {
   o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df };
   return o;
 })(genState);
+/* ---------- abstract orders and routes (W21) ----------
+   The same three for the person at the chair, the MCP model and the AI general, through genCmd:
+   ord {k: atk | def | rec | amb | fire, pi | x z, ids | n, rt?}: a verb and a target; named squads or n (1 to W21.nmax) the general picks itself
+     (the nearest free ones that have a way there). atk: each squad forms up on its own axis around the objective (up to three, W21.ring m out,
+     W21.off apart) and assaults from there; def: a ring of holds facing the enemy's base, W21.def m out; rec: observe; amb and fire hand over
+     to the ambush and the fire mission as they are.
+   fort {k: trench | sandbag | sup, x z, a?, ids?, rt?}: the general picks the builder (an engineer first) unless it is named; the work
+     starts once they are there and no enemy is near (fortPlan), and none past the side's FORT.ai.cap works (fcap).
+   req {k: fire | smoke | recon | cas | lift, x z, n?, ids?, rt?}: a request for support. The general picks who answers: the mortars and
+     batteries that reach (fire, smoke), the nearest free squad (recon), the attack aircraft in the air (cas: the pilots' mark and the air
+     focus), a truck for the squads named (lift: a manual move at a run).
+   The squads of these orders go at a run while no enemy is near (O.fast; recon quiet, holding its fire until found), and a free truck
+   carries them when the way is long, as a manoeuvre's squads (op.ride: manRides).
+   move, hold (x z), recon, assault and work take a route as well (gUsrGo).
+   rt: a route, flat [x0, z0, x1, z1, ...] of at most W21.wp points the squads walk through, in order, before the target: straight between
+     two points over dry ground, by the road network where a leg crosses water (tripOf). It is the way of the order (O.wp, O.rt) and the
+     route of the squad's mission (mis.route). The way is at most W21.max m. Orders and routes need the road network (map version 4).
+   No random number is drawn here. */
+const W21 = { wp: 8, max: 9000, nmax: 6, live: 2, ring: 230, off: [0, .95, -.95], def: 70, dry: 25, n: { atk: 3, def: 2, rec: 1, lift: 1 },
+  v: { atk: 'ataque', def: 'defesa', rec: 'reconhecimento', amb: 'emboscada', fire: 'fogo' },
+  fort: { trench: 'trincheira', sandbag: 'sacos de areia', sup: 'base de suprimento' },
+  vn: { atk: 'ataque', def: 'defesa', rec: 'reconhecimento', fort: 'fortificação', lift: 'transporte' },
+  rq: { fire: 'fogo de artilharia', smoke: 'cortina de fumaça', recon: 'reconhecimento', cas: 'apoio aéreo', lift: 'transporte' },
+  jobs: { push: 1, held: 1, road: 1, line: 1, wood: 1, rec: 1, lp: 1, eng: 1 } };
+Object.assign(GEN.no, { mv: 'Ordens amplas e rotas só no mapa com rede de estradas', rt: 'Rota inválida: até ' + W21.wp + ' pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até ' + W21.max / 1000 + ' km)', air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de ' + FORT.ai.cap + ' obras de campanha do lado' });
+Object.assign(GEN.cn, { ord: 'ordem ampla', fort: 'fortificar' });
+Net.rx.welcome = (old => m => { Net.rte = m.rte === 1; old(m); })(Net.rx.welcome);   // the relay passes rt (welcome rte: 1)
+/* a command's name for the log and the toast: an abstract one by its verb or kind */
+function gCn(c) {
+  const k = c && typeof c.k === 'string' ? c.k : '';
+  if (c && c.c === 'req' && Object.hasOwn(W21.rq, k)) return 'pedido de ' + W21.rq[k];
+  if (c && c.c === 'ord' && Object.hasOwn(W21.v, k)) return 'ordem ampla: ' + W21.v[k];
+  if (c && c.c === 'fort' && Object.hasOwn(W21.fort, k)) return 'fortificar: ' + W21.fort[k];
+  return GEN.cn[c && c.c] || (c && c.c) || '';
+}
+/* the route of command c: undefined (none), null (malformed) or its points */
+function gRt(c) {
+  if (c.rt === undefined) return undefined;
+  const r = c.rt; if (!Array.isArray(r) || r.length < 2 || r.length % 2 || r.length > 2 * W21.wp) return null;
+  const out = []; for (let i = 0; i < r.length; i += 2) { if (!gMapOk(r[i], r[i + 1])) return null; out.push({ x: r[i], z: r[i + 1] }); }
+  return out;
+}
+/* dry ground all along a straight leg */
+function gDry(a, b) {
+  const n = Math.ceil(hdist(a, b) / W21.dry);
+  for (let i = 1; i < n; i++) { const f = i / n; if (hgt(a.x + (b.x - a.x) * f, a.z + (b.z - a.z) * f) < S.T.WL + .3) return false; }
+  return true;
+}
+/* the way of a squad from its leader through the points to x z: a polyline in the shape of a route, or null (no way, or longer than W21.max) */
+function gWay(q, pts, x, z) {
+  const L = q.men.find(m => !m.dead && !m.gone); if (!L) return null;
+  const P = [{ x: L.x, z: L.z }, ...pts, { x, z }], out = [P[0]];
+  for (let i = 1; i < P.length; i++) {
+    const a = P[i - 1], b = P[i];
+    if (gDry(a, b)) { out.push(b); continue; }
+    const tp = tripOf(a.x, a.z, b.x, b.z, { mode: 'foot', team: q.team }); if (!tp) return null;
+    out.push(...tp.slice(1));
+  }
+  const w = polyOf(out); return w.len <= W21.max ? w : null;
+}
+const gLead = q => q.men.find(m => !m.dead && !m.gone);
+/* the squads of an abstract order: those named, or n of the side's free ones the general picks, nearest first (pref first of all) */
+function gPick(t, c, x, z, n, pref, avoid) {
+  if (Array.isArray(c.ids) && c.ids.length) return gSqs(t, c.ids);
+  const l = S.squads.filter(q => q.team === t && !q.net && q.live >= W21.live && !q.state && !q.op && !q.lift && !q.rd && W21.jobs[q.job] && q.ord
+    && q.ord.k !== 'supply' && q.ord.k !== 'build' && !q.ord.b && !q.ord.T && !q.ord.tw && gLead(q));
+  const key = q => hdist(gLead(q), { x, z }) - (pref && pref[q.job] ? 1e6 : 0) + (avoid && avoid[q.job] ? 1e6 : 0);
+  return l.sort((a, b) => key(a) - key(b) || a.id - b.id).slice(0, Math.max(n * 3, n));
+}
+/* the target of an abstract order: point pi, or x z (atk and def snap to a point within 400 m) */
+function gTgt(c, snap) {
+  const pts = gPts();
+  if (c.pi !== undefined) { const p = Number.isInteger(c.pi) ? pts[c.pi] : null; return p ? { x: p.x, z: p.z, p } : null; }
+  if (!gMapOk(c.x, c.z)) return null;
+  if (snap) { let b = null, bd = 400; for (const p of pts) { const d = Math.hypot(p.x - c.x, p.z - c.z); if (d < bd) { bd = d; b = p; } } if (b) return { x: b.x, z: b.z, p: b }; }
+  return { x: c.x, z: c.z, p: null };
+}
+/* a manual operation of squads qs, each with mk(q, i) -> { x, z, via?, O }: its way through rt (and via), its order; the squads with no way are left out */
+function gSend(t, o, x, z, qs, n, rt, mk) {
+  const go = [];
+  for (const q of qs) {
+    if (go.length >= n) break;
+    const m = mk(q, go.length), w = gWay(q, m.via ? rt.concat(m.via) : rt, m.x, m.z); if (!w) continue;
+    go.push([q, Object.assign(m.O, { wp: w, rt: rt.length ? rt.map(p => ({ x: p.x, z: p.z })) : undefined })]);
+  }
+  if (!go.length) return null;
+  const C = cmdOf(t), op = gUsr(C, o, x, z); op.rt = rt.length ? rt : null; op.ride = 1;
+  for (const [q, O] of go) gTake(op, q, O);
+  return { op, qs: go.map(g => g[0]) };
+}
+const gWhy = (qs, s) => { for (const q of qs) if (q.mis) q.mis.why = s; };
+GC.ord = { d: 'atk', f(t, c, by) {
+  const v = c.k; if (typeof v !== 'string' || !Object.hasOwn(W21.v, v)) return gBad('kind');
+  const rt = gRt(c); if (rt === null) return gBad('rt');
+  if (v === 'amb' || v === 'fire') {
+    if (rt) return gBad('rt');
+    const T = gTgt(c, false); if (!T) return gBad(c.pi !== undefined ? 'at' : 'map');
+    return v === 'amb' ? GC.amb.f(t, { c: 'amb', x: T.x, z: T.z, ids: c.ids }, by) : gReq(t, { k: 'fire', x: T.x, z: T.z, n: c.n });
+  }
+  if (!(S.T.mv >= 4)) return gBad('mv');
+  const T = gTgt(c, v !== 'rec'); if (!T) return gBad(c.pi !== undefined ? 'at' : 'map');
+  if (v === 'atk' && T.p && T.p.hold === t) return gBad('own');
+  const named = Array.isArray(c.ids) && c.ids.length > 0, n = named ? GENC.ids : clamp(Number.isInteger(c.n) ? c.n : W21.n[v], 1, W21.nmax);
+  const RL = { rec: 1, lp: 1 }, qs = gPick(t, c, T.x, T.z, n, v === 'rec' ? RL : null, v === 'rec' ? null : RL); if (!qs.length) return gBad('sq');
+  const nm = w => (T.p ? w + ' ' + gName(T.p) : gNear(T.x, T.z)), pts = rt || [];
+  let r;
+  if (v === 'atk') {
+    const L = qs.slice(0, n).map(gLead).filter(Boolean), cx = L.length ? L.reduce((a, o) => a + o.x, 0) / L.length : S.base[t].x, cz = L.length ? L.reduce((a, o) => a + o.z, 0) / L.length : S.base[t].z;
+    const ang = Math.atan2(cz - T.z, cx - T.x), ax = Math.min(W21.off.length, n, qs.length), p = railOf(T.x, T.z);
+    r = gSend(t, 'assault', T.x, T.z, qs, n, pts, (q, i) => {
+      let F = null; for (const a of [ang + W21.off[i % ax], ang]) { const f = { x: T.x + Math.cos(a) * W21.ring, z: T.z + Math.sin(a) * W21.ring }; if (gMapOk(f.x, f.z)) { F = f; break; } }
+      return { x: T.x, z: T.z, via: F ? [F] : null, O: { k: 'assault', ri: p.ri, s: p.s, x: T.x, z: T.z, R: 12, ax: T.x, az: T.z, mk: 'attack', fast: 1 } };
+    });
+    if (r) { r.op.v = 'atk'; const k = new Set(r.qs.map((q, i) => i % ax)).size, s = 'Ataque ' + nm('a') + ': ' + r.qs.length + (r.qs.length > 1 ? ' esquadras' : ' esquadra') + ' por ' + k + (k > 1 ? ' eixos' : ' eixo') + (pts.length ? ', pela rota de ' + pts.length + (pts.length > 1 ? ' pontos' : ' ponto') : '');
+      gWhy(r.qs, c.why || s); gLog(t, 'atk', s, T, null); }
+  } else if (v === 'def') {
+    const b = S.base[1 - t], ang = Math.atan2(b.z - T.z, b.x - T.x);
+    r = gSend(t, 'hold', T.x, T.z, qs, n, pts, (q, i) => {
+      const a = ang + (i - (Math.min(n, qs.length) - 1) / 2) * .8, P = { x: T.x + Math.cos(a) * W21.def, z: T.z + Math.sin(a) * W21.def }, at = gMapOk(P.x, P.z) ? P : T, p = railOf(at.x, at.z);
+      return { x: at.x, z: at.z, O: { k: 'hold', ri: p.ri, s: p.s, x: at.x, z: at.z, R: 12, mk: 'defend', fast: 1 } };
+    });
+    if (r) { r.op.v = 'def'; const s = 'Defesa ' + nm('de') + ': ' + r.qs.length + (r.qs.length > 1 ? ' esquadras em anel' : ' esquadra') + (pts.length ? ', pela rota de ' + pts.length + (pts.length > 1 ? ' pontos' : ' ponto') : ''); gWhy(r.qs, c.why || s); gLog(t, 'def', s, T, null); }
+  } else {
+    const p = railOf(T.x, T.z);
+    r = gSend(t, 'recon', T.x, T.z, qs, n, pts, () => ({ x: T.x, z: T.z, O: { k: 'observe', ri: p.ri, s: p.s, x: T.x, z: T.z, R: 5, mk: 'recon', fast: 1, quiet: 1 } }));
+    if (r) { r.op.v = 'rec'; const s = 'Reconhecimento ' + nm('de') + ': ' + r.qs.length + (r.qs.length > 1 ? ' esquadras' : ' esquadra') + (pts.length ? ', pela rota de ' + pts.length + (pts.length > 1 ? ' pontos' : ' ponto') : ''); gWhy(r.qs, c.why || s); gLog(t, 'atk', s, T, null); }
+  }
+  return r ? gYes(r.op.id) : gBad('way');
+} };
+GC.fort = { d: 'def', f(t, c, by) {
+  const k = c.k; if (typeof k !== 'string' || !Object.hasOwn(W21.fort, k)) return gBad('kind');
+  const rt = gRt(c); if (rt === null) return gBad('rt');
+  if (!gMapOk(c.x, c.z)) return gBad('map');
+  const named = Array.isArray(c.ids) && c.ids.length > 0;
+  if (k === 'sup') {   // the supply base is the sup order's own, with the builder the general picks; its walk is its own
+    if (rt) return gBad('rt');
+    if (named) return GC.sup.f(t, { c: 'sup', x: c.x, z: c.z, a: c.a, ids: c.ids }, by);
+    const ri = railOf(c.x, c.z).ri, q = gPick(t, c, c.x, c.z, 1, { eng: 1 }).find(q => gOrdOk(q, ri)); if (!q) return gBad('sq');
+    return GC.sup.f(t, { c: 'sup', x: c.x, z: c.z, a: c.a, ids: [q.id] }, by);
+  }
+  if (!(S.T.mv >= 4)) return gBad('mv');
+  if (S.forts.reduce((n, f) => n + (f.team === t && !f.pre ? 1 : 0), 0) >= FORT.ai.cap) return gBad('fcap');   // the planner starts no more (fortPlan): said now, not left undone
+  const e = S.base[1 - t], a = Number.isFinite(c.a) ? c.a : headTo(c.x, c.z, e.x, e.z), p = railOf(c.x, c.z);
+  const qs = gPick(t, c, c.x, c.z, 1, { eng: 1 }); if (!qs.length) return gBad('sq');
+  const r = gSend(t, 'work', c.x, c.z, qs, named ? GENC.ids : 1, rt || [], () => ({ x: c.x, z: c.z, O: { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, dig: { k: k === 'trench' ? 1 : 2, a }, mk: 'build', fast: 1 } }));
+  if (!r) return gBad('way');
+  r.op.v = 'fort'; const s = 'Fortificar ' + gNear(c.x, c.z) + ': ' + W21.fort[k] + ' (' + r.qs.length + (r.qs.length > 1 ? ' esquadras' : ' esquadra') + ')'; gWhy(r.qs, c.why || s); gLog(t, 'def', s, { x: c.x, z: c.z }, null);
+  return gYes(r.op.id);
+} };
+/* a request for support: who answers is the general's choice */
+function gReq(t, c, by) {
+  const k = c.k, C = cmdOf(t), rt = gRt(c); if (rt === null) return gBad('rt');
+  if (!gMapOk(c.x, c.z)) return gBad('map');
+  if (k === 'fire' || k === 'smoke') {
+    if (rt) return gBad('rt');
+    const r = GC.fire.f(t, { c: 'fire', k: k === 'smoke' ? 'smk' : 'he', x: c.x, z: c.z, n: Number.isInteger(c.n) ? c.n : 3 });
+    if (r.ok) gLog(t, 'atk', 'Pedido de ' + W21.rq[k] + ' ' + gNear(c.x, c.z) + ': os morteiros e baterias que alcançam atendem', { x: c.x, z: c.z }, null);
+    return r;
+  }
+  if (k === 'recon') return GC.ord.f(t, { c: 'ord', k: 'rec', x: c.x, z: c.z, n: Number.isInteger(c.n) ? c.n : 1, ids: c.ids, rt: c.rt, why: c.why }, by);
+  if (k === 'cas') {
+    if (rt) return gBad('rt');
+    if (!S.planes.some(p => p.team === t && !p.dead && p.ai && !p.net && (p.role === 'cas' || (p.heli && !p.def.lift)))) return gBad('air');
+    C.umark = { x: c.x, z: c.z, T: S.t + GENC.mark }; C.ufoc = { x: c.x, z: c.z, r: 450, T: S.t + GENC.focus };
+    gLog(t, 'atk', 'Pedido de apoio aéreo ' + gNear(c.x, c.z) + ': marca para os pilotos e foco aéreo', { x: c.x, z: c.z }, null);
+    return gYes();
+  }
+  if (!(S.T.mv >= 4)) return gBad('mv');
+  const named = Array.isArray(c.ids) && c.ids.length > 0, n = named ? GENC.ids : clamp(Number.isInteger(c.n) ? c.n : W21.n.lift, 1, W21.nmax), p = railOf(c.x, c.z);
+  const qs = gPick(t, c, c.x, c.z, n); if (!qs.length) return gBad('sq');
+  const r = gSend(t, 'move', c.x, c.z, qs, n, rt || [], () => ({ x: c.x, z: c.z, O: { k: 'move', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, fast: 1, mk: 'lift' } }));
+  if (!r) return gBad('way');
+  r.op.v = 'lift';
+  const s = 'Transporte para ' + r.qs.length + (r.qs.length > 1 ? ' esquadras ' : ' esquadra ') + gNear(c.x, c.z) + ': a pé até um caminhão livre as levar'; gWhy(r.qs, c.why || s); gLog(t, 'sup', s, { x: c.x, z: c.z }, null);
+  return gYes(r.op.id);
+}
+GC.req = (G => ({ d: G.d, r: G.r, f(t, c, by, R) { return !R && typeof c.k === 'string' && Object.hasOwn(W21.rq, c.k) ? gReq(t, c, by) : G.f(t, c, by, R); } }))(GC.req);
+/* the unit orders that send named squads to a place (move, hold, recon, assault, work) take a route too */
+gUsrGo = (g => (t, c, o, mk) => {
+  if (c.rt === undefined) return g(t, c, o, mk);
+  const rt = gRt(c); if (!rt) return gBad('rt');
+  if (!(S.T.mv >= 4)) return gBad('mv');
+  if (!gMapOk(c.x, c.z)) return gBad('map');
+  const qs = gSqs(t, c.ids); if (!qs.length) return gBad('sq');
+  const p = railOf(c.x, c.z), r = gSend(t, o, c.x, c.z, qs, GENC.ids, rt, () => ({ x: c.x, z: c.z, O: mk(p) }));
+  return r ? gYes(r.op.id) : gBad('way');
+})(gUsrGo);
+/* a squad's mission carries the route of its order, and the kind an abstract order gave it (O.mk) */
+misOrd = (g => (q, O) => { g(q, O); const M = q.mis; if (!M || !O) return; if (O.mk) M.kind = O.mk; if (O.rt) M.route = O.rt.map(p => ({ x: p.x, z: p.z })); else delete M.route; })(misOrd);
 
 /* ---------- sappers (SAP): the kit, its mines, and its charges against what stands parked ----------
    The content of the sappers; what the AI general does with them is not here. A sapper (a kit with sap) carries chg charges instead of
@@ -20391,7 +20601,7 @@ function gorDrain() {
 function gorSend(c) {
   if (!gorSeat()) return;
   if (S.net && !Net.gc2 && !(GC[c.c] && GC[c.c].d === 'eco')) return gorToast('Servidor antigo: só ordens de economia', true);
-  const nm = GEN.cn[c.c] || c.c, n = { c, T: performance.now() };
+  const nm = gCn(c), n = { c, T: performance.now() };
   GOR.pend.push(n); if (S.net && !S.host) gorToast('Enviada: ' + nm + '…');
   genDo(c, r => {
     GOR.pend = GOR.pend.filter(o => o !== n);
@@ -20633,7 +20843,7 @@ function gorBar() {
   gorSet('#genCmdP', 'hidden', !(seat && GOR.tab === 'cmd'));
   const keys = document.querySelector('.gen-keys');
   if (!GOR.keys0) GOR.keys0 = keys.textContent;
-  const kt = seat ? 'Clique/arraste: selecionar · Clique direito: ordem · Alt+arrastar ou WASD: mover o mapa · 1-9: grupos (Shift+número grava) · B: construir · N: comando · Tab: fechar' : GOR.keys0;
+  const kt = seat ? 'Clique/arraste: selecionar · Clique direito: ordem · Alt+arrastar ou WASD: mover o mapa · 1-9: grupos (Shift+número grava) · B: construir · U: rota · J: ordem ampla · O: fortificar · N: comando · Tab: fechar' : GOR.keys0;
   if (keys.textContent !== kt) keys.textContent = kt;
   gorSet('#genOrd', 'hidden', !seat);
   if (!seat) return;
@@ -20708,7 +20918,7 @@ function gorCmdPanel(V) {
     bt.append(btn('−', { a: 'posts', k, n: Math.max(0, (n === undefined ? 1 : n) - 1) }, 'Uma esquadra a menos neste posto', undefined, !tac), gE('b', '', n === undefined ? 'auto' : String(n)), btn('+', { a: 'posts', k, n: Math.min(6, (n === undefined ? 0 : n) + 1) }, 'Uma esquadra a mais neste posto', undefined, !tac), btn('auto', { a: 'posts', k, n: -1 }, 'Voltar ao número da doutrina', undefined, !tac || n === undefined));
     li.append(gE('span', '', t), bt); return li;
   }));
-  const OP = { atk: o => 'Assalto · ' + (o.O ? o.O.nm : '') + ' — ' + (GEN.st[o.st] || o.st), amb: o => 'Emboscada · rota ' + (o.ri + 1) + ' — ' + (GEN.st[o.st] || o.st), ctr: () => 'Contra-ataque da reserva', usr: o => 'Ordem: ' + (GORU[o.o] || o.o) + ' · ' + o.n + ' esq.' };
+  const OP = { atk: o => 'Assalto · ' + (o.O ? o.O.nm : '') + ' — ' + (GEN.st[o.st] || o.st), amb: o => 'Emboscada · rota ' + (o.ri + 1) + ' — ' + (GEN.st[o.st] || o.st), ctr: () => 'Contra-ataque da reserva', usr: o => (o.v ? 'Ordem ampla: ' + (W21.vn[o.v] || o.v) + (o.rt ? ' · rota de ' + o.rt.length + ' pts' : '') : 'Ordem: ' + (GORU[o.o] || o.o)) + ' · ' + o.n + ' esq.' };
   fill('#gcOpsL', ops.length ? ops.map(o => {
     const li = gE('li', o.id === GOR.opSel ? 'on' : ''), sp = gE('span', '', OP[o.k] ? OP[o.k](o) : genManTxt(o)), bt = gE('span', 'gc-btns');
     sp.title = sp.textContent; sp.dataset.a = 'opsel'; sp.dataset.id = o.id; sp.style.cursor = 'pointer';
@@ -20750,7 +20960,7 @@ function gSel(g, V, P, now) {
     const c = o.c; if (!Number.isFinite(c.x)) continue;
     const x = X(c.x), y = Y(c.z); g.setLineDash([4, 4]);
     if (c.ids) for (const e of sq) if (c.ids.includes(e.id)) gLine(g, X(e.x), Y(e.z), x, y, '#aeb6b3', 1);
-    gRing(g, x, y, 10 * k, '#aeb6b3', 1.4); g.setLineDash([]); gTxt(g, (GEN.cn[c.c] || c.c) + ' …', x, y - 14 * k, 10 * k, '#aeb6b3', 'center');
+    gRing(g, x, y, 10 * k, '#aeb6b3', 1.4); g.setLineDash([]); gTxt(g, gCn(c) + ' …', x, y - 14 * k, 10 * k, '#aeb6b3', 'center');
   }
   if (GOR.rally) { const x = X(GOR.rally.x), y = Y(GOR.rally.z); gLine(g, x, y, x, y - 22 * k, '#ece6d6', 2); g.beginPath(); g.moveTo(x, y - 22 * k); g.lineTo(x + 14 * k, y - 17 * k); g.lineTo(x, y - 12 * k); g.closePath(); g.fillStyle = acc; g.fill(); gTxt(g, 'REUNIÃO', x, y + 12 * k, 10 * k, acc, 'center'); }
   if (GOR.mark && S.t < GOR.mark.T) { const x = X(GOR.mark.x), y = Y(GOR.mark.z), r = 11 * k; g.beginPath(); g.moveTo(x, y - r); g.lineTo(x + r, y); g.lineTo(x, y + r); g.lineTo(x - r, y); g.closePath(); g.strokeStyle = '#7fd0ff'; g.lineWidth = 2; g.stroke(); gTxt(g, 'ORDEM', x, y - r - 4, 10 * k, '#7fd0ff', 'center'); }
@@ -20787,6 +20997,128 @@ function gorGhost(g, P, now) {
   const cx = P.X(x), cy = P.Y(z);
   gTxt(g, ECO.tx.nm[GOR.bk] + (snap ? ' · ponto sugerido' : '') + ' · ' + (ok ? 'pode construir aqui' : ECO.tx.why[GOR.wy] || GOR.wy), cx + 14 * k, cy - 12 * k, 11 * k, c, 'left');
 }
+/* ---------- abstract orders and routes on the view (W21) ----------
+   U draws a route: a click a point (at most W21.wp; Backspace takes the last off, Enter or U ends, Esc with nothing armed clears it). The
+   route rides on the next order that sends squads to a place (move, hold, recon, the right button's, J, O, the recon and lift requests) and
+   is cleared once that order is sent. J arms an abstract order: a verb (J again or the chips: attack, defend, recon, ambush, fire) and who
+   (the selection, else N squads the general picks); a click gives the target. O arms a fortification (O again or the chips: trench,
+   sandbag, supply base) and who builds it (the selection, else the general's pick). The requests of the Comando tab (fire, smoke, recon,
+   air support, lift) arm a click on the map. The type chips select every own squad of a kind (Shift adds). Everything goes through gorSend */
+Object.assign(GOR, { rt: [], ov: 'atk', on: 0, fk: 'trench', rk: '', rtLast: null });
+const GORV = ['atk', 'def', 'rec', 'amb', 'fire'], GORF = ['trench', 'sandbag', 'sup'], GORN = [0, 1, 2, 3, 4, 6];
+const GORX = { rt: 1, ord: 1, fort: 1, rq: 1 }, GORRQ = { recon: 1, lift: 1 };
+Object.assign(GORK, { KeyU: 'rt', KeyJ: 'ord', KeyO: 'fort' });
+const gorWho2 = () => (gorIds().length ? gorIds().length + (gorIds().length > 1 ? ' esquadras selecionadas' : ' esquadra selecionada') : GOR.on ? GOR.on + (GOR.on > 1 ? ' esquadras' : ' esquadra') + ' que o general escolhe' : 'o general escolhe quantas e quais');
+Object.defineProperties(GORT, {
+  rt: { enumerable: true, get: () => 'Rota: clique para o ponto ' + (GOR.rt.length + 1) + ' de até ' + W21.wp + ' · Backspace apaga o último · Enter ou U termina' },
+  ord: { enumerable: true, get: () => 'Ordem ampla: ' + W21.v[GOR.ov] + ' · ' + (GOR.ov === 'fire' ? 'os morteiros e baterias que alcançam' : gorWho2()) + ' · clique no alvo · J troca o verbo' },
+  fort: { enumerable: true, get: () => 'Fortificar: ' + W21.fort[GOR.fk] + ' · ' + (gorIds().length ? 'as selecionadas constroem' : 'o general escolhe quem constrói') + ' · clique no lugar · O troca o tipo' },
+  rq: { enumerable: true, get: () => 'Pedido de ' + (W21.rq[GOR.rk] || '') + ': clique no mapa' + (GORRQ[GOR.rk] ? ' · ' + gorWho2() : ' · o general escolhe quem atende') } });
+gorMode = (g => (m, keep) => {
+  if (typeof m !== 'string' || !(GORX[m] || m.startsWith('rq:'))) return g(m, keep);
+  gorSync();
+  if (!gorSeat()) return;
+  if (!gorTac()) return gorToast('Servidor antigo: só ordens de economia', true);
+  if (m === 'rt' && S.net && !S.host && !Net.rte) return gorToast('Servidor antigo: sem rotas', true);
+  if (m.startsWith('rq:')) { GOR.rk = m.slice(3); m = 'rq'; }
+  else if (m === GOR.mode && !keep) {   // the key again: the route ends; the verb or the kind turns
+    if (m === 'rt') m = '';
+    else if (m === 'ord') GOR.ov = GORV[(GORV.indexOf(GOR.ov) + 1) % GORV.length];
+    else GOR.fk = GORF[(GORF.indexOf(GOR.fk) + 1) % GORF.length];
+  }
+  GOR.mode = m; GOR.plan = null; GOR.sig = {};
+  gorBar();
+})(gorMode);
+/* the route on an order: on those that send squads to a place; a point's hold with a route is the abstract defence of it */
+gorSend = (g => c => {
+  const n = GOR.rt.length, takes = n && (Object.hasOwn({ move: 1, assault: 1, recon: 1, hold: 1 }, c.c) || (c.c === 'ord' && (c.k === 'atk' || c.k === 'def' || c.k === 'rec')) || (c.c === 'fort' && c.k !== 'sup') || (c.c === 'req' && GORRQ[c.k]));
+  if (!takes) return g(c);
+  if (S.net && !S.host && !Net.rte) return gorToast('Servidor antigo: sem rotas (Esc limpa a rota)', true);
+  if (c.c === 'hold' && c.pi !== undefined) c = { c: 'ord', k: 'def', pi: c.pi, ids: c.ids };
+  c.rt = []; for (const p of GOR.rt) c.rt.push(p.x, p.z);
+  GOR.rtLast = { pts: GOR.rt, T: performance.now() }; GOR.rt = []; GOR.sig = {};
+  return g(c);
+})(gorSend);
+gorTarget = (g => (px, py, shift) => {
+  const m = GOR.mode; if (!GORX[m]) return g(px, py, shift);
+  const w = gorW(px, py), ids = gorIds(), r1 = v => Math.round(v * 10) / 10, x = r1(w.x), z = r1(w.z);
+  if (m === 'rt') {
+    if (GOR.rt.length >= W21.wp) gorToast('A rota já tem ' + W21.wp + ' pontos: Enter termina', true); else GOR.rt.push({ x, z });
+    GOR.sig = {}; return gorBar();
+  }
+  let c;
+  if (m === 'ord') {
+    const v = GOR.ov, pt = v === 'atk' || v === 'def' ? gorPt(px, py) : null;
+    c = pt ? { c: 'ord', k: v, pi: pt.i } : { c: 'ord', k: v, x, z };
+    if (v !== 'fire') { if (ids.length) c.ids = ids; else if (GOR.on && v !== 'amb') c.n = GOR.on; }
+  } else if (m === 'fort') { c = { c: 'fort', k: GOR.fk, x, z }; if (ids.length) c.ids = ids; }
+  else { c = { c: 'req', k: GOR.rk, x, z }; if (GORRQ[GOR.rk]) { if (ids.length) c.ids = ids; else if (GOR.on) c.n = GOR.on; } }
+  gorSend(c);
+  if (!shift) GOR.mode = '';
+  gorBar();
+})(gorTarget);
+gorKey = (g => e => {
+  gorSync();
+  if (!gorOn()) return g(e);
+  const c = e.code;
+  if (c === 'Backspace' && GOR.rt.length && (GOR.mode === 'rt' || !GOR.opSel)) { if (!e.repeat) { GOR.rt.pop(); GOR.sig = {}; gorBar(); } return true; }
+  if (c === 'Enter' && GOR.mode === 'rt') { gorMode(''); return true; }
+  if (c === 'Escape' && !GOR.mode && !GOR.plan && GOR.rt.length) { GOR.rt = []; GOR.sig = {}; gorToast('Rota apagada'); gorBar(); return true; }
+  return g(e);
+})(gorKey);
+gorAct = (g => (d, shift) => (d.a === 'ask' ? gorMode('rq:' + d.k) : g(d, shift)))(gorAct);
+/* the type chips: every own squad of a kind (g on the map: inf, mort, rec, eng; free: in no operation) */
+function gorSelT(k, add) {
+  gorSync(); if (!gorSeat()) return;
+  if (!add) GOR.sel.clear();
+  for (const e of gorSquads()) if (k === 'all' || (k === 'free' ? !e.op : e.g === k)) GOR.sel.add(e.id);
+  if (!GOR.sel.size) gorToast('Nenhuma esquadra desse tipo', true);
+  gorBar();
+}
+/* the options of the armed order (verbs, who, kinds) and the route under construction: rebuilt only when they change */
+function gorOpt() {
+  if (!S) return;
+  const el = $('#genOpt'), seat = !!gorSeat(), m = GOR.mode, show = seat && (m === 'ord' || m === 'fort' || m === 'rq' || m === 'rt' || GOR.rt.length > 0);
+  if (el.hidden !== !show) el.hidden = !show;
+  if (!show) return;
+  const sg = JSON.stringify([m, GOR.ov, GOR.on, GOR.fk, GOR.rk, GOR.rt.length, gorIds().length]);
+  if (GOR.sig.opt === sg) return; GOR.sig.opt = sg;
+  const chip = (t, d, on, title) => { const b = gE('button', 'chip', t); b.type = 'button'; for (const k in d) b.dataset[k] = String(d[k]); if (on !== undefined) b.setAttribute('aria-pressed', String(!!on)); if (title) b.title = title; return b; };
+  const kids = [];
+  if (m === 'ord') {
+    kids.push(gE('span', '', 'Verbo:'), ...GORV.map(v => chip(W21.v[v][0].toUpperCase() + W21.v[v].slice(1), { ov: v }, GOR.ov === v)));
+    if (GOR.ov !== 'fire' && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', 'Quem:'), ...GORN.map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n, n ? 'O general escolhe ' + n + (n > 1 ? ' esquadras livres' : ' esquadra livre') + ' com caminho até lá' : 'O general escolhe quantas (ataque 3, defesa 2, reconhecimento 1)')));
+  } else if (m === 'fort') kids.push(gE('span', '', 'Obra:'), ...GORF.map(k => chip(W21.fort[k][0].toUpperCase() + W21.fort[k].slice(1), { fk: k }, GOR.fk === k)));
+  else if (m === 'rq' && GORRQ[GOR.rk] && !gorIds().length) kids.push(gE('span', '', 'Quem:'), ...GORN.map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n)));
+  if (GOR.rt.length || m === 'rt') kids.push(gE('span', '', 'Rota: ' + GOR.rt.length + (GOR.rt.length === 1 ? ' ponto' : ' pontos') + (m === 'rt' ? '' : ' · vai com a próxima ordem')), chip('Apagar rota', { rtx: 1 }, undefined, 'Esc também apaga a rota quando nada está armado'));
+  el.replaceChildren(...kids);
+}
+gorBar = (g => () => { g(); gorOpt(); })(gorBar);
+/* the routes: the one being drawn (from the selection through the points to the cursor), the last one sent fading, and those of the side's manual operations */
+function gorRoutes(g, V, P, now) {
+  if (!gorSeat()) return;
+  const k = P.k, X = P.X, Y = P.Y, acc = gAcc(), line = (pts, col, a, dash) => {
+    g.globalAlpha = a; g.setLineDash(dash); g.beginPath(); pts.forEach((p, i) => (i ? g.lineTo(X(p.x), Y(p.z)) : g.moveTo(X(p.x), Y(p.z)))); g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+  };
+  for (const o of V.ops || []) if (o.k === 'usr' && Array.isArray(o.rt) && o.rt.length) line(o.rt.map(p => ({ x: p[0], z: p[1] })).concat([{ x: o.x, z: o.z }]), FRIEND, .55, [2, 5]);
+  const L = GOR.rtLast; if (L && now - L.T < 15000) line(L.pts, acc, .7 * (1 - (now - L.T) / 15000), [6, 6]); else if (L) GOR.rtLast = null;
+  if (!GOR.rt.length && GOR.mode !== 'rt') return;
+  const sel = gorSq(V).filter(e => GOR.sel.has(e.id)), pts = [];
+  if (sel.length) pts.push({ x: sel.reduce((a, e) => a + e.x, 0) / sel.length, z: sel.reduce((a, e) => a + e.z, 0) / sel.length });
+  pts.push(...GOR.rt);
+  if (GOR.mode === 'rt' && GOR.cur && !GOR.dn) pts.push(gorW(GOR.cur.px, GOR.cur.py));
+  if (pts.length > 1) { g.lineDashOffset = -(now / 40) % 14; line(pts, acc, 1, [8, 6]); g.lineDashOffset = 0; }
+  GOR.rt.forEach((p, i) => { const x = X(p.x), y = Y(p.z); g.beginPath(); g.arc(x, y, 7 * k, 0, TAU); g.fillStyle = 'rgba(8,12,13,.85)'; g.fill(); gRing(g, x, y, 7 * k, acc, 1.8); gTxt(g, String(i + 1), x, y + 4 * k, 10 * k, acc, 'center'); });
+}
+(L => { const d = L.draw; L.draw = (g, V, P, now) => { d(g, V, P, now); gorRoutes(g, V, P, now); }; })(gLay('sel'));
+$('#genSelT').addEventListener('click', e => { const b = e.target.closest('[data-st]'); if (b) { gorSelT(b.dataset.st, e.shiftKey); b.blur(); } });
+$('#genOpt').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset;
+  if (d.ov) GOR.ov = d.ov; else if (d.on !== undefined) GOR.on = +d.on; else if (d.fk) GOR.fk = d.fk; else if (d.rtx) { GOR.rt = []; if (GOR.mode === 'rt') GOR.mode = ''; }
+  GOR.sig = {}; gorBar(); b.blur();
+});
+
 /* the clicks of the panel, the bar and the seat group */
 $('#genClaim').addEventListener('click', e => { gorClaim(); e.currentTarget.blur(); });
 $('#genAs').addEventListener('click', e => { const b = e.target.closest('[data-as]'); if (b) { gorAs(b.dataset.as); b.blur(); } });

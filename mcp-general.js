@@ -205,7 +205,8 @@ const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 
   near: 'Perto demais de outra instalação', far: 'Fora do território', front: 'À frente da linha', dep: 'Mina só sobre jazida livre', fabroad: 'Fábrica precisa de estrada a menos de 500 m',
   q: 'Fila cheia', era: 'Não existe nesta época', unknown: 'Instalação inimiga não localizada (ou avistada há muito tempo)', none: 'Nada na reserva', en: 'Falta energia', mt: 'Falta metal',
   hate: 'A população dessa vila se voltou contra nós', nociv: 'Ninguém para armar nessa vila', mil0: 'Sem tropa nossa na vila para armar os civis',
-  roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento' };
+  roe: 'Civis à vista e alvo não identificado: fogo negado pelas regras de engajamento',
+  rt: 'Rota inválida: até 8 pontos no mapa, fora da água', way: 'Nenhuma esquadra com caminho até lá a pé (até 9 km)', air: 'Nenhum avião de ataque nosso no ar', fcap: 'Limite de obras de campanha do lado', mv: 'Ordens amplas e rotas só no mapa com rede de estradas' };
 const explain = r => (r.ok ? 'accepted' : 'refused: ' + (r.why || 'unspecified') + (PT[r.why] ? ' (' + PT[r.why] + ')' : '') + (WHY[r.why] ? ' - ' + WHY[r.why] : '') + (r.note ? ' - ' + r.note : ''));
 
 /* the host's answer to a command: text for the model */
@@ -250,7 +251,7 @@ async function runAsk(q) {
 /* ---------------------------------------------------------------- input checks (mirror the relay's gcmd whitelist) */
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
-  mk: 'w', lat: 'i', roe: 'w', brk: 'n', nd: 'w' };
+  mk: 'w', lat: 'i', roe: 'w', brk: 'n', nd: 'w', rt: 'P' };
 const ASKS = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec'];   // the relay's gask kinds; it passes on k, x, z, a
 const isNum = v => typeof v === 'number' && Number.isFinite(v), isInt = v => Number.isInteger(v);
 function rawCmd(c) {   // returns an error string or null
@@ -266,6 +267,7 @@ function rawCmd(c) {   // returns an error string or null
     if (t === 'i' && !(isInt(v) && Math.abs(v) < 1e6)) return k + ' must be an integer with |value| < 1000000';
     if (t === 's' && !(typeof v === 'string' && v.length <= 120)) return k + ' must be a string of at most 120 characters';
     if (t === 'L' && !(Array.isArray(v) && v.length <= 24 && v.every(e => isInt(e) && Math.abs(e) < 1e6))) return k + ' must be an array of at most 24 integers';
+    if (t === 'P' && !(Array.isArray(v) && v.length >= 2 && v.length <= 16 && v.length % 2 === 0 && v.every(e => isNum(e) && Math.abs(e) < 1e5))) return k + ' must be a flat array of 1-8 x, z pairs (2-16 numbers)';
   }
   return null;
 }
@@ -382,6 +384,16 @@ const pickView = v => { if (!v) return null; const o = {}; for (const k of ['doc
 const unit = { type: 'string', pattern: '^[a-z0-9]{1,10}$', description: 'unit kind key as in this era\'s production list (lowercase letters/digits, 1-10 chars); ask_view lists costs by kind (modern: squad car truck lav aa art tank rad aaf fighter cas heli lift drone; ww2 has no lav/heli/lift/drone)' };
 const siteId = { type: 'integer', description: 'site id (from get_state or ask_view)' };
 const xz = { x: { type: 'number', description: 'map x, metres' }, z: { type: 'number', description: 'map z, metres' } };
+/* a route: 1-8 waypoints [{x, z}] the squads walk through, in order, before the target; flattened into rt */
+const ROUTE = { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', properties: xz, required: ['x', 'z'], additionalProperties: false },
+  description: 'optional route: 1-8 waypoints {x, z} the squads walk through, in order, before the target (straight over dry ground, by the roads where a leg crosses water; at most 9 km in all). Refused rt if a point is off the map or in water' };
+function rtOf(a) {
+  if (a.route === undefined || a.route === null) return null;
+  if (!Array.isArray(a.route) || a.route.length < 1 || a.route.length > 8 || !a.route.every(p => p && isNum(p.x) && isNum(p.z) && Math.abs(p.x) < 1e5 && Math.abs(p.z) < 1e5)) throw new Error('"route" must be 1-8 points {x, z}');
+  const o = []; for (const p of a.route) o.push(p.x, p.z); return o;
+}
+const IDS = { type: 'array', maxItems: 12, items: { type: 'integer' }, description: 'squad ids from get_state (general.squads); omit to let the general pick' };
+const withRt = (c, a) => { const rt = rtOf(a); if (rt) c.rt = rt; return c; };
 const TOOLS = [
   { name: 'get_state', description: 'Read what your side knows, in readable names: economy (stock, income, your sites with ids and progress, the production queue with ids, reserves, known enemy sites), the commander view (posture, operations, squads with ids and jobs) and the last order-log lines. Every part carries ageSeconds: trust the age. Cheap and unlimited, it never asks the host. The MAP part (points with index, name, position and holder; roads; enemy sightings; your vehicles; squad positions and men; tickets) comes from one question to the host: pass refresh_map: true to ask now (about a second, at most one a second; do it on your first call and after big moves); wait also refreshes it every 8 s, so after a wait it is recent. Positions are metres on the map (x, z). The ids in it are what the tactical commands name (squad ids in ids, point indexes in pi, enemy site ids in strike/raid). With from_host: true you instead get the host\'s raw whole picture (genState, large) as data.',
     inputSchema: { type: 'object', properties: { log_lines: { type: 'integer', minimum: 0, maximum: 80, description: 'how many recent log lines to include (default 10)' }, refresh_map: { type: 'boolean', description: 'ask the host for a fresh map picture and merge it in' }, from_host: { type: 'boolean', description: 'return the host\'s raw picture instead (large)' } }, additionalProperties: false },
@@ -477,12 +489,38 @@ const TOOLS = [
     + '- pplan {k: kind | auto, n: field count 0-20 or -1}: the production plan.  disp {k, n?: 1-4, mk?: mission, pi | x,z, r?, lat?, roe?, H?, why?}: dispatch from the reserve with a mission.  mis {ids, mk, pi | x,z, r?, lat?, roe?, brk?, H?}: squads take a mission (the dedicated tools are easier).\n'
     + '- conv {nd} / alift {nd} / sprio {nd, p: -1..3}: logistics: a convoy, the airlift, a node\'s priority (nd: b<supply base id> | p<point index>).\n'
     + '- recv {id} / medv {x,z}: recovery and evacuation: a recovery vehicle for an immobilized hulk (id from the question rec), an evacuation of the wounded near x,z.\n'
-    + 'QUESTIONS {q: spots (k) | why (k,x,z) | view | state | pool (x,z: squads that could assault there) | amb (x,z) | fire (k,x,z) | plan | logi | rec}. Params allowed in a command: k, k2, mk, roe, nd (short lowercase words), x, z, a, s, fx, fz, x2, z2, H, r, brk (numbers), n, id, p, inf, aa, ri, op, j, pi, sd, smk, home, lat (integers), ids (list), why (text up to 120 chars). Anything else is rejected. Refusal codes (Portuguese text is returned with them): ctl you lack the seat, off, over, shape, kind, at, link, own, busy, max, sq, reach, nores, fire, amb, id, cool, tk, stock, res, rate, map, water, steep, road, obj, base, foe, cap, pop, node, full, mt, conv, lift, cut, era, hate, nociv, mil0, roe.',
+    + '- ord {k: atk|def|rec|amb|fire, pi | x,z, ids? | n?: 1-6 squads the general picks, rt?}: an abstract order (order_units is easier).  fort {k: trench|sandbag|sup, x,z, a?, ids?, rt?}: a fortification, the general picks the builder (build_defence).  req {k: fire|smoke|recon|cas|lift, x,z, n?, ids?, rt?}: a request for support (request_support).\n'
+    + '- rt: a route, a flat list [x0, z0, x1, z1, ...] of 1-8 waypoints, on move, hold (x,z), recon, assault, work, ord (atk, def, rec), fort (trench, sandbag) and req (recon, lift).\n'
+    + 'QUESTIONS {q: spots (k) | why (k,x,z) | view | state | pool (x,z: squads that could assault there) | amb (x,z) | fire (k,x,z) | plan | logi | rec}. Params allowed in a command: k, k2, mk, roe, nd (short lowercase words), x, z, a, s, fx, fz, x2, z2, H, r, brk (numbers), n, id, p, inf, aa, ri, op, j, pi, sd, smk, home, lat (integers), ids (list), rt (flat list of 1-8 x,z pairs), why (text up to 120 chars). Anything else is rejected. Refusal codes (Portuguese text is returned with them): ctl you lack the seat, off, over, shape, kind, at, link, own, busy, max, sq, reach, nores, fire, amb, id, cool, tk, stock, res, rate, map, water, steep, road, obj, base, foe, cap, pop, node, full, mt, conv, lift, cut, era, hate, nociv, mil0, roe, rt, way, air, mv, fcap, esc, cost, mcap.',
     inputSchema: { type: 'object', properties: { d: { type: 'string', enum: ['eco', 'cmd'], description: 'which dispatcher (default eco)' }, command: { type: 'object', description: 'the command: {"c": "name", ...params}', properties: { c: { type: 'string', pattern: '^[a-z]{2,8}$' } }, required: ['c'] }, question: { type: 'object', description: 'a question instead of a command: {"q": kind, k?, x?, z?, a?}', properties: { q: { type: 'string', enum: ASKS } }, required: ['q'] } }, additionalProperties: false },
     run: async a => {
       if (!a || (a.command === undefined) === (a.question === undefined)) throw new Error('give exactly one of command or question');
       if (a.question !== undefined) { const e = rawAsk(a.question); if (e) throw new Error(e); return runAsk(a.question); }
       if (a.d !== undefined && a.d !== 'eco' && a.d !== 'cmd') throw new Error('d must be "eco" or "cmd"'); const e = rawCmd(a.command); if (e) throw new Error(e); return runCmd(a.command, a.d || 'eco');
+    } },
+  { name: 'order_units', description: 'An abstract order to squads: a verb and a target, and the squads decide how. verb attack: each squad forms up on its own axis around the objective (up to three axes) and assaults; defend: a ring of holds facing the enemy\'s base; recon: observe the place; ambush: at the nearest road site; fire: a fire mission by whatever mortars and batteries reach. Target: point (index from get_state map.points; attack and defend also snap x, z to a point within 400 m) or x, z. Who: ids (squads you name), else count squads the general picks (the nearest free ones with a way there; default attack 3, defend 2, recon 1). Optional route: waypoints the squads walk through first (attack, defend, recon only). Accepted with an operation id (cancel it with send_command stop, hand the squads back with free) or refused: way (no squad has a way there on foot, at most 9 km), sq, own, at, map, rt, mv (needs the road-network map).',
+    inputSchema: { type: 'object', properties: { verb: { type: 'string', enum: ['attack', 'defend', 'recon', 'ambush', 'fire'] }, point: { type: 'integer', description: 'point index from get_state map.points' }, ...xz, ids: IDS, count: { type: 'integer', minimum: 1, maximum: 6, description: 'squads the general picks when ids is omitted' }, route: ROUTE, why: WHYP }, required: ['verb'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { verb: ['w', true, ['attack', 'defend', 'recon', 'ambush', 'fire']], point: ['i', false, 0, 99], x: ['n', false], z: ['n', false], count: ['i', false, 1, 6], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give point or both x and z');
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      const k = { attack: 'atk', defend: 'def', recon: 'rec', ambush: 'amb', fire: 'fire' }[a.verb], c = Object.assign({ c: 'ord', k }, pick(a, ['point', 'x', 'z', 'ids', 'count', 'why'], { point: 'pi', count: 'n' }));
+      return runCmd(withRt(c, a), 'cmd');
+    } },
+  { name: 'request_support', description: 'Ask for support at a place; the general picks who answers. kind fire: an artillery fire mission by the mortars and batteries that reach it (rounds 1-8, default 3); smoke: a smoke screen; recon: the nearest free squad goes to observe (or the ids you name; optional route); cas: the side\'s attack aircraft in the air get the pilots\' mark and the air focus there (refused air when none is up); lift: the squads you name (or the nearest free one) head there at a run and a free truck carries them when the way is long (optional route). Accepted, or refused with the reason (fire: nothing reaches; way, sq, map, rt, air).',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['fire', 'smoke', 'recon', 'cas', 'lift'] }, ...xz, rounds: { type: 'integer', minimum: 1, maximum: 8 }, ids: IDS, count: { type: 'integer', minimum: 1, maximum: 6 }, route: ROUTE, why: WHYP }, required: ['kind', 'x', 'z'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { kind: ['w', true, ['fire', 'smoke', 'recon', 'cas', 'lift']], x: ['n', true], z: ['n', true], rounds: ['i', false, 1, 8], count: ['i', false, 1, 6], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      const c = Object.assign({ c: 'req', k: a.kind }, pick(a, ['x', 'z', 'ids', 'why'])); if (a.rounds !== undefined) c.n = a.rounds; else if (a.count !== undefined) c.n = a.count;
+      return runCmd(withRt(c, a), 'cmd');
+    } },
+  { name: 'build_defence', description: 'Order a field fortification at a place: trench, sandbag (a sandbag emplacement) or sup (a supply base). The general picks the builder (an engineer squad first, then the nearest free one) unless you name ids. Optional facing (radians; default toward the enemy base) and route (trench and sandbag only) the builders walk first. Accepted with an operation id or refused (way, sq, map, rt, fcap: the side already has its most field works, and for sup the supply-base reasons: steep, road, obj, base, foe, cap, reach).',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['trench', 'sandbag', 'sup'] }, ...xz, facing: { type: 'number', description: 'heading in radians' }, ids: IDS, route: ROUTE, why: WHYP }, required: ['kind', 'x', 'z'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { kind: ['w', true, ['trench', 'sandbag', 'sup']], x: ['n', true], z: ['n', true], facing: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(withRt(Object.assign({ c: 'fort', k: a.kind }, pick(a, ['x', 'z', 'facing', 'ids', 'why'], { facing: 'a' })), a), 'cmd');
     } },
   { name: 'ask_placement', description: 'Ask the host for the best places to build a kind of site (the economy AI\'s own placement scorer): up to 5 candidates {x, z, a, score, why}. Call this before build_site when unsure where to build. Limited to one question per second.',
     inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['pow', 'mine', 'fab'], description: 'site kind' } }, required: ['kind'], additionalProperties: false },
@@ -512,7 +550,7 @@ const TOOL = new Map(TOOLS.map(t => [t.name, t]));
 const listing = () => TOOLS.map(t => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, ...(t.annotations ? { annotations: t.annotations } : {}) }));
 
 /* ---------------------------------------------------------------- MCP over stdio */
-const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; send_command for assaults, holds, moves, fire missions), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
+const INSTRUCTIONS = 'You are the general of side ' + SIDE + ' in Ceu de Ferro 3D, an economy-and-combat game. Play in cycles: get_state with refresh_map true (the first time), a few orders (economy tools for sites and production; order_units, request_support and build_defence for abstract orders the squads carry out their own way, with optional routes; send_command for planned assaults and the rest), then wait (20-40 s of match time) and get_state again. Call ask_view once for the cost table and the deposits. You hold the seat and the economy automatically unless the seat is taken (check with seat). Every order is answered accepted or refused with a reason in Portuguese; get_log shows its effect. The state is fog-limited and ages: trust ageSeconds.';
 const out = o => process.stdout.write(JSON.stringify(o) + '\n');
 const ok = (id, result) => out({ jsonrpc: '2.0', id, result });
 const fail = (id, code, message, data) => out({ jsonrpc: '2.0', id, error: Object.assign({ code, message }, data !== undefined ? { data } : {}) });

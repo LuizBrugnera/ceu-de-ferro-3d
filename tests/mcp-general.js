@@ -41,7 +41,7 @@ function bridge(env) {
   const old = await b.rpc('tools/list', { _meta: { 'io.modelcontextprotocol/protocolVersion': '1900-01-01' } }); ok(old && old.error && old.error.code === -32022 && old.error.data.supported.length > 1, 'an unsupported per-request version: error -32022 with the supported list');
   const tl = await b.rpc('tools/list');
   const names = tl.result.tools.map(t => t.name);
-  ok(['get_state', 'get_log', 'build_site', 'produce_unit', 'cancel_order', 'set_priority', 'scrap_site', 'set_site_defence', 'set_reserve', 'scout', 'strike', 'send_command', 'ask_placement', 'seat', 'get_match_report'].every(x => names.includes(x)) && tl.result.tools.every(t => t.description && t.inputSchema && t.inputSchema.type === 'object'), 'tools/list: every tool with a description and an object schema');
+  ok(['get_state', 'get_log', 'build_site', 'produce_unit', 'cancel_order', 'set_priority', 'scrap_site', 'set_site_defence', 'set_reserve', 'scout', 'strike', 'send_command', 'ask_placement', 'seat', 'get_match_report', 'order_units', 'request_support', 'build_defence'].every(x => names.includes(x)) && tl.result.tools.every(t => t.description && t.inputSchema && t.inputSchema.type === 'object'), 'tools/list: every tool with a description and an object schema');
   ok((await b.rpc('nosuch')).error.code === -32601 && (await b.rpc('tools/call', { name: 'nosuch' })).error.code === -32602, 'unknown method and unknown tool are protocol errors');
 
   /* the seat is claimed on connect: the host and everyone see gctl */
@@ -89,6 +89,14 @@ function bridge(env) {
   const rf = await b.call('send_command', { command: { c: 'nope' } }); ok(rf.isError && rf.json.accepted === false && /unknown/.test(rf.json.result), 'a host refusal comes back as an error with its reason');
   const sc = await b.call('send_command', { d: 'cmd', command: { c: 'ops', k: 'atk', ri: 1 } }); ok(!sc.isError && seenCmd[seenCmd.length - 1].d === 'cmd' && seenCmd[seenCmd.length - 1].c.ri === 1, 'send_command passes a raw command with d cmd');
   const sa = await b.call('send_command', { d: 'cmd', command: { c: 'atk', pi: 2, ids: [3, 4], H: 60 } }); ok(!sa.isError && JSON.stringify(seenCmd[seenCmd.length - 1].c) === '{"c":"atk","pi":2,"ids":[3,4],"H":60}', 'send_command passes a tactical command with a list of squad ids');
+  const last = () => JSON.stringify(seenCmd[seenCmd.length - 1].c);
+  const ou = await b.call('order_units', { verb: 'attack', point: 3, count: 4, route: [{ x: 100, z: 200 }, { x: 300.5, z: -40 }], why: 'cidade' });
+  ok(!ou.isError && last() === '{"c":"ord","k":"atk","pi":3,"n":4,"why":"cidade","rt":[100,200,300.5,-40]}' && seenCmd[seenCmd.length - 1].d === 'cmd', 'order_units: an abstract order (ord) with the general\'s pick and a route flattened into rt');
+  const rs = await b.call('request_support', { kind: 'fire', x: 10, z: 20, rounds: 5 }), rl = await b.call('request_support', { kind: 'lift', x: 10, z: 20, ids: [7], route: [{ x: 5, z: 5 }] });
+  ok(!rs.isError && !rl.isError && JSON.stringify(seenCmd[seenCmd.length - 2].c) === '{"c":"req","k":"fire","x":10,"z":20,"n":5}' && last() === '{"c":"req","k":"lift","x":10,"z":20,"ids":[7],"rt":[5,5]}', 'request_support: req fire with its rounds, req lift with named squads and a route');
+  const bd = await b.call('build_defence', { kind: 'trench', x: 1, z: 2, facing: 1.5 }); ok(!bd.isError && last() === '{"c":"fort","k":"trench","x":1,"z":2,"a":1.5}', 'build_defence: fort, the builder left to the general');
+  const bads = [await b.call('order_units', { verb: 'charge', x: 1, z: 1 }), await b.call('order_units', { verb: 'attack' }), await b.call('order_units', { verb: 'defend', x: 1, z: 1, route: new Array(9).fill({ x: 1, z: 1 }) }), await b.call('request_support', { kind: 'nuke', x: 1, z: 1 }), await b.call('build_defence', { kind: 'trench', x: 1, z: 1, route: [{ x: 'a', z: 1 }] })];
+  ok(bads.every(r => r.isError), 'a bad verb, no target, nine route points, a bad kind or a bad route point are refused by the bridge itself');
   const t0 = Date.now(); const [r1, r2, r3] = await Promise.all([b.call('scout', { x: 1, z: 2 }), b.call('strike', { id: 5 }), b.call('cancel_order', { id: 4 })]);
   ok(!r1.isError && !r2.isError && !r3.isError && Date.now() - t0 >= 550, 'three commands at once all get through, spaced out (rate limit)');
   const ap = await b.call('ask_placement', { kind: 'pow' }); ok(!ap.isError && ap.json.data[0].x === 1 && seenAsk[0].q.q === 'spots' && seenAsk[0].q.k === 'pow' && seenAsk[0].s === 1, 'ask_placement: gask spots reaches the host, the answer returns');
@@ -115,7 +123,7 @@ function bridge(env) {
   const wk = await new Promise(res => { w.p.on('exit', res); w.p.stdin.end(); setTimeout(() => res(null), 3000); }); ok(wk === 0, 'closing stdin ends the bridge process');
 
   /* a relay that does not support gen: the welcome has no flag. Stood in for by a fake relay. */
-  const WebSocket = N.WebSocket, wss = new WebSocket.Server({ port: N.PORT + 1 });
+  const WebSocket = N.WebSocket, wss = new WebSocket.Server({ host: '127.0.0.1', port: N.PORT + 1 });
   wss.on('connection', ws => ws.on('message', () => ws.send(JSON.stringify({ t: 'welcome', id: 5, host: 0, players: [] }))));
   const o = bridge({ CEU_URL: 'ws://localhost:' + (N.PORT + 1) }); await o.rpc('initialize', { protocolVersion: '2025-11-25' });
   const og = await o.call('scout', { x: 1, z: 2 }); ok(og.isError && /not support/.test(og.text), 'a relay without the eco/gen welcome flag: a clear error');

@@ -9,7 +9,8 @@
    messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill)
    hlp (the units' calls for help: the messages hlp, hask and hacc)
    lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
-   and rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec).
+   rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
+   and rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas). */
 const http = require('http'), fs = require('fs'), os = require('os'), path = require('path'), zlib = require('zlib'), crypto = require('crypto');
 const { WebSocketServer } = require('ws');
@@ -107,7 +108,7 @@ const RX = {
       if (!GENKEY || m.key !== GENKEY) { send(c.ws, { t: 'error', code: 'gen' }); return c.ws.close(); }   // one guess a connection
       if ((m.side !== 0 && m.side !== 1) || [...room.gens].some(o => o.player.side === m.side)) return send(c.ws, { t: 'error', code: 'taken' });
       c.player = { id: nextId++, name: 'MCP', cls: 'gen', model: '', side: m.side, kills: 0, deaths: 0, ai: 0 }; c.gen = 1; c.room = room; room.gens.add(c);
-      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player) });
+      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1 });
     }
     if (m.cls === 'spec') {   // a spectator: no body, not in the roster, never host; it is sent everything and can send nothing
       const room = rooms[m.room];
@@ -134,7 +135,7 @@ const RX = {
     else if (mv !== room.mv && !(room.mv === 1 && m.mv1 === 1)) return send(c.ws, { t: 'error', code: 'map' });
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
@@ -485,15 +486,16 @@ RX.gclaim = (c, m) => {
 const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', inf: 'i', aa: 'i', ri: 'i', op: 'i', why: 's',
   ids: 'L', j: 'i', pi: 'i', sd: 'i', smk: 'i', home: 'i', s: 'n', fx: 'n', fz: 'n', x2: 'n', z2: 'n', H: 'n', r: 'n',
   mk: 'w', lat: 'i', roe: 'w', brk: 'n',   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
-  nd: 'w' };   // logistics (F2b): a supply node's key, b<base id> or p<point index> (conv, alift, sprio)
+  nd: 'w',   // logistics (F2b): a supply node's key, b<base id> or p<point index> (conv, alift, sprio)
+  rt: 'P' };   // abstract orders (W21): a route, flat x z pairs (welcome rte: 1)
 function gcmdOf(c) {
   if (!c || !rec(c) || typeof c.c !== 'string' || !/^[a-z]{2,8}$/.test(c.c) || c.c === 'draw') return null;
   const o = { c: c.c };
   for (const k of Object.keys(c)) {
     if (k === 'c') continue;
     const t = GK[k], v = c[k];
-    if (!Object.hasOwn(GK, k) || !(t === 'L' ? Array.isArray(v) && v.length <= 24 && v.every(e => Number.isInteger(e) && Math.abs(e) < 1e6) : t === 'w' ? typeof v === 'string' && /^[a-z0-9]{1,10}$/.test(v) : t === 'n' ? num(v) && Math.abs(v) < 1e5 : t === 'i' ? Number.isInteger(v) && Math.abs(v) < 1e6 : txt(v, 120))) return null;
-    o[k] = t === 'L' ? v.slice() : t === 's' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 80) : v;
+    if (!Object.hasOwn(GK, k) || !(t === 'P' ? Array.isArray(v) && v.length >= 2 && v.length <= 16 && v.length % 2 === 0 && v.every(e => num(e) && Math.abs(e) < 1e5) : t === 'L' ? Array.isArray(v) && v.length <= 24 && v.every(e => Number.isInteger(e) && Math.abs(e) < 1e6) : t === 'w' ? typeof v === 'string' && /^[a-z0-9]{1,10}$/.test(v) : t === 'n' ? num(v) && Math.abs(v) < 1e5 : t === 'i' ? Number.isInteger(v) && Math.abs(v) < 1e6 : txt(v, 120))) return null;
+    o[k] = t === 'L' || t === 'P' ? v.slice() : t === 's' ? v.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 80) : v;
   }
   return o;
 }

@@ -4409,8 +4409,9 @@ function spawnPlayer() {
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
-  const p = routeAt(S.T.routes[u.ri], u.s);
-  u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * u.lane; u.z = p.z + p.dx * u.lane; u.y = hgt(u.x, u.z);
+  const R = S.T.routes[u.ri], p = routeAt(R, u.s), lv = orgLane(u), ox = orgOut(u), L = lv + ox + orgWob(u, u.s);
+  u.h = Math.atan2(-p.dz * u.ds, p.dx * u.ds); u.x = p.x - p.dz * L; u.z = p.z + p.dx * L; u.y = hgt(u.x, u.z);
+  if (L !== u.lane && u.s + u.ds * 4 >= 0 && u.s + u.ds * 4 <= R.len) { const s2 = u.s + u.ds * 4, q = routeAt(R, s2), L2 = lv + ox + orgWob(u, s2); u.h = Math.atan2(-(q.z + q.dx * L2 - u.z), q.x - q.dz * L2 - u.x); }   // its nose along the line it weaves (ORG)
 }
 /* one ground vehicle whoever drives it: h hull heading, ty turret yaw from the hull, tp gun pitch, f the gun line.
    ctl is all a controller (AI, player input) may touch: aim is the direction the turret slews to, aim2 a free gun's own line,
@@ -4506,7 +4507,7 @@ function tripOf(x0, z0, x1, z1, o) {
     pts.push(...inner(E1, best.B === E1.a ? 0 : E1.len, n1.s));
   }
   pts.push({ x: n1.x, z: n1.z }, { x: x1, z: z1 });
-  const out = polyOf(pts);
+  const out = orgPoly(polyOf(pts));   // its corners rounded (ORG)
   if (E1.c === 0 && n1.d < RN.onAx) { out.ri = E1.ax[0]; out.s1 = E1.ax[1] + n1.s; }
   else if (E1.a2 && n1.d < RN.onAx) { out.ri = E1.a2[0]; out.s1 = E1.a2[1] + E1.a2[2] * n1.s; }   // a class 1 edge of the centre axis (map version 4)
   if (key) (pm || T.pc).set(key, out);
@@ -6207,8 +6208,8 @@ function moveUnit(u, dt) {
   const d = u.def, c = u.ctl, x0 = u.x, y0 = u.y, z0 = u.z, Q = u.mod;
   if (u.fixed) return;
   if (u.def.swim && swim(u, dt)) return;
-  if (u.rail && u.trip) { u.sp = c.drive * d.spd * Q.drive; tripMove(u, dt); }   // map version 4: on a trip it rides the trip's polyline, not its axis
-  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive; const s1 = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); if (S.brc && brStop(u, S.T.routes[u.ri], u.s, s1)) u.sp = 0; else u.s = s1; place(u); }   // a fallen bridge stops it at the bank (W20)
+  if (u.rail && u.trip) { u.sp = c.drive * d.spd * Q.drive * orgPace(u); tripMove(u, dt); }   // map version 4: on a trip it rides the trip's polyline, not its axis
+  else if (u.rail) { u.sp = c.drive * d.spd * Q.drive * orgPace(u); const s1 = clamp(u.s + u.ds * u.sp * GSPD * dt, 0, S.T.routes[u.ri].len); if (S.brc && brStop(u, S.T.routes[u.ri], u.s, s1)) u.sp = 0; else u.s = s1; place(u); }   // a fallen bridge stops it at the bank (W20)
   else {
     const dir = Math.sign(u.sp || c.drive) || 1, cx = Math.cos(u.h), cz = -Math.sin(u.h);
     const slope = (hgt(u.x + cx * 6 * dir, u.z + cz * 6 * dir) - u.y) / 6, want = c.brake ? 0 : c.drive * d.spd * Q.drive * (c.drive < 0 ? .5 : 1) * clamp(1 - slope * 2.2, .2, 1.15), acc = (c.brake ? 16 : 5) * dt;
@@ -6292,12 +6293,13 @@ function ghostUnit(u, dt) {
 const GOAL = { x: 0, z: 0 };
 const atLimit = u => u.fixed || (u.cnG && S.t < u.cnG.T) || (S.cq ? (u.s - cqNext(u.team, u.ri).rs[u.ri]) * u.ds >= (u.def.rad ? -RAD.ai.back : 0) : (u.s - S.T.routes[u.ri].len / 2) * u.ds >= DIR.push);
 function scan(u) {
-  const A = u.ai; A.fd = 1e9; A.blocked = S.t < A.rest;
+  const A = u.ai; A.fd = 1e9; A.blocked = S.t < A.rest; let held = null;
   for (const o of S.units) {
     if (o === u || o.dead) continue;
     if (o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
-    else if (u.rail && !u.trip && o.rail && !o.trip && o.ri === u.ri && o.lane === u.lane) { const d = (o.s - u.s) * u.ds; if (d > 0 && d < 22) A.blocked = true; }
+    else if (u.rail && !u.trip && o.rail && !o.trip && o.ri === u.ri && o.lane === u.lane) { const d = (o.s - u.s) * u.ds; if (d > 0 && d < 22) held = o; }
   }
+  if (held && !orgPass(u, held)) A.blocked = true;   // held up in its lane: it passes in the other one when that is free (ORG)
   for (const o of S.men) if (!o.dead && o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
 }
 /* ---------- vehicle trips (map version 4): a vehicle on its axis goes by the network to a place off it and rides the way as it rides a route ----------
@@ -6310,14 +6312,14 @@ function tripTo(u, x, z, o) {
   o = o || {}; const p = tripOf(u.x, u.z, x, z, { mode: 'veh', team: u.team }); if (!p) return null;
   return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: o.T !== undefined ? o.T : S.t + 2 * p.len / (u.def.spd * GSPD) + 30, drop: !!o.drop, back: o.back || null, gone: !!o.gone, why: o.why || '' });
 }
-function placeOn(u, p, s) {
-  const q = routeAt(p, s); u.h = Math.atan2(-q.dz, q.dx); u.x = q.x; u.z = q.z; u.y = hgt(u.x, u.z);
+function placeOn(u, p, s, l) {
+  const q = routeAt(p, s); l = l || 0; u.h = Math.atan2(-q.dz, q.dx); u.x = q.x - q.dz * l; u.z = q.z + q.dx * l; u.y = hgt(u.x, u.z);   // l: m to its side of the way (ORG)
 }
 /* T.ev (a manoeuvre squad's ride, MAN.ride): places along the way where the trip does something (k pick: the squad boards; drop: it gets out), in order; the vehicle stops there for a step */
 function tripMove(u, dt) {
   const T = u.trip, E = T.ev && T.ev[0], s1 = Math.min(E ? E.s : T.p.len, T.s + Math.max(0, u.sp) * GSPD * dt);
   if (S.brc && brStop(u, T.p, T.s, s1)) u.sp = 0; else T.s = s1;   // a fallen bridge on the way: it waits at the bank for brStep to find another (W20)
-  placeOn(u, T.p, T.s);
+  placeOn(u, T.p, T.s, orgTrip(u, T, dt));
   if (E && T.s >= E.s - 1e-6) { T.ev.shift(); u.sp = 0; rideEv(u, E); if (u.trip !== T) return; }
   if (T.s >= T.p.len - 1e-6) tripEnd(u);
 }
@@ -7001,12 +7003,111 @@ function addSquad(team, x, z, ri, s, kits) {
   });
   q.n0 = q.live = q.men.length; S.squads.push(q); return q;
 }
+/* ---------- organic movement (ORG, cf-movimento-organico): squads in formations by the situation, vehicles off the one exact line, rounded ways ----------
+   Everything here is deterministic from hash2 (no Math.random), so two runs of the same match place men and hulls the same; it runs where the AI does (the host).
+   Squads (orgSlot, the moving part of slot): file, a staggered column on both shoulders, each man side[0..1] m out (his own, by hash), gap m
+   apart; wedge, when an enemy is within threat m, on a way of its own across country (a hidden or commander's way) or on an order that goes
+   carefully: wedge[0] m back and wedge[1] m out a rank; line, abreast line m apart, on an assault within close m. On top: each man's own
+   offset jit [lateral, along] m, a smooth noise over wl m of the way; breathe [m, rad/s], the accordion of his own pace; drift [m, wl], the whole
+   squad's own line beside the way (half of it in file), so squads on one road do not walk on one line. A place in the water (under wet m above
+   it: a bridge, a ford, a bank) closes in to bridge m of the way: the squad crosses in single file.
+   Vehicles: veh.wob m of weave of its lane over wl m of road (half again for tracks), the lane eased at lane m/s (a lane change is a glide);
+   its pace varies by pace over pw s; a hull held up in its lane by a slower one passes in the other lane when that is free for pass m (again after
+   passT s); a tracked hull, and a wheeled one with an enemy within thr m, drives open m (wheel m) further out off the road where the ground
+   there and look m ahead is dry, within step m of the road's height and clear of things for clear m, eased at ease m/s (checked every `every`
+   s); on a trip a hull keeps trip m to its side of the way. poly: the corners of a way sharper than ang rad are rounded over up to cut m a side,
+   not where the rounded corner would be in the water. on: 0 turns it all off (the old formation and lines) */
+const ORG = { on: 1, gap: 7, side: [3.5, 7], wedge: [7, 8], line: 8, threat: 900, close: 350, jit: [2.2, 2.5], wl: 45, breathe: [1.6, .07], drift: [5, 140], wet: .6, bridge: 1.2,
+  veh: { wob: 1.6, wl: 70, lane: 1.5, pace: .08, pw: 45, pass: 30, passT: 10, thr: 1500, open: 9, wheel: 5, look: 25, step: 2.5, clear: 5, ease: 1.5, every: 2, trip: 2.5 },
+  poly: { ang: .35, cut: 14 } };
+const orgH = (a, b, c) => hash2(a, b, c) * 2 - 1;
+/* a smooth noise -1..1 along t, a new value every wl, k and sd its stream */
+function orgN(k, t, sd, wl) { const v = t / wl, i = Math.floor(v), f = v - i, w = f * f * (3 - 2 * f); return orgH(i, k, sd) * (1 - w) + orgH(i + 1, k, sd) * w; }
+/* the formation a moving squad takes now */
+function orgForm(q, O) {
+  if (O && O.k === 'assault' && q.fd < ORG.close) return 'line';
+  if (q.fd < ORG.threat || (q.tp && (!O || q.tp !== O.trp)) || (O && (O.quiet || O.k === 'flank' || O.k === 'scout' || O.k === 'bait' || O.k === 'ambush'))) return 'wedge';
+  return 'file';
+}
+/* man i's place in his squad's formation on the move, along its trip (q.tp) or its road */
+function orgSlot(q, i) {
+  const G = ORG, O = q.ord, n = Math.max(q.n0, 1), sd = q.team * 37 + (q.id || 0), F = orgForm(q, O), s0 = q.tp ? q.ts : q.s, sg = q.tp ? 1 : q.ds;
+  let b, l;
+  if (F === 'line') { b = 0; l = (i - (n - 1) / 2) * G.line; }
+  else if (F === 'wedge') { const k = (i + 1) >> 1; b = G.wedge[0] * k; l = (i ? (i % 2 ? 1 : -1) : 0) * G.wedge[1] * k; }
+  else { b = G.gap * i; l = (i % 2 ? 1 : -1) * (G.side[0] + (G.side[1] - G.side[0]) * hash2(sd, i, 3)); }
+  b += orgN(i * 7 + 1, s0, sd, G.wl) * G.jit[1] + Math.sin(S.t * G.breathe[1] + i * 1.7 + sd) * G.breathe[0];
+  l += orgN(i * 7 + 2, s0, sd, G.wl) * G.jit[0] + orgN(97, s0, sd, G.drift[1]) * G.drift[0] * (F === 'file' ? .5 : 1);
+  const p = q.tp ? routeAt(q.tp, s0 - b) : routeAt(S.T.routes[q.ri], s0 - q.ds * b), fx = p.dx * sg, fz = p.dz * sg;
+  let x = p.x - fz * l, z = p.z + fx * l;
+  if (hgt(x, z) < S.T.WL + G.wet) { const c = clamp(l, -G.bridge, G.bridge); x = p.x - fz * c; z = p.z + fx * c; }   // a bridge or a ford: in single file on the way
+  return { x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW) };
+}
+/* a vehicle's own seed (by the order the host made them), whether it runs on tracks, and its pace now */
+const orgSd = u => u.osd || (u.osd = (S.orgN = (S.orgN || 0) + 1) * 13 + u.team);
+const orgTrk = u => u.kind === 'tank' || u.kind === 'art';
+const orgPace = u => (ORG.on && u.ai ? 1 + ORG.veh.pace * orgN(5, S.t, orgSd(u), ORG.veh.pw) : 1);
+/* the lane a rail hull is seen in: its lane, eased (a change of lane is a glide, not a jump); a hull back on its rail after a while takes it at once */
+function orgLane(u) {
+  if (!ORG.on || !u.ai) return u.lane;
+  const dt = S.t - (u.lvT === undefined ? -1e9 : u.lvT); u.lvT = S.t;
+  if (u.lv === undefined || dt > 2) u.lv = u.lane; else u.lv += clamp(u.lane - u.lv, -ORG.veh.lane * dt, ORG.veh.lane * dt);
+  return u.lv;
+}
+/* the weave of a rail hull's lane at s */
+const orgWob = (u, s) => (ORG.on && u.ai && !u.fixed ? orgN(3, s, orgSd(u), ORG.veh.wl) * ORG.veh.wob * (orgTrk(u) ? 1.5 : 1) : 0);
+/* how far further out a rail hull wants to be: open ground beside the road for a tracked one, or a wheeled one under threat */
+function orgWant(u) {
+  const V = ORG.veh, thr = u.ai.fd < V.thr, trk = orgTrk(u);
+  if (!trk && !thr) return 0;
+  const out = (Math.sign(u.lane) || 1) * (trk ? V.open : V.wheel) * (thr ? 1.3 : 1), R = S.T.routes[u.ri];
+  for (const a of [0, V.look]) {   // here and ahead: dry, level with the road and clear
+    const p = routeAt(R, u.s + u.ds * a), L = u.lane + out, x = p.x - p.dz * L, z = p.z + p.dx * L, y = hgt(x, z);
+    if (y < S.T.WL + 1 || Math.abs(y - hgt(p.x, p.z)) > V.step || near(x, z, V.clear).some(o => S.os[o.id] < 2 && !o.K.veil)) return 0;
+  }
+  return out;
+}
+function orgOut(u) {
+  if (!ORG.on || !u.ai || u.fixed) return 0;
+  const V = ORG.veh, gap = S.t - (u.oT === undefined ? -1e9 : u.oT), dt = clamp(gap, 0, 1); u.oT = S.t;
+  if (gap > 2) u.ox = 0;
+  if (S.t >= (u.oN || 0)) { u.oN = S.t + V.every; u.oW = orgWant(u); }
+  const o = u.ox || 0; u.ox = o + clamp((u.oW || 0) - o, -V.ease * dt, V.ease * dt); return u.ox;
+}
+/* a rail hull held up in its lane by o, which is moving (a halted one is a queue, not a slow one) and no enemy near: it takes the other lane when that is free, true then */
+function orgPass(u, h) {
+  const V = ORG.veh, A = u.ai;
+  if (!ORG.on || !u.lane || S.t < (A.pT || 0) || Math.abs(h.sp) < .5 || A.fd < V.thr) return false;
+  for (const o of S.units) if (o !== u && !o.dead && o.rail && !o.trip && o.ri === u.ri && o.lane === -u.lane && Math.abs(o.s - u.s) < V.pass) return false;
+  u.lane = -u.lane; A.pT = S.t + V.passT; return true;
+}
+/* a hull on a trip: the side of the way it keeps, eased from the middle where the trip starts; none where that side is water (a bridge) */
+function orgTrip(u, T, dt) {
+  if (!ORG.on || !u.ai) return 0;
+  const p = routeAt(T.p, T.s), w = (Math.sign(u.lane) || 1) * ORG.veh.trip + orgN(3, T.s, orgSd(u), ORG.veh.wl) * ORG.veh.wob * .6, x = p.x - p.dz * w, z = p.z + p.dx * w, t = hgt(x, z) < S.T.WL + .3 ? 0 : w;
+  T.l = (T.l || 0) + clamp(t - (T.l || 0), -ORG.veh.lane * dt, ORG.veh.lane * dt); return T.l;
+}
+/* a way with its sharp corners rounded (in place, once: the same array stays the way everyone holds); the corner stays where the rounding would be in the water */
+function orgPoly(p) {
+  if (!ORG.on || !p || p.org || p.length < 3) return p;
+  const P = ORG.poly, out = [p[0]];
+  for (let i = 1; i < p.length - 1; i++) {
+    const a = p[i - 1], v = p[i], b = p[i + 1], ax = v.x - a.x, az = v.z - a.z, bx = b.x - v.x, bz = b.z - v.z, la = Math.hypot(ax, az), lb = Math.hypot(bx, bz);
+    if (la < 1e-6 || lb < 1e-6 || Math.acos(clamp((ax * bx + az * bz) / (la * lb), -1, 1)) < P.ang) { out.push(v); continue; }
+    const c = Math.min(P.cut, la * .3, lb * .3), A = { x: v.x - ax / la * c, z: v.z - az / la * c }, B = { x: v.x + bx / lb * c, z: v.z + bz / lb * c }, M = { x: .25 * A.x + .5 * v.x + .25 * B.x, z: .25 * A.z + .5 * v.z + .25 * B.z };
+    if (hgt(M.x, M.z) < S.T.WL + .5) { out.push(v); continue; }
+    for (const t of [0, .25, .5, .75, 1]) { const u = 1 - t; out.push({ x: u * u * A.x + 2 * t * u * v.x + t * t * B.x, z: u * u * A.z + 2 * t * u * v.z + t * t * B.z }); }   // the quadratic curve from A to B about the corner
+  }
+  out.push(p[p.length - 1]);
+  const q = polyOf(out); p.length = 0; for (const o of q) p.push(o); p.len = q.len; p.org = 1; return p;
+}
 /* a man's place: at the squad's post once it is there (q.at), else in the loose formation around its anchor on the road; at a halt its
    perimeter was formed for (q.drPer: the end of a walk, its order, or the meeting place for its ride), his place in the ring */
 const slot = (q, i) => {
   const O = q.ord, X = q.bg && !q.state ? q.bg[i] : null; if (X) return X;
   const P = q.drPer; if (P && !q.state && P.p[i] && (P.h === O ? q.at : P.h === q.rd && q.halt && q.rd.st !== 'ride')) return P.p[i];
   if (q.at && !q.state && O && O.x !== undefined) { const P = q.pts || (q.pts = ptPts(q, O) || postPts(q.team, O.x, O.z, Math.max(q.n0, 1), O.R, O.k)); return P[i % P.length]; }
+  if (ORG.on) return orgSlot(q, i);   // on the move: the formation of the situation (ORG)
   const p = q.tp ? routeAt(q.tp, q.ts - IAI.form[1] * (i >> 1)) : routeAt(S.T.routes[q.ri], q.s - q.ds * IAI.form[1] * (i >> 1)), off = (i % 2 ? 1 : -1) * (IAI.form[2] + IAI.form[0] * (i >> 1)); return { x: p.x - p.dz * off, z: p.z + p.dx * off };   // on a trip (q.tp) the formation is along it
 };
 /* the places of a post: the corners of the standing houses nearest it that look toward the enemy's base, two men a house, or a ring R m wide */
@@ -7062,7 +7163,7 @@ ORD.move = (q, O) => O.s;   // map version 4: a walk to a place (O.wp the way, O
    along: q.ts, the way is kept in O.trp); an order that brings its own way (O.wp: a path of the commander's) walks that, on any axis */
 function setOrd(q, O) {
   const R = S.T.routes, r = R[q.ri], e = Math.min(q.s, r.len - q.s), net = S.T.mv >= 4;
-  let tp = net && O.wp ? O.wp : null;
+  let tp = net && O.wp ? orgPoly(O.wp) : null;   // the commander's way, its corners rounded once (ORG)
   if (O.ri !== undefined && O.ri !== q.ri) {
     const sw = net && !tp ? swNear(q.ri, q.s, O.ri) : null;
     if (sw) { q.ri = O.ri; q.s = sw.sj; }
@@ -23771,7 +23872,7 @@ function hideStep() {
     if (O.hx === undefined) { const p = O.x !== undefined ? O : routeAt(S.T.routes[O.ri !== undefined ? O.ri : q.ri], clamp(O.s || 0, 0, S.T.routes[O.ri !== undefined ? O.ri : q.ri].len)); O.hx = p.x; O.hz = p.z; }
     const why = hideWhy(q, O, L), X = HIDES();
     if (why) { q.hw = { O, T: S.t + HIDE.again }; X.road[why] = (X.road[why] || 0) + 1; continue; }
-    const way = tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK);
+    const way = orgPoly(tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK));   // the grid's steps rounded (ORG)
     if (!way) { q.hw = { O, T: S.t + HIDE.retry }; X.none++; continue; }   // no budget this tick, or no way
     if (way.len > HIDE.stretch * Math.hypot(O.hx - L.x, O.hz - L.z) + 300) { q.hw = { O, T: S.t + HIDE.again }; X.long++; continue; }
     q.hw = { O, way }; q.tp = way; q.ts = 0; q.at = false; X.go++;

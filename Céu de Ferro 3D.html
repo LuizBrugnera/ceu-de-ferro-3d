@@ -3401,7 +3401,7 @@ const LADDER = { rec: .6, id: .35, pw: 3, rate: 1, cap: 4, opt: { snp: 1, atg: 1
    squad's base of fire. A special has a kind k, n rounds, rl s between two and a range rng the AI trusts it to:
    heat, an unguided shaped-charge rocket that hits the plate it strikes by its facing, like a shell, and bursts over r m (pen: the plate its charge
    defeats, in ARMOR.mm's units: a modern tank's side, rear and roof, not its front; without it, its damage decides);
-   atgm, guided: a lock inside cone rad held for lockT s and a line clear of smoke, not nearer than min m, coming down on the roof;
+   atgm, guided: a lock inside cone rad held for lockT s and the seeker's line (seekLine: no ground, wall, crown or smoke on it), not nearer than min m, coming down on the roof;
    sam, a shoulder-fired heat seeker for aircraft, decoyed by flares like any missile */
 const SARMS = {
   k98: { name: 'Kar 98k', rate: 1.5, dmg: 13, spd: 760, mag: 5, mags: 12, sp: .0035, rl: 2.6 },
@@ -4303,7 +4303,7 @@ function spawnPlayer() {
   S.mouse = S.pref || S.cls !== 'plane';
   if (S.cls === 'heli') S.mouse = S.pref;
   S.aim = S.mouse ? { h, p: 0, d: { x: Math.cos(h), y: 0, z: -Math.sin(h) } } : null;
-  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
+  S.gv = S.sol = S.gf = S.lead = S.lockAir = S.lockGnd = S.threat = S.noLos = null; S.lockOk = false; S.mpp = S.aimR = S.rearm = 0; S.shellT = -9; S.falls = []; S.hold = false; S.input.mx = S.input.my = 0; S.bm = null;
   p.me = 1; p.inv = 4; S.my = p; fx.enter(p); return p;
 }
 function place(u) {
@@ -5226,17 +5226,21 @@ function fireGun(p) {
   S.bullets.push({ x: p.x + f.x * L, y: p.y + f.y * L, z: p.z + f.z * L, vx: p.v.x + dx * g.spd, vy: p.v.y + dy * g.spd, vz: p.v.z + dz * g.spd, life: g.life || 1.5, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: p.def.prop ? 0 : 1, fr: g.fr });
   fx.shot(p === S.my, p);
 }
-/* see: the lock needs a line clear of smoke */
+/* see: the lock needs the seeker's line (seekLine, smoke included); see 2: a radar's, the ground and what hides only. LOCK.blk: see above */
 function lockOn(p, list, range, cone, see) {
+  LOCK.blk = null;
   if (p.mod && !p.mod.lock) return null;
-  let best = null, bo = cone;
+  let best = null, bo = cone, bb = null, bbo = cone;
   for (const q of list) {
     if (q.dead || q.team === p.team) continue;
     const dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z, d = Math.hypot(dx, dy, dz);
-    if (d > range || d < 1 || (see && hid(p, q))) continue;
+    if (d > range || d < 1) continue;
     const off = Math.acos(clamp((dx * p.f.x + dy * p.f.y + dz * p.f.z) / d, -1, 1));
-    if (off < bo) { bo = off; best = q; }
+    if (off >= bo) continue;
+    if (see && (see === 2 ? !los(p, eyeY(p), q, bodyY(q)) : hid(p, q) || !seekLine(p, eyeY(p), q, bodyY(q)))) { if (off < bbo) { bbo = off; bb = q; } continue; }
+    bo = off; best = q;
   }
+  LOCK.blk = best ? null : bb;
   return best;
 }
 function useOrd(p, i) {
@@ -5492,7 +5496,7 @@ const LO = {
   },
   /* what B and V can lock: the first of the two of that kind with rounds left */
   seek(P, k) {
-    const l = P.def.ord;
+    const l = P.def.ord; LOCK.blk = null;
     for (let i = 0; i < 2; i++) if (l[i] && (l[i].k === k || (l[i].gd && k === 'agm')) && P.ord[i] > 0) { if (k === 'agm') S.lockW = l[i]; else S.lockA = l[i]; return k === 'aam' ? MSL.pick(P, l[i]) : lockOn(P, S.units, 6500, .8, true); }
     return null;
   },
@@ -5732,7 +5736,7 @@ function aiRun(p, t, dt) {
   if (o.k === 'agm') {   // stand-off: a missile or two from the far side of the target's guns, then away
     if (hd < C.fire[1]) { p.egress = C.egress; return lvl; }
     if (hd > C.fire[0]) return lvl;
-    if (on > .97 && p.ocool[wi] <= 0 && !t.lost && idd(p, p.tgt) && los(p, p.y, t, t.y + 2.5) && !ffHeld(p, p.tgt, o.r, p.ffA || (p.ffA = {})) && release(p, wi)) { p.ocool[wi] = C.gap; if (t.sup) S.missiles[S.missiles.length - 1].target = t; }
+    if (on > .97 && p.ocool[wi] <= 0 && !t.lost && idd(p, p.tgt) && MSL.line(p, t, MSL.SK[MSL.def(o, { gnd: 1 }).sk]) && !ffHeld(p, p.tgt, o.r, p.ffA || (p.ffA = {})) && release(p, wi)) { p.ocool[wi] = C.gap; if (t.sup) S.missiles[S.missiles.length - 1].target = t; }
     return aim;
   }
   const far = p.V * ASPD * C.lead;   // rockets: a shallow dive, half the load in a ripple with the guns, and off before the target
@@ -5908,6 +5912,18 @@ function los(a, ay, b, by) {
 const ZERO = { x: 0, y: 0, z: 0 }, eyeY = o => o.y + (o.man ? STANCE[o.st].eye * MAN.sc : o.kind ? o.def.mh : 0), bodyY = o => o.y + (o.man ? o.fy || STANCE[o.st].h * MAN.sc * .6 : o.sup ? 1.6 : o.kind ? 2.5 : 0);
 const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);
 const sees = (a, t) => los(a, eyeY(a), t, bodyY(t)) && !hid(a, t);
+/* the seeker's line: what a guided weapon's sight, seeker or laser needs to its target, for the player and the AI alike, at the lock, at the
+   launch and in flight. The one sight rule (los: the ground and whatever hides, every kind with OBJ sight) and anything else solid on the line,
+   a tree by its crown (ray mode 2, as for an aircraft): what would stop the missile stops its look. smk: smoke cuts it too (an optical or heat
+   seeker; a radar sees through smoke and foliage, and keeps to los). A target that is itself a world object (a supply base) is not in its own way */
+function seekLine(a, ay, t, ty, smk) {
+  if (!los(a, ay, t, ty) || (smk && smoked(a.x, ay, a.z, t.x, ty, t.z))) return false;
+  const o = ray(a.x, ay, a.z, t.x, ty, t.z, 2);
+  return !o || o === t || o === t.o;
+}
+/* LOCK.blk: what the last lock (lockOn, MSL.pick) found nearest its line but could not take for the seeker's line alone, when it took nothing:
+   the player's HUD says SEM LINHA DE VISADA over it */
+const LOCK = { blk: null };
 const known = (M, a, t) => (!hid(a, t) && grade(a, t) >= 2) || (!!M.mem && M.mem.of === t && S.t - M.mem.t < SIGHT.mem);
 function sight(M, a, t) {
   let m = M.mem;
@@ -6491,7 +6507,7 @@ function aiAA(u, dt) {
     const s = lead(u, t, a1.d.spd, true), closing = (u.x - t.x) * t.v.x + (u.y - t.y) * t.v.y + (u.z - t.z) * t.v.z;
     c.aim = s.d; c.sp[1] = G.sp + blind + aimErr(u, A.tgt, rng); c.lock = blind ? null : t;
     c.fire[1] = A.los && rng < G.ciws && onAim(u, s.d, G.tol);
-    c.fire[0] = A.los && !blind && S.t > A.wait && rng > G.sam[0] && rng < G.sam[1] && (closing > 0 || rng < G.aspect) && idd(u, t) && MSL.aaShot(u, a0.d, t);
+    c.fire[0] = A.los && !blind && S.t > A.wait && rng > G.sam[0] && rng < G.sam[1] && (closing > 0 || rng < G.aspect) && idd(u, t) && MSL.line(u, t, MSL.SK[MSL.def(a0.d, { sam: 1 }).sk]) && MSL.aaShot(u, a0.d, t);
   } else if (rng < G.auto) {   // tracer bursts with lead
     const s = lead(u, t, a0.d.spd, true);
     c.aim = s.d; c.sp[0] = G.sp + blind + aimErr(u, A.tgt, rng);
@@ -6735,6 +6751,7 @@ const MSHOT = {
 /* the target a guided special has: the nearest its line inside the cone, in range and in clear sight; ready once held for lockT s */
 function manLock(m, a) {
   const w = a.d, e = manEye(m), v = { x: e.x, y: e.y, z: e.z, team: m.team, f: m.f }, t = w.k === 'sam' ? MSL.pick(v, w, true) : lockOn(v, S.units, w.rng, w.cone, true);
+  a.blk = t ? null : LOCK.blk;
   if (t !== a.lock) { a.lock = t; a.lockT = S.t + w.lockT; }
   return t && S.t >= a.lockT && !(dist(t, m) < w.min) ? t : null;
 }
@@ -7541,7 +7558,7 @@ function walk(P, I, dt) {
   build(P, I, hit('build'), hit('fire'));
   const g = P.arms[P.w]; S.lead = S.sol = S.gf = null; S.aimR = 0;
   if (P.def.mort) mortHands(P, hit);
-  S.lockAir = g.d.k === 'sam' ? g.lock : null; S.lockGnd = g.d.k === 'atgm' ? g.lock : null; S.lockOk = !!g.lock && S.t >= g.lockT;
+  S.lockAir = g.d.k === 'sam' ? g.lock : null; S.lockGnd = g.d.k === 'atgm' ? g.lock : null; S.lockOk = !!g.lock && S.t >= g.lockT; S.noLos = g.d.lockT && !g.lock ? g.blk || null : null;
   /* ammunition, grenades and a dressing beside a friendly truck, or solo at the base */
   const full = P.hp >= P.max && !P.wl && !P.wa && P.nades >= MAN.nade.n && P.smk >= MAN.smk.n && P.arms.every(m => m.res >= (m.d.k ? m.d.n - 1 : m.d.mags)), dep = (S.dep = depot(P));
   if ((!full && (dep || S.units.some(u => !u.dead && (u.kind === 'truck' || u.dep === 1) && u.team === P.team && hdist(u, P) < MAN.reach))) || (dep && (P.kit < BLD.kit || P.chg < BLD.charge.n))) {   // the kit and the charge only at a base
@@ -7827,7 +7844,7 @@ const MSL = {
     const ab = c.ab && e[2], rear = (1 - (dx * c.f.x + dy * c.f.y + dz * c.f.z) / R) / 2, s = (ab ? e[2] : e[0] + (e[1] - e[0]) * Math.min(1, thr / H.thr)) * Math.max(K.front + (1 - K.front) * rear, ab ? H.plume : 0);
     const low = dy > R * .15 && c.y - hgt(c.x, c.z) < 400 ? 1 - K.gnd : 1;
     if (R > K.rng * Math.min(H.far, Math.sqrt(s * low)) || -(dx * MSL.SUN.x + dy * MSL.SUN.y + dz * MSL.SUN.z) / R > Math.cos(K.sun)) return 0;
-    return chk && !los(m, m.y, c, c.y) ? 0 : s;
+    return chk && !seekLine(m, m.y, c, c.y, true) ? 0 : s;
   },
   off: (m, o, f) => { const dx = o.x - m.x, dy = o.y - m.y, dz = o.z - m.z; return (dx * f.x + dy * f.y + dz * f.z) / (Math.hypot(dx, dy, dz) || 1); },
   /* what a radar at `from` has of c: 0 clear, 1 behind the ground, 2 in the notch */
@@ -7840,23 +7857,30 @@ const MSL = {
   holds: (by, c) => !by.dead && !by.gone && (by.kind ? (!by.mod || !!by.mod.lock) && by.ctl.lock === c : !by.q || (MSL.off(by, c, by.f) > Math.cos(MSL.RAD.gim) && dist(by, c) < MSL.RAD.rng * 1.5)),
   /* the aircraft a store can be launched at: nearest the nose, where its seeker or the plane's radar has it */
   pick(p, o, see) {
-    const K = MSL.SK[MSL.def(o).sk], ir = K.k === 'ir', R = MSL.RAD; let best = null, bo = Math.cos(ir ? K.hob : R.cone);
+    const K = MSL.SK[MSL.def(o).sk], ir = K.k === 'ir', R = MSL.RAD; let best = null, bo = Math.cos(ir ? K.hob : R.cone), bb = null, bbo = bo;
+    LOCK.blk = null;
     if (p.mod && p.mod.lock === 0 && !ir) return null;
     for (const q of S.planes) {
       if (q.dead || q.team === p.team) continue;
       const c = MSL.off(p, q, p.f);
-      if (c < bo || (see && hid(p, q)) || (ir ? !MSL.heat(p, q, K, true) : dist(p, q) > R.rng || MSL.radar(p, q, MSL.SK.ar, true))) continue;
+      if (c < bo || (ir ? !MSL.heat(p, q, K) : dist(p, q) > R.rng || MSL.radar(p, q, MSL.SK.ar) === 2)) continue;   // off its nose, out of its reach, in the notch
+      if ((see && hid(p, q)) || (ir ? !MSL.heat(p, q, K, true) : MSL.radar(p, q, MSL.SK.ar, true))) { if (c > bbo) { bbo = c; bb = q; } continue; }   // behind the ground, a wall, a crown or smoke
       bo = c; best = q;
     }
+    LOCK.blk = best ? null : bb;
     return best;
   },
+  /* the launcher has the seeker's line to t: the one every launch is held to (first) and every AI checks before it lets go */
+  line: (by, t, K) => K.k === 'ar' || K.k === 'rc' ? los(by, eyeY(by), t, bodyY(t)) : seekLine(by, eyeY(by), t, bodyY(t), K.k !== 'img'),
   /* m is what its launch site has put together (place, target, o, team, by); it leaves along dir at the launcher's speed */
   arm(m, dir, by, v0) {
     const D = MSL.def(m.o, m), w = by ? vel(by) : ZERO;
     return Object.assign(m, { D, K: MSL.SK[D.sk], d: { x: dir.x, y: dir.y, z: dir.z }, v: v0 || Math.max(D.v0 || 0, Math.hypot(w.x || 0, w.y || 0, w.z || 0) + (D.v0 ? 0 : 20)), life: D.life, age: 0, s: 0, lk: 0, lt: 0, n: 0, lost: 0, fx: MSL.fix, ap: null, av: ZERO, rj: new Map(), cq: Math.random(), gq: Math.random(), gt: 0, g0: 0, l0: null, om: ZERO, vc: 0 });
   },
   first(m) {
-    const t = m.tg0 = m.target || null;
+    let t = m.target || null;
+    if (t && !t.flare && t.kind !== 'pt' && m.K.k !== 'gps' && m.by && !m.by.net && !MSL.line(m.by, t, m.K)) t = m.target = null;   // no line at the launch: it leaves unguided, whoever let it go
+    m.tg0 = t;
     m.los = t ? vnorm({ x: t.x - m.x, y: t.y - m.y, z: t.z - m.z }) : m.d; m.has = !!t;
     if (t) { m.ap = { x: t.x, y: t.kind ? t.y + 2 : t.y, z: t.z }; m.av = m.K.k === 'gps' || t.kind ? ZERO : vel(t); }
   },
@@ -7927,20 +7951,20 @@ const MSL = {
     las(m, K) {
       const c = m.tg0, by = m.by; if (!c) return;
       const y = bodyY(c), ok = !by.dead && !by.gone && (K.pod ? -MSL.off(by, c, by.u) > Math.cos(K.pod) : MSL.off(by, c, by.f) > Math.cos(K.cone)) && !smoked(by.x, eyeY(by), by.z, c.x, y, c.z) && !smoked(m.x, m.y, m.z, c.x, y, c.z);
-      if (ok && !(m.n++ & 3)) m.msk = !los(by, eyeY(by), c, y);
+      if (ok && !(m.n++ & 3)) m.msk = !seekLine(by, eyeY(by), c, y);
       MSL.keep(m, K, ok && !m.msk, c, 0);
     },
     clos(m, K) {
       const c = m.tg0, by = m.by; if (!c) { m.ap = null; return; }
       const y = bodyY(c), ok = !by.dead && !by.gone && MSL.off(by, c, by.f) > Math.cos(K.cone) && !smoked(by.x, eyeY(by), by.z, c.x, y, c.z) && !(by.man ? by.sup > S.t : S.t - by.hitT < K.sup);
-      if (ok && !(m.n++ & 3)) m.msk = !los(by, eyeY(by), c, y);
+      if (ok && !(m.n++ & 3)) m.msk = !seekLine(by, eyeY(by), c, y);
       MSL.keep(m, K, ok && !m.msk, c, 0);
     },
     img(m, K) {
       const c = m.tg0; if (!c) return;
       const dark = hid(m, c);
       if (!dark) m.sq = undefined; else if (m.sq === undefined) m.sq = Math.random() < K.smk;
-      if (!(m.n++ & 3)) m.msk = !los(m, m.y, c, bodyY(c));
+      if (!(m.n++ & 3)) m.msk = !seekLine(m, m.y, c, bodyY(c));
       MSL.keep(m, K, !(dark && m.sq) && !m.msk, c, 0);
     },
     gps() {}
@@ -8218,7 +8242,7 @@ function fly(P, I, dt) {
   if ((I.flare || autoFlare(P)) && dropFlare(P) && S.net) Net.flare(P);
   if (I.smoke && !P.nxK) LO.next(P);
   P.nxK = !!I.smoke;
-  S.lockAir = LO.seek(P, 'aam'); S.lockGnd = LO.seek(P, 'agm');
+  S.lockAir = LO.seek(P, 'aam'); const na = LOCK.blk; S.lockGnd = LO.seek(P, 'agm'); S.noLos = LOCK.blk || na;
 }
 /* where the ground player looks from: behind and above the turret along the aim, or from a seat (S.gv), given as t metres ahead, above
    and right of the turret pivot and turning with the turret. hatch: measured from the tank's own roof hatch */
@@ -8260,7 +8284,7 @@ function drive(P, I, dt) {
   if (w.k === 'how') {
     const F = S.fcp, R = S.mpp ? 0 : rayAim(o, a, 6000), L = HOW.ch.length - 1, sol = S.mpp ? artSolve(P, w, F.x, hgt(F.x, F.z), F.z) : R ? artSolve(P, w, o.x + a.x * R, o.y + a.y * R, o.z + a.z * R, true) : null;
     const f = P.f, v = w.spd * HOW.ch[sol && sol.ok ? sol.ch : L];
-    S.aimR = R; S.sol = sol; S.lockGnd = S.lockAir = S.lead = c.lock = null;
+    S.aimR = R; S.sol = sol; S.lockGnd = S.lockAir = S.lead = c.lock = S.noLos = null;
     if (sol) sol.laid = sol.ok && onAim(P, sol.d, HOW.lay);
     c.ch = sol ? sol.ch : L; c.aim = sol && (sol.ok || S.mpp) ? sol.d : a;
     if (S.mpp) { c.fire[0] = c.fire[0] && sol.laid; c.fire[1] = false; }
@@ -8268,7 +8292,8 @@ function drive(P, I, dt) {
     return resupply(P, dt);
   }
   /* the launcher takes a missile coming for it first, then a plane, then a missile bound for someone else */
-  S.lockGnd = null; S.lockAir = c.lock = w.k === 'sam' && P.arms[0].ammo > 0 && P.mod.lock ? lockMsl(view, P, w, true) || lockOn(view, S.planes, w.range, w.cone) || lockMsl(view, P, w) : null;
+  S.lockGnd = null; S.lockAir = c.lock = w.k === 'sam' && P.arms[0].ammo > 0 && P.mod.lock ? lockMsl(view, P, w, true) || lockOn(view, S.planes, w.range, w.cone, 2) || lockMsl(view, P, w) : null;
+  S.noLos = !c.lock && w.k === 'sam' && P.arms[0].ammo > 0 && P.mod.lock ? LOCK.blk : null;
   S.lead = P.kind === 'aa' ? (c.lock && c.lock.gnd ? c.lock : lockOn(view, S.planes, 4000, .6)) : null;
   const R = (S.aimR = rayAim(o, a, 6000)) || (S.lead ? dist(S.lead, P) : 2500);
   const x = o.x + a.x * R - pv.x, y = o.y + a.y * R - pv.y, z = o.z + a.z * R - pv.z, tt = w.k === 'shell' && S.aimR ? Math.hypot(x, y, z) / w.spd : 0;
@@ -8316,7 +8341,7 @@ function step(dt) {
     const cp = Math.cos(aim.p); aim.d = { x: Math.cos(aim.h) * cp, y: Math.sin(aim.p), z: -Math.sin(aim.h) * cp };
   }
   if (P && !P.dead) (P.man ? walk : P.kind ? drive : fly)(P, I, dt);
-  else { S.lockAir = S.lockGnd = S.lead = S.sol = S.gf = null; S.rearm = 0; S.oob = false; }
+  else { S.lockAir = S.lockGnd = S.lead = S.sol = S.gf = S.noLos = null; S.rearm = 0; S.oob = false; }
   let a0 = AIB.now();
   if ((S.spotT -= dt) <= 0) {   // what is left of the last look first
     S.spotT = SPOT.every; S.spotJ = aiDrain(S.spotJ); S.spotK = 1; spot(); S.spotK = 0;
@@ -10652,8 +10677,8 @@ function flyHeli(P, I, dt) {
   } else { c.pitch = -fw; c.roll = sd; c.yaw = (I.yawR ? 1 : 0) - (I.yawL ? 1 : 0); }
   if (!S.oob) { c.vs = col > 0 ? F.vs[0] : col < 0 ? -Math.min(F.vs[1], Math.max(F.land.aid, agl * F.land.k)) : 0; c.raw = col; }
   const e = aim ? heliEye(P, aim.d) : P, view = aim ? { x: e.x, y: e.y, z: e.z, team: P.team, f: aim.d } : P, O = d.ord, has = k => { for (let i = 0; i < 2; i++) if (O[i] && O[i].k === k && P.ord[i] > 0) return O[i]; return null; }, og = has('agm'), oa = has('aam');
-  const lk = og && !P.mgd ? lockOn(view, S.units, F.lock[0], aim ? F.lock[1] : F.lock[2], true) : null, la = oa ? MSL.pick(view, oa) : null;
-  S.lockGnd = lk; S.lockW = og; S.lockAir = la; S.lockA = oa; S.aimR = 0;
+  LOCK.blk = null; const lk = og && !P.mgd ? lockOn(view, S.units, F.lock[0], aim ? F.lock[1] : F.lock[2], true) : null, ng = LOCK.blk; LOCK.blk = null; const la = oa ? MSL.pick(view, oa) : null;
+  S.lockGnd = lk; S.lockW = og; S.lockAir = la; S.lockA = oa; S.aimR = 0; S.noLos = ng || LOCK.blk;
   if (aim) {   // the gun converges where the aim rests: on the aircraft under it, led, or on the ground, and is raised for the round's drop
     const air = lockOn(view, S.planes, F.gun[0], F.gun[1]), R = (S.aimR = air ? dist(air, e) : rayAim(e, aim.d, 5000)) || F.gun[2], m = heliMuzzle(P), g = d.gun;
     let x = e.x + aim.d.x * R - m.x, y = e.y + aim.d.y * R - m.y, z = e.z + aim.d.z * R - m.z, tt = Math.hypot(x, y, z) / g.spd;
@@ -10726,9 +10751,9 @@ function heliPick(p, A) {
   }
   return best;
 }
-/* a battle position for target t: masked low, the target in sight from a pop-up, and no known AA vehicle looking at that pop-up from close */
+/* a battle position for target t: masked low, the target in sight from a pop-up (in the missile's line, seekLine, when it is a missile's), and no known AA vehicle looking at that pop-up from close */
 function heliBP(p, t) {
-  const R0 = heliAgm(p, t) ? rand(HAI.stand[0], HAI.stand[1]) : HAI.close, b = S.base[p.team], a0 = Math.atan2(b.z - t.z, b.x - t.x), ty = bodyY(t);
+  const ag = heliAgm(p, t), R0 = ag ? rand(HAI.stand[0], HAI.stand[1]) : HAI.close, b = S.base[p.team], a0 = Math.atan2(b.z - t.z, b.x - t.x), ty = bodyY(t);
   const aa = S.units.filter(u => !u.dead && u.team !== p.team && u.kind === 'aa' && u !== t && spotted(u));
   let best = null, bs = 1e9, open = null, od = 1e9;
   for (let i = 0; i < 11; i++) for (const k of [1, .82, 1.18]) {
@@ -10737,7 +10762,7 @@ function heliBP(p, t) {
     const far = hdist(p, o);
     if (far < od) { od = far; open = { x, z, pop: HAI.pop[1], open: 1 }; }
     if (los(o, g + HAI.noe, t, ty)) continue;
-    const pop = HAI.pop.find(h => los(o, g + h, t, ty)); if (!pop) continue;
+    const pop = HAI.pop.find(h => (ag ? seekLine(o, g + h, t, ty) : los(o, g + h, t, ty))); if (!pop) continue;   // with a missile for it, a pop-up the missile's line clears too (a crown on the crest)
     if (aa.some(u => hdist(u, o) < (u.arms[0].d.k === 'sam' && g + pop - u.y > HAI.samH ? u.arms[0].d.range : HAI.aaR) && los(o, g + pop, u, u.y + u.def.mh))) continue;
     const sc = pop * 12 + far * .1 + Math.abs(k - 1) * 300;
     if (sc < bs) { bs = sc; best = { x, z, pop }; }
@@ -10751,7 +10776,7 @@ function aiAttack(p, A, dt, msl) {
   let t = A.tgt; if (t && (t.dead || t.gone)) t = A.tgt = null;
   const empty = !(p.ord[0] > 0 || p.ord[1] > 0) && p.ammo < 60, hurt = p.mod.crip || p.hp < d.hp * HAI.hurt;
   if ((empty || hurt) && A.st !== 'home' && A.st !== 'land') { A.st = 'home'; A.pad = heliFreePad(p.team, 3, p); }
-  if ((A.lT -= dt) <= 0) { A.lT = .1; A.vis = !!t && los(p, p.y, t, bodyY(t)); if (A.vis && !A.t0 && (A.st === 'pop' || A.st === 'fire')) A.t0 = S.t; else if (!A.vis) heliExpo(A); }
+  if ((A.lT -= dt) <= 0) { A.lT = .1; A.vis = !!t && los(p, p.y, t, bodyY(t)); A.ml = A.vis && heliAgm(p, t) && MSL.line(p, t, MSL.SK[MSL.def(p.def.ord[1], { gnd: 1 }).sk]); if (A.vis && !A.t0 && (A.st === 'pop' || A.st === 'fire')) A.t0 = S.t; else if (!A.vis) heliExpo(A); }
   if (A.st === 'home') { if (heliTo(p, pad.x, pad.z, HAI.noe, HAI.cruise) < 60) { A.st = 'land'; A.pad = heliFreePad(p.team, 3, p); } return; }
   if (A.st === 'land') { heliLandAt(p, pad.x, pad.z); if (p.land && heliFull(p)) { A.st = 'go'; A.bp = null; } else if (!p.land && !empty && !hurt && agl > 6) A.st = 'go'; return; }
   if (A.st === 'leave') { if (p.land) { p.gone = p.bye = true; return; } if (heliTo(p, pad.x, pad.z, HAI.noe, HAI.cruise) < 60) heliLandAt(p, pad.x, pad.z); return; }
@@ -10774,14 +10799,14 @@ function aiAttack(p, A, dt, msl) {
   }
   if (A.st === 'pop') {
     c.vs = HAI.vs[0];
-    if (A.vis && !hid(p, t)) { A.st = 'fire'; A.T = S.t + HAI.expo; A.hy = p.y + HAI.rise; }
-    else if (agl > B.pop + 30 || S.t - A.x0 > 25) { A.bp = null; A.st = 'drop'; }
+    if (A.vis && !hid(p, t) && (A.ml || !heliAgm(p, t))) { A.st = 'fire'; A.T = S.t + HAI.expo; A.hy = p.y + HAI.rise; }   // with a missile for it, up until the missile's line is clear too (over the crowns)
+    else if (agl > B.pop + 30 || S.t - A.x0 > 25 || (A.vis && !A.ml && heliAgm(p, t) && agl > B.pop + 8)) { A.bp = null; A.st = 'drop'; }   // seen but not in the missile's line a little over the pop-up: another place, not a longer climb in view
     return;
   }
   /* fire: a little higher than where the target came into sight, so that what it fires clears the mask; the nose on the target */
   c.vs = clamp((A.hy - p.y) * .8, -2, HAI.vs[0]);
   const hot = heliAgm(p, t) && rng > HAI.agm[0] && rng < HAI.agm[1] && idd(p, t), dir = vnorm({ x: t.x - p.x, y: bodyY(t) - p.y, z: t.z - p.z });
-  if (hot) { if (p.ocool[1] <= 0 && A.n < HAI.salvo && p.y > A.hy - 1.5 && dot(dir, p.f) > Math.cos(HAI.cone) && A.vis && !hid(p, t) && heliRelease(p, 1, t)) { A.n++; p.ocool[1] = HAI.gap; } }
+  if (hot) { if (p.ocool[1] <= 0 && A.n < HAI.salvo && p.y > A.hy - 1.5 && dot(dir, p.f) > Math.cos(HAI.cone) && A.vis && A.ml && !hid(p, t) && heliRelease(p, 1, t)) { A.n++; p.ocool[1] = HAI.gap; } }
   else if (p.ord[0] > 0 && rng < HAI.rk[0] && (t.kind !== 'tank' || !heliAgm(p, t))) {
     const tt = rng / 450, ar = vnorm({ x: t.x - p.x, y: bodyY(t) + .125 * GR * tt * tt - p.y, z: t.z - p.z });
     c.pitch = clamp(Math.asin(ar.y), -.3, .15); c.free = false;
@@ -15566,7 +15591,7 @@ addSquad = (g => (team, x, z, ri, s, kits, off) => {   // off: the squad is gett
    the aim, which then steers it; reload (R): the camera's next zoom step. L takes the goggles off: a quad close by is taken back, any other holds where it is */
 function droneHands(P, I, dt) {
   const kd = P.dk || (P.dk = {}), hit = k => { const v = !!I[k], e = v && !kd[k]; kd[k] = v; return e; }, st = dstock(P), c = P.ctl, L = P.def.drone, own = drones().filter(o => o.op === P && !o.net && !o.dead && !o.gone);
-  const eL = hit('mlock'), eY = hit('glock'), eF = hit('fire'), eX = hit('brake'), eR = hit('reload'), quiet = () => { c.mx = c.mz = 0; c.fire = c.ads = c.run = false; c.nade = 0; S.lockAir = S.lockGnd = S.lead = S.sol = S.gf = null; S.rearm = 0; };
+  const eL = hit('mlock'), eY = hit('glock'), eF = hit('fire'), eX = hit('brake'), eR = hit('reload'), quiet = () => { c.mx = c.mz = 0; c.fire = c.ads = c.run = false; c.nade = 0; S.lockAir = S.lockGnd = S.lead = S.sol = S.gf = S.noLos = null; S.rearm = 0; };
   let o = S.dr;
   if (o && (o.gone || o.dead || o.op !== P)) o = S.dr = null;
   if (P.dsel === undefined) P.dsel = 0;
@@ -22471,7 +22496,7 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
     if (a.d.rl) { bar(L, y + 1, 158 * u, 5 * u, 1 - a.cool / a.d.rl, a.cool > 0 ? ink : acc); y += 10 * u; }
   });
   if (nS) txt('G FUMAÇA ×' + P.smk + (P.smk && P.smkT > S.t ? '  ' + Math.ceil(P.smkT - S.t) + ' s' : ''), L, y + 2 * u, 12.5 * u, P.smk ? ink : FOE);
-  if (w.k === 'sam' && !P.dead && !S.lockAir) txt('SEM ALVO NA MIRA', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
+  if (w.k === 'sam' && !P.dead && !S.lockAir && !S.noLos) txt('SEM ALVO NA MIRA', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
 }
 /* ---------- damage panel: the vehicle from above, nose up, each part in the colour of its state; beside it what is hurt, worst first,
    with the seconds left of what is running out, the crew by seat, and under it fire, leak, jammed controls, the extinguishers and the
@@ -22574,6 +22599,12 @@ function drawHud() {
   if (seat) { seat.draw(P, u, ink, acc, disp, blink); fpFx(P); }
   if (!P.dead && S.t - P.dazeT < 1.6) { hx.globalAlpha = .8 * (1 - (S.t - P.dazeT) / 1.6); hx.fillStyle = '#050607'; hx.fillRect(0, 0, cw, ch); hx.globalAlpha = 1; }   // the pilot is hit: the view goes dark for a moment
   (P.man ? hudMan : P.kind ? hudDrive : hudFly)(P, u, ink, acc, disp, blink, seat);
+  const nl = S.noLos;   // a guided weapon's seeker has a target in its cone that only the ground, a wall, trees or smoke keep from it: no lock
+  if (nl && !P.dead && !nl.dead && !nl.gone) {
+    const s = proj(nl.x, bodyY(nl) + (nl.kind ? .5 : 0), nl.z), amb = '#ffd24a';
+    if (s.front) { hx.setLineDash([4, 4]); bracket(s.x, s.y, 15, amb); hx.setLineDash([]); }
+    txt('SEM LINHA DE VISADA', cw / 2, ch * .5 + 60 * u, 12 * u, amb, 'center');
+  }
   if (!P.dead) dmgPanel(P, u, ink, acc, seat, blink);
   const cut = sightClip(seat);
   for (const q of S.planes) {
@@ -23337,7 +23368,7 @@ const LEGEND = {
     const rows = [['Mouse', 'Apontar. O soldado vira com a mira, e a cruz abre conforme a dispersão: menor agachado, deitado, parado e mirando'],
       ['W / S / A / D', 'Andar para onde a mira aponta e para os lados'], ['Shift', 'Correr, em pé, enquanto houver fôlego'], ['Z', 'Postura: em pé, agachado, deitado. Mais baixo é mais lento, mais preciso e mais difícil de ver e de acertar'],
       ['Botão esquerdo ou Espaço', a0.name + (a0.auto ? ' (rajada enquanto apertado)' : ' (um tiro por aperto)')], ['Botão direito', 'Mirar pela alça: campo mais fechado e menos dispersão'], ['R', 'Recarregar']];
-    if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; fumaça corta a trava)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);
+    if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; sem linha de visada não trava: morro, prédio, árvores ou fumaça no caminho)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);
     rows.push(['F', 'Granada de mão, uns 30 m'], ['G', 'Granada de fumaça: uma cortina pequena que esconde dos dois lados'], ['N', 'Obras: mostra o contorno à sua frente, verde onde dá para construir e vermelho com o motivo onde não dá. Cada toque passa para a próxima: base de suprimento, trincheira, sacos de areia, e fecha. O clique começa a obra (a base gasta o kit) e o botão direito cancela. Fique parado junto da obra para construir (' + BLD.time + ' s sozinho, mais rápido com outros soldados ao lado); um tiro recebido interrompe. Pronta, ela remunicia e repara soldados e veículos do seu lado a até ' + BLD.r + ' m e vira ponto de entrada. Encostado em uma base inimiga, N arma a carga de demolição, que explode em ' + BLD.charge.fuse + ' s'], ['Prédios', 'Entre pelas portas, pelos buracos abertos nas paredes e pelas janelas do térreo. A escada em caracol fica no canto dos fundos: dê a volta no pilar para subir ou descer; nos prédios de teto plano ela leva ao telhado. Parede de pé para tiros e esconde; janela e buraco deixam ver e atirar, nos dois sentidos. Canhão, foguete e a carga de demolição (N, de frente para a parede, a até ' + CITY.plant + ' m) abrem buracos; sem apoio as lajes caem andar por andar, e o prédio vem abaixo quando o térreo cede'], ['C', 'Trocar a visão: por cima do ombro e primeira pessoa'], o.swap, o.esc);
     rows.push(['I', 'Civil ao lado: segure ' + CIV.hold + ' s para recrutá-lo como miliciano do seu lado (no máximo ' + CIV.mil.each + ' de cada vez). Ele segue você e luta com uma arma velha; a IA também arma civis da vila que defende. Cada civil morto custa ' + CIV.toll + ' tíquetes a quem o matou, e uma vila onde o seu lado matou ' + CIV.rage.n + ' não arma mais ninguém para você']);
     return rows;

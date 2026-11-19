@@ -125,7 +125,10 @@ function gnd(name, o, from, d, opt) {
   opt = opt || {}; const R = { hit: 0, kill: 0, lost: 0 };
   for (let i = 0; i < TRIALS; i++) {
     C.seed(700 + i * 7919); for (let k = 0; k < 30; k++) Math.random.call ? C.$("Math.random()") : 0; S = C.sandbox('modern');
-    const bx = S.base[0].x + 800, bz = S.base[0].z + i * 15, t = C.addVehicle('tank', 't90', 1, bx + d, bz, 0); t.inv = 0; t.ai = null; t.smk = 3;
+    const bx = S.base[0].x + 800; let bz = S.base[0].z + i * 15;
+    /* from the ground the lane must be open: a wood between them would hide the tank from the seeker (seekLine), and that is missile-los.js */
+    if (from === 'man') for (let k = 0; k < 200 && !$('seekLine')({ x: bx, z: bz }, C.hgt(bx, bz) + 2.75, { x: bx + d, z: bz }, C.hgt(bx + d, bz) + 2.5, true); k++) bz += 7;
+    const t = C.addVehicle('tank', 't90', 1, bx + d, bz, 0); t.inv = 0; t.ai = null; t.smk = 3;
     let m, a;
     if (from === 'man') { const s = C.addMan('blueAT', 0, bx, bz, 0), w = s.arms[1].d, e = $('manEye')(s); s.f = C.vnorm({ x: t.x - e.x, y: t.y - e.y, z: t.z - e.z }); m = $('MSHOT').atgm(s, w, e, s.f, t); a = s; }
     else {

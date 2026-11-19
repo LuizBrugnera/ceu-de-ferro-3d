@@ -271,7 +271,7 @@ Quem simula a partida (o anfitrião, ou a página numa partida IA × IA local) r
 
 - `ANALYTICS=0 npm start` desliga a gravação; `ANA_DIR=<pasta>` grava em outra pasta; `ANA_DAYS=<n>` muda a retenção; `ANA_DAY_MB=<n>` limita os MB gravados por dia (512); `HOST=127.0.0.1` deixa o servidor só neste computador.
 - `node tools/balance.js` junta as partidas guardadas e imprime vitória por lado (um lado acima de 60% em 40 partidas é alerta), por doutrina, como e quando as partidas acabam, para onde foram os tíquetes e a custo-efetividade por tipo.
-- `node tools/balance.js --torneio 40` joga 40 partidas IA × IA sem tela na simulação de verdade, cada par de doutrinas dos dois lados, grava como o servidor grava e mostra os mesmos números. `--era`, `--docs`, `--min` (relógio curto), `--eco`, `--jobs` e `--save` ajustam; `--help` explica. Uma partida Curta leva uns 6 min de um núcleo.
+- `node tools/balance.js --torneio 40` joga 40 partidas IA × IA sem tela na simulação de verdade, cada par de doutrinas dos dois lados, grava como o servidor grava e mostra os mesmos números. `--era`, `--docs`, `--pers`, `--dif`, `--min` (relógio curto), `--eco`, `--jobs` e `--save` ajustam; `--help` explica. Uma partida Curta leva uns 6 min de um núcleo.
 - O MCP do general tem `get_match_report` (§ `MCP.md`).
 
 ## PvP online

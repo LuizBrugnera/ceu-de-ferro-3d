@@ -3831,8 +3831,9 @@ let S = null;
 
 /* ---------- terrain: a height grid generated once per era, with valleys cut along the roads ---------- */
 /* MAPV: the map's version. 1 is the first map, two roads; 2 adds the road network (RN, T.net), 3 the new places and points, 4 the centre axis and the manoeuvres,
-   5 the seat towns beside the bases, with their lots (CITY.plan.seat), 6 the rocks and bushes on open ground (COVERS). A room's version is its first player's, told in welcome (Net.mv) */
-let MAPV = 6;
+   5 the seat towns beside the bases, with their lots (CITY.plan.seat), 6 the rocks and bushes on open ground (COVERS), 7 more of them and the
+   bush corridors (COV7: hedgerows, river banks, wood margins). A room's version is its first player's, told in welcome (Net.mv) */
+let MAPV = 7;
 const TERRAIN = {};
 function hash2(i, j, s) { const n = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); }
 function vnoise(x, z, s) {
@@ -4105,6 +4106,7 @@ function genTerrain(eraId, mv) {
   cityObjs(T);
   if (mv >= 4) axisNet(T, eraId);   // map version 4: the centre axis, after everything is placed
   if (mv >= 6) { treesV6(T, eraId, sd); coverTerrain(T, eraId, sd); }   // map version 6: the trees grown and the rocks and bushes, last, so that no other id moves
+  if (mv >= 7) coverV7(T, eraId, sd);   // map version 7: the bush corridors, after the rest of the cover
   return (TERRAIN[ck] = T);
 }
 function hgtT(T, x, z) {
@@ -12726,8 +12728,8 @@ function canopy(o) {
 }
 /* the rocks and bushes of a terrain, after everything else is placed */
 function coverTerrain(T, era, sd) {
-  const D = COVERS, Q = D[era], G = T.grid, C = OBJS.cell, W = T.W, HW = T.HW, lines = T.net ? T.net.e.map(e => e.p) : T.routes, id0 = T.nid;
-  const room = Math.min(D.max, 65536 - 16 - NDYN - NECO - id0);
+  const D = COVERS, Q = T.mv >= 7 ? Object.assign({}, D[era], COV7.more[era]) : D[era], G = T.grid, C = OBJS.cell, W = T.W, HW = T.HW, lines = T.net ? T.net.e.map(e => e.p) : T.routes, id0 = T.nid;
+  const room = Math.min(T.mv >= 7 ? COV7.v6 : D.max, 65536 - 16 - NDYN - NECO - id0);   // map version 7: fewer clusters, the ids left go to the corridors
   let n = 0;
   const taken = (x, z, r) => {   // anything standing within r m
     const i0 = Math.max(0, Math.floor((x - r - T.x0) / C)), i1 = Math.min(G.nx - 1, Math.floor((x + r - T.x0) / C)), j0 = Math.max(0, Math.floor((z - r - T.z0) / C)), j1 = Math.min(G.nz - 1, Math.floor((z + r - T.z0) / C));
@@ -12780,6 +12782,92 @@ function coverTerrain(T, era, sd) {
     cluster((a + .2 + .6 * hash2(a, b, sd + 72)) * O, -HW + (b + .2 + .6 * hash2(a, b, sd + 73)) * O, a + 1000, b + 1000, 74);
   }
   T.cvn = n; T.cv0 = id0; T.nid += n;
+}
+/* ---------- the bush corridors (COV7, map version 7) ----------
+   More bushes (the clusters of COVERS drawn with the era's `more` odds), and lines of bushes a soldier can walk hidden along from one
+   place to another, the same on every client from the map's seed: a hedgerow along a field's edge (the lines every lot[0] m of x and lot[1] m
+   of z the fields are cut by, a stretch between two crossings by the era's `row` odds where a field lies on either side), a line on each bank of
+   the river (bank: by its odds a stretch of seg m, off m back from where the bank is dry, looked for up to look m from the river's middle) and
+   a line along the margin of a wood (edge: by its odds, on open ground beside a dense wood, across the side that faces it). A line is bushes every
+   gap m (jit m off it), r and h their size ranges, with a break of brk[1] m by the odds brk[0] at each, so that a line is crossed; bushes of a
+   line may touch each other (they are one hedge), never stand on anything else (COVERS' pad), and the rules of COVERS keep them out of the roads,
+   the towns, the water, the woods and the bases. Each kind of line has its share (share) of max bushes; within a kind the lines are taken in
+   the order their dice give, so that a short budget thins them evenly over the map. The ids are the limit (the cities take most of them
+   and an object's id stays under 65536, the server's and the rows'): on map 7 the clusters of COVERS have v6 at most, and a bush of a line is
+   a wide low thicket, so that the few ids left make the most metres of hedge. see: m within which the scene draws them (tile m a tile) */
+const COV7 = { max: 16000, v6: 3200, gap: 6, jit: 1.2, r: [2.8, 4.4], h: [1.3, 2.3], brk: [.05, 10], lot: [330, 260], share: { row: .55, bank: .2, edge: .25 },
+  row: { ww2: .5, modern: .3 }, bank: { p: .6, seg: 360, off: [4, 14], look: 340 }, edge: { p: .55 },
+  more: { ww2: { on: .65, open: .5, rock: .2 }, modern: { on: .3, open: .2, rock: .35 } }, see: 2600, tile: 1000, tm: 40 };
+function coverV7(T, era, sd) {
+  const D = COVERS, K = COV7, G = T.grid, C = OBJS.cell, W = T.W, HW = T.HW, id0 = T.nid, room = Math.max(0, Math.min(K.max, 65536 - 16 - NDYN - NECO - id0));
+  let n = 0;
+  const taken = (x, z, r) => {   // anything standing within r m, but a bush of a line
+    const i0 = Math.max(0, Math.floor((x - r - 4 - T.x0) / C)), i1 = Math.min(G.nx - 1, Math.floor((x + r + 4 - T.x0) / C)), j0 = Math.max(0, Math.floor((z - r - 4 - T.z0) / C)), j1 = Math.min(G.nz - 1, Math.floor((z + r + 4 - T.z0) / C));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) for (const o of G.c[j * G.nx + i] || []) {
+      const d = Math.hypot(o.x - x, o.z - z);
+      if (o.K.veil ? d < .5 * (r + o.r) : d < r + o.r + (o.K.rock ? D.near : D.pad)) return true;
+    }
+    return false;
+  };
+  const fit = (x, z, r) => {
+    if (!(x > D.edge && x < W - D.edge && Math.abs(z) < HW - D.edge)) return false;
+    const k = T.kind[nodeAt(T, x, z)];
+    if (k === 1 || k === 8 || k === 9 || hgtT(T, x, z) < T.WL + D.wet) return false;
+    if (Math.min(Math.hypot(x - T.bases[0].x, z - T.bases[0].z), Math.hypot(x - T.bases[1].x, z - T.bases[1].z)) < D.base || !cityFar(T, x, z)) return false;
+    return !taken(x, z, r) && routeDist(T, x, z) > D.road;
+  };
+  const line = (pts, a, b, cap) => {   // bushes along polyline pts; a b: its dice; cap: the most the kind may still put
+    let m = 0, st = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i - 1], q = pts[i], L = Math.hypot(q.x - p.x, q.z - p.z); if (L < 1e-6) continue;
+      const dx = (q.x - p.x) / L, dz = (q.z - p.z) / L;
+      for (let t = 0; t < L; t += K.gap, st++) {
+        if (m >= cap || n >= room) return m;
+        const h = j => hash2(a * 37 + st, b * 23 + j, sd + 91);
+        if (h(0) < K.brk[0]) { t += K.brk[1] - K.gap; continue; }   // a gap in the hedge
+        const r = K.r[0] + (K.r[1] - K.r[0]) * h(1), o = (h(2) - .5) * 2 * K.jit, x = p.x + dx * t - dz * o, z = p.z + dz * t + dx * o;
+        if (!fit(x, z, r)) continue;
+        const y = Object.assign(addObj(T, id0 + n++, 'bush', x, z, 0, 0, Math.min(K.h[0] + (K.h[1] - K.h[0]) * h(3), r * 1.6 + .4), h(4) * 6.283, r), { sc: r });
+        cellsOf(T, y, c => { (G.c[c] || (G.c[c] = [])).push(y); G.f[c] |= 1; });
+        m++;
+      }
+    }
+    return m;
+  };
+  const kd = (x, z) => T.kind[nodeAt(T, x, z)], field = k => k >= 2 && k <= 4, put = (L, f) => {   // the lines of a kind, in the order of their dice; f: its part of what is left
+    L.sort((a, b) => a.o - b.o); let left = Math.floor((room - n) * f);
+    for (const l of L) { if (left <= 0 || n >= room) break; left -= line(l.p, l.a, l.b, left); }
+  };
+  const [lx, lz] = K.lot, R = [], B = [], E = [];
+  for (let a = Math.ceil(D.edge / lx); a * lx < W - D.edge; a++) for (let b = Math.floor((-HW + D.edge) / lz); (b + 1) * lz < HW - D.edge; b++) {   // the field edges: x = a lx, z = b lz
+    const x = a * lx, z0 = b * lz, zm = z0 + lz / 2;
+    if ((field(kd(x - 25, zm)) || field(kd(x + 25, zm))) && hash2(a, b, sd + 92) < K.row[era]) R.push({ p: [{ x, z: z0 }, { x, z: z0 + lz }], a, b: b + 500, o: hash2(a, b, sd + 93) });
+    const z = b * lz, x0 = a * lx, xm = x0 + lx / 2;
+    if ((field(kd(xm, z - 25)) || field(kd(xm, z + 25))) && hash2(a + 300, b, sd + 92) < K.row[era]) R.push({ p: [{ x: x0, z }, { x: x0 + lx, z }], a: a + 300, b: b + 900, o: hash2(a + 300, b, sd + 93) });
+  }
+  const rx = T.rx || (() => -1e9), BK = K.bank;
+  for (let s = 0, z = -HW + D.edge; z < HW - D.edge; z += BK.seg, s++) for (const sg of [1, -1]) {   // the river's banks
+    if (hash2(s, sg + 2, sd + 94) >= BK.p) continue;
+    const p = [];
+    for (let k = 0; k <= 4; k++) {
+      const zz = Math.min(HW - D.edge, z + BK.seg * k / 4), x0 = rx(zz); let d = 40;
+      while (d < BK.look && hgtT(T, x0 + sg * d, zz) < T.WL + D.wet + .5) d += 8;
+      if (d >= BK.look) break;
+      p.push({ x: x0 + sg * (d + BK.off[0] + (BK.off[1] - BK.off[0]) * hash2(s, k + sg * 7, sd + 95)), z: zz });
+    }
+    if (p.length > 1) B.push({ p, a: s + 2000, b: sg + 2, o: hash2(s, sg + 2, sd + 96) });
+  }
+  const N = T.N;
+  for (let j = 1; j < N; j++) for (let i = 1; i < N; i++) {   // the margins of the woods
+    const k = j * (N + 1) + i, c = T.kind[k]; if (c === 1 || c === 8 || c === 9) continue;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      if (T.kind[k + dj * (N + 1) + di] !== 1 || hash2(i * 4 + di + 2, j * 4 + dj + 2, sd + 97) >= K.edge.p) continue;
+      const x = T.x0 + (i + di * .35) * T.cx, z = T.z0 + (j + dj * .35) * T.cz, hx = dj ? T.cx / 2 : 0, hz = di ? T.cz / 2 : 0;
+      E.push({ p: [{ x: x - hx, z: z - hz }, { x: x + hx, z: z + hz }], a: i + 4000, b: j * 4 + di + dj * 2 + 8, o: hash2(i, j * 4 + di + 2 * dj, sd + 98) });
+    }
+  }
+  const H = K.share; put(R, H.row); put(B, H.bank / (H.bank + H.edge)); put(E, 1);   // what a kind leaves goes to the next
+  T.cvn = (T.cvn || 0) + n; T.cv7 = n; T.nid += n;
 }
 
 /* a work's record f and its object f.o, under the id its owner gave it: a faces the enemy, the object lies across it. Its object is found
@@ -22893,14 +22981,16 @@ function tmStatic(T) {
     const q = j * nx + i; road[q] = r / (m * m); wood[q] = w / (m * m); water[q] = v / (m * m); h[q] = y / (m * m);
   }
   for (const o of T.houses || []) { const i = o.x / c | 0, j = (o.z + HW) / c | 0; if (i >= 0 && j >= 0 && i < nx && j < nz) bld[j * nx + i] = Math.min(1, bld[j * nx + i] + .2); }
+  const bush = new Float32Array(n);   // map version 7: the bushes (COV7.tm of them in a cell is a cell full of them)
+  if (T.mv >= 7) for (const o of T.objs) if (o.k === 'bush') { const i = o.x / c | 0, j = (o.z + HW) / c | 0; if (i >= 0 && j >= 0 && i < nx && j < nz) bush[j * nx + i] = Math.min(1, bush[j * nx + i] + 1 / COV7.tm); }
   const fold = new Float32Array(n), o = new Float32Array(n), scr = new Float32Array(n);
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
     let s = 0, k = 0;
     for (let b = j - 2; b <= j + 2; b++) for (let a = i - 2; a <= i + 2; a++) if ((a !== i || b !== j) && a >= 0 && b >= 0 && a < nx && b < nz) { s += h[b * nx + a]; k++; }
     const q = j * nx + i; fold[q] = k ? clamp((s / k - h[q]) / TM.fold, 0, 1) : 0;
-    scr[q] = Math.max(wood[q], bld[q]); o[q] = water[q] > .5 ? 0 : clamp(scr[q] + .3 * fold[q], 0, 1);
+    scr[q] = Math.max(wood[q], bld[q], .6 * bush[q]); o[q] = water[q] > .5 ? 0 : clamp(Math.max(wood[q], bld[q]) + .3 * fold[q] + .6 * bush[q], 0, 1);
   }
-  const Z2 = { key, c, nx, nz, W, HW, hs, hx, hz, hg, h, wood, bld, road, water, fold, o, scr, k: null };
+  const Z2 = { key, c, nx, nz, W, HW, hs, hx, hz, hg, h, wood, bld, road, water, fold, o, scr, bush, k: null };
   Z2.k = tmChoke(T, Z2);
   return (T.tms = Z2);
 }
@@ -23099,19 +23189,20 @@ function tmExp(C, p) {
 /* the tactical walk (§8): the cheapest way on foot over side C's map, a cell of TM.cell m costing cell x (1 + 4 V + 2 F) x .75 in a wood x .85
    on a road (V where the enemy sees, F the known enemy strength as 0 to 1), water with no standing bridge no way. A* over the cells, 8
    neighbours; one of the side's footPath calls (difOf(t).fp a plan tick, the difficulty's depth). A polyline (polyOf) from x0 z0 to x1 z1 with
-   exp (the share the enemy sees) and wood, or null: no map, no budget, no way */
-function tmWalk(C, x0, z0, x1, z1) {
+   exp (the share the enemy sees) and wood, or null: no map, no budget, no way. K: another cost, { cost(k, c, V, F, Z) a cell's, lo the
+   least a cell may cost over c } (the hidden walk, HIDE) */
+function tmWalk(C, x0, z0, x1, z1, K) {
   const M = C && C.tm, Z = S.T.tms; if (!M || !Z || Z.nx !== M.nx || Z.nz !== M.nz) return null;
   if (C.fpT !== S.t) { C.fpT = S.t; C.fpN = 0; }
   if (C.fpN >= difOf(C.t).fp) return null;
   C.fpN++;
   const c = M.c, nx = M.nx, nz = M.nz, n = nx * nz, V = M.v, F = M.f, wet = tmWet(Z);
-  const cost = k => (wet[k] ? Infinity : c * (1 + 4 * V[k] + 2 * F[k] / (F[k] + 3)) * (Z.wood[k] > .5 ? .75 : 1) * (Z.road[k] > .1 ? .85 : 1));
+  const cost = K ? k => (wet[k] ? Infinity : K.cost(k, c, V, F, Z)) : k => (wet[k] ? Infinity : c * (1 + 4 * V[k] + 2 * F[k] / (F[k] + 3)) * (Z.wood[k] > .5 ? .75 : 1) * (Z.road[k] > .1 ? .85 : 1));
   const a = m4Cell(M, x0, z0), b = m4Cell(M, x1, z1), g = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), done = new Uint8Array(n), hk = [], hv = [];
   const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { [hk[i], hk[j]] = [hk[j], hk[i]]; [hv[i], hv[j]] = [hv[j], hv[i]]; };
   const push = (f, v) => { hk.push(f); hv.push(v); let i = hk.length - 1; while (i > 0) { const q = (i - 1) >> 1; if (!less(i, q)) break; swap(i, q); i = q; } };
   const pop = () => { const v = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return v; };
-  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return .6375 * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost
+  const bi = b % nx, bj = b / nx | 0, h = k => { const dx = Math.abs(k % nx - bi), dz = Math.abs((k / nx | 0) - bj); return (K ? K.lo : .6375) * c * (Math.max(dx, dz) + .414 * Math.min(dx, dz)); };   // the cheapest a cell can cost
   g[a] = 0; push(h(a), a);
   while (hk.length) {
     const u = pop(); if (done[u]) continue; done[u] = 1; if (u === b) break;
@@ -23130,6 +23221,59 @@ function tmWalk(C, x0, z0, x1, z1) {
   for (let r = 0; r < 2; r++) { const q = [pts[0]]; for (let i = 0; i + 1 < pts.length; i++) { const p = pts[i], o = pts[i + 1]; q.push({ x: .75 * p.x + .25 * o.x, z: .75 * p.z + .25 * o.z }, { x: .25 * p.x + .75 * o.x, z: .25 * p.z + .75 * o.z }); } q.push(pts[pts.length - 1]); pts = q; }
   const out = polyOf(pts), X = tmExp(C, out); out.exp = X.exp; out.wood = X.wood; out.cost = g[b]; return out;
 }
+
+/* ---------- the hidden walk (HIDE, map version 7): infantry goes through the brush, not down the road ----------
+   An AI squad with an order to a place min m or more away and max m at most, that walks it by the road (no way of its own: none of the
+   commander's O.wp, at most the foot trip setOrd gave it), is given instead the hidden way over its side's tactical map (TM): tmWalk with a cell
+   costing c x (1 + v x V + f x F/(F + 3) + road on a road) x (1 - o x the cell's cover: woods, houses, folds of the ground and the bushes of
+   map 7), so that it keeps out of what the enemy watches and goes along the hedgerows, the woods and the dead ground. Not when the enemy is far:
+   no cell within look m of the walk where the enemy's watch V or its strength F/(F + 3) passes thr (then the road is quicker, and it is asked
+   again every again s); nor in a hurry (an assault at a run, a withdrawal, an operation whose H-hour is within hurry s or past, a squad late to
+   it); nor for the orders that live on the road (kinds: the ones it is given for); nor if the hidden way is longer than stretch x the
+   straight line plus 300 m. Every every s, on the host; the squad's think walks it as any trip (squadTrip), and a new setOrd of the same order
+   puts it back on it (q.hw). Vehicles keep the road (M5). HIDE.on 0 leaves it out */
+const HIDE = { on: 1, every: 2, min: 250, max: 6000, look: 1200, thr: .12, again: 12, retry: 3, hurry: 30, stretch: 1.9,
+  kinds: { hold: 1, move: 1, ambush: 1, overwatch: 1, observe: 1, flank: 1, assault: 1, mortar: 1 },
+  k: { v: 6, f: 3, road: .8, o: .55 } };
+const hideK = { lo: 1 - HIDE.k.o, cost: (k, c, V, F, Z) => c * (1 + HIDE.k.v * V[k] + HIDE.k.f * F[k] / (F[k] + 3) + (Z.road[k] > .1 ? HIDE.k.road : 0)) * (1 - HIDE.k.o * Z.o[k]) };
+/* the enemy anywhere within look m of the line from a to b on side C's map: the highest of its watch and its strength */
+function hideThreat(C, ax, az, bx, bz) {
+  const M = C.tm, c = M.c, L = HIDE.look, i0 = Math.max(0, (Math.min(ax, bx) - L) / c | 0), i1 = Math.min(M.nx - 1, (Math.max(ax, bx) + L) / c | 0), j0 = Math.max(0, (Math.min(az, bz) - L + S.HW) / c | 0), j1 = Math.min(M.nz - 1, (Math.max(az, bz) + L + S.HW) / c | 0);
+  let hi = 0;
+  for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const q = j * M.nx + i; hi = Math.max(hi, M.v[q], M.f[q] / (M.f[q] + 3)); }
+  return hi;
+}
+/* why squad q walks its order O by the road (a word), or '' when it should go hidden */
+function hideWhy(q, O, L) {
+  if (!HIDE.kinds[O.k]) return 'kind';
+  if (O.rush || q.late || (q.op && q.op.H && S.t > q.op.H - HIDE.hurry)) return 'hurry';
+  const d = Math.hypot(O.hx - L.x, O.hz - L.z);
+  if (d < HIDE.min || d > HIDE.max) return 'far';
+  const C = cmdOf(q.team); if (!C || !C.tm || !S.T.tms || C.tm.nx !== S.T.tms.nx) return 'map';
+  if (hideThreat(C, L.x, L.z, O.hx, O.hz) < HIDE.thr) return 'calm';
+  return '';
+}
+const HIDES = () => S.hws || (S.hws = { go: 0, road: {}, none: 0, long: 0 });   // the counts of the match (the probes read them)
+function hideStep() {
+  if (!HIDE.on || !TM.on || !(S.T.mv >= 7) || (S.net && !S.host) || S.t < (S.hwT || 0)) return;
+  S.hwT = S.t + HIDE.every;
+  for (const q of S.squads) {
+    if (q.net || q.mil || !q.live || q.state || q.rd || q.lift || q.at) continue;
+    const O = q.ord, L = q.men.find(m => !m.dead && !m.down); if (!O || !L || O.wp) continue;
+    const H = q.hw;
+    if (H && H.O === O && H.way) { if (q.tp !== H.way) { if (q.tp && q.tp !== O.trp) continue; q.tp = H.way; q.ts = polyNearS(H.way, L); } continue; }   // its order given again: back on its hidden way
+    if (H && H.O === O && S.t < H.T) continue;
+    if (q.tp && q.tp !== O.trp) continue;   // a way of someone else's
+    if (O.hx === undefined) { const p = O.x !== undefined ? O : routeAt(S.T.routes[O.ri !== undefined ? O.ri : q.ri], clamp(O.s || 0, 0, S.T.routes[O.ri !== undefined ? O.ri : q.ri].len)); O.hx = p.x; O.hz = p.z; }
+    const why = hideWhy(q, O, L), X = HIDES();
+    if (why) { q.hw = { O, T: S.t + HIDE.again }; X.road[why] = (X.road[why] || 0) + 1; continue; }
+    const way = tmWalk(cmdOf(q.team), L.x, L.z, O.hx, O.hz, hideK);
+    if (!way) { q.hw = { O, T: S.t + HIDE.retry }; X.none++; continue; }   // no budget this tick, or no way
+    if (way.len > HIDE.stretch * Math.hypot(O.hx - L.x, O.hz - L.z) + 300) { q.hw = { O, T: S.t + HIDE.again }; X.long++; continue; }
+    q.hw = { O, way }; q.tp = way; q.ts = 0; q.at = false; X.go++;
+  }
+}
+step = (g => dt => { g(dt); hideStep(); })(step);
 
 /* ===== emb and itd: the planned ambush (P7) and the interdiction of the supply (P9) ===== */
 /* the best place for an ambush on edge ei of the network (between lo and hi m along it): every 80 m, the side of the road with more cover (the
@@ -24245,12 +24389,26 @@ function buildWorld() {
   /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
   const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = new THREE.IcosahedronGeometry(1, 1), rkg = new THREE.DodecahedronGeometry(1, 0);
   bsg.translate(0, .55, 0); rkg.translate(0, .45, 0);
-  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr)); wo.bushes = new THREE.InstancedMesh(bsg, mat(P.bush), Math.max(1, cvl.length - nr));
-  let ir = 0, ib = 0; const cc = new THREE.Color();
-  for (const o of cvl) { const r = o.k === 'rock'; wo.cv[o.id] = [r ? wo.rocks : wo.bushes, r ? ir++ : ib++]; wo.cv[o.id][0].setColorAt(wo.cv[o.id][1], cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
-  wo.rocks.count = ir; wo.bushes.count = ib;
-  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true; if (wo.bushes.instanceColor) wo.bushes.instanceColor.needsUpdate = true;
-  scene.add(wo.rocks, wo.bushes);
+  /* map version 7 (COV7): the bushes in tiles of COV7.tile m, each an instanced mesh with its own bounds (so that the frustum leaves out what
+     is not in view) and drawn only within COV7.see m of the eye (bushTiles); the rocks keep one mesh, bounded by the whole map */
+  rkg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW));
+  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr));
+  const bm = mat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
+  for (const o of cvl) if (o.k === 'bush') { const k = Math.floor(o.x / BT) * 4096 + Math.floor((o.z + HW) / BT), l = btl.get(k); if (l) l.push(o); else btl.set(k, [o]); }
+  wo.bt = [];
+  for (const [k, l] of btl) {
+    const g = bsg.clone(), me = new THREE.InstancedMesh(g, bm, l.length);
+    g.boundingSphere = new THREE.Sphere(new THREE.Vector3((Math.floor(k / 4096) + .5) * BT, l.reduce((a, o) => a + o.y, 0) / l.length, (k % 4096 + .5) * BT - HW), BT * .75 + 40);
+    me.userData.c = g.boundingSphere.center; wo.bt.push(me);
+    l.forEach((o, j) => { wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); });
+  }
+  wo.bushes = wo.bt[0] || null;
+  let ir = 0;
+  for (const o of cvl) if (o.k === 'rock') { wo.cv[o.id] = [wo.rocks, ir++]; wo.rocks.setColorAt(ir - 1, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
+  wo.rocks.count = ir;
+  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
+  for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
+  scene.add(wo.rocks, ...wo.bt);
   cityScene();
   const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }), cg = new THREE.IcosahedronGeometry(1, 1);
   for (let i = 0; i < 46; i++) { const k = new THREE.Mesh(cg, cm); k.scale.set(rand(160, 420), rand(35, 75), rand(120, 320)); k.position.set(rand(-3000, W + 3000), rand(1500, 3600), rand(-HW - 3000, HW + 3000)); scene.add(k); }
@@ -24708,8 +24866,15 @@ function updateCamera(dt) {
   S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
   sparks.material.uniforms.scale.value = ch * dpr / (2 * Math.tan(camera.fov * Math.PI / 360));
 }
+/* the bush tiles of map version 7 (COV7) the eye is within see m of: the others are not drawn */
+function bushTiles() {
+  if (!wo || !wo.bt) return;
+  const p = camera.position, R = COV7.see + COV7.tile * .75;
+  for (const me of wo.bt) { const c = me.userData.c; me.visible = (c.x - p.x) * (c.x - p.x) + (c.z - p.z) * (c.z - p.z) < R * R; }
+}
 /* the world, then in a seat that shows it my own model around the eye: same camera, depth cleared, a near plane close enough for a cockpit */
 function render3d() {
+  bushTiles();
   renderer.render(scene, camera);
   if (!camSt.body) return;
   camera.layers.set(1); camera.near = .06; camera.far = 150; camera.updateProjectionMatrix(); renderer.autoClearColor = false;

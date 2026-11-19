@@ -57,7 +57,7 @@ ok(lost.dead && lost.gone && pool('truck').length === 1 && pool('truck')[0] !== 
 const near = pool('truck')[0]; near.s += ds * 2500; $('place')(near);
 S.my = { x: near.x + 20, z: near.z, dead: false };
 tick();
-ok(!near.dead, 'but not with a person of ours within ' + $('BODY').keep.near + ' m (they may take it)');
+ok(!near.dead, 'but not with a player within ' + $('BODY').keep.near + ' m (they may take it)');
 S.my = null;
 
 console.log('-- a ride waits for its squad, not for ever --');

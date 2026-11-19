@@ -29,7 +29,13 @@ Tudo no `Céu de Ferro 3D.html`, mais o script `tests/trucks-base.js` e uma linh
 ## O que rodou
 
 - `node tests/trucks-base.js`, antes do merge do main novo: tudo passa (17 checagens). Com a página de antes (`PAGE=<página do main com só o M5 movido>`), 10 falham: três caminhões do pool empilhados na estrada velha, o segundo nunca volta para a reserva e a carona espera para sempre.
-- Smoke: o servidor sobe em 127.0.0.1 e a página carrega no Chrome. A demonstração roda sem erro no console (só o 404 de sempre).
+- Depois do merge do main novo, o mesmo script passa de novo (17 de 17), mas só numa cópia da página com três funções de dois lados no começo (`dsOf`, `myRoutes`, `foeOn`; veja abaixo). A cópia não entrou no commit.
+- Smoke antes do merge: o servidor sobe em 127.0.0.1 e a página carrega no Chrome sem erro no console (só o 404 de sempre).
+- Smoke depois do merge: o servidor sobe e a página carrega, mas o console mostra `Uncaught ReferenceError: dsOf is not defined`. O mesmo erro aparece com a página do `origin/main` sozinha (`a82df2b`), sem esta tarefa.
+
+## O main está quebrado (não é desta tarefa)
+
+Desde o #76 (`75b340c`, 3 lados P6a), a página chama `dsOf` (26 vezes), `myRoutes` (8) e `foeOn` (7), e nenhuma delas é definida. Pelos comentários, elas vêm de uma "fundação" dos 3 lados (4.2: `R.ends`, `dsOf`, `foeOn`, `myRoutes`) que ainda não entrou no main. Toda partida que passa pelo `newState` lança `ReferenceError`, no navegador e no harness. Esta tarefa não define essas funções, para não brigar com a fundação quando ela chegar.
 
 ## O que NÃO foi testado
 
@@ -37,7 +43,7 @@ Tudo no `Céu de Ferro 3D.html`, mais o script `tests/trucks-base.js` e uma linh
 - Se a reserva fica certa: o veículo do pool aposentado volta com `ecoBack` só com o portão da economia ligado e fora da abertura (`E.open`), como o resto do código faz.
 - Se a carona desiste cedo demais: 120 s depois do encontro previsto pode ser pouco para uma esquadra que atravessa mato. Se as caronas caírem muito, aumente `MAN.ride.wait` ou use outro limite.
 - O jogador que anda até um veículo do pool que está numa estrada velha: com ele a menos de 300 m, o veículo fica. Longe disso, some (volta para a reserva).
-- O merge com o main novo (3 lados, P2 a P9, mapas v7 e v8, #59 a #86) foi feito sem rodar nada além do smoke. O pool, a carona e o `trnPlan` não mudaram no main, mas o `trucks-base.js` não foi rodado de novo depois do merge.
+- O merge com o main novo (3 lados, P2 a P9, mapas v7 e v8, #59 a #86). O pool, a carona e o `trnPlan` não mudaram no main. O `trucks-base.js` só rodou depois do merge com as três funções de dois lados no lugar da fundação.
 - Com 3 lados: o `poolTrim` vale por lado (`t`), e o `trnPlan` ainda usa `ds = t ? 1 : -1`, como antes. Não foi visto se o lado 3 (Insurgentes) tem pool.
 
 ## Riscos

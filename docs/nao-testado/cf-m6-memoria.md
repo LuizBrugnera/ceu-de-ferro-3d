@@ -7,13 +7,13 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 
 Seção nova `MM` logo antes de `function boot()`, e poucas linhas trocadas em `prPick`, `cmdManJob` e `m5Lg`.
 
-- **Memória das abordagens** (`S.mm[t].a`). Chave: objetivo (posição) e setor do anel (o `s` da abordagem, 8 setores).
+- **Memória das abordagens** (`S.gmem[t].a`). Chave: objetivo (posição) e setor do anel (o `s` da abordagem, 8 setores).
   - Assalto que falhou: −0,3. Objetivo tomado (ou `cons`): +0,15. Meia-vida de 10 min. Guarda usos, sucessos, falhas e baixas.
   - O `prPick` multiplica a nota de cada procedimento por 1 + esse valor (média das abordagens que o assalto usa), entre 0,25 e 1,4. O diário mostra "memória: falhou por ali (×0,7)".
   - O reconhecimento (P12) que achou uma abordagem defendida dá −0,15 a ela.
   - Um P1 abandonado (`prFail`) conta falha do flanco na hora. Se virar frontal, o resultado final vai para o eixo.
   - Ao fim de cada assalto o diário diz "Memória: o assalto a X pela abordagem a N° deu certo/falhou".
-- **Sem repetir** (`S.mm[t].h`, `mmBan`). A mesma abordagem não sai pela terceira vez seguida para o mesmo objetivo, salvo se uma das duas últimas deu certo.
+- **Sem repetir** (`S.gmem[t].h`, `mmBan`). A mesma abordagem não sai pela terceira vez seguida para o mesmo objetivo, salvo se uma das duas últimas deu certo.
   - Os procedimentos por ela ficam com nota 0.
   - O frontal (P6) vai pela abordagem mais barata que não esteja vetada (`mmP6`).
   - Se tudo estiver vetado, vale a nota de antes.
@@ -21,7 +21,7 @@ Seção nova `MM` logo antes de `function boot()`, e poucas linhas trocadas em `
   - τ vem da personalidade: Blitz 1,6 e Guerrilheiro 1,7 variam mais; Retranqueiro 0,6 e Artilheiro 0,7 variam menos; Logístico e sem personalidade: 1 (igual a antes).
   - Vale no `prPick` (M3) e no `cmdManJob`.
 - **Dificuldade** (`mmApN`). O `prPick` avalia 1 abordagem no Fácil, 2 no Moderado e todas (3) no Normal e no Difícil. A informação é a mesma (D9). A leitura dos hábitos já vinha do W17 (`DIF.look`).
-- **Memória das manobras** (`S.mm[t].m`, `mmMan`). Por tipo (`flk`, `inf`, `cut`...) e lugar (350 m). A manobra que não tomou o ponto: −0,25; que tomou: +0,1. A nota no `cmdManJob` é multiplicada por 1 + valor.
+- **Memória das manobras** (`S.gmem[t].m`, `mmMan`). Por tipo (`flk`, `inf`, `cut`...) e lugar (350 m). A manobra que não tomou o ponto: −0,25; que tomou: +0,1. A nota no `cmdManJob` é multiplicada por 1 + valor.
 - **Logística** (`mmLgK`, `lgLost`, `m5Edge`).
   - Cada comboio guarda o eixo por onde foi (`c.mmRi`).
   - Comboio perdido: o eixo para aquele nó fica mais caro no `m5Lg` (×(1 + 0,6 × perdas)).
@@ -75,6 +75,6 @@ Partidas IA × IA de 20 min ou mais, nas duas épocas, com `MM.on` 1 e 0 (script
 - entropia das abordagens por objetivo (eventos `ap` do M0) e repetição de (objetivo, setor), com e sem memória;
 - com personalidades Blitz × Retranqueiro: a Blitz deve variar mais de procedimento (`C.prEv` e o diário);
 - comboio perdido: o próximo para o mesmo nó vai por outro eixo, quando houver;
-- online: anfitrião sai no meio da partida e o novo continua com a memória (`S.mm` igual depois do `ecoUnpack`).
+- online: anfitrião sai no meio da partida e o novo continua com a memória (`S.gmem` igual depois do `ecoUnpack`).
 
 Teste de cenário sugerido (`tests/memoria.js`): dois assaltos seguidos que falham pelo mesmo flanco → o terceiro não usa esse setor; um sucesso no meio → pode repetir; `MM.on = 0` → igual ao M3.

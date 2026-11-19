@@ -11,6 +11,7 @@
    lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
    rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
    rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs),
+   man2 (M7: gcmd may carry ap, ap2, f and e, the keys of the new manoeuvres man fixflank envelop turn penet ambush guard),
    br (destructible bridges: their stages travel in obj like any object's; the pontoon is the work of kind 7 in fort and fbuild, and gask brg),
    gq (the general's tools for everyone: gask missions, unit with an id, lots and mines),
    crl (the radio relay of the command net: the work of kind 8 in fort and fbuild),
@@ -115,7 +116,7 @@ const RX = {
       if (!GENKEY || m.key !== GENKEY) { send(c.ws, { t: 'error', code: 'gen' }); return c.ws.close(); }   // one guess a connection
       if ((m.side !== 0 && m.side !== 1) || [...room.gens].some(o => o.player.side === m.side)) return send(c.ws, { t: 'error', code: 'taken' });
       c.player = { id: nextId++, name: 'MCP', cls: 'gen', model: '', side: m.side, kills: 0, deaths: 0, ai: 0 }; c.gen = 1; c.room = room; room.gens.add(c);
-      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1, gq: 1 });
+      return send(c.ws, { t: 'welcome', id: c.player.id, host: room.host ? room.host.player.id : 0, side: m.side, eco: 1, gen: 1, gn: room.gen, gk: room.genk, cqn: room.cqn || 0, gc: 2, players: [...room.values()].map(o => o.player), rte: 1, gq: 1, man2: 1 });
     }
     if (m.cls === 'spec') {   // a spectator: no body, not in the roster, never host; it is sent everything and can send nothing
       const room = rooms[m.room];
@@ -497,7 +498,8 @@ const GK = { k: 'w', k2: 'w', x: 'n', z: 'n', a: 'n', n: 'i', id: 'i', p: 'i', i
   mk: 'w', lat: 'i', roe: 'w', brk: 'n',   // the General's production (F2): a mission's kind, latitude, rules of engagement and break-off (disp, mis)
   nd: 'w',   // logistics (F2b): a supply node's key, b<base id> or p<point index> (conv, alift, sprio)
   rt: 'P',   // abstract orders (W21): a route, flat x z pairs (welcome rte: 1)
-  role: 'w', qrf: 'i' };   // campaigns and the threat board (F4): an operation's role in a campaign (camp), a place's policy for the quick reaction force (dpol)
+  role: 'w', qrf: 'i',
+  ap: 'i', ap2: 'i', f: 'w', e: 'i' };   // M7 (welcome man2: 1): the new manoeuvres' approaches (ap, ap2 of gask ap), the ambush's or guard's form (f: lin, l, post, mine), a road edge (e). Above: campaigns and the threat board (F4): an operation's role in a campaign (camp), a place's policy for the quick reaction force (dpol)
 function gcmdOf(c) {
   if (!c || !rec(c) || typeof c.c !== 'string' || !/^[a-z]{2,8}$/.test(c.c) || c.c === 'draw') return null;
   const o = { c: c.c };

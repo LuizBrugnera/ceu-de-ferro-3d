@@ -103,7 +103,8 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
     const lx2 = dome.x + sg * 3000, ly2 = host.hgt(lx2, dome.z) + 4, a = [R(lx2), R(ly2), R(dome.z), R(-sg * 3000 / 24.5), 120, 0], by = { team: 1, x: lx2, y: ly2, z: dome.z };
     const b2 = g2.lob(by, w, ...a); await run(lead); const bh = host.lob(by, w, ...a), b1 = g1.lob(by, w, ...a);
     let rel = false;
-    await run(bh.T + 2, () => { if (!rel && bh.T - bh.t <= at) { rel = true; dome.dm = 1; dome.dn = 0; } else if (!rel) { dome.dm = 0; dome.dl = 0; } });
+    await run(bh.T + 2, () => { for (const f of host.S.forts) if (f.k === 6 && f !== dome) { f.dm = 0; f.dl = 0; }   // only this dome: the side's AI may have raised one of its own nearby
+      if (!rel && bh.T - bh.t <= at) { rel = true; dome.dm = 1; dome.dn = 0; } else if (!rel) { dome.dm = 0; dome.dl = 0; } });
     return [host, g1, g2].map((c, i) => stopped(c, [bh, b1, b2][i]));
   };
   const L1 = await late(.7, .6), L2 = await late(.3, 1.5);

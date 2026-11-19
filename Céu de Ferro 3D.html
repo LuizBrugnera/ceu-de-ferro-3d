@@ -16283,6 +16283,432 @@ arms = (g => (u, dt) => {
     else if (!a.sv && a.cool > w.rip && S.units.some(t => !t.dead && t.team === u.team && t.kind === 'truck' && hdist(t, u) < MLRS.truck)) a.cool -= dt * (MLRS.fast - 1);
   }
 })(arms);
+/* ---------- the AI's defences (AID): sappers, crewed posts, the anti-rocket dome, the rocket launchers and the economy's guard ----------
+   What the AI general and its units do with the content above, every piece of it through the mission contract (MIS): a squad sent to a
+   task gets an order whose mission (O.aid: kind, the general's words, the leash, the operation) says what it is for, and what the side
+   fields comes by a Dispatch order. All of it runs where the match is simulated, and only for a side whose general is the AI for that
+   part (genBy: def for the defences, atk for the raids).
+   Sappers. A side keeps sap.n squads of job sap (kits: two sappers in place of two riflemen, as many men as the road patrol it stands in for), at the seat town's rear (map
+   version 5) or behind its base on the front road, fielded in the opening as the field's posts are and in place of its last road patrol
+   (the population cap is soon full, and a squad more for one side would be one less for the other); not in the hangar's demo. One task a squad (q.sapT, its order's O.sap): mfield, a minefield of AT mines across
+   a road and AP mines beside it (pts, by kind); clear, a sweep of a suspect field (sus) or of enemy mines its side knows, lifting what the
+   detector finds; refill, back to a depot when the pouches are empty. The commander picks, most urgent first: a field to clear in its
+   own ground, the road of a blocking position it holds (blk: interdict), then the approaches of its seat town and of its forward mine
+   (field.out m out along each road toward the enemy; without either, the front road field.line m ahead of its line). A task is given up
+   after sap.T s; one that failed is not tried again for sap.retry s, one done not for field.redo s. Each sapper works on his own
+   (m.sw): he lays a mine within sap.reach m of its point (a step short of it is his place in the squad, q.bg), lifts a
+   known enemy mine within sap.lift m of his squad standing by it for SAP.clear s, or walks his sweep point; never while his squad
+   is not quiet (fd under sap.quiet m) or not at its place. A sapper by a depot has his charges and mines back. A raid of the AI's
+   takes a free sapper squad along (its way within MBR's limits), and at the target a sapper plants a charge against a vehicle that
+   stands still (sabPlant). What the side knows of mines (suspect fields, enemy mines found) weighs on the danger of the roads
+   (C.et + sus.k on an edge with a sample within SAP.sus.r m of one), so its trips and columns go round them.
+   Posts. A squad holding its place, quiet (FORT.ai.quiet) and with its side able to pay (the work's cost and ECO.ai.keep left over)
+   builds one post there, facing the enemy's base: a line squad an anti-tank post when its side knows enemy armour (else a machine-gun
+   nest), a base or site guard a machine-gun nest, a garrison the sniper tower or a nest, an observation squad the tower (not a garrison that
+   holds a village, nor a squad in a building: its houses serve it better); none within post.apart m
+   of one of that kind, again every post.again s. The post's garrison comes by its own order (postGarr).
+   The dome (modern era). A side builds one (two at most, POSTS.dome.cap) when enemy rounds have come down within dome.r m of its
+   seat town (or its factory) or of its base, dome.n of them in dome.mem s, or an enemy rocket launcher is known within its reach:
+   the nearest free squad of jobs dome.by holds by the site (open ground the nearest to it) until it is up; the site does not decay
+   while they walk to it, dome.walk s at most (nor a post), and they stand behind it while it rises. An enemy dome is known once an own unit or soldier has
+   been within dome.see m of it, or it has engaged one of the side's rounds (f.kn, bit t).
+   Rocket launchers. A column that brings artillery brings the side's launcher (ERAS sides mlrs) in its place while the side has none
+   (sapOn: online only with a server that knows them). It fires its whole salvo at a time, only at a mass of known enemy (grad.mass,
+   a soldier 1 and a vehicle grad.veh within grad.r m of the target), and its commander gives it the missions it is for: the enemy
+   dome it knows, to saturate it, and the objective of an assault being prepared (before its hour H), at most one every grad.again s.
+   The economy's guard. The economy's AI asks a guard (an AA and a squad) for each site in the seat town and for its forward mine
+   (eco.fwd m or less behind the line); the side's reserve squad (job base) is its quick reaction force: held in the seat town (else by
+   the factory) with mission reserve, unless a mobile reserve (mres) has its place, it goes to an own site, supply base or the seat town when the known enemy within qrf.r m of it is worth qrf.thr
+   (more if the place was hit in the last qrf.hit s) and no more than qrf.max (a force it cannot stop is left, and said), within
+   qrf.reach m; it holds there until qrf.calm s pass with nobody known there, or qrf.T s in all, or half of it is lost */
+const AID = { dt: .5,
+  sap: { n: 1, back: 300, T: 420, retry: 120, walk: 3500, quiet: 300, foe: 250, reach: 3, lift: 40, fwd: 600 },
+  field: { out: 160, line: 250, road: 500, r: 60, at: 7, ap: 12, redo: 900 },
+  post: { again: 60, apart: 150, max: 5 },
+  dome: { r: 2000, n: 6, mem: 240, see: 1200, again: 120, walk: 120, by: { base: 1, egd: 1, guard: 1, sap: 1, garr: 1 } },
+  grad: { r: 90, mass: 4, veh: 2, again: 90, life: 150 },
+  eco: { fwd: 1500 },
+  qrf: { r: 450, thr: 2, hit: 30, hitV: 2, max: 14, reach: 3000, calm: 60, T: 360, own: ['abertura', 'posto: base', 'reforço: base'] },
+  sus: { k: 2 } };
+MIS.job.sap = 'reserve';
+Object.assign(GEN.job, { sap: 'Sapadores' }); Object.assign(GEN.tag, { sap: 'SAP' });
+const aidSeat = t => (S.T.burgs || []).find(b => b.seat === t) || null;
+const aidMen = q => q.men.filter(m => !m.dead && m.def.sap && m.ai);
+const aidLead = q => q.men.find(m => !m.dead) || null;
+const aidRide = q => !!q.lift || S.units.some(u => !u.dead && u.run && u.run.q === q);   // a vehicle is fetching or carrying it
+const aidOf = C => C.aid || (C.aid = { done: {}, rk: [], dT: 0, gT: 0, fl: null, flT: -1e9 });
+/* a side's own finished economy sites */
+const aidSites = t => (S.eco ? S.eco.l.filter(e => e.team === t && !e.dead && e.prog >= 1) : []);
+/* the places of the two jobs: the sappers at the rear of the seat town (or behind the base on the front road), the reaction force in it (or by the factory) */
+function aidSapPost(t) {
+  const w = aidSeat(t), b = S.base[t]; let x, z;
+  if (w) { const d = Math.hypot(b.x - w.x, b.z - w.z) || 1; x = w.x + (b.x - w.x) / d * w.ru * .6; z = w.z + (b.z - w.z) / d * w.ru * .6; }
+  else { const fr = frontR(), r = S.T.routes[fr], p = routeAt(r, clamp(endS(t, fr, FIELD.base + AID.sap.back), 0, r.len)); x = p.x - p.dz * 40; z = p.z + p.dx * 40; }
+  const c = clearOf(x, z, 2, {}), p = railOf(c.x, c.z); return { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 8 };
+}
+function aidQrfAt(t) {
+  const w = aidSeat(t); if (w) return { x: w.x, z: w.z, nm: 'a cidade-sede' };
+  const f = aidSites(t).find(e => e.k === 'fab'); return f ? { x: f.x, z: f.z, nm: 'a ' + f.name.toLowerCase() } : null;
+}
+function aidQrfPost(t) {
+  const P = aidQrfAt(t); if (!P) return null;
+  const b = S.base[t], d = Math.hypot(b.x - P.x, b.z - P.z) || 1, c = clearOf(P.x + (b.x - P.x) / d * 60, P.z + (b.z - P.z) / d * 60, 2, {}), p = railOf(c.x, c.z);
+  return { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12 };
+}
+const aidSapKits = t => { const E = INF[S.era][S.fac[t]], i = E.findIndex(id => KITS[id].sap); return i < 0 ? undefined : [i, i].concat(SQUAD[S.era].slice(2)); };   // as many men as the patrol it stands in for
+const aidRoad = t => (!(S.demo && !S.watch) && genBy(t, 'def') === 'ai' && sapOn() && aidSapKits(t) ? postN('road', FIELD.posts.find(p => p[0] === 'road')[1]) - 1 : -1);   // the road patrol the sappers stand in for
+const aidQrfOn = t => !(S.cmd && S.cmd[t].resAt) && !!aidQrfAt(t);
+post = (g => (t, job, k) => (job === 'sap' ? aidSapPost(t) : job === 'base' && aidQrfOn(t) ? aidQrfPost(t) : g(t, job, k)))(post);
+/* that patrol is not fielded, in the opening nor as a reinforcement (its post stays, for the patrol cars that drive it) */
+fieldSquad = (g => (t, job, k, ...a) => (job === 'road' && k === aidRoad(t) ? null : g(t, job, k, ...a)))(fieldSquad);
+reinforce = (g => (t, job, k) => (job === 'road' && k === aidRoad(t) ? false : g(t, job, k)))(reinforce);
+jobKits = (g => (t, job) => (job === 'sap' ? aidSapKits(t) : g(t, job)))(jobKits);
+/* the sappers: in the opening at their place, first (a match soon fills the population cap, and with it the reinforcements stop), then
+   the last of the posts a side keeps (the others are reinforced in the order they always were) */
+const aidJobs = t => (aidRoad(t) >= 0 ? [['sap', AID.sap.n]] : []);
+deploy = (g => t => { for (const [job, n] of aidJobs(t)) for (let k = 0; k < n; k++) { const O = post(t, job, k); if (O) fieldSquad(t, job, k, O, O.x, O.z); } g(t); })(deploy);
+cmdPosts = (g => (C, sq, have) => g(C, sq, have).concat(aidJobs(C.t)))(cmdPosts);
+/* an order's mission from the task it carries (O.aid) */
+misOrd = (g => (q, O) => {
+  g(q, O); const M = q.mis, a = O && O.aid; if (!M || !a) return;
+  M.kind = a.kind; if (a.why) M.why = a.why; if (a.area) M.area = a.area; if (a.op) M.op = a.op;
+})(misOrd);
+/* ===== sappers ===== */
+/* a minefield across road point p (dx dz its way): AT mines on the road, staggered, and AP mines on both sides; at: only the AT ones */
+function aidField(x, z, dx, dz, key, why, kind, at) {
+  const F = AID.field, pts = [];
+  for (const i of [-1, 0, 1]) pts.push({ k: 0, x: x + dx * i * F.at - dz * i * 2.5, z: z + dz * i * F.at + dx * i * 2.5 });
+  if (!at) for (const sd of [1, -1]) for (const j of [-1, 1]) pts.push({ k: 1, x: x - dz * F.ap * sd + dx * j * 6, z: z + dx * F.ap * sd + dz * j * 6 });
+  return { k: 'mfield', key, x, z, pts, why, kind, n: 0 };
+}
+/* the defensive fields of side t: the roads into its seat town and to its forward mine (or, with neither, the front road ahead of its line) */
+function aidFields(t, A) {
+  if (A.fl && S.t - A.flT < 60) return A.fl;
+  const out = [], R = S.T.routes, ds = t ? 1 : -1, w = aidSeat(t), F = AID.field;
+  const at = (ri, s, key, why) => { const r = R[ri], p = routeAt(r, clamp(s, 0, r.len)); out.push(aidField(p.x, p.z, p.dx, p.dz, key, why, 'build')); };
+  if (w) R.forEach((r, ri) => {
+    let bs = 0, bd = 1e9; for (let s = 0; s <= r.len; s += 25) { const p = routeAt(r, s), d = Math.hypot(p.x - w.x, p.z - w.z); if (d < bd) { bd = d; bs = s; } }
+    if (bd < w.ru + 150) at(ri, bs + ds * (w.ru + F.out), 'seat' + ri, 'minar a aproximação da cidade-sede pela rota ' + (ri + 1));
+  });
+  const fm = aidSites(t).filter(e => e.k === 'mine').sort((a, b) => ecoDepth(t, a.x, a.z) - ecoDepth(t, b.x, b.z))[0];
+  if (fm && ecoDepth(t, fm.x, fm.z) < AID.eco.fwd) { const p = railOf(fm.x, fm.z); if (p.d < F.road) at(p.ri, p.s + ds * F.out, 'mine' + fm.id, 'minar a aproximação da mina avançada'); }
+  if (!out.length) { const fr = frontR(); at(fr, lineS(t, fr) + ds * F.line, 'line' + fr, 'minar a aproximação da linha na rota ' + (fr + 1)); }
+  A.flT = S.t; return (A.fl = out);
+}
+/* a sweep of a suspect field: its middle and a ring round it */
+function aidSweep(x, z, key, why) {
+  const pts = [{ x, z }];
+  for (let i = 0; i < 6; i++) { const a = i * TAU / 6, c = clearOf(x + Math.cos(a) * 30, z + Math.sin(a) * 30, 1, {}); if (hgt(c.x, c.z) > S.T.WL + .5) pts.push({ x: c.x, z: c.z }); }
+  return { k: 'clear', key, x, z, pts, why, kind: 'support', n: 0 };
+}
+const aidAt = nm => nm.replace(/^a /, 'à ');   // 'a usina' → 'junto à usina'
+const aidKey = (x, z) => Math.round(x / 60) + ',' + Math.round(z / 60);
+/* what side t knows to clear in its own ground: its suspect fields and the enemy mines it has found, the nearest to L first */
+function aidClear(C, A, L) {
+  const t = C.t, own = (x, z) => ecoDepth(t, x, z) > -AID.sap.fwd, c = [];
+  for (const f of sus(t)) c.push(f);
+  for (const o of mines()) if (!o.gone && o.team !== t && mineKnown(o, t)) c.push(o);
+  let best = null, bd = AID.sap.walk;
+  for (const f of c) { const k = aidKey(f.x, f.z), d = hdist(f, L); if (own(f.x, f.z) && !(A.done['clr' + k] > S.t) && d < bd) { bd = d; best = f; } }
+  return best && aidSweep(best.x, best.z, 'clr' + aidKey(best.x, best.z), 'abrir passagem: limpar minas ' + ecoNear(best.x, best.z));
+}
+/* a blocking position of side t on the enemy's supply road with nobody mining it yet: its road, AT mines only */
+function aidBlk(C, A, L) {
+  const op = C.ops.find(o => o.k === 'blk' && !o.over && o.st === 'set' && !o.aidMn && o.site && hdist(o.site, L) < AID.sap.walk);
+  if (!op) return null;
+  const s = op.site, T = aidField(s.x, s.z, s.dx, s.dz, 'blk' + op.id, 'minar a estrada de suprimento inimiga (bloqueio ' + ecoNear(s.x, s.z) + ')', 'interdict', true);
+  T.op = op; op.aidMn = 1; return T;
+}
+/* the task given: the squad walks to it (by a foot path where the map has one) with an order that carries it */
+function aidSapGo(C, q, T) {
+  const L = aidLead(q), p = railOf(T.x, T.z), wp = L && S.T.mv >= 4 ? footPath(C, L.x, L.z, T.x, T.z) : null;
+  T.T0 = S.t; q.sapT = T;
+  const O = Object.assign({ k: 'hold', ri: p.ri, s: p.s, x: T.x, z: T.z, R: 6, sap: T, aid: { kind: T.kind, why: T.why, area: { x: T.x, z: T.z, r: AID.field.r }, op: T.op ? T.op.id || 0 : 0 } }, wp ? { wp: polyOf([{ x: L.x, z: L.z }, ...wp]) } : {});
+  setOrd(q, O);
+  if (q.ord.sap !== T) return aidSapEnd(q, T, 'inviable', 'sem caminho');
+  gLog(C.t, 'eng', 'Sapadores: ' + T.why, T, 'sap' + T.key);
+}
+function aidSapEnd(q, T, how, why) {
+  const t = q.team, A = aidOf(cmdOf(t));
+  q.sapT = null;
+  for (const m of q.men) if (m.sw) { if (m.sw.p) m.sw.p.by = null; m.sw = null; }
+  if (T.key) A.done[T.key] = S.t + (how === 'done' ? AID.field.redo : AID.sap.retry);
+  if (T.op && T.op.aidMn && how !== 'done') T.op.aidMn = 0;
+  rep(q, how, { k: T.k, n: T.n });
+  if (how === 'done' && T.k === 'mfield') gLog(t, 'eng', 'Campo minado pronto (' + T.n + (T.n === 1 ? ' mina' : ' minas') + '): ' + T.why.replace(/^minar /, ''), T);
+  else if (how === 'done' && T.k === 'clear') gLog(t, 'eng', 'Passagem aberta' + (T.n ? ': ' + T.n + (T.n === 1 ? ' mina levantada' : ' minas levantadas') : ''), T);
+  else if (how !== 'done') gLog(t, 'eng', 'Sapadores desistem: ' + (why || T.why), T);
+  if (q.ord && q.ord.sap === T && q.live > 0) setOrd(q, post(t, 'sap', q.jk) || { k: 'hold', ri: q.ri, s: q.s });
+}
+/* the commander's part: a task for each sapper squad of the side that has none */
+function aidSap(C, A, sq) {
+  const t = C.t;
+  for (const q of sq) {
+    if (q.job !== 'sap') continue;
+    const T = q.sapT;
+    if (T) { if (!q.ord || q.ord.sap !== T || S.t - T.T0 > AID.sap.T) aidSapEnd(q, T, 'inviable', q.ord && q.ord.sap === T ? 'tempo esgotado' : 'outra ordem'); continue; }
+    const L = aidLead(q), sp = aidMen(q);
+    if (q.op || q.dome || q.state || q.lift || !L || !sp.length || q.fd < AID.sap.foe || q.ord.k === 'supply') continue;
+    if (sp.every(m => !m.mn || !(m.mn[0] + m.mn[1] > 0))) {   // the pouches are empty: to a depot
+      if (depot(L)) continue;
+      const b = S.sup.filter(b => !b.dead && b.prog >= 1 && b.team === t).sort((a, c) => hdist(a, L) - hdist(c, L))[0], to = b || S.base[t], c = clearOf(to.x + 25, to.z + 25, 2, {});
+      aidSapGo(C, q, { k: 'refill', key: '', x: c.x, z: c.z, pts: [], why: 'reabastecer minas e cargas', kind: 'support', n: 0 }); continue;
+    }
+    const tk = aidClear(C, A, L) || aidBlk(C, A, L) || aidFields(t, A).find(F => !(A.done[F.key] > S.t) && !sq.some(o => o.sapT && o.sapT.key === F.key) && hdist(F, L) < AID.sap.walk && mines().filter(o => !o.gone && o.team === t).length < SAP.cap);
+    if (tk) aidSapGo(C, q, tk);
+  }
+}
+/* the next work of sapper m: a known enemy mine near his squad, else the next point of the task he has mines for */
+function aidNext(q, m, T) {
+  const L = T && T.k !== 'refill' ? T : aidLead(q); if (!L) return null;
+  for (const o of mines()) if (!o.gone && o.team !== q.team && mineKnown(o, q.team) && hdist(o, L) < (T && T.k === 'clear' ? AID.field.r + 20 : AID.sap.lift) && !(o.aidBy && !o.aidBy.dead && o.aidBy.sw && o.aidBy.sw.o === o)) {
+    const d = hdist(o, m) || 1; o.aidBy = m; return { k: 'lift', o, x: o.x + (m.x - o.x) / d * .8, z: o.z + (m.z - o.z) / d * .8, c: 0 };
+  }
+  if (!T || !T.pts) return null;
+  for (const p of T.pts) if (!p.done && !(p.by && p.by !== m && !p.by.dead && p.by.sw && p.by.sw.p === p) && (T.k !== 'mfield' || (m.mn && m.mn[p.k] > 0))) {
+    p.by = m; if (T.k === 'clear') return { k: 'walk', p, x: p.x, z: p.z };
+    const d = Math.hypot(p.x - m.x, p.z - m.z) || 1; return { k: 'lay', p, mk: p.k, x: p.x + (m.x - p.x) / d * SAP.put * .5, z: p.z + (m.z - p.z) / d * SAP.put * .5 };
+  }
+  return null;
+}
+/* each AID.dt: each AI sapper at his work, and his squad's task done or not */
+function aidWork(dt) {
+  for (const q of S.squads) {
+    if (q.net || !(q.live > 0)) continue;
+    for (const f of [q.dome, q.aidP]) if (f && f.o && !f.gone && f.prog < 1 && !q.op && S.t - f.T0 < AID.dome.walk) f.workT = S.t;   // a work its builders are on their way to does not decay
+    const T = q.sapT; let n = 0;
+    for (const m of q.men) {
+      if (m.dead || !m.def.sap || !m.ai) continue;
+      n++;
+      if (S.t - m.hitT > 3 && (m.chg < SAP.chg || sapShort(m)) && depot(m)) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; }   // a depot fills the pouch (the base's own service gives the one charge of a rifleman)
+      let w = m.sw;
+      if (w && (m.in || q.state || (w.o && w.o.gone) || (w.p && (w.p.done || !T || !T.pts.includes(w.p))) || q.fd < AID.sap.quiet)) { if (w.p && !w.p.done) w.p.by = null; w = m.sw = null; }
+      if (!w && !m.in && q.at && !q.state && q.fd >= AID.sap.quiet && !q.op) w = m.sw = aidNext(q, m, T);
+      if (!w) continue;
+      const still = m.v.x * m.v.x + m.v.z * m.v.z < 1, d = Math.hypot(m.x - w.x, m.z - w.z);
+      if (w.k === 'lay' && still && Math.hypot(m.x - w.p.x, m.z - w.p.z) < AID.sap.reach) {
+        const o = mineLay(w.mk, q.team, w.p.x, w.p.z); w.p.done = 1;
+        if (o) { m.mn[w.mk]--; if (T) T.n++; }
+        m.sw = null;
+      } else if (w.k === 'lift') {
+        if (still && hdist(m, w.o) < SAP.near) { if ((w.c += dt) >= SAP.clear) { if (mineLift(w.o, m) && T) T.n++; m.sw = null; } } else w.c = 0;
+      } else if (w.k === 'walk' && d < 6) { w.p.done = 1; m.sw = null; }
+    }
+    if (!T || (!q.at && T.k !== 'refill')) continue;   // a pouch is filled on the way, within a depot's reach
+    const sp = aidMen(q).filter(m => !m.in);
+    if (!sp.length) aidSapEnd(q, T, 'inviable', 'sem sapadores');
+    else if (T.k === 'mfield') { const left = T.pts.filter(p => !p.done); if (!left.length || !left.some(p => sp.some(m => m.mn && m.mn[p.k] > 0))) aidSapEnd(q, T, T.n ? 'done' : 'inviable', 'nenhum lugar livre para as minas'); }
+    else if (T.k === 'clear') { if (T.pts.every(p => p.done) && !sp.some(m => m.sw) && !mines().some(o => !o.gone && o.team !== q.team && mineKnown(o, q.team) && hdist(o, T) < AID.field.r + 20)) aidSapEnd(q, T, 'done'); }
+    else if (T.k === 'refill' && !sp.some(m => !m.mn || m.mn[0] + m.mn[1] < SAP.mines[0] + SAP.mines[1])) aidSapEnd(q, T, 'done');
+  }
+}
+/* a sapper's place is his work's; the builders of a post or a dome stand behind it while it rises */
+sqMore = (g => (q, L, O, live) => {
+  g(q, L, O, live);
+  let bg = q.bg;
+  const f = q.dome || q.aidP;
+  if (f && f.o && !f.gone && f.prog < 1 && !q.state) {
+    const bx = -Math.cos(f.a), bz = Math.sin(f.a), ux = -Math.sin(f.a), uz = -Math.cos(f.a), b = f.o.hd + 1.5, l = live.filter(m => !m.sw).slice(0, q.dome ? 6 : 3);
+    l.forEach((m, k) => { const e = (k - (l.length - 1) / 2) * 1.6; bg = bg || []; bg[m.ai.i] = { x: f.x + bx * b + ux * e, z: f.z + bz * b + uz * e }; });
+  }
+  for (const m of live) { const w = m.sw; if (w && m.def.sap) { bg = bg || []; bg[m.ai.i] = { x: w.x, z: w.z }; } }
+  const op = q.op, a = op && op.k === 'raid' && op.st === 'hit' ? op.tg : null;
+  if (a && a.kind && !a.dead) for (const m of live) if (m.def.sap && m.chg > 0) { const d = hdist(a, m) || 1; bg = bg || []; bg[m.ai.i] = { x: a.x + (m.x - a.x) / d * 3.5, z: a.z + (m.z - a.z) / d * 3.5 }; }
+  q.bg = bg;
+})(sqMore);
+/* a raid of the AI's takes a free sapper squad along; at a vehicle that stands still a sapper plants a charge */
+MANO.raid = (g => (t, C, spec, by, R) => {
+  const r = g(t, C, spec, by, R), op = r.ok && by === 'ai' && C.ops.find(o => o.id === r.id && o.k === 'raid');
+  if (!op) return r;
+  const q = S.squads.find(q => q.team === t && !q.net && q.job === 'sap' && q.live >= 2 && !q.op && !q.sapT && !q.state && !q.lift && q.fd > AID.sap.foe && aidMen(q).length && aidLead(q) && hdist(aidLead(q), op.drop) < MBR.far);
+  const L = q && aidLead(q), path = L && footPath(C, L.x, L.z, op.drop.x, op.drop.z);
+  if (!path || !mbRaidOk(path, mbTm('raid', spec))) return r;
+  opTake(op, q, { k: 'move', ri: op.ri, s: op.s, x: op.drop.x, z: op.drop.z, R: 12, wp: polyOf([{ x: L.x, z: L.z }, ...path]), quiet: 1, fast: 1 }); op.n0 += q.live;
+  gLog(t, 'atk', 'Sapadores seguem com a incursão contra ' + op.nm + ', com cargas de demolição', L, 'msap' + op.id);
+  return r;
+})(MANO.raid);
+OPS.raid = (g => (C, op) => {
+  g(C, op);
+  const a = op.tg;
+  if (op.over || op.st !== 'hit' || !a || a.dead || !a.kind || a.man || (S.sab || []).some(c => c.g === a && !c.gone) || Math.hypot(a.v ? a.v.x : 0, a.v ? a.v.z : 0) > SAP.sab.park) return;
+  for (const q of opLive(op)) for (const m of q.men) if (!m.dead && !m.in && m.def.sap && m.chg > 0 && hdist(m, a) < SAP.sab.reach + 2 && sabPlant(m, a)) { gLog(C.t, 'atk', 'Carga de sabotagem armada contra ' + op.nm, a, 'sab' + op.id); return; }
+})(OPS.raid);
+/* the danger of the roads: the side's suspect fields and the enemy mines it knows */
+cmdEdges = (g => (C, sq) => {
+  g(C, sq);
+  const t = C.t, l = sus(t).slice(), E = S.T.net.e, r = SAP.sus.r + 30;
+  for (const o of mines()) if (!o.gone && o.team !== t && mineKnown(o, t)) l.push(o);
+  if (!l.length || !C.et) return;
+  E.forEach((e, i) => { if (e.smp.some(p => l.some(f => Math.abs(f.x - p.x) < r && Math.abs(f.z - p.z) < r))) C.et[i] += AID.sus.k; });
+})(cmdEdges);
+/* ===== posts ===== */
+const aidArmour = C => C.known.some(o => !o.dead && !o.man && (tk(o) === 'tank' || tk(o) === 'lav'));
+/* can side t pay for it and keep the economy's own reserve */
+function aidPay(t, c) {
+  if (!c || !ecoSim() || !S.eco.d[t]) return true;
+  const d = S.eco.d[t], K = ECO.ai.keep; return d.en >= c[0] + K.en && d.mt >= c[1] + K.mt;
+}
+function aidPostKind(C, q) {
+  const j = q.job;
+  if (j === 'line') return aidArmour(C) ? 3 : 4;
+  if (j === 'guard' || j === 'egd') return 4;
+  if (j === 'garr') return q.jk & 1 ? 4 : 5;
+  if (j === 'wood') return 5;
+  return 0;
+}
+/* not a garrison that holds a village, nor a squad in a building: its houses and windows serve it better than a post */
+function aidPosts(C, A, sq) {
+  const t = C.t, e = S.base[1 - t];
+  if (S.net && !(Net.ft && Net.sap)) return;
+  if (S.forts.filter(f => f.team === t && f.k >= 3 && f.k <= 5 && !f.gone).length >= AID.post.max) return;
+  for (const q of sq) {
+    const O = q.ord, L = aidLead(q);
+    if (q.op || q.dome || (q.aidP && !q.aidP.gone) || !q.at || q.state || aidRide(q) || !L || O.k !== 'hold' || O.b || O.es || (O.tw && q.job === 'garr') || q.men.some(m => !m.dead && m.cbo) || O.x === undefined || q.fd < FORT.ai.quiet || S.t < (q.aidPT || 0) || hdist(L, O) > 30 || foeIn(t, L.x, L.z, FORT.ai.quiet)) continue;
+    const k = aidPostKind(C, q), F = FORT.K[k]; if (!k) continue;
+    q.aidPT = S.t + AID.post.again;
+    if (S.forts.some(f => f.team === t && f.k === k && !f.gone && hdist(f, O) < AID.post.apart)) continue;
+    if (!aidPay(t, F.cost)) continue;
+    const a = headTo(O.x, O.z, e.x, e.z), ux = -Math.sin(a), uz = -Math.cos(a), men = q.men.filter(m => !m.dead && !m.in), need = Math.min(2, men.length);
+    for (const m of men) for (const R of [4, 6]) for (const s of [0, 1, -1]) {   // a little ahead of where its men stand, so that they build it
+      if (q.aidP) break;
+      const x = m.x + Math.cos(a) * R + ux * s * 4, z = m.z - Math.sin(a) * R + uz * s * 4;
+      if (men.filter(o => Math.hypot(o.x - x, o.z - z) < BLD.reach).length < need) continue;
+      const f = fortStart(k, t, x, z, a);
+      if (f) { q.aidP = f; f.T0 = S.t; gLog(t, 'eng', F.name + (k === 5 ? ' iniciada ' : ' iniciado ') + ecoNear(x, z) + ' (' + (GEN.job[q.job] || q.job).toLowerCase() + ')', { x, z }, 'post' + f.id); }
+    }
+    return;   // one a plan
+  }
+}
+/* ===== the dome ===== */
+/* where side t wants one: its seat town (or factory) and its base */
+const aidAreas = t => { const P = aidQrfAt(t), b = S.base[t], l = [{ x: b.x, z: b.z, nm: 'a base' }]; if (P) l.unshift(P); return l; };
+function aidDome(C, A, sq) {
+  const t = C.t, D = POSTS.dome, K = AID.dome;
+  if (S.era !== D.era || (S.net && !(Net.ft && Net.sap))) return;
+  for (const q of sq) if (q.dome && (q.dome.gone || q.dome.prog >= 1 || q.op)) {   // the builders of one that is up (or lost) go back
+    const f = q.dome; q.dome = null;
+    if (f.prog >= 1 && !f.gone) gLog(t, 'eng', 'Cúpula antifoguete pronta ' + ecoNear(f.x, f.z), f, 'dome' + f.id);
+    if (!q.op && q.ord.dome === f) setOrd(q, q.ord.back || post(t, q.job, q.jk) || { k: 'hold', ri: q.ri, s: q.s });
+  }
+  if (S.t < A.dT) return;
+  A.dT = S.t + K.again / 4;
+  const mine = S.forts.filter(f => f.k === 6 && f.team === t && !f.gone);
+  if (mine.length >= D.cap || mine.some(f => f.prog < 1) || !aidPay(t, D.cost)) return;
+  const rk = A.rk, launcher = C.known.some(o => !o.dead && o.kind === 'art' && o.arms && o.arms[0].d.sal);
+  for (const P of aidAreas(t)) {
+    if (mine.some(f => hdist(f, P) < D.r * .8)) continue;
+    const n = rk.filter(r => S.t - r.t < K.mem && Math.hypot(r.x - P.x, r.z - P.z) < D.r).length, ln = launcher && C.known.some(o => !o.dead && o.kind === 'art' && o.arms && o.arms[0].d.sal && Math.hypot(o.sx - P.x, o.sz - P.z) < o.arms[0].d.range);
+    if (n < K.n && !ln) continue;
+    const q = sq.filter(q => K.by[q.job] && !q.op && !q.dome && !q.sapT && !q.qrf && !q.state && q.live >= 2 && aidLead(q) && !aidRide(q)).sort((a, b) => hdist(aidLead(a), P) - hdist(aidLead(b), P))[0];
+    if (!q || hdist(aidLead(q), P) > 1500) continue;
+    const L = aidLead(q), e = S.base[1 - t], a = headTo(P.x, P.z, e.x, e.z);
+    let f = null;
+    for (let i = 0; i < 64 && !f; i++) {   // open ground the nearest to its builders, away from the houses
+      const an = a + Math.PI + (i % 8) * TAU / 8, R = 15 + (i >> 3) * 30, x = L.x + Math.cos(an) * R, z = L.z - Math.sin(an) * R;
+      if (!near(x, z, 25).some(o => o.K.sight)) f = fortStart(6, t, x, z, a);
+    }
+    if (!f) continue;
+    q.dome = f; f.T0 = S.t; const p = railOf(f.x, f.z), back = q.ord;
+    setOrd(q, { k: 'hold', ri: p.ri, s: p.s, x: f.x, z: f.z, R: 9, dome: f, back, aid: { kind: 'build', why: 'construir a cúpula antifoguete', area: { x: f.x, z: f.z, r: 60 } } });
+    gLog(t, 'eng', 'Cúpula antifoguete iniciada junto ' + aidAt(P.nm) + (n >= K.n ? ': ' + n + ' granadas e foguetes inimigos caíram ali' : ': lançador de foguetes inimigo ao alcance'), f, 'domeS' + f.id);
+    A.dT = S.t + K.again; return;
+  }
+}
+/* an enemy dome becomes known by sight, or when it engages one of the side's rounds */
+domeHit = (g => (f, b, stop) => { g(f, b, stop); f.kn = (f.kn || 0) | (1 << (1 - f.team)); })(domeHit);
+function aidSee() {
+  for (const f of S.forts) {
+    if (f.k !== 6 || f.gone) continue;
+    const e = 1 - f.team; if (f.kn & (1 << e)) continue;
+    const by = o => !o.dead && o.team === e && Math.abs(o.x - f.x) < AID.dome.see && Math.abs(o.z - f.z) < AID.dome.see && hdist(o, f) < AID.dome.see;
+    if (S.units.some(by) || S.men.some(by)) f.kn = (f.kn || 0) | (1 << e);
+  }
+  for (const b of S.bombs) {   // where enemy rounds come down, for the side they come down on
+    if (b.aidN || b.k !== 'he' || b.px === undefined || b.gone) continue;
+    b.aidN = 1; const C = S.cmd && S.cmd[1 - b.team]; if (!C) continue;
+    const l = aidOf(C).rk; l.push({ x: b.px, z: b.pz, t: S.t }); if (l.length > 200) l.shift();
+  }
+}
+/* ===== the rocket launchers ===== */
+const aidGradOf = t => S.units.find(u => u.team === t && !u.dead && u.kind === 'art' && u.arms[0].d.sal);
+/* a column's artillery is the side's launcher while it has none */
+spawnColumn = (g => (team, nt, na, ntr, ri, s0, nar, nsq) => {
+  const side = S.E.sides[S.fac[team]], want = nar > 0 && side.mlrs && sapOn() && !aidGradOf(team), n0 = S.units.length;
+  g(team, nt, na, ntr, ri, s0, nar - (want ? 1 : 0), nsq);
+  if (!want) return;
+  const i = S.units.length - n0;
+  dispatchIf(team, { by: MIS.col, why: 'coluna' }, () => addUnit('art', team, 0, 0, side.mlrs, false, ri, s0 + (team ? -1 : 1) * 24 * i, i % 2 ? 5 : -5, i));
+})(spawnColumn);
+/* a launcher fires at a mass only, and its whole salvo */
+pickFire = (g => (u, w) => {
+  const t = g(u, w); if (!t || !w.sal || u.man) return t;
+  let v = 0; for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && o.team !== u.team && Math.abs(o.x - t.x) < AID.grad.r && Math.abs(o.z - t.z) < AID.grad.r && spotted(o)) v += o.man ? 1 : AID.grad.veh;
+  return v >= AID.grad.mass ? t : null;
+})(pickFire);
+aiArt = (g => (u, dt) => { const was = u.ai.fm; g(u, dt); const M = u.ai.fm, w = u.arms[0].d; if (M && M !== was && w.sal && !M.t.cm) M.n = Math.max(M.n, w.sal); })(aiArt);
+AI.art = aiArt;
+function aidGrad(C, A) {
+  const t = C.t, u = aidGradOf(t); if (!u || !u.ai || u.net || S.t < A.gT) return;
+  const w = u.arms[0].d, inR = p => { const d = hdist(p, u); return d > GAI.art.near && d < w.range; };
+  let tg = null, why = '';
+  const dm = S.forts.find(f => f.k === 6 && f.team !== t && !f.gone && f.prog >= 1 && (f.kn & (1 << t)) && inR(f));
+  if (dm) { tg = dm; why = 'saturar a cúpula antifoguete inimiga'; }
+  else { const op = C.ops.find(o => o.k === 'atk' && !o.over && (o.st === 'form' || o.st === 'prep' || o.st === 'screen') && !o.aidG && o.O && inR(o.O)); if (op) { tg = op.O; op.aidG = 1; why = 'preparação antes da hora H'; } }
+  if (!tg) return;
+  const M = cmdMission(C, 'he', tg.x, tg.z, w.sal, AID.grad.life); M.by = u; A.gT = S.t + AID.grad.again;
+  gLog(t, 'fire', 'Lançador de foguetes: salva de ' + w.sal + ' para ' + why + ' ' + ecoNear(tg.x, tg.z), u, null, tg);
+}
+/* ===== the economy's guard ===== */
+ecoAI = (g => (t, V) => {
+  const out = g(t, V);
+  for (const s of V.sites) {
+    if (out.length >= 2) break;
+    const e = S.eco.l.find(e => e.id === s.id); if (!e || e.prog < 1 || (s.gd.inf >= 1 && s.gd.aa >= 1) || out.some(o => o.id === s.id)) continue;
+    const seat = e.lot >= 0, fwd = e.k === 'mine' && ecoDepth(t, e.x, e.z) < AID.eco.fwd;
+    if (seat || fwd) out.push({ c: 'def', id: s.id, inf: Math.max(1, s.gd.inf), aa: 1, why: seat ? 'proteger a produção na cidade-sede' : 'proteger a mina avançada' });
+  }
+  return out;
+})(ecoAI);
+/* the quick reaction force: sent to an own place the known enemy threatens, back when it is calm there */
+function aidQrf(C, A, sq) {
+  const t = C.t, K = AID.qrf;
+  for (const q of sq) {
+    if (q.job !== 'base' || !aidQrfOn(t)) continue;
+    const R = q.qrf, L = aidLead(q); if (!L) continue;
+    if (R) {
+      if (cmdKnown(C, R.x, R.z, K.r) > 0) R.qT = S.t;
+      const end = q.ord.qrf !== R ? 'outra ordem' : q.live < q.n0 * .5 ? 'perdas' : S.t - R.qT > K.calm ? 'nenhum inimigo junto ' + aidAt(R.nm) : S.t - R.T0 > K.T ? 'tempo esgotado' : '';
+      if (end) { q.qrf = null; rep(q, end === 'perdas' ? 'losses' : 'done', { k: 'qrf' }); gLog(t, 'def', 'Força de reação rápida volta: ' + end, L); if (q.ord.qrf === R && q.live > 0) { setOrd(q, post(t, q.job, q.jk) || { k: 'hold', ri: q.ri, s: q.s }); if (q.mis && R.why) q.mis.why = R.why; } }
+      continue;
+    }
+    if (q.op || q.dome || q.state || aidRide(q) || !q.at || q.live < 3 || (q.mis && !AID.qrf.own.includes(q.mis.why))) continue;   // a squad the general sent on a task of its own keeps it
+    const P = [];
+    for (const e of aidSites(t)) P.push({ x: e.x, z: e.z, id: e.id, nm: 'a ' + e.name.toLowerCase() });
+    for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1) P.push({ x: b.x, z: b.z, id: b.o.id, nm: 'a base de suprimento' });
+    const w = aidSeat(t); if (w) P.push({ x: w.x, z: w.z, nm: 'a cidade-sede' });
+    let best = null, bs = 0, big = null;
+    for (const p of P) {
+      if (hdist(p, L) > K.reach) continue;
+      const v = cmdKnown(C, p.x, p.z, K.r), sc = v + (p.id !== undefined && S.t - (S.ot[p.id] || -99) < K.hit ? K.hitV : 0);
+      if (v > K.max) { big = p; continue; }
+      if (sc >= K.thr && sc > bs) { bs = sc; best = Object.assign({ ex: KN.n ? KN.x : p.x, ez: KN.n ? KN.z : p.z }, p); }
+    }
+    if (!best) { if (big) gLog(t, 'def', 'Força de reação rápida não sai: o inimigo junto ' + aidAt(big.nm) + ' é forte demais para ela', big, 'qrfbig' + aidKey(big.x, big.z)); continue; }
+    const r = q.qrf = { x: best.x, z: best.z, nm: best.nm, T0: S.t, qT: S.t, why: q.mis && q.mis.why }, p = railOf(best.ex, best.ez);
+    setOrd(q, { k: 'assault', ri: p.ri, s: p.s, x: best.ex, z: best.ez, R: 10, qrf: r, aid: { kind: 'defend', why: 'força de reação rápida: ' + best.nm, area: { x: best.x, z: best.z, r: K.r } } });
+    if (q.ord.qrf !== r) { q.qrf = null; continue; }
+    gLog(t, 'def', 'Força de reação rápida enviada para ' + best.nm + ' (inimigo de força ' + gN(bs) + ')', best, 'qrf' + aidKey(best.x, best.z));
+  }
+}
+/* the commander's part, each plan (after its works: fortPlan) */
+function aidPlan(t, sq) {
+  if (S.net && !S.host) return;
+  const C = cmdOf(t), A = aidOf(C);
+  if (genBy(t, 'def') === 'ai') { if (sapOn()) aidSap(C, A, sq); aidQrf(C, A, sq); aidPosts(C, A, sq); aidDome(C, A, sq); }
+  aidGrad(C, A);
+}
+fortPlan = (g => (t, sq) => { g(t, sq); aidPlan(t, sq); })(fortPlan);
+step = (g => dt => { g(dt); if ((!S.net || S.host) && (S.aidT = (S.aidT || 0) - dt) <= 0) { S.aidT = AID.dt; aidWork(AID.dt); aidSee(); } })(step);
 /* ---------- analytics (ANA): what a match was, for the after-action review and for balancing ----------
    Where the match is simulated (solo, a local watch match, the online host), ANA writes typed events and a snapshot every snap s, and builds
    the after-action review from them (anaReport, a pure function of the events: tools/balance.js and the MCP report use the same one). It only

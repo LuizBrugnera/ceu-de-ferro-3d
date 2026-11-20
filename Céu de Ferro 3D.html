@@ -38491,6 +38491,9 @@ function proj(x, y, z) {
 
 /* the renderer of the carousel: one WebGL context off screen for every preview, copied to the 2D canvas of the slide. m: a model about L
    long, kept by the caller; ang: how far it has turned on the turntable */
+/* TT.w, TT.h: the size of its drawing buffer, which only grows: a smaller card is drawn in its lower left corner and copied from there. Sized
+   to each card, the buffer was set again on every switch between the big card and the small ones (setSize, up to 1.6 s each on a weak GPU:
+   the hangar stalled at load and at each vehicle picked, cf-pol-fluxos) */
 const TT = { r: null, s: null, c: null, p: null, w: 0, h: 0 };
 function preview(m, L, canvas, ang) {
   try {
@@ -38501,14 +38504,16 @@ function preview(m, L, canvas, ang) {
       TT.c = new THREE.PerspectiveCamera(30, 16 / 9, 1, 500); TT.p = new THREE.Group(); TT.s.add(TT.p);
     }
     const W = canvas.width, H = canvas.height, g = canvas.getContext('2d');
-    if (W !== TT.w || H !== TT.h) { TT.r.setSize((TT.w = W), (TT.h = H), false); TT.c.aspect = W / H; TT.c.updateProjectionMatrix(); }
+    if (W > TT.w || H > TT.h) TT.r.setSize((TT.w = Math.max(W, TT.w)), (TT.h = Math.max(H, TT.h)), false);
+    if (TT.c.aspect !== W / H) { TT.c.aspect = W / H; TT.c.updateProjectionMatrix(); }
+    TT.r.setViewport(0, 0, W, H);
     let b = m.userData.fit;
     if (!b) {   // framed by its own size: the half diagonal on the ground and the half height, from the model's box
       m.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), c = bb.getCenter(new THREE.Vector3()), r = Math.hypot(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2, hy = (bb.max.y - bb.min.y) / 2;
       b = m.userData.fit = isFinite(r) && r > 0 ? { y: c.y, d: Math.max((hy + r * .25) / .268, r / .477) * 1.06 } : { y: 0, d: L * 1.6 };
     }
     TT.p.add(m); TT.p.rotation.y = ang || 0; TT.c.position.set(b.d * .594, b.y + b.d * .218, b.d * .775); TT.c.lookAt(0, b.y, 0);
-    TT.r.render(TT.s, TT.c); TT.p.remove(m); g.clearRect(0, 0, W, H); g.drawImage(TT.r.domElement, 0, 0, W, H);
+    TT.r.render(TT.s, TT.c); TT.p.remove(m); g.clearRect(0, 0, W, H); g.drawImage(TT.r.domElement, 0, TT.h - H, W, H, 0, 0, W, H);   // the viewport's rows are the buffer's last H (GL counts from the bottom)
   } catch (e) {}
 }
 /* ---------- woods, trenches and sandbags: what is seen of them ----------
@@ -40707,7 +40712,7 @@ function ttSpin(now) {
   requestAnimationFrame(ttSpin);
   if (now - spinT < (sw.on ? 30 : 1000 / HOME.lite.spin) && !F.dirty) return;
   const dt = Math.min(.1, (now - spinT) / 1000), k = F.o.cls, id = F.ids[F.i]; spinT = now;
-  const model = v => { let e = F.m.get(v); if (!e) { const c = cardOf(k, v); F.m.set(v, (e = { m: c.mesh(), L: c.L })); } return e; };
+  const model = v => { let e = F.m.get(v); if (!e) { const c = cardOf(k, v); PACK.ask = new Set(); try { e = { m: c.mesh(), L: c.L, ask: PACK.ask }; } finally { PACK.ask = null; } F.m.set(v, e); } return e; };   // ask: the pack models it looked for (packHangar)
   if (F.dirty) {
     F.dirty = false;
     for (const v of F.ids) { const c = F.el[v].firstChild, big = v === id, W = big ? clamp(Math.round(F.el[v].offsetWidth * Math.min(2, devicePixelRatio || 1)), 480, 1280) : 480; if (c.width !== W) { c.width = W; c.height = Math.round(W * 9 / 16); } if (!big || reduced) { const e = model(v); preview(e.m, e.L, c, .5); } }
@@ -45217,21 +45222,32 @@ function packRead(buf) {
 /* the model id, or null while it is not here (the first ask starts the fetch; a failure is remembered and never retried) */
 function packGet(id) {
   if (!PACK.on || !id) return null;
+  if (PACK.ask) PACK.ask.add(id);   // a hangar card being built: which pack models it uses (packHangar)
   const E = PACK.M[id];
   if (E) return E.st === 1 ? E.d : null;
   const e = (PACK.M[id] = { st: 0, d: null });
   try {
-    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; packHangar(); })
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; packHangar(id); })
       .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
   } catch (er) { e.st = -1; }
   return null;
 }
-/* the hangar's carousels keep each model from the first time they drew it, mostly before the pack came in: when a model arrives, they
-   drop what they kept (once, a moment after the last of a burst) and draw it again */
-function packHangar() {
+/* the hangar's carousels keep each model from the first time they drew it, mostly before the pack came in: when pack models arrive, they
+   drop the ones built while those were missing (a card's ask: what it looked for) and draw them again, once, a moment after the last of a
+   burst. Only those: the pack comes in model by model as the battle behind the hangar asks for them, and dropping every card at each one
+   (planes too, which use none) redrew the whole carousel again and again in the first minute (cf-pol-fluxos) */
+function packHangar(id) {
+  (PACK.hq || (PACK.hq = new Set())).add(id);
   clearTimeout(PACK.ht);
   PACK.ht = setTimeout(() => {
-    try { for (const b of [$('#planes'), $('#swapList')]) { const F = b && b._f; if (!F) continue; for (const v of F.m.values()) kill(v.m); F.m.clear(); F.dirty = true; } ttKick(); } catch (e) {}
+    const got = PACK.hq; PACK.hq = new Set(); let any = false;
+    try {
+      for (const b of [$('#planes'), $('#swapList')]) {
+        const F = b && b._f; if (!F) continue;
+        for (const [v, e] of F.m) if (!e.ask || [...e.ask].some(i => got.has(i))) { kill(e.m); F.m.delete(v); F.dirty = any = true; }
+      }
+      if (any) ttKick();
+    } catch (e) {}
   }, 250);
 }
 /* a phong material in the game's look over the vertex colours: paint takes the colour, fixed stays white; c is what damageLook goes back to */

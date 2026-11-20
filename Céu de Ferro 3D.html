@@ -8357,6 +8357,10 @@ const ARMK = {
     if ((s.wo = ray(m.x, m.y, m.z, s.x, s.y, s.z, 0))) { const k = Math.max(0, RAY.t - OBJS.back / R); s.x = m.x + d.x * R * k; s.y = m.y + d.y * R * k; s.z = m.z + d.z * R * k; s.T *= k; }   // a wall on the way: it bursts on it
     S.shells.push(s); puff(m.x, m.y, m.z, 'spark', 1); return s;
   } },
+  rkt: { fire(u, w, m, d) {   // an unguided rocket from a vehicle's pod: the aircraft's rocket (S.bombs k rocket), which bursts on what it strikes
+    const b = { k: 'rocket', x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, o: w, team: u.team, by: u, life: w.life || 4 };
+    S.bombs.push(b); puff(m.x, m.y, m.z, 'flash', .8); puff(m.x - d.x * 2, m.y, m.z - d.z * 2, 'smoke', 1); fx.launch(u === S.my); return b;
+  } },
   sam: { fire: (u, w) => (u.ctl.lock && !u.ctl.lock.dead && !u.ctl.lock.gone ? launchSam(u, w, u.ctl.lock) : null), relay: (u, i, m) => Net.ord(u, i, m) }
 };
 /* a tank's gun keeps one count of rounds, a.ammo, and says how many of them are high explosive, a.he (set again whenever the magazine is
@@ -8380,7 +8384,7 @@ function arms(u, dt) {
     a.cool -= dt;
     if (a.d.hv) shFix(a);
     if (!c.fire[i] || a.cool > 0 || a.ammo <= 0 || shN(a, a.ld | 0) <= 0 || (u.net && K.relay) || !Q['gun' + i] || (w.k === 'sam' && !Q.lock) || Math.abs(u.sp) > w.halt) return;
-    if (u.ai && (w.k === 'shell' || w.k === 'gun' || w.k === 'flak') && ffHeld(u, i ? u.ai.inf || u.ai.low || u.ai.tgt : u.ai.tgt || u.ai.low, 0, a)) return;   // a friend on the line
+    if (u.ai && (w.k === 'shell' || w.k === 'gun' || w.k === 'rkt' || w.k === 'flak') && ffHeld(u, i ? u.ai.inf || u.ai.low || u.ai.tgt : u.ai.tgt || u.ai.low, 0, a)) return;   // a friend on the line
     const f = (w.free && c.aim2) || u.f, s = w.sp + c.sp[i] + Q.disp * DMG.disp, d = s ? vnorm({ x: f.x + rand(-s, s), y: f.y + rand(-s, s), z: f.z + rand(-s, s) }) : f;
     const r = K.fire(u, w, { x: u.x + f.x * D.bl, y: u.y + D.mh + f.y * D.bl, z: u.z + f.z * D.bl }, d);
     if (!r) return;
@@ -20176,7 +20180,7 @@ function rqDepot(o) {
   const p = Q.p.find(p => p.base < 0 && hdist(o, p) < p.r && !cqSpawnWhy(p, t) && S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, p) < p.r + 60));
   return p ? { id: p.i + 1, k: 3, x: p.x, z: p.z } : null;
 }
-const rqKind = (cls, model) => (cls === 'trn' ? DEFS.trn[model].svc || (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);   // a service vehicle (REC.play) by its own kind
+const rqKind = (cls, model) => (cls === 'trn' ? (DEFS.trn[model].bomb ? (DEFS.trn[model].bomb === 'truck' ? 'svbied' : 'vbied') : '') || DEFS.trn[model].svc || (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);   // a service vehicle (REC.play) by its own kind
 const rqCost = (cls, model) => RQ.cost[rqKind(cls, model)] || 1;
 function rqStock(id) { const Q = S.cq, s = Q.stock[id] || (Q.stock[id] = { n: RQ.stock, t: S.t }); while (s.n < RQ.stock && S.t - s.t >= RQ.refill) { s.n++; s.t += RQ.refill; } if (s.n >= RQ.stock) s.t = S.t; return s; }
 /* why not, for soldier o of player who (0 solo): '' or a key of RQ.why */
@@ -24384,12 +24388,13 @@ Object.assign(ARMS, {
   zu23: { k: 'gun', rate: .035, dmg: 7, spd: 970, ap: .25, ammo: 400, life: 2.6, sp: .0045, sweep: 1 },
   /* the Insurgents' old anti-air (cf-insurg-antiaerea; NOT TESTED, see docs/nao-testado/cf-insurg-antiaerea.md): gunfire and unguided rockets only,
      aimed by eye with lead (the AI's lowPlane/known sight, so weaker at night and in bad weather); no radar, no lock, no missile. kpv: the 14.5 mm
-     KPV of the ZPU; shil: the Shilka's four 23 mm AZP-23, fast but short of ammunition; s5, s8: unguided 57 and 80 mm rocket pods as fast, heavy,
-     loose rounds in salvos (rate short, spread wide, a pod's worth of ammo) */
+     KPV of the ZPU; shil: the Shilka's four 23 mm AZP-23, fast but short of ammunition; s5, s8: unguided 57 and 80 mm rocket pods fired in salvos (rate short, spread wide, a pod's worth of ammo): k rkt, a real
+     rocket (ARMK.rkt, the aircraft's S.bombs rocket) that bursts where it strikes, dmg r its warhead (S-8 as the aircraft's, S-5 smaller), vis
+     [radius, length] of its drawn body (cf-foguete-tecnica; NOT TESTED, see docs/nao-testado/cf-foguete-tecnica.md) */
   kpv: { k: 'gun', rate: .065, dmg: 9, spd: 990, ap: .3, ammo: 480, life: 2.5, sp: .0055, sweep: 1 },
   shil: { k: 'gun', rate: .017, dmg: 6.5, spd: 970, ap: .24, ammo: 900, life: 2.6, sp: .005, sweep: 1 },
-  s5: { k: 'gun', rate: .07, dmg: 15, spd: 560, ap: .1, ammo: 64, life: 3.4, sp: .016, sweep: 1 },
-  s8: { k: 'gun', rate: .11, dmg: 28, spd: 600, ap: .2, ammo: 40, life: 3.6, sp: .013, sweep: 1 }
+  s5: { k: 'rkt', rate: .07, dmg: 55, r: 12, spd: 560, ammo: 64, life: 3.4, sp: .016, vis: [.1, 2.2] },
+  s8: { k: 'rkt', rate: .11, dmg: 95, r: 20, spd: 600, ammo: 40, life: 3.6, sp: .013, vis: [.14, 2.6] }
 });
 Object.assign(SARMS, {
   akm: { name: 'AKM', rate: .1, dmg: 8, spd: 715, mag: 30, mags: 6, sp: .009, rl: 2.6, auto: 1 },
@@ -24437,6 +24442,8 @@ Object.assign(SARMS, {
     suv: { name: 'Land Cruiser civil', kind: 'car', role: 'Utilitário civil', l: 4.8, w: 1.9, hh: 1, cab: .6, hp: 12, spd: 27, tr: .85, seats: { pax: 4 }, arm: NOARM },
     sedan: { name: 'Sedã civil', kind: 'car', role: 'Carro civil', l: 4.5, w: 1.75, hh: .75, cab: .4, hp: 9, spd: 28, tr: .9, seats: { pax: 3 }, arm: NOARM },
     vbied: { name: 'Carro-bomba (VBIED)', kind: 'car', role: 'Carro-bomba', l: 4.6, w: 1.8, hh: .9, cab: .5, hp: 16, spd: 24, tr: .8, seats: { pax: 0 }, arm: NOARM, bomb: 'car' },
+    vbiedPk: { name: 'Picape-bomba (VBIED)', kind: 'car', role: 'Carro-bomba (picape carregada)', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 18, spd: 23, tr: .85, seats: { pax: 0 }, arm: NOARM, bomb: 'car' },   // cf-vbied
+    svbied: { name: 'Caminhão-bomba (SVBIED)', kind: 'truck', role: 'Caminhão-bomba pesado', l: 7, w: 2.5, hh: 1.05, cab: 2, hp: 30, spd: 13, tr: .5, seats: { pax: 0 }, arm: NOARM, bomb: 'truck' },   // cf-vbied: BOMB.truck
     zil131: { name: 'Caminhão ZIL-131', kind: 'truck', role: 'Caminhão', l: 7, w: 2.5, hh: 1.05, cab: 2, hp: 22, spd: 15, tr: .55, open: 1, mat: 1, seats: { pax: 12 }, arm: NOARM },
     btr70: { name: 'BTR-70 (capturado)', kind: 'lav', role: 'Blindado sobre rodas capturado', l: 7.5, w: 2.8, hh: 1.15, t: [1.2, 1.3, .45, 1], g: 2.2, cab: 2.5, hp: 55, spd: 20, tr: .65, sl: .8, el: [-.08, .9], swim: 2, seats: { gun: 1, pax: 6 }, seat: 'gunnerM',
       arm: [['ac30', { name: 'KPVT 14,5 mm', rate: .11, rl: .11, dmg: 8, ap: .2, spd: 1000, ammo: 500 }], ['coax', { name: 'PKT coaxial' }]] } };
@@ -24488,7 +24495,7 @@ addUnit = (g => (kind, team, x, z, id, ...r) => { const sd = S.E.sides[S.fac[tea
 /* the kits an AI soldier's row names by index: a third side's come after every kit an older page knew, so the old indices hold */
 trnKits = (g => () => { const l = g(), c = INF[S.era][2]; return c ? l.concat(c.filter(id => !l.includes(id))) : l; })(trnKits);
 /* ---- the bombs: when one goes, and the AI that takes it to its target ---- */
-const bombOf = o => (o && o.def && o.def.bomb ? BOMB[o.def.bomb] : null);
+const bombOf = o => (o && !o.svb && o.def && o.def.bomb ? BOMB[o.def.bomb] || null : null);   // the strategic truck (u.svb) is STK's own (cf-vbied)
 const bombSim = () => !S.net || S.host;
 /* the nearest enemy on the ground within r of o (a vehicle, or a soldier not in one) */
 function bombFoe(o, r) {
@@ -30646,7 +30653,7 @@ function stkSvb(u, dt) {
 function stkSvbGo(u) {
   const V = u.svb, K = STK.K.svbied; if (!V || V.go) return; V.go = 1;
   const x = u.x, y = u.y + 1.5, z = u.z;
-  explode(x, y, z, K.r, K.dmg, u, u.team, false, 1); stkFx(x, y, z, K.r);
+  explode(x, y, z, K.r, K.dmg, u, u.team, false, 1, K.dmg * CITY.chg.ied); stkFx(x, y, z, K.r);   // cf-vbied: and the buildings near it
   const s = (S.stk || []).find(s => s.id === V.s); if (s) { s.res = 'ok'; s.st = 'detonado ' + ecoNear(x, z); }
   gLog(u.team, 'atk', 'Caminhão-bomba detonado ' + ecoNear(x, z), { x, z }, 'stkv');
   if (!u.dead) { u.cqd = 1; killUnit(u, true); }   // spent, not lost
@@ -30763,6 +30770,242 @@ function stkView(t) {
 }
 genState = (g => t => { const o = g(t); if (o) o.stk = stkView(t); return o; })(genState);
 genQuery = (g => (t, q) => (q && q.q === 'stk' ? stkView(t) || gBad('off') : g(t, q)))(genQuery);
+/* ---------- the car bomb, the truck bomb and the disguised bomber (cf-vbied; NÃO TESTADO, see docs/nao-testado/cf-vbied.md) ----------
+   The captain: "faltou o carro bomba e caminhão bomba para os insurgentes" and "deve ter uma classe de homem bomba insurgente que se
+   disfarça de civil". What was there: the AI car bomb (vbied, sent by insBomb straight at its target, not playable), the heavy truck bomb of
+   the strategic strike (svbied, a plain truck with no model of its own) and the suicide bomber (insBomber, in uniform, recognised as any
+   soldier but in a village). What this adds, all through hooks:
+   - Models: the car bomb (vbied, a sedan) and a pickup bomb (vbiedPk) and the truck bomb (svbied, a ZIL with 1.5 t in the bed: BOMB.truck),
+     playable by an Insurgent in the hangar, the swap board (H) and the requisition (U; VBM.rq tickets, at most VBM.cap of each alive per side,
+     the AI's included). The strategic truck now has the svbied body (bombOf leaves it to STK's own code, u.svb).
+   - The player sets one off with 5 (VBK), a hard blow (ramHit, vcolHit: VBM.imp m/s or more, armed), or as before an enemy within trig m.
+     Its burst: explode (with what it does to buildings, CITY.chg.ied) and STK's crater, fireball and cloud (stkFx) by its radius.
+   - The command vbied { k: car|truck, m: sedan|pk, x z | id | pi, why } in the general's funnel (genCmd), the same for the AI, a person
+     (General's view: Campanha, Carro-bomba) and the MCP (car_bomb): the car is drawn from the economy as a car and driven by the least seen
+     way of the road network (vbTrip: each edge costs more near the enemies the side knows, its points and its bases), then straight at the
+     target; the truck is GC.bomb's svbied, which now also takes the least seen way.
+   - The AI general (insBomb): a vehicle target (and now the enemy's main base, HQ and points too) goes to genCmd vbied, the truck when its
+     reserve has one and the target is worth VBM.ai.truck; the guerrilla's sabotage (sab) and the cut of the command (cmd) try a bomb first
+     (VBM.ai.grl of the time). The bomber it sends is the disguised one VBM.civ.p of the time.
+   - The disguised bomber (insCivBomber): a kit of the Insurgents, in plain clothes (the pack's civilian), with the vest of compartment 5
+     and a hidden pistol; to every enemy it is at most a man seen (grade 1: no shot) until it is within VBM.civ.near m, it has fired, or it
+     is suspect (below).
+   - Suspicion (vbSusStep, every VBM.sus.every s where the battle is simulated): a bomb vehicle closing at VBM.sus.v m/s or more, or a bomb man
+     running at VBM.civ.v m/s, toward a regular's man or vehicle within VBM.sus.r (a man: VBM.civ.sus) m is suspect for VBM.sus.T s: the
+     regulars' AI fires on it first (manThink, pickGround), the side's log says so once. HESCO and walls already stop a hull (bump), and a
+     bomb that hits one at speed goes off there. */
+const VBM = {
+  cap: { car: 2, truck: 1 },
+  rq: { vbied: 3, svbied: 6 },
+  imp: 8, fx: 1,
+  route: { r: 450, w: 3, post: 2, base: 4, max: 6 },
+  sus: { r: 350, v: 7, cos: .75, every: .5, T: 8 },
+  civ: { near: 25, sus: 80, v: 3.2, p: .6 },
+  ai: { truck: 4.5, grl: .5, val: { base: 4, hq: 6, post: 3 } }
+};
+BOMB.truck = { name: 'Carga de 1,5 t', dmg: STK.K.svbied.dmg, r: STK.K.svbied.r, arm: 3, trig: STK.K.svbied.trig, seek: 1500, kill: STK.K.svbied.kill, he: 1 };
+Object.assign(GEN.no, { vbcap: 'Limite de carros-bomba deste lado (' + VBM.cap.car + ' por vez)' });
+GEN.cn.vbied = 'carro-bomba';
+Object.assign(RQ.cost, VBM.rq);
+Object.assign(RQ.why, { vbcap: 'Limite de veículos-bomba do seu lado: espere o que já saiu explodir.' });
+/* the disguised bomber's kit, the vehicles a player may drive, and the faction's bombs */
+{
+  const F = FACTIONS.modern.insurgentes;
+  KITS.insCivBomber = Object.assign({}, KITS.insBomber, { name: 'Homem-bomba disfarçado', role: 'Homem-bomba (roupa civil)', civ: 1, arms: KITS.insBomber.arms.slice() });
+  if (!F.inf.includes('insCivBomber')) F.inf.push('insCivBomber');
+  if (INF.modern[F.slot] && !INF.modern[F.slot].includes('insCivBomber')) INF.modern[F.slot].push('insCivBomber');   // at the end: no older index moves
+  for (const id of ['vbied', 'vbiedPk', 'svbied']) if (TRNS[id]) Object.defineProperty(TRNS, id, { value: TRNS[id], enumerable: true, configurable: true });
+  Object.assign(F.bomb, { pk: 'vbiedPk', truck: 'svbied', civ: 'insCivBomber' });
+}
+/* the side's faction bombs, or null (STK.any: every side) */
+function vbFac(t) {
+  const sd = S && S.E && S.fac && S.E.sides[S.fac[t]], F = sd && sd.fac && FACTIONS[S.era] && FACTIONS[S.era][sd.fac];
+  return F && F.bomb ? F.bomb : STK.any ? FACTIONS.modern.insurgentes.bomb : null;
+}
+/* the bomb vehicles of side t alive: car (car and pickup) or truck (the strategic one too) */
+const vbCount = (t, k) => S.units.reduce((a, u) => a + (!u.dead && !u.gone && u.team === t && (k === 'truck' ? (u.svb && !u.svb.go) || (u.def && u.def.bomb === 'truck') : u.def && u.def.bomb === 'car') ? 1 : 0), 0);
+/* ---- the least seen way ---- */
+function vbCost(t, mode) {
+  const C = S.cmd && S.cmd[t], K = VBM.route, eyes = [];
+  if (C) for (const o of C.known || []) if (!o.dead && insFoe(t, o) && Number.isFinite(sX(o, t))) eyes.push({ x: sX(o, t), z: sZ(o, t), w: 1 });
+  (S.base || []).forEach((b, s) => { if (b && foeSide(t, s)) eyes.push({ x: b.x, z: b.z, w: K.base }); });
+  if (S.cq && S.cq.p) for (const p of S.cq.p) if (p && Number.isInteger(p.hold) && p.hold >= 0 && foeSide(t, p.hold)) eyes.push({ x: p.x, z: p.z, w: K.post });
+  const R2 = K.r * K.r, memo = new Map();
+  return e => {
+    let k = memo.get(e.i);
+    if (k === undefined) {
+      const L = e.smp || e.p, m = L && L.length ? L[L.length >> 1] : null; let n = 0;
+      if (m) for (const q of eyes) { const dx = q.x - m.x, dz = q.z - m.z; if (dx * dx + dz * dz < R2) n += q.w; }
+      k = 1 + K.w * Math.min(n, K.max); memo.set(e.i, k);
+    }
+    return e.len * RN.cls[mode][e.c] * k;
+  };
+}
+/* tripTo by the least seen way (the fastest when that fails) */
+function vbTrip(u, x, z, why, T) {
+  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
+  const mode = vehMode(u);
+  let p = null; try { p = tripOf(u.x, u.z, x, z, { mode, team: u.team, cost: vbCost(u.team, mode) }); } catch (e) { p = null; }
+  if (!p) return tripTo(u, x, z, { why, T });
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: T !== undefined ? T : S.t + 2 * tripLen(p) / (u.def.spd * GSPD) + 30, drop: false, back: null, gone: false, why: why || '' });
+}
+/* ---- the command ---- */
+const vbSite = (t, id) => S.sup.concat(ecoFoe(t)).find(b => b.id === id && !b.dead && foeSide(t, b.team) && spotted(b, t)) || null;
+function vbSend(t, x, z, o, id, why, by) {
+  const B = S.base[t], p0 = railOf(B.x, B.z);
+  const u = dispatch(t, { kind: 'attack', why: 'carro-bomba' + (why ? ': ' + why : ''), area: { x, z, r: 300 } }, () => addUnit('car', t, 0, 0, id, false, p0.ri, p0.s, 0, 0));
+  if (!u) return null;
+  const real = o && (o.man || o.def) && o.team !== undefined ? o : null;
+  u.insGo = { x, z, o: real };
+  u.vb = { x, z, trip: 0, T: S.t, by };
+  gLog(t, 'atk', (TRNS[id] ? TRNS[id].name : 'Carro-bomba') + ' enviado ' + gNear(x, z) + (by === 'ai' ? '' : ' (ordem do comando)') + (why ? ': ' + why : '') + '; pelo caminho menos vigiado', { x, z }, null);
+  return u;
+}
+GC.vbied = { d: 'atk', f(t, c, by) {
+  const k = c.k === 'truck' ? 'truck' : 'car';
+  if (k === 'truck') return GC.bomb.f(t, Object.assign({}, c, { c: 'bomb', k: 'svbied' }), by);
+  const F = vbFac(t); if (!F || !F.car) return gBad('fac');
+  let x = c.x, z = c.z, tg = null;
+  if (Number.isInteger(c.id)) { tg = vbSite(t, c.id); if (!tg) return gBad('id'); x = tg.x; z = tg.z; }
+  else if (Number.isInteger(c.pi)) { const P = gPts()[c.pi]; if (!P) return gBad('at'); x = P.x; z = P.z; }
+  if (!Number.isFinite(x) || !Number.isFinite(z) || !gMapOk(x, z)) return gBad('map');
+  if (vbCount(t, 'car') >= VBM.cap.car) return gBad('vbcap');
+  const P = popOf(t), U = popUse(t); if (U.veh + 1 > P.veh) return gBad('pop');
+  const o = by === 'ai' && c.o && typeof c.o === 'object' ? c.o : null;   // a target object: the AI's own, never one from the wire
+  if (by === 'ai' && roeHeld(t, x, z, BOMB.car.r, o || tg)) return gBad('roe');
+  if (!ecoUse(t, 'car')) return gBad('res');
+  const id = c.m === 'pk' && F.pk && TRNS[F.pk] ? F.pk : F.car;
+  const u = vbSend(t, x, z, o || tg, id, typeof c.why === 'string' ? c.why.slice(0, 120) : '', by);
+  if (!u) { if (S.eco && ecoSim()) ecoBack(t, 'car', 1); return gBad('bug'); }
+  return gYes(u.id);
+} };
+/* the strategic truck: the svbied body, and the least seen way */
+let vbTruckId = null;
+addUnit = (g => (kind, team, x, z, id, ...r) => (kind === 'truck' && id === null && vbTruckId ? g(kind, team, x, z, vbTruckId, ...r) : g(kind, team, x, z, id, ...r)))(addUnit);
+stkLaunch = (g => (t, k, ...r) => {
+  if (k !== 'svbied') return g(t, k, ...r);
+  const F = vbFac(t); vbTruckId = F && F.truck && TRNS[F.truck] && TRNS[F.truck].side === S.fac[t] ? F.truck : null;
+  try { return g(t, k, ...r); } finally { vbTruckId = null; }
+})(stkLaunch);
+tripTo = (g => (u, x, z, o) => (o && o.why === 'svb' && u.svb && !u.vbW ? ((u.vbW = 1), vbTrip(u, x, z, 'svb', o.T)) : g(u, x, z, o)))(tripTo);
+/* ---- the AI's car: the least seen way first, no stop for a fight on it ---- */
+AI.car = (g => (u, dt) => {
+  const V = u.vb;
+  if (V && !V.trip && !u.dead) { V.trip = 1; if (u.rail && vbTrip(u, V.x, V.z, 'vb')) return; }
+  g(u, dt);
+})(AI.car);
+tripAI = (g => (u, dt) => {
+  if (!u.vb || u.svb) return g(u, dt);
+  const A = u.ai, c = u.ctl;
+  if (!u.rail || u.dead) { u.trip = null; return false; }
+  if ((A.think -= dt) <= 0) { A.think = GAI.think; scan(u); }
+  if (S.t > u.trip.T) { tripStop(u); return false; }
+  c.fire[0] = c.fire[1] = false; c.brake = false; c.drive = 1;
+  return true;
+})(tripAI);
+/* ---- the burst of a bomb vehicle: STK's crater, fireball and cloud by its radius ---- */
+bombGo = (g => o => {
+  const B = bombOf(o), v = !!B && !o.man && !o.bGone, x = o.x, y = (o.y || hgt(o.x, o.z)) + 1, z = o.z;
+  g(o);
+  if (v) { stkFx(x, y, z, B.r * VBM.fx); gLog(o.team, 'atk', (o.def.name || 'Carro-bomba') + ' detonado ' + gNear(x, z), { x, z }, null); }
+})(bombGo);
+/* a hard blow sets an armed bomb vehicle off (into a wall, a house, a HESCO, another hull) */
+function vbBlow(u, v) {
+  if (!u || u.dead || u.man || !bombSim() || u.net || !(v >= VBM.imp)) return;
+  if (u.svb) { if (!u.svb.go && !(u.svb.ff && FF.ai && ffOn() && ffDanger(u.x, u.z, STK.K.svbied.r, u.team, u))) stkSvbGo(u); return; }
+  const B = bombOf(u); if (!B || u.bGone || u.bArm === undefined || S.t < u.bArm || bombHeld(u, B, null)) return;
+  bombGo(u);
+}
+ramHit = (g => (u, o, x, z, v) => { const r = g(u, o, x, z, v); vbBlow(u, v); return r; })(ramHit);
+vcolHit = (g => (u, o, v, k, x, z, crush) => { const d = u.dead; g(u, o, v, k, x, z, crush); if (!d) vbBlow(u, v); })(vcolHit);
+/* ---- the requisition: its own price and cap ---- */
+rqWhy = (g => (o, cls, model, who) => {
+  const r = g(o, cls, model, who), d = cls === 'trn' && DEFS.trn[model]; if (r || !d || !d.bomb) return r;
+  return vbCount(o.team, d.bomb === 'truck' ? 'truck' : 'car') >= VBM.cap[d.bomb === 'truck' ? 'truck' : 'car'] ? 'vbcap' : '';
+})(rqWhy);
+/* ---- the disguised bomber: a man seen, not an enemy, until near, firing or suspect ---- */
+grade = (g => (a, t) => {
+  const k = g(a, t);
+  if (k < 2 || !t || !t.man || t.in || !t.def || !t.def.civ || !a || a.team === t.team) return k;
+  if (S.t - shotAt(t) < INS.dis.calm || (t.vbS || 0) > S.t || hdist(a, t) < VBM.civ.near) return k;
+  return 1;
+})(grade);
+/* ---- the AI general ---- */
+insBombTgt = (g => C => {
+  let best = g(C); const t = C.t, K = INS.bomb, B = S.base[t], V = VBM.ai.val;
+  let bs = best ? best.v / (1 + hdist(B, best) / 4000) : 0;
+  const take = (v, x, z, nm) => { if (!Number.isFinite(x) || hdist(B, { x, z }) > K.reach) return; const s = v / (1 + hdist(B, { x, z }) / 4000); if (s > bs) { bs = s; best = { o: { name: nm }, x, z, v, veh: true, fix: 1 }; } };
+  (S.base || []).forEach((b, s) => { if (b && foeSide(t, s) && s !== t) take(V.base, b.x, b.z, 'a base principal inimiga'); });
+  if (S.eco) for (const e of ecoFoe(t)) if (e.k === 'hq' && spotted(e, t)) take(V.hq, e.x, e.z, 'a sede inimiga');
+  if (S.cq && S.cq.p) for (const p of S.cq.p) if (p && Number.isInteger(p.hold) && p.hold >= 0 && foeSide(t, p.hold)) take(V.post, p.x, p.z, 'o posto inimigo em ' + (p.nm || gName(p)));
+  return best;
+})(insBombTgt);
+/* a bomb at target a { x, z, v, o, nm }: the truck when its reserve has one and a is worth it, else a car; true when one went */
+function vbGo(C, a, why) {
+  const t = C.t, F = vbFac(t); if (!F || !a) return false;
+  if (a.v >= VBM.ai.truck && stkKinds(t).includes('svbied') && stkRes(t, 'svbied') > 0 && !stkLive(t, 'svbied').length) {
+    const r = genCmd(t, { c: 'vbied', k: 'truck', x: Math.round(a.x), z: Math.round(a.z), why }, 'ai'); if (r && r.ok) return true;
+  }
+  const r = genCmd(t, { c: 'vbied', k: 'car', m: Math.random() < .5 ? 'pk' : 'sedan', x: Math.round(a.x), z: Math.round(a.z), o: a.o && (a.o.man || a.o.def) ? a.o : null, why }, 'ai');
+  return !!(r && r.ok);
+}
+insBomb = (g => C => {
+  const t = C.t, K = INS.bomb, F = FACTIONS.modern.insurgentes; if (S.t < (C.bombT || 0)) return;
+  const a = insBombTgt(C);
+  if (a && a.veh && vbCount(t, 'car') < K.car && vbGo(C, a, (a.o && a.o.name) || 'alvo de valor')) { C.bombT = S.t + K.every; return; }
+  const c0 = K.car, m0 = F.bomb.man; K.car = 0;   // the old path for the man only (the car went by the command above)
+  if (Math.random() < VBM.civ.p) F.bomb.man = 'insCivBomber';
+  try { g(C); } finally { K.car = c0; F.bomb.man = m0; }
+})(insBomb);
+/* ---- suspicion and the regulars' answer ---- */
+function vbSusStep(dt) {
+  if (!bombSim() || (S.vbT = (S.vbT || 0) - dt) > 0) return;
+  const K = VBM.sus, e = K.every - S.vbT; S.vbT = K.every;
+  const L = S.vbSus = [];
+  const look = (o, v0, r) => {
+    const p = o.vbP; o.vbP = { x: o.x, z: o.z }; if (!p || !(e > 0)) return;
+    const vx = (o.x - p.x) / e, vz = (o.z - p.z) / e, v = Math.hypot(vx, vz); if (v < v0) { if ((o.vbS || 0) > S.t) L.push(o); return; }
+    let hit = null;
+    for (const l of [S.men, S.units]) for (const q of l) {
+      if (hit || q.dead || q.in || q.team === o.team || !foeSide(o.team, q.team) || insT(q.team) || Math.abs(q.x - o.x) > r || Math.abs(q.z - o.z) > r) continue;
+      const dx = q.x - o.x, dz = q.z - o.z, d = Math.hypot(dx, dz); if (d < r && (dx * vx + dz * vz) / ((d || 1) * v) > K.cos) hit = q;
+    }
+    if (!hit) { if ((o.vbS || 0) > S.t) L.push(o); return; }
+    if (!((o.vbS || 0) > S.t)) gLog(hit.team, 'def', (o.man ? 'Civil suspeito correndo' : 'Veículo suspeito acelerando') + ' para as nossas tropas ' + gNear(o.x, o.z) + ': fogo nele', o, 'vbs' + (o.id || 0));
+    o.vbS = S.t + K.T; L.push(o);
+  };
+  for (const u of S.units) if (!u.dead && !u.gone && (u.svb || (u.def && u.def.bomb))) look(u, K.v, K.r);
+  for (const m of S.men) if (!m.dead && !m.in && m.def && m.def.bomb === 'man') look(m, VBM.civ.v, VBM.civ.sus);
+}
+trnStep = (g => dt => { g(dt); if (S.units.length || S.men.length) vbSusStep(dt); })(trnStep);
+/* the nearest suspect within r of a that a's side may fire on and knows */
+function vbSusFor(a, r, men) {
+  const L = S.vbSus; if (!L || !L.length || !a.ai) return null;
+  let best = null, bd = r;
+  for (const o of L) {
+    if (o.dead || o.gone || o.in || (!men && o.man) || !foeSide(a.team, o.team) || insT(a.team)) continue;
+    const d = hdist(a, o); if (d < bd && known(a.ai, a, o)) { bd = d; best = o; }
+  }
+  return best;
+}
+pickGround = (g => u => { const b = g(u); return vbSusFor(u, GAI.tank.see) || b; })(pickGround);
+manThink = (g => m => {
+  g(m);
+  const A = m.ai; if (!A || m.dead || m.down) return;
+  const s = vbSusFor(m, VBM.sus.r, true); if (!s || A.tgt === s) return;
+  A.tgt = s; A.los = los(m, eyeY(m), s, s.man ? bodyY(s) : s.y + 1.5);
+  const sp = m.arms[1]; if (!s.man && sp && sp.mag + sp.res > 0 && sp.d.k === 'heat') m.ctl.w = 1; else if (s.man) m.ctl.w = 0;
+  if (!A.st) A.st = 1;
+})(manThink);
+/* ---- what the side sees: the general's state and the question vb ---- */
+function vbView(t) {
+  if (!S || !isSide(t) || !vbFac(t)) return null;
+  const l = S.units.filter(u => !u.dead && u.team === t && (u.svb || (u.def && u.def.bomb))).map(u => ({ id: u.id, k: u.svb || (u.def && u.def.bomb === 'truck') ? 'truck' : 'car', name: u.name || u.def.name, x: Math.round(u.x), z: Math.round(u.z), player: u.ai ? 0 : 1, sus: (u.vbS || 0) > S.t ? 1 : 0 }));
+  return { cap: VBM.cap, car: vbCount(t, 'car'), truck: vbCount(t, 'truck'), truckRes: stkKinds(t).includes('svbied') ? stkRes(t, 'svbied') : 0, l };
+}
+genState = (g => t => { const o = g(t); if (o) o.vb = vbView(t); return o; })(genState);
+genQuery = (g => (t, q) => (q && q.q === 'vb' ? vbView(t) || gBad('fac') : g(t, q)))(genQuery);
+/* ---------- end of cf-vbied (the sim) ---------- */
 /* ---------- combined arms (CA; não testado, see docs/nao-testado/cf-armas-combinadas.md): tanks and infantry as teams, at the unit level ----------
    The captain: "tanques devem apoiar a infantaria e vice versa". Every CA.every s each side's general pairs each of its tanks and armoured cars
    (an AI one, or a player's) that has no team with the best free squad of its side within CA.r m (CA.rArm times as far while the strategy
@@ -31860,6 +32103,17 @@ GRLDO.rcv = (C, X) => {
   gLog(t, 'grl', GRL.nm.rcv + ': esquadra ' + grlNear(q.L) + ' vai a ' + b.nm + ' recrutar (simpatia ' + icvPct(b.v) + ', ' + b.home + ' civis)', b.b, null);
   return true;
 };
+/* cf-vbied (NÃO TESTADO): the guerrilla's sabotage and the cut of the command try a bomb vehicle first (vbGo, VBM.ai.grl of the time) */
+for (const k of ['sab', 'cmd']) {
+  const g = GRLDO[k]; if (!g) continue;
+  GRLDO[k] = (C, X) => {
+    if (Math.random() < VBM.ai.grl && insAI(C.t, 'atk')) {
+      const a = grlBest(C, X, k === 'cmd' ? (a => a.k === 'rad' || (a.k === 'eco' && a.o.k === 'hq')) : (a => a.k === 'eco' || a.k === 'sup'));
+      if (a && vbGo(C, { x: a.x, z: a.z, v: a.val, o: a.o, nm: a.nm }, (GRL.nm[k] || '') + ': ' + a.nm)) { gLog(C.t, 'grl', GRL.nm[k] + ': veículo-bomba contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    }
+    return g(C, X);
+  };
+}
 GRLDO.ter = (C, X) => {
   const t = C.t, a = X.terT; if (!a) return false;
   const R = a.b.ru + 30, n = S.men.filter(m => !m.dead && !m.in && m.team === t && hdist(m, a.b) < R).length;
@@ -34799,6 +35053,280 @@ genVM = (g => (t, all) => { const V = g(t, all); if (V && typeof V === 'object' 
 GENK.push('dfp');   // a guest's general sees the host's defence plans (the layer and the Defesa tab)
 if (typeof rtsBrain === 'function') rtsBrain = (g => q => { const L = g(q); if (q.dfpR && q.pts && q.pts.dfp) L.push('Defesa: ' + q.dfpR); return L; })(rtsBrain);
 /* ---------- end of CEREBRO: defesa ---------- */
+/* ---------- infantry rides (EMB, cf-infantaria-veiculos; NÃO TESTADO, see docs/nao-testado/cf-infantaria-veiculos.md): the commander puts its infantry in vehicles ----------
+   The captain: "as infantarias devem pegar veiculos para locomoção tambem", and of the Insurgents: "tem muitos veiculos legais de infantaria
+   capturados e tal, e não vejo eles usarem". Why the AI's infantry hardly rode (read from the code; not measured, by the captain's rule):
+   - the manoeuvres' ride (MAN.ride, manRides) looks only at the squads of a manoeuvre or of an abstract order (op.man, op.ride) that walk a way
+     of their own (O.wp) at a run: an assault's squads (atkOpen: hold at the forming-up place, no way of their own), a point's reinforcement,
+     a post's relief and every order of the planner never ask for one;
+   - the planner's ride (trnPlan, fetch) is one errand a side at a time (two with points, CMD.rq.ride), one every RUNS.again s, only along the
+     squad's own axis and only for 1.5 x FIELD.ride m or more along it;
+   - the vehicles a ride may take (rideFind) are trucks and wheeled armour on their axis: never a car (the Insurgents' technicals carry their
+     men in the back), never a vehicle left or captured (u.left: parked off the rail, u.rail false), so the captured ones stood there until
+     trnSlow took them away;
+   - nothing armed stayed with the squad it carried: the vehicle always went home.
+   What this section does, on top of that (hooks only: rideFind, rideBoard, rideCheck, rideEv, tripAI, setOrd, manRides, genQuery):
+   - embRides(C), after the manoeuvres' rides each plan of side C: a squad of an AI side (on the host) whose way to its order's place still has
+     EMB.far m or more, with no enemy within FIELD.dbl (in contact on foot it never boards), whose leader is not bounding (q.tec lances, P3),
+     whose order is not one done on foot by its nature (EMB.foot, EMB.footOp: ambush, observation, infiltration...) and not just off a ride
+     (q.rdT), is given a ride (embGo): a vehicle (rideFind, and embFind after it: trucks, wheeled armour and cars with room for the whole
+     squad, idle on their axis, parked ones of the pool, and left and captured ones too, within EMB.near m) comes by the side's safe way
+     (tripOf with the side's costs) to a meeting place: on the squad's own trip (q.tp) ahead of it, as a manoeuvre's ride does, or, for a
+     squad walking its axis, where it stands (it halts there; at most EMB.wait s for the vehicle). The whole squad goes aboard (all within
+     MAN.ride.board m: it stays one squad) and gets out at a drop point (embDrop) on its way, keep m short of the order's place (by the
+     leader's technique, P3: vig farther, desloc the plain; the Insurgents nearer: they arrive fast, get out and vanish), never within
+     MAN.ride.safe m of known enemy nor in closed ground (a wood, thick undergrowth, among houses: it gets out before it), then walks on with
+     the same order. A contact or a new order on the way lets it off where the vehicle is (rideCheck, as before);
+   - the vehicle then goes home; one that was left or captured stays parked at the drop point (left again: whoever comes takes it);
+   - fire support: an armed car or armoured car that carried the squad stays at the drop point for EMB.sup.T s (the Insurgents EMB.sup.ins:
+     hit and run), its gun on what it sees, and leaves when the time is up, the squad is gone or EMB.sup.r m away, it is hurt below
+     EMB.sup.hp, or a short while after it is hit; and an Insurgent side sends a free armed technical (embEsc: DShK, SPG-9, ZU-23...) along
+     with an unarmed truck to the same drop point, to cover the squad the same way and go;
+   - with no free vehicle for a long walk (EMB.rq.far m or more) an AI side with points asks for a truck through its own requisition order
+     (genCmd req, as cmdReq does) once every EMB.rq.every s, while it has fewer than EMB.rq.max requisitioned ones;
+   - the measure (S.emb, embView, the gask question emb): per side the long walks begun (an order EMB.far m or more from the squad), how many
+     were ridden (any ride, the manoeuvres' too), the squad-seconds spent halted waiting for a vehicle, the rides given up and the rides
+     given; per side and vehicle model the seconds alive and in use (on an errand or a trip, carrying, escorting, driven), the rides and the
+     men carried: the task's "% of the long moves made aboard", with EMB.ride 0 (the measure kept, the new rides left out: today's game) as the A
+     and EMB.ride 1 as the B of a comparison. EMB.on 0 leaves it all out, the measure too.
+   Only the host (or solo) runs any of it: it moves AI squads and vehicles (no q.net, no u.net) */
+const EMB = { on: 1, ride: 1, far: 1500, near: 6000, cd: 45, per: 2, wait: 240,
+  keep: { desloc: 900, vig: 1300, ins: 600 }, closed: { ug: .5, bld: 3, r: 80 },
+  foot: { ambush: 1, observe: 1, patrol: 1, escort: 1, supply: 1, withdraw: 1, mortar: 1, flank: 1 }, footOp: { inf: 1, amb: 1, emb: 1, itd: 1 },
+  kinds: { truck: 1, lav: 1, car: 1 }, hp: .5,
+  sup: { T: 150, ins: 60, hp: .5, hit: 2.5, r: 900 }, esc: { near: 3500, spd: 15, all: 0 },
+  rq: { far: 2500, every: 90, max: 2 } };
+const embSim = () => !S.net || !!S.host;
+const embOn = () => EMB.on && embSim() && S.T && S.T.mv >= 4;
+/* the measure, per side */
+function embM() {
+  if (S.emb && S.emb.n === SIDES().length) return S.emb;
+  const z = () => bySide(() => 0);
+  return (S.emb = { n: SIDES().length, legs: z(), rode: z(), wait: z(), off: z(), go: z(), rq: z(), esc: z(), veh: bySide(() => ({})), T: z(), rqT: z() });
+}
+const embName = u => (u.def && (u.def.id || u.def.name)) || u.id || u.kind;
+const embArmed = u => !!u.arms && !!u.arms[0] && u.arms[0].d.dmg > 0 && !u.def.bomb;
+/* a man of the squad's who leads it now */
+const embLead = q => q.men.find(m => !m.dead && !m.gone && !m.down) || null;
+/* the squad is one the AI may put in a vehicle at all (its order's kind and its op aside) */
+function embFit(q) {
+  if (!q || q.net || q.team < 0 || q.mil || q.civ || q.col || q.lift || q.rd || q.state || q.cnP || !q.live || !q.ord) return false;
+  if (S.my && q.men.includes(S.my)) return false;
+  if (q.men.some(m => !m.dead && m.def && (m.def.bomb || m.def.mort))) return false;   // a bomber walks to his target; a mortar team sets up where it is
+  if (q.op && (q.op.man || q.op.ride || EMB.footOp[q.op.k])) return false;   // a manoeuvre's own ride (manRides), or one done on foot by its nature
+  return !EMB.foot[q.ord.k];
+}
+/* the vehicles a ride may take beyond the manoeuvres' (rideFind): cars with room for the whole squad, left and captured ones, the
+   requisitioned transports standing idle; whole enough, not lately hit, no enemy near it */
+function embFind(t, q, P) {
+  const K = MAN.ride, n = manLive(q); let best = null, bd = EMB.near;
+  for (const u of S.units) {
+    if (u.team !== t || u.dead || u.gone || u.net || !u.ai || u.fixed || u.trip || u.mr || u.run || u.me || u.pid || u.res || u.lim || u.svb || u === S.my || !u.occ || !EMB.kinds[u.kind]) continue;
+    if (u.def.bomb || u.def.rad || u.def.svc || u.lgp || u.gp || (u.cargo && u.cargo.length) || u.occ.some(Boolean)) continue;
+    if (!u.rail && !u.left) continue;   // off its axis: a tank's brain drives it, or it is not a transport's
+    if (u.fld && !u.ai.park && !u.left) continue;   // an errand's vehicle
+    if (S.t - u.hitT < 15 || u.ai.fd < K.safe || roomIn(u) < n || u.hp < u.max * EMB.hp || (u.kind === 'lav' && u.ai.tgt && !u.ai.tgt.dead)) continue;
+    const d = hdist(u, P); if (d < bd) { bd = d; best = u; }
+  }
+  return best;
+}
+rideFind = (g => (t, q, P) => g(t, q, P) || (embOn() ? embFind(t, q, P) : null))(rideFind);
+/* a left (or captured) vehicle put to drive again: on the rail the trips need (tripAI drops a trip of a vehicle off it) */
+function embWake(u) {
+  const p = railOf(u.x, u.z), was = u.left;
+  Object.assign(u, { left: 0, bye: false, rail: true, ri: p.ri, s: p.s, lane: clamp(p.off, -30, 30), ds: u.ds || (u.team ? 1 : -1), fld: 1 });
+  u.ai.park = 1; u.embL = was || u.embL || 0;
+}
+/* parked where it stands, left again: no trip, off the rail (as crewPark leaves one), for whoever comes */
+function embPark(u) {
+  u.trip = null; u.rail = false; u.sp = 0; u.ai.park = 1; u.fld = 1; u.left = Math.max(S.t, .01); u.embL = 0; u.embS = null;
+}
+/* the squad's way still to go: its own trip (q.tp from q.ts), or along its axis to its order's place (a way made for it, from its leader) */
+function embWay(q, L) {
+  const O = q.ord;
+  if (q.tp && q.tp.len) return { W: q.tp, s0: q.ts || 0, here: 0 };
+  if (O.ri === undefined || O.ri !== q.ri || O.s === undefined) return null;
+  const r = S.T.routes[q.ri], s1 = clamp(O.s, 0, r.len), n = Math.min(120, Math.ceil(Math.abs(s1 - q.s) / 60)), pts = [{ x: L.x, z: L.z }];
+  for (let i = 1; i <= n; i++) { const p = routeAt(r, q.s + (s1 - q.s) * i / n); pts.push({ x: p.x, z: p.z }); }
+  if (O.x !== undefined) pts.push({ x: O.x, z: O.z });
+  return pts.length > 1 ? { W: polyOf(pts), s0: 0, here: 1 } : null;
+}
+/* how far short of the end it gets out: the leader's technique (P3), the Insurgents nearer */
+const embKeep = q => (insT(q.team) ? EMB.keep.ins : q.tec === 'vig' ? EMB.keep.vig : EMB.keep.desloc);
+/* closed ground at x z, where the squad must already be on foot: a wood, thick undergrowth, among standing houses */
+function embClosed(x, z) {
+  const K = EMB.closed;
+  if (kindAt(x, z) === 1 || ugAt(x, z) > K.ug) return true;
+  let n = 0; for (const o of near(x, z, K.r)) if (o.K && o.K.sight && !o.K.rock && S.os[o.id] < 2 && ++n >= K.bld) return true;
+  return false;
+}
+/* rideDrop with the squad's own keep, and out of closed ground: { D, s, p2 } or null */
+function embDrop(C, q, W, P, sP, keep) {
+  const K = MAN.ride; let tries = 0;
+  for (let s = W.len - keep; s >= sP + K.far * .5 && tries < K.tries; s -= K.step) {
+    const D = routeAt(W, s), nn = netNear(D.x, D.z);
+    if (nn.d > K.stub || !rideDry(nn, D)) { mrw('stub'); continue; }
+    if (cmdKnown(C, D.x, D.z, K.safe) > 0 || mbThr(C, D.x, D.z) > K.thr) { mrw('known'); continue; }
+    if (embClosed(D.x, D.z)) { mrw('closed'); continue; }
+    tries++;
+    const p2 = tripOf(P.x, P.z, D.x, D.z, { mode: 'veh', team: q.team }); if (!p2) { mrw('p2'); continue; }
+    if (p2.len > K.detour * (s - sP) + 300) { mrw('detour'); continue; }
+    if (mbMeanThr(C, p2) > K.pthr) { mrw('pthr'); continue; }
+    return { D: { x: D.x, z: D.z }, s, p2 };
+  }
+  return null;
+}
+/* a ride for squad q along way W (from s0; here: the meeting place is where it stands): true when one is on its way */
+function embGo(C, q, w) {
+  const K = MAN.ride, { W, s0, here } = w, M = embM(), t = q.team, u = rideFind(t, q, routeAt(W, s0));
+  if (!u) { embAsk(C, q, W.len - s0); return mrw('vehicle'); }
+  const spd = u.def.spd * GSPD * K.spd, keep = embKeep(q); let n = 0;
+  for (let sP = here ? s0 : s0 + K.lead; sP <= W.len - keep - K.far * .5 && n < K.tries; sP += K.step) {
+    const P = routeAt(W, sP), nn = netNear(P.x, P.z), stop = () => (here ? 'stop' : 0);
+    if (nn.d > K.pick || !rideDry(nn, P)) { mrw('pick'); if (stop()) break; continue; }
+    n++;
+    const p1 = tripOf(u.x, u.z, P.x, P.z, { mode: 'veh', team: t }); if (!p1) { mrw('p1'); if (stop()) break; continue; }
+    const tu = p1.len / spd, ts = (sP - s0) / MAN.pace; if (tu - ts > (here ? EMB.wait : K.waitMax)) { mrw('wait'); if (stop()) break; continue; }
+    const d = embDrop(C, q, W, P, sP, keep); if (!d) { mrw('drop'); if (stop()) break; continue; }
+    if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - s0) / MAN.pace * K.gain)) { mrw('gain'); if (stop()) break; continue; }
+    const lf = !!u.left || !u.rail, home = { x: u.x, z: u.z }, p3 = lf ? null : tripOf(d.D.x, d.D.z, home.x, home.z, { mode: 'veh', team: t }); if (!lf && !p3) return false;
+    if (lf) embWake(u);
+    const sup = embArmed(u) && !lf, Ts = sup ? (insT(t) ? EMB.sup.ins : EMB.sup.T) : 0;
+    const p = polyOf(lf ? [...p1, ...d.p2] : [...p1, ...d.p2, ...p3]), T = S.t + 1.6 * p.len / spd + K.wait + Ts;
+    q.rd = { u, st: 'call', wp: W, sP, D: d.D, sD: d.s, T, home, eta: S.t + Math.max(tu, ts), emb: 1, O: q.ord, here };
+    mrd().go++; M.go[t]++;
+    const ev = [{ s: p1.len, k: 'pick' }, { s: p1.len + d.p2.len, k: 'drop' }];
+    if (sup) ev.push({ s: p1.len + d.p2.len, k: 'sup', q, T: 0 });
+    u.trip = { p, s: 0, ri: lf ? undefined : p3.ri, s1: lf ? undefined : p3.s1, T, drop: false, back: null, gone: false, why: 'ride', rq: q, ev };
+    if (lf) u.embP = 1;   // left or captured: it stays at the drop point
+    if (!sup && (insT(t) || EMB.esc.all)) embEsc(q, d.D, P);
+    gLog(t, 'atk', 'Transporte: ' + (u.def.name || GEN.kind[u.kind] || u.kind) + (captured(u) ? ' capturado' : '') + ' vai buscar esquadra para ' + gN((d.s - sP) / 1000) + ' km de estrada', P);
+    return true;
+  }
+  return mrw('none');
+}
+/* no vehicle for a long walk: the side asks for a truck by its own requisition order, now and then */
+function embAsk(C, q, rem) {
+  const t = C.t, M = embM(), G = EMB.rq;
+  if (!S.cq || rem < G.far || S.t < M.rqT[t] || genBy(t, 'sup') !== 'ai') return;
+  M.rqT[t] = S.t + G.every;
+  if (S.units.reduce((n, u) => n + (u.team === t && !u.dead && u.rqa && (u.kind === 'truck' || u.kind === 'car') ? 1 : 0), 0) >= G.max) return;
+  if (genCmd(t, { c: 'req', k: 'truck', ri: q.ri }, 'ai', { id: null }).ok) M.rq[t]++;
+}
+/* the Insurgents' escort: a free armed technical drives to the drop point by the safe way, covers the squad there and goes home */
+function embEsc(q, D, P) {
+  const t = q.team, M = embM(); let best = null, bd = EMB.esc.near;
+  for (const u of S.units) {
+    if (u.team !== t || u.kind !== 'car' || u.dead || u.gone || u.net || !u.ai || u.fixed || u.trip || u.mr || u.run || u.me || u.pid || u.res || u.lim || u.svb || u === S.my) continue;
+    if (!embArmed(u) || u.def.spd < EMB.esc.spd || u.gp || u.occ.some(Boolean) || u.left || !u.rail || (u.fld && !u.ai.park) || u.hp < u.max * EMB.sup.hp || S.t - u.hitT < 15 || u.ai.fd < MAN.ride.safe) continue;
+    const d = hdist(u, P); if (d < bd) { bd = d; best = u; }
+  }
+  const u = best; if (!u) return null;
+  const home = { x: u.x, z: u.z }, a = tripOf(u.x, u.z, D.x, D.z, { mode: 'veh', team: t }), b = a && tripOf(D.x, D.z, home.x, home.z, { mode: 'veh', team: t });
+  if (!a || !b) return null;
+  const spd = u.def.spd * GSPD * MAN.ride.spd, p = polyOf([...a, ...b]);
+  u.trip = { p, s: 0, ri: b.ri, s1: b.s1, T: S.t + 1.6 * p.len / spd + MAN.ride.wait + Math.max(EMB.sup.T, EMB.sup.ins) + 120, drop: false, back: null, gone: false, why: 'emb-esc', ev: [{ s: a.len, k: 'sup', q, T: 0, esc: 1, R: q.rd }] };
+  M.esc[t]++;
+  gLog(t, 'atk', 'Transporte: ' + (u.def.name || 'técnica') + ' acompanha a esquadra como apoio de fogo', D);
+  return u;
+}
+/* the support at the drop point (the trip's sup event): the vehicle waits there, firing (the tripAI hook below), until it goes */
+function embSupEv(u, E) {
+  const K = EMB.sup, q = E.q, L = q && embLead(q), ins = insT(u.team);
+  if (E.esc && q && q.rd === E.R && q.rd && !E.T) {   // the escort is there before the squad: it waits for it to get out (EMB.wait s at most), firing
+    E.W = E.W || S.t + EMB.wait; E.h = u.hitT;
+    if (S.t < E.W && !(u.hp < u.max * K.hp)) { u.embS = E; u.trip.ev.unshift(E); return; }
+    u.embS = null; return;
+  }
+  if (!E.T) { E.T = S.t + (ins ? K.ins : K.T); E.h = u.hitT; }
+  if (u.hitT > E.h) { E.h = u.hitT; E.T = Math.min(E.T, S.t + K.hit); }   // hit: a burst more, and away (bate e foge)
+  const go = S.t > E.T || !L || q.rd || hdist(L, u) > K.r || u.hp < u.max * K.hp || u.mr;
+  if (!go) { u.embS = E; u.trip.ev.unshift(E); return; }
+  u.embS = null;
+  if (u.embP) { u.embP = 0; embPark(u); }
+}
+rideEv = (g => (u, E) => {
+  if (E.k === 'sup') return embSupEv(u, E);
+  g(u, E);
+  if (E.k === 'drop' && u.embP && u.trip && !(u.trip.ev && u.trip.ev.length)) { u.embP = 0; embPark(u); }   // left or captured: parked at the drop point
+})(rideEv);
+/* a vehicle on its trip: one at its support place fires and holds (no stop for a fight: it is there for it); a left one put to a ride drives */
+tripAI = (g => (u, dt) => {
+  if (u.trip && !u.rail && !u.dead && (u.trip.rq || u.trip.why === 'emb-esc') && (u.left || u.embL)) embWake(u);
+  const E = u.embS, T = u.trip;
+  if (!E || !T || !T.ev || T.ev[0] !== E || u.dead || !u.rail) return g(u, dt);
+  const A = u.ai, c = u.ctl;
+  if ((A.think -= dt) <= 0) { A.think = GAI.think; looks(u, TCOL.gun); }
+  c.drive = 0; c.turn = 0; c.brake = true; gunner(u, u.kind === 'lav' ? TCOL.inf : TCOL.gun);
+  return true;
+})(tripAI);
+/* boarding: an EMB ride is checked by its own order (it has no op); either kind counted */
+function embBoard(u, q) {
+  const R = q.rd, men = q.men.filter(m => !m.dead && !m.gone);
+  if (!men.length || q.state || q.ord !== R.O || men.length > roomIn(u) || q.fd < FIELD.dbl) { embM().off[q.team]++; mrd().off++; return manRideEnd(q); }
+  if (men.some(m => hdist(m, u) > MAN.ride.board)) return 'wait';
+  const E = INF[S.era][S.fac[q.team]];
+  for (const m of men) { (u.cargo || (u.cargo = [])).push(Math.max(0, E.indexOf(m.id))); m.gone = true; }
+  u.mr = q; R.st = 'ride'; q.live = men.length; q.at = false; mrd().boarded++;
+  gLog(q.team, 'atk', 'Transporte: esquadra embarca em ' + (u.def.name || (u.kind === 'lav' ? 'blindado leve' : 'caminhão')) + ' e segue ' + gN((R.sD - R.sP) / 1000) + ' km antes de continuar a pé', u);
+}
+function embCount(u, q) {
+  const M = embM(), t = q.team, V = M.veh[t], k = embName(u), r = V[k] || (V[k] = { nm: u.def.name || k, t: 0, use: 0, rides: 0, men: 0 });
+  r.rides++; r.men += u.cargo ? u.cargo.length : 0;
+  if (q.embL && !q.embL.r) { q.embL.r = 1; M.rode[t]++; }
+}
+rideBoard = (g => (u, q) => {
+  const R = q.rd, r = R && R.emb ? embBoard(u, q) : g(u, q);
+  if (EMB.on && q.rd && q.rd.st === 'ride' && !q.rd.cnt) { q.rd.cnt = 1; embCount(u, q); }
+  return r;
+})(rideBoard);
+function embCheck(q) {
+  const R = q.rd, u = R.u, gone = u.dead || u.gone, away = q.ord !== R.O || S.t > R.T;
+  if (R.st === 'call') { if (gone || !u.trip || u.trip.rq !== q || away || q.state || q.fd < FIELD.dbl) { embM().off[q.team]++; manRideEnd(q); } }
+  else if (gone || !u.mr || !u.trip || u.trip.rq !== q || away) manRideEnd(q);
+}
+rideCheck = (g => q => (q.rd && q.rd.emb ? embCheck(q) : g(q)))(rideCheck);
+/* the long walks: an order EMB.far m or more from the squad's leader, counted once an order (the AI's sides) */
+setOrd = (g => (q, O) => {
+  g(q, O);
+  if (!EMB.on || !embSim() || !q || !O || q.net || !(q.team >= 0) || !S.T || !(S.T.mv >= 4) || genBy(q.team, 'atk') !== 'ai' || (q.embL && q.embL.O === O) || EMB.foot[O.k]) return;
+  const L = embLead(q); if (!L || (S.my && q.men.includes(S.my))) return;
+  const r = S.T.routes[O.ri], to = O.x !== undefined ? O : r && O.s !== undefined ? routeAt(r, clamp(O.s, 0, r.len)) : null;
+  if (!to || hdist(L, to) < EMB.far) return;
+  q.embL = { O, r: 0 }; embM().legs[q.team]++;
+})(setOrd);
+/* every plan of side C: the measure, and rides for the long walks the manoeuvres' ride does not look at */
+function embRides(C) {
+  if (!embOn()) return;
+  const t = C.t, M = embM(), dt = M.T[t] ? Math.min(30, S.t - M.T[t]) : 0; M.T[t] = S.t;
+  for (const q of S.squads) if (q.team === t && q.rd && q.rd.st === 'call' && q.halt) M.wait[t] += dt;
+  const V = M.veh[t];
+  for (const u of S.units) {
+    if (u.team !== t || u.dead || u.gone || !u.occ || !EMB.kinds[u.kind]) continue;
+    const k = embName(u), r = V[k] || (V[k] = { nm: u.def.name || k, t: 0, use: 0, rides: 0, men: 0 });
+    r.t += dt; if (u.trip || u.run || u.mr || u.embS || u.gp || u.me || (u.cargo && u.cargo.length) || u.occ.some(Boolean)) r.use += dt;
+  }
+  if (!EMB.ride || genBy(t, 'atk') !== 'ai') return;
+  let n = 0;
+  for (const q of S.squads) {
+    if (n >= EMB.per) break;
+    if (q.team !== t || !embFit(q) || S.t < (q.rdT || 0) || S.t < (q.embT || 0) || q.fd < FIELD.dbl || q.tec === 'lances' || q.hf || q.at) continue;   // q.hf: a picket holding its fire
+    const L = embLead(q); if (!L) continue;
+    const w = embWay(q, L); if (!w || w.W.len - w.s0 < EMB.far) continue;
+    q.embT = S.t + EMB.cd; n++;
+    embGo(C, q, w);
+  }
+}
+manRides = (g => C => { g(C); embRides(C); })(manRides);
+/* what the side's rides were (gask emb; the probe tests/embarque.js reads it) */
+function embView(t) {
+  const M = embM(), R = mrd(), r = v => Math.round(v);
+  return { ok: true, why: '', on: EMB.on ? 1 : 0, ride: EMB.ride ? 1 : 0, legs: M.legs[t], rode: M.rode[t], pct: M.legs[t] ? r(100 * M.rode[t] / M.legs[t]) : 0, wait: r(M.wait[t]), off: M.off[t], go: M.go[t], rq: M.rq[t], esc: M.esc[t],
+    all: { go: R.go, boarded: R.boarded, landed: R.landed, lost: R.lost, off: R.off, why: Object.assign({}, R.why) },
+    veh: Object.entries(M.veh[t]).map(([k, v]) => ({ id: k, nm: v.nm, t: r(v.t), use: r(v.use), pct: v.t ? r(100 * v.use / v.t) : 0, rides: v.rides, men: v.men })) };
+}
+genQuery = (f => (t, q) => (q && q.q === 'emb' && lsSide(t) ? (embSim() ? embView(t) : gBad('off')) : f(t, q)))(genQuery);
+/* ---------- end of the infantry rides (EMB) ---------- */
 /* ---------- the soldier's stimuli (P1): what he perceives that his reflexes answer ----------
    The one place of the soldier's brain that looks at the world, each by what a man can see or hear: a round cracking past or striking him
    (drInc), a blast (heard within hear m, its weight k by distance and size), a grenade (seen in flight or on the ground within see m in
@@ -37319,7 +37847,7 @@ function syncScene(dt) {
   fortScene();
   vegFrame(dt);
   sync(S.debris, gDebris, debrisMesh, (o, m) => { m.position.set(o.x, o.y, o.z); m.quaternion.set(o.q.x, o.q.y, o.q.z, o.q.w); });
-  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
+  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : b.o && b.o.vis ? cylX(b.o.vis[0], b.o.vis[0], b.o.vis[1], 5) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
   let n = 0; const bp = tracers.geometry.attributes.position.array;
@@ -38463,7 +38991,7 @@ function fpEO(P, u, ink, acc, disp, blink) {
     hx.fillStyle = t.gnd ? '#ffd24a' : G; hx.fillRect(gx - gs, gy + gs + 6 * u, 2 * gs * fr, 3 * u);
     if (blink) { hx.strokeStyle = t.gnd ? '#ffd24a' : FOE; hx.lineWidth = 2; hx.strokeRect(gx - gs - 4 * u, gy - gs - 4 * u, 2 * gs + 8 * u, 2 * gs + 8 * u); }
   }
-  const gun = P.arms.find(k => k.d.k === 'gun'), ld = S.lead;
+  const gun = P.arms.find(k => k.d.k === 'gun' || k.d.k === 'rkt'), ld = S.lead;
   if (ld && gun) { const tl = dist(ld, P) / gun.d.spd, lv = vel(ld), q = proj(ld.x + lv.x * tl, ld.y + lv.y * tl + .5 * GR * tl * tl, ld.z + lv.z * tl); if (q.front) { hx.strokeStyle = G; hx.lineWidth = 1.5; hx.beginPath(); hx.arc(q.x, q.y, 7 * u, 0, TAU); hx.stroke(); } }   // ○ where to lead the gun
   let x = m + 10 * u, y = ch - m - 46 * u;   // missiles: one pip each, and the reload
   for (let i = 0; i < w.ammo; i++) { hx.fillStyle = i < a0.ammo ? G : 'rgba(168,255,186,.2)'; hx.fillRect(x + i * 9 * u, y, 6 * u, 13 * u); }
@@ -38898,7 +39426,7 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
     }
     if (g.front && P.kind === 'tank') { hx.strokeStyle = acc; hx.lineWidth = 2; hx.beginPath(); hx.arc(g.x, g.y, 5, 0, TAU); hx.stroke(); }   // cf-miras-impl: where the round falls, a small circle
     else if (g.front) { hx.strokeStyle = acc; hx.lineWidth = 2; hx.beginPath(); for (const [i, j] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { hx.moveTo(g.x + i * 5, g.y + j * 5); hx.lineTo(g.x + i * 13, g.y + j * 13); } hx.stroke(); }
-    const gun = P.arms.find(k => k.d.k === 'gun'), t = S.lead;
+    const gun = P.arms.find(k => k.d.k === 'gun' || k.d.k === 'rkt'), t = S.lead;
     if (t && gun) {   // lead point for the anti-aircraft gun
       const tl = dist(t, P) / gun.d.spd, tv = vel(t), q = proj(t.x + tv.x * tl, t.y + tv.y * tl + .5 * GR * tl * tl, t.z + tv.z * tl);
       if (q.front) { hx.strokeStyle = acc; hx.lineWidth = 1.5; hx.beginPath(); hx.arc(q.x, q.y, 7, 0, TAU); hx.stroke(); }
@@ -39646,7 +40174,7 @@ const loadOf = id => (RACKS[id] ? LO.ord(LO.mine(id)) : PLANES[id].ord.filter(Bo
 const storeIcon = o => (o.cl ? 'cluster' : o.gd ? 'guided' : o.k === 'bomb' ? 'bomb' : o.k === 'rocket' ? 'rocket' : 'missile');
 const seekOf = o => MSL.SK[MSL.def(o, { gnd: o.k !== 'aam' }).sk], GDTAG = { las: 'guiada a laser', gps: 'guiada por GPS', img: 'guiada por TV' };
 const storeTag = o => (o.cl ? 'cacho' : o.gd ? GDTAG[seekOf(o).k] || 'guiada' : o.k === 'bomb' ? 'queda livre' : o.k === 'rocket' ? 'foguete' : o.k === 'agm' ? 'ar-solo' : o.sk ? 'ar-ar, curto alcance' : 'ar-ar, médio alcance');
-const armIcon = a => (a.k === 'sam' ? 'sam' : a.k === 'shell' || a.k === 'how' || a.k === 'flak' ? 'shell' : a.k === 'heat' || a.k === 'atgm' ? 'rocket' : 'gun');
+const armIcon = a => (a.k === 'sam' ? 'sam' : a.k === 'shell' || a.k === 'how' || a.k === 'flak' ? 'shell' : a.k === 'heat' || a.k === 'atgm' || a.k === 'rkt' ? 'rocket' : 'gun');
 const CARD = {
   plane(id, d) {
     const ord = loadOf(id), add = RACKS[id] ? LO.add(LO.mine(id)) : 0, hit = ord.reduce((n, o) => n + o.n * o.dmg, 0);
@@ -39672,7 +40200,7 @@ function groundCard(kind, d, role, fire) {
   return { mesh: () => buildUnit({ kind, def: d, col: [sd.col, sd.col2], x: 0, y: -4.5, z: 0, h: 0, ty: .5, tp: kind === 'aa' ? .6 : kind === 'art' ? .45 : .08 }), L: 15, role,
     meters: [['Velocidade', d.spd / 19], ['Proteção', d.hp / 150], ['Poder de fogo', a.k === 'shell' ? a.dmg / a.rl / 15 : a.k === 'how' ? (a.dmg + a.hit) / a.rl / 31 : a.k === 'sam' ? .85 : a.dmg / a.rate / 140], ['Torre', d.sl / 1.2]],
     spec: Math.round(d.spd * 3.6) + ' km/h · torre a ' + Math.round(d.sl * 57.3) + '°/s · ' + fire,
-    arms: d.arms.map(a => [armIcon(a), a.name, a.k === 'sam' ? 'guiado' : a.k === 'how' ? 'tiro indireto' : a.k === 'flak' ? 'espoleta de tempo' : a.k === 'shell' ? (a.hv ? 'perfurante e explosiva' : 'perfurante') : '']) };
+    arms: d.arms.map(a => [armIcon(a), a.name, a.k === 'sam' ? 'guiado' : a.k === 'how' ? 'tiro indireto' : a.k === 'flak' ? 'espoleta de tempo' : a.k === 'rkt' ? 'foguetes não guiados, explodem no impacto' : a.k === 'shell' ? (a.hv ? 'perfurante e explosiva' : 'perfurante') : '']) };
 }
 /* a class with no builder of its own still shows: its name, and the model of a plane if it is one */
 const cardOf = (k, id) => (CARD[k] ? CARD[k](id, DEFS[k][id]) : { mesh: () => (PLANES[id] ? buildPlane(id) : new THREE.Group()), L: 20, role: CLS[k] ? CLS[k][0] : k, meters: [], spec: '', arm: '' });
@@ -44573,7 +45101,7 @@ function packMan(m) {
     if (!s.root.parent) scene.add(s.root);
     s.m = m; PM.by.set(m, s); s.cur = null; s.mixer.stopAllAction(); fresh = true;
   }
-  const col = m.civ ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];
+  const col = m.civ || (m.def && m.def.civ) ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];   // cf-vbied: the disguised bomber in plain clothes
   for (const mt of s.mats) if (mt.userData.c !== col) { mt.color.setHex(col); mt.userData.c = col; }
   s.root.visible = true; s.seen = frameId; packPose(s, m, PM.dt || 0, fresh);
   return true;
@@ -45983,6 +46511,71 @@ gorTarget = (g => (px, py, shift) => {
   if (!shift) GOR.mode = ''; GOR.sig = {}; gorBar();
 })(gorTarget);
 /* ---------- end of CEREBRO: defesa on the general's view ---------- */
+/* ---------- cf-vbied on the screen (NÃO TESTADO, see docs/nao-testado/cf-vbied.md): the driver's key 5, the General's view, the looks ----------
+   VBK: the driver of a bomb vehicle sets it off with 5 (armed BOMB.arm s after it entered); a guest asks the host (mreq k 9).
+   The General's view (and the commander's camera, which is the same view): Campanha has Carro-bomba (mode vbied: a click on the map sends
+   genCmd vbied car there; Shift keeps the mode). The pickup bomb and the truck bomb have their looks (TLOOK, the pack's pickup and truck, the
+   drums and the plates), and the disguised bomber is the pack's civilian */
+const VBK = { say: 2.5 };
+function vbMe() {
+  const P = S.my, B = P && !P.man && bombOf(P); if (!B || P.dead || P.bGone) return '';
+  const T = P.bArm !== undefined ? P.bArm : (P.vbA || (P.vbA = S.t + B.arm));
+  if (S.t < T) return 'Carga armando: ' + Math.ceil(T - S.t) + ' s';
+  if (S.net && !S.host) { Net.send('mreq', { k: 9 }); return 'Detonando'; }
+  bombGo(P); return '';
+}
+addEventListener('keydown', e => {
+  if (e.code !== 'Digit5' || e.repeat || playMode !== 'play' || paused || sw.on || GV.on || !S || !S.my || S.my.man || !S.my.kind || S.my.dead || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+  if (!bombOf(S.my)) return;
+  const w = vbMe(); if (w) S.banner = { text: (S.my.def.name || 'Veículo-bomba').toUpperCase(), sub: w, life: VBK.say };
+});
+Net.rx.mreq = (g => m => {
+  if (!m || m.k !== 9) return g(m);
+  const G = Net.ghosts.get(m.from);
+  if (!S || !S.net || !S.host || !G || G.dead || G.man || G.bGone || !bombOf(G)) return;
+  if (G.bArm !== undefined && S.t < G.bArm) return;
+  bombGo(G);
+})(Net.rx.mreq);
+/* the driver's line: what 5 does, once when it enters */
+spawnPlayer = (g => (...a) => {
+  const p = g(...a), B = p && !p.man && bombOf(p);
+  if (B) S.banner = { text: (p.def.name || 'Veículo-bomba').toUpperCase(), sub: '5 detona (raio de ' + B.r + ' m) · explode sozinho com inimigo a ' + B.trig + ' m ou numa batida forte', life: 5 };
+  return p;
+})(spawnPlayer);
+/* ---- the General's view ---- */
+GORW.vbied = 1;
+Object.defineProperty(GORT, 'vbied', { enumerable: true, get: () => 'Carro-bomba (' + vbCount(S.me, 'car') + ' de ' + VBM.cap.car + ' em campo): clique no alvo · ele vai pelo caminho menos vigiado' });
+gorTarget = (g => (px, py, shift) => {
+  if (GOR.mode !== 'vbied') return g(px, py, shift);
+  const w = gorW(px, py); gorSend({ c: 'vbied', k: 'car', x: Math.round(w.x * 10) / 10, z: Math.round(w.z * 10) / 10 });
+  if (!shift) GOR.mode = '';
+  GOR.sig = {}; gorBar();
+})(gorTarget);
+gorCampP = (g => V => {
+  g(V);
+  const el = $('#gcTgtB'); if (!el || el.querySelector('[data-m="vbied"]')) return;
+  const F = vbFac(S.me); if (!F || !F.car) return;
+  const n = vbCount(S.me, 'car'), L = S.units.filter(u => !u.dead && u.team === S.me && ((u.def && u.def.bomb) || u.svb));
+  el.append(gorBtn('Carro-bomba (' + n + '/' + VBM.cap.car + ')', { a: 'mode', m: 'vbied' }, 'Carro-bomba contra o alvo que você clicar (custa um carro da economia; vai pelo caminho menos vigiado e explode no alvo ou perto do inimigo). O caminhão-bomba pesado está em Bombardeio' + (L.length ? '. Em campo: ' + L.map(u => (u.name || u.def.name) + ' ' + gNear(u.x, u.z)).join('; ') : ''), GOR.mode === 'vbied', n >= VBM.cap.car || !gorTac()));
+})(gorCampP);
+/* ---- the looks ---- */
+Object.assign(TLOOK, { vbiedPk: { ax: [1.5, -1.3], hood: 1.3 }, svbied: { ax: [2.6, -1.3, -2.5], hood: 1.6 } });
+Object.assign(PACK.trn, { vbiedPk: 'pickup', svbied: 'trk_m939' });
+PACK.civWreck.vbiedPk = 1;
+buildTrn = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def; if (wreck || !d || (d.id !== 'vbiedPk' && d.id !== 'svbied')) return g;
+  const by = (d.kind === 'truck' ? .78 : .45) + d.hh, drum = mat(0x5b5f57), wire = mat(0xb3201d), plate = mat(0x3d3f3a);
+  const box = (w, h, dp, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), m); b.position.set(x, y, z); g.add(b); return b; };
+  if (d.id === 'vbiedPk') { for (let i = 0; i < 4; i++) box(.45, .5, .45, drum, -d.l * .32 + (i >> 1) * .5, by - .05, (i % 2 ? 1 : -1) * .3); box(.02, .02, d.w * .7, wire, -d.l * .2, by + .25, 0); }
+  else {
+    for (let i = 0; i < 8; i++) box(.55, .7, .55, drum, -d.l * .38 + (i >> 1) * .65, by + .1, (i % 2 ? 1 : -1) * .45);
+    box(.06, 1, d.w * .95, plate, d.l * .28, by + .2, 0);   // the plate welded over the windscreen
+    box(.02, .02, d.w * .8, wire, -d.l * .1, by + .5, 0);
+  }
+  return g;
+})(buildTrn);
+packManModel = (f => m => (m && !m.civ && m.def && m.def.civ ? ((m.id || 0) % 2 ? 'civ_woman' : 'civ_man') : f(m)))(packManModel);
+/* ---------- end of cf-vbied on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

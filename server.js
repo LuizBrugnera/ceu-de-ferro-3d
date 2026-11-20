@@ -558,7 +558,7 @@ RX.gcmd = (c, m) => {
 };
 /* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
    lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
-const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk', 'dfp'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro); dfp: the side's defence plans (cf-defesa-posicoes)
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk', 'dfp', 'emb'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro); dfp: the side's defence plans (cf-defesa-posicoes); emb: the side's infantry rides (cf-infantaria-veiculos)
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
   if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
@@ -648,6 +648,23 @@ const MSIDE = {
     const h = c.room.host, now = Date.now();
     if (!h || h === c || c.player.cls !== 'inf' || !aid(m.id) || (m.k === 8 && !vec(m.p, 2)) || now - (c.mdq || 0) < 200) return;
     c.mdq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k, id: m.id }, m.k === 8 ? { p: m.p } : {}));
+  };
+}
+/* bomb vehicles and the disguised bomber (cf-vbied, NÃO TESTADO: docs/nao-testado/cf-vbied.md): the pickup bomb and the truck bomb a player may
+   drive, the Insurgents' kit in plain clothes, at the end of their lists so that no older index moves; and mreq k 9, a guest's driver
+   asks the host to set off its bomb vehicle (500 ms apart at least) */
+{
+  const m = MODELS.modern, R = rooms.modern;
+  for (const [cls, id] of [['trn', 'vbiedPk'], ['trn', 'svbied'], ['inf', 'insCivBomber']]) {
+    if (m[cls].includes(id)) throw new Error('vbied model already there: ' + id);
+    m[cls].push(id); (cls === 'inf' ? R.inf : R.gnd).add(id); MSIDE.modern[2].push(id); R.ms[id] = 2;
+  }
+  const old = RX.mreq;
+  RX.mreq = (c, m) => {
+    if (m.k !== 9) return old(c, m);
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.player.cls !== 'trn' || now - (c.vbq || 0) < 500) return;
+    c.vbq = now; send(h.ws, { t: 'mreq', from: c.player.id, k: 9 });
   };
 }
 /* the room's sides, said by its first player: the general's seats past them are free again, and a bridge of such a side is told and let go */

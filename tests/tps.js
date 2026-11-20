@@ -69,5 +69,12 @@ console.log('-- against armour: a wall that stops the gun, through the house --'
   ok(!!W && W.length >= 4 && W.some(p => p.b === B), 'to the far side, the way runs through the house (' + (W ? W.length : 0) + ' waypoints)');
   const D = $('DRILLS').find(d => d.id === 'tanque'); ok(!!D && /contra_blindado/.test(D.act.toString()), 'the tank drill asks for it');
 }
+console.log('-- the works (ABRT of cf-trincheiras-tuneis, or P2 own) --');
+{
+  const p = { x: house.x + house.r + 60, z: house.z + 40 }, f = $('fortAdd')(29000, 1, 0, p.x, p.z, 0, 1, true);
+  const pts = $('tpsPts')(p.x, p.z, 12).filter(q => q.k === 'trincheira'), q = pts[0];
+  ok(pts.length >= 3 && [0, 2, 4, 6].every(i => $('tpsProt')(q, q.x + Math.cos(i) * 100, q.z + Math.sin(i) * 100, 1) === 3), 'a trench dug: ' + pts.length + ' places, a crouched man covered all round (' + ($('typeof abrMap') === 'function' ? 'ABRT' : 'P2') + ')');
+  ok(!!q.set && Math.abs($('wrap')(q.set.a - -f.a)) < .2, 'its fire step faces the enemy');
+}
 ok(!H.nan(S), 'nothing turned to NaN');
 done();

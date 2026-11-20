@@ -33,6 +33,8 @@ Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/mod
 | `w_launcher.glb` | [Bazooka](https://poly.pizza/m/2IabhRwQkCt) | Poly by Google | CC-BY 3.0 |
 | `w_rpg.glb` | [RPG Launcher](https://poly.pizza/m/2qqg9SbrsZ) | austincford | CC-BY 3.0 |
 | `w_grenade.glb` | [Frag Grenade West](https://poly.pizza/m/1aIZys4mhg) | Pichuliru | CC0 1.0 |
+| `w_sniper.glb` | [Sniper Rifle](https://poly.pizza/m/i65hEldsw6) | Quaternius | CC0 1.0 |
+| `w_pistol.glb` | [Pistol](https://poly.pizza/m/52kQzphmeF) | Quaternius | CC0 1.0 |
 | `p_sandbags.glb` | [Sack Trench](https://poly.pizza/m/LW3jwpPfiN) | Quaternius | CC0 1.0 |
 | `p_nest.glb` | [Sack Trench Small](https://poly.pizza/m/iHyRewQQcN) | Quaternius | CC0 1.0 |
 | `p_crate.glb` | [Crate](https://poly.pizza/m/3OEFd1AWfa) | Quaternius | CC0 1.0 |

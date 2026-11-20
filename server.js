@@ -164,6 +164,7 @@ const RX = {
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
     send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1, man2: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
+    send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
     cast(c, { t: 'joined', player: c.player });
@@ -508,6 +509,13 @@ RX.glog = (c, m) => {
   const opt = v => v === null || num(v), row = r => Array.isArray(r) && r.length === 7 && num(r[0]) && typeof r[1] === 'string' && /^[a-z]{1,6}$/.test(r[1]) && txt(r[2], 240) && r.slice(3).every(opt);
   if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !lst(m.e, 80) || !m.e.every(row) || (m.to !== undefined && !pid(m.to))) return;
   castSide(c, Object.assign({ t: 'glog', s: m.s, T: m.T, e: m.e }, m.full === 1 && { full: 1 }), m.s, m.to);
+};
+/* the tunnels (cf-trincheiras-tuneis, NOT TESTED): the host tells each side s its own tunnels and the enemy mouths it found, a row each,
+   [id, side, ax, az, bx, bz, percent dug, found (1 mouth a, 2 mouth b, 3 its own), state (0 open, 1 fallen)]; only that side's players get it */
+RX.tun = (c, m) => {
+  const row = e => vec(e, 9) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 1e6 && ts(c.room, e[1]) && [2, 3, 4, 5].every(i => Math.abs(e[i]) < 1e5) && e[6] >= 0 && e[6] <= 100 && Number.isInteger(e[7]) && e[7] >= 0 && e[7] <= 3 && (e[8] === 0 || e[8] === 1);
+  if (!host(c) || !ts(c.room, m.s) || !lst(m.e, 64) || !m.e.every(row)) return;
+  castSide(c, { t: 'tun', s: m.s, e: m.e }, m.s);
 };
 RX.keep = (c, m) => { if (host(c) && m.e && rec(m.e)) c.room.keep = m.e; };
 RX.gclaim = (c, m) => {

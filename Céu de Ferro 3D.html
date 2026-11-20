@@ -28121,6 +28121,461 @@ function tmAsk(t, k) {
 genQuery = (f => (t, q) => (q && q.q === 'tmap' && isSide(t) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && isSide(s))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
+/* ---------- GENERAL 2: mundo (G1 of the General 2, cf-g2-g1-mundo; measured by tests/g2-mundo.js, the rest NÃO TESTADO: docs/nao-testado/cf-g2-g1-mundo.md) ----------
+   The world as the General 2 sees it (report cf-ia-opensource, sections 5.2 and 6, package G1): the ground in regions, the different ways
+   between its places, what each region is worth to a side and what the side believes is in it. It decides nothing and orders nothing: the
+   packages above it read it (G2 the simulation, G3 the planner, G4 the operation), so the battle is the same with it on or off (G2W.on).
+   1. The ground (g2Ground, once a terrain and the state of its bridges, like the tactical map's ground: TM): the passable cells of the tactical
+      map (TM.cell m; apPass: water is no way but where a standing bridge or ford crosses it) cut into regions around seeds: every capture point
+      and base, each side's seat town, the choke points of the tactical map (k G2W.seed.k or more: bridges and fords, junctions, a town's
+      exits), the crests (G2W.seed.crest m over the ground around), the woods (G2W.seed.woodN cells or more of wood) and a lattice every
+      G2W.seed.lat m to fill the rest, no two seeds closer than G2W.seed.near m (a point always stays). A cell goes to the seed it is quickest
+      to walk to (one Dijkstra from all of them, at the foot's time: G2W.spd by road, open ground and wood, G2W.up s more a metre climbed); two
+      regions that touch make an edge, through the quickest pair of cells on their border, with its way (cells, seed to seed), length, time on
+      foot, on wheels and on tracks, share of road and of wood, cover (the map's o), worst choke (k) and whether it crosses a bridge. tt: the
+      foot's time from every region to every other. A fallen bridge or a new pontoon builds it again, a piece a frame (g2Step); the old one
+      serves until then.
+   2. The routes (g2Routes(W, a, b), a and b regions): up to G2W.rt.n ways from a to b that differ, the axes a plan chooses from, on the cells.
+      The first is the quickest. Each next one is a Dijkstra in which a cell within one cell of a way before (but within G2W.rt.end m of a or
+      b, where every way starts and ends) costs G2W.rt.pen times more, and which comes into the ring G2W.rt.arr m about b from a bearing
+      G2W.rt.ang degrees or more off every way before, then on to b the quickest way; no longer than G2W.rt.long times the first. One that
+      still runs within a cell of a way before over more than G2W.rt.lap of its length (the ends left out) is tried again with the penalty
+      doubled, G2W.rt.tries times. A route: its cells, the regions it crosses (rg), length, foot time, the bearing it arrives by, its overlap
+      with each way before (lap) and the smallest angle between their arrivals (ang), div when both pass. Built when asked (g2Ask: a piece a
+      frame in g2Step; g2Now: at once, for a question), kept until the ground changes. g2Pairs: every point to every other, the criterion of G1.
+   3. The belief of a side (g2Sense, every G2W.bel.every s a side, inside the commanders' share of the frame): by region, the enemy strength
+      the side knows of (C.known, where it was reported: sX, sZ, CMD.val by class) remembered with its age (half every G2W.bel.half s, every
+      G2W.bel.seen s where its own forces are and see nothing there), when it was last seen, the most it has seen at once (peak), its own
+      strength (its squads, and its own vehicles: each side's roll of the vehicles it fielded, S.g2r, never the world's list), who holds the
+      region's point (all sides see it), the enemy's sight and traffic there (the side's tactical map: v, t), the danger each region is in
+      (Freeciv's assess_danger: the enemy believed in each region over the time to walk from it, G2W.bel.eta) and what each region is worth
+      (4). g2Hyp(C, n, k): n guesses of what the side does not see (the determinization of section 5.1): what it has seen at most less what
+      it knows of, and G2W.bel.prior more, spread over the regions it does not watch, more where the enemy holds a point and on the enemy's
+      side of the front; the draws are a hash of the side, k and the clock, never Math.random (the battle draws the same).
+   4. The values (in g2Sense): what each region is worth to the side, to keep (vo: the points it holds and its base, its seat town, its own
+      economy sites, supply bases, radio nodes and domes) and to take (ve: the points it does not hold and the enemy's base, an enemy seat it
+      knows of (sedeKn), the enemy sites it has identified (ECO kn), the enemy guns it knows of), G2W.val each, times its doctrine's
+      weights (G2W.dw: keep, take) and its personality's (G2W.pw, by kind of value).
+   Honest: nothing here reads S.men, S.units, S.bombs or S.planes (tests/g2-mundo.js: the code and a count with a Proxy on S); the enemy is
+   only what the side knows, its own is its own. gask mundo: the regions, the edges and the side's belief and values; with x z, the routes
+   to the region nearest x z (a point within G2W.ask m) from region id (the side's base without it). G2W.on 0 leaves it all out (the battle
+   as before: a measurement's control). G2WB: the cost, read only */
+const G2W = { on: 1,
+  seed: { near: 900, lat: 1800, k: .5, crest: 20, crestR: 3, wood: .6, woodN: 10, snap: 2 },
+  spd: { foot: [3.5, 3, 2.2], wheel: [14, 5, 2.5], track: [9, 6, 4] }, up: 1.5, road: .02,
+  rt: { n: 3, pen: 3, long: 1.8, ang: 45, arr: 600, end: 600, lap: .4, tries: 3, pops: 2500, per: 1 },
+  bel: { every: 4, half: 180, seen: 20, prior: 6, hold: 3, front: 1.5, eta: 120 },
+  val: { base: 10, seat: 8, town: 4, vil: 3, pt: 2, eco: { fab: 3, pow: 2, mine: 1 }, sup: 2, rad: 1.5, dome: 2, art: 2 },
+  dw: { cautious: [1.3, .8], balanced: [1, 1], aggressive: [.8, 1.3] },
+  pw: { ret: { keep: 1.2 }, blz: { base: 1.5, seat: 1.5 }, gue: { eco: 1.5, sup: 1.3 }, art: { art: 2 }, log: { sup: 2, rad: 1.5 } },
+  ask: 800, pts: 40,
+  K: ['base', 'pt', 'seat', 'bridge', 'choke', 'crest', 'wood', 'open'],
+  nm: { base: 'base', pt: 'ponto', seat: 'cidade-sede', bridge: 'ponte', choke: 'gargalo', crest: 'crista', wood: 'mata', open: 'campo' } };
+const G2WB = { build: 0, builds: 0, cells: 0, routes: 0, rms: 0, rworst: 0, sense: 0, senses: 0, sworst: 0,
+  stat() { const r = v => Math.round(v * 100) / 100; return { build: r(G2WB.build), builds: G2WB.builds, routes: G2WB.routes, route: r(G2WB.routes ? G2WB.rms / G2WB.routes : 0), routeWorst: r(G2WB.rworst), sense: r(G2WB.senses ? G2WB.sense / G2WB.senses : 0), senseWorst: r(G2WB.sworst), senses: G2WB.senses }; } };
+const g2Can = () => !!(G2W.on && S && S.T && S.cq && S.T.mv >= 4);
+/* a binary heap of cells by cost */
+function g2Heap() {
+  const hk = [], hv = [];
+  const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { const a = hk[i]; hk[i] = hk[j]; hk[j] = a; const b = hv[i]; hv[i] = hv[j]; hv[j] = b; };
+  return {
+    get n() { return hk.length; },
+    push(k, q) { hk.push(k); hv.push(q); let i = hk.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (!less(i, p)) break; swap(i, p); i = p; } },
+    pop() { const q = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return q; } };
+}
+/* m/s of class sp (G2W.spd) in cell q: the road's, else between the open ground's and the wood's by its share of wood */
+const g2Spd = (sp, Z, q) => (Z.road[q] > G2W.road ? sp[0] : sp[1] + (sp[2] - sp[1]) * Z.wood[q]);
+/* the cell nearest x z that a squad may walk, within G2W.seed.snap cells, or -1 */
+function g2Snap(Z, pass, x, z) {
+  const q0 = apCell(Z, x, z); if (pass[q0]) return q0;
+  const i0 = q0 % Z.nx, j0 = q0 / Z.nx | 0, R = G2W.seed.snap; let b = -1, bd = 1e18;
+  for (let j = Math.max(0, j0 - R); j <= Math.min(Z.nz - 1, j0 + R); j++) for (let i = Math.max(0, i0 - R); i <= Math.min(Z.nx - 1, i0 + R); i++) {
+    const q = j * Z.nx + i, p = apXZ(Z, q), d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z); if (pass[q] && d < bd) { bd = d; b = q; }
+  }
+  return b;
+}
+/* the ground's model of terrain T as it stands (null: none on this map): made at once the first time (now: at once in any case, the load), and
+   when a bridge fell or a pontoon went up, again a piece a frame (g2Step) while the old one serves */
+function g2Ground(T, now) {
+  if (!g2Can() || T !== S.T) return null;
+  const Z = tmStatic(T), W = T.g2w, sig = S.g2sig || (S.g2sig = g2Sig());   // the points and the seat towns of this match (they do not move)
+  if (W && W.Z === Z && W.sig === sig) return W;
+  if (W && W.sig === sig && !now) { if (!S.g2J) S.g2J = g2Job(T); return W; }
+  S.g2J = null; aiDrain(g2Job(T)); return T.g2w;
+}
+const g2Sig = () => S.cq.p.map(p => Math.round(p.x) + ',' + Math.round(p.z)).join(';') + '|' + SIDES().map(t => { const w = aidSeat(t); return w ? Math.round(w.x) + ',' + Math.round(w.z) : '-'; }).join(';');
+/* the build, a piece at a time: the seeds, the regions, the edges, the times between regions; T.g2w when done */
+function* g2Job(T) {
+  let a0 = AIB.now(), ms = 0; const lap = () => { ms += AIB.now() - a0; };
+  const Z = tmStatic(T), pass = apPass(Z), nx = Z.nx, nz = Z.nz, n = nx * nz, c = Z.c, K = G2W.seed, F = G2W.spd.foot;
+  const tf = new Float32Array(n); for (let q = 0; q < n; q++) tf[q] = pass[q] ? c / g2Spd(F, Z, q) : Infinity;
+  /* the seeds */
+  const nd = [], near = (x, z, r) => nd.some(o => Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r);
+  const add = (x, z, k, o) => { const q = g2Snap(Z, pass, x, z); if (q < 0) return null; const p = apXZ(Z, q), r = Object.assign({ i: nd.length, k, x: o && o.exact ? x : p.x, z: o && o.exact ? z : p.z, q, p: -1, seat: -1, e: [] }, o); delete r.exact; nd.push(r); return r; };
+  S.cq.p.forEach((p, i) => add(p.x, p.z, p.base >= 0 ? 'base' : 'pt', { exact: 1, p: i, nm: gName(p) }));
+  for (const t of SIDES()) { const w = aidSeat(t); if (!w) continue; const o = nd.find(o => hdist(o, w) < K.near); if (o) o.seat = t; else { const r = add(w.x, w.z, 'seat', { seat: t }); if (r) r.nm = w.nm || 'Sede'; } }
+  const ck = []; for (let q = 0; q < n; q++) if (pass[q] && Z.k[q] >= K.k) ck.push(q);
+  ck.sort((a, b) => Z.k[b] - Z.k[a] || a - b);
+  for (const q of ck) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, Z.k[q] >= TM.k.bridge ? 'bridge' : 'choke'); }
+  const cr = [], R = K.crestR;
+  for (let j = R; j < nz - R; j++) for (let i = R; i < nx - R; i++) {
+    const q = j * nx + i; if (!pass[q]) continue; let s = 0, m = 0, top = true;
+    for (let b = j - R; b <= j + R && top; b++) for (let a = i - R; a <= i + R; a++) { const h = Z.h[b * nx + a]; if (h > Z.h[q]) { top = false; break; } s += h; m++; }
+    if (top && Z.h[q] - s / m >= K.crest) cr.push([q, Z.h[q] - s / m]);
+  }
+  cr.sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  for (const [q] of cr) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, 'crest'); }
+  lap(); yield; a0 = AIB.now();
+  const seen = new Uint8Array(n), wd = [];
+  for (let q0 = 0; q0 < n; q0++) {
+    if (seen[q0] || !pass[q0] || Z.wood[q0] < K.wood) continue;
+    const st = [q0], l = []; seen[q0] = 1;
+    while (st.length) { const u = st.pop(); l.push(u); const ui = u % nx, uj = u / nx | 0; for (const [di, dj] of DIR8) { if (di && dj) continue; const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue; const v = j * nx + i; if (!seen[v] && pass[v] && Z.wood[v] >= K.wood) { seen[v] = 1; st.push(v); } } }
+    if (l.length < K.woodN) continue;
+    let mx = 0, mz = 0; for (const u of l) { const p = apXZ(Z, u); mx += p.x; mz += p.z; } mx /= l.length; mz /= l.length;
+    let b = l[0], bd = 1e18; for (const u of l) { const p = apXZ(Z, u), d = (p.x - mx) ** 2 + (p.z - mz) ** 2; if (d < bd) { bd = d; b = u; } }
+    wd.push([b, l.length]);
+  }
+  wd.sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  for (const [q] of wd) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, 'wood'); }
+  for (let x = K.lat / 2; x < Z.W; x += K.lat) for (let z = -Z.HW + K.lat / 2; z < Z.HW; z += K.lat) if (!near(x, z, K.near)) { const q = apCell(Z, x, z); if (pass[q]) add(x, z, 'open'); }
+  lap(); yield; a0 = AIB.now();
+  /* the regions: a Dijkstra from every seed at once */
+  const D = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), lab = new Int32Array(n).fill(-1), done = new Uint8Array(n), H = g2Heap(), up = G2W.up, h = Z.h;
+  const stp = (a, b, dg) => (tf[a] + tf[b]) * (dg ? .7071 : .5) + up * Math.max(0, h[b] - h[a]);
+  for (const o of nd) if (lab[o.q] < 0) { lab[o.q] = o.i; D[o.q] = 0; H.push(0, o.q); }
+  let k = 0;
+  while (H.n) {
+    const u = H.pop(); if (done[u]) continue; done[u] = 1; const ui = u % nx, uj = u / nx | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const q = j * nx + i; if (done[q] || !pass[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const w = D[u] + stp(u, q, di && dj); if (w < D[q]) { D[q] = w; via[q] = u; lab[q] = lab[u]; H.push(w, q); }
+    }
+    if (++k % 3000 === 0) { lap(); yield; a0 = AIB.now(); }
+  }
+  /* the edges: the quickest pair of cells across each border */
+  const best = new Map();
+  for (let q = 0; q < n; q++) {
+    if (lab[q] < 0) continue; const ui = q % nx, uj = q / nx | 0;
+    for (const [di, dj] of DIR8) {
+      if (dj < 0 || (dj === 0 && di < 0)) continue;   // each pair once
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const v = j * nx + i; if (lab[v] < 0 || lab[v] === lab[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const a = Math.min(lab[q], lab[v]), b = Math.max(lab[q], lab[v]), qa = lab[q] === a ? q : v, qb = qa === q ? v : q, w = D[qa] + stp(qa, qb, di && dj) + D[qb], key = a * 65536 + b, o = best.get(key);
+      if (!o || w < o.w) best.set(key, { a, b, qa, qb, w });
+    }
+  }
+  lap(); yield; a0 = AIB.now();
+  const chain = q => { const l = []; for (let w = q; w !== -1; w = via[w]) l.push(w); return l; };
+  const E = [];
+  for (const o of [...best.values()].sort((x, y) => x.a - y.a || x.b - y.b)) {
+    const cells = chain(o.qa).reverse().concat(chain(o.qb)), e = Object.assign({ i: E.length, a: o.a, b: o.b, cells: Int32Array.from(cells), tf: o.w }, g2Way(Z, cells));
+    E.push(e); nd[o.a].e.push(e.i); nd[o.b].e.push(e.i);
+  }
+  /* each region: its size, cover, wood, height; the foot's time from each to each */
+  const N = nd.length, cnt = new Float32Array(N), co = new Float32Array(N), cw = new Float32Array(N), ch = new Float32Array(N);
+  for (let q = 0; q < n; q++) { const r = lab[q]; if (r < 0) continue; cnt[r]++; co[r] += Z.o[q]; cw[r] += Z.wood[q]; ch[r] += Z.h[q]; }
+  for (const o of nd) { const m = cnt[o.i] || 1; Object.assign(o, { n: cnt[o.i], o: co[o.i] / m, wood: cw[o.i] / m, y: ch[o.i] / m }); if (!o.nm) o.nm = g2Nm(nd, o); }
+  const tt = new Float32Array(N * N).fill(Infinity);
+  for (let s = 0; s < N; s++) {
+    const d = tt.subarray(s * N, s * N + N), dn = new Uint8Array(N), G = g2Heap(); d[s] = 0; G.push(0, s);
+    while (G.n) { const u = G.pop(); if (dn[u]) continue; dn[u] = 1; for (const ei of nd[u].e) { const e = E[ei], v = e.a === u ? e.b : e.a, w = d[u] + e.tf; if (w < d[v]) { d[v] = w; G.push(w, v); } } }
+  }
+  lap(); G2WB.build = ms; G2WB.builds++; G2WB.cells = n;
+  T.g2w = { T: S.t, Z, sig: S.g2sig || (S.g2sig = g2Sig()), pass, tf, lab, n: nd, e: E, tt, N, rc: new Map(), to: new Map(), rq: [], ms };
+  S.g2J = null;
+}
+/* the way along cells (seed to seed): length, the time of each class, its share of road and of wood, mean cover, worst choke, a bridge */
+function g2Way(Z, cells) {
+  const c = Z.c, sp = G2W.spd; let len = 0, tw = 0, tk = 0, rd = 0, wd = 0, o = 0, k = 0, br = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const q = cells[i]; o += Z.o[q]; if (Z.k[q] > k) k = Z.k[q]; if (Z.k[q] >= TM.k.bridge) br = 1;
+    if (!i) continue;
+    const p = cells[i - 1], dl = (Math.abs(q - p) === 1 || Math.abs(q - p) === Z.nx ? c : c * 1.4142);
+    len += dl; tw += dl * .5 * (1 / g2Spd(sp.wheel, Z, p) + 1 / g2Spd(sp.wheel, Z, q)); tk += dl * .5 * (1 / g2Spd(sp.track, Z, p) + 1 / g2Spd(sp.track, Z, q));
+    if (Z.road[q] > G2W.road) rd += dl; if (Z.wood[q] > .5) wd += dl;
+  }
+  const L = Math.max(1, len);
+  return { len: Math.round(len), tw: Math.round(tw), tk: Math.round(tk), road: Math.round(rd / L * 100) / 100, wd: Math.round(wd / L * 100) / 100, o: Math.round(o / cells.length * 100) / 100, k: Math.round(k * 100) / 100, br };
+}
+/* a region's name: its point's, its seat town's, else its kind and how far it is from the nearest point */
+function g2Nm(nd, o) {
+  let b = null, bd = 1e9; for (const p of nd) if (p.p >= 0 && p !== o) { const d = hdist(p, o); if (d < bd) { bd = d; b = p; } }
+  return b ? G2W.nm[o.k] + ' a ' + gN(bd / 1000) + ' km de ' + b.nm : G2W.nm[o.k];
+}
+/* the region of x z (-1 off the ground: deep water) */
+function g2At(W, x, z) {
+  const Z = W.Z, q = apCell(Z, x, z); if (W.lab[q] >= 0) return W.lab[q];
+  const i0 = q % Z.nx, j0 = q / Z.nx | 0;
+  for (let r = 1; r <= 3; r++) for (let j = Math.max(0, j0 - r); j <= Math.min(Z.nz - 1, j0 + r); j++) for (let i = Math.max(0, i0 - r); i <= Math.min(Z.nx - 1, i0 + r); i++) { const v = W.lab[j * Z.nx + i]; if (v >= 0) return v; }
+  return -1;
+}
+/* the ground's model now (null: none) */
+const g2W = () => (g2Can() ? g2Ground(S.T) : null);
+/* a search over W's cells from cell s, a piece of G2W.rt.pops cells at a time (yields): toward s (rev: the cost of walking into s) or away
+   from it, each cell entered pen[cell] times dearer where pen is given. With g, an A*: what is left is at least the straight way to within
+   g.r m of g.x g.z at the road's foot pace, and it stops once nothing left can beat g.best (g.at(q): what ending at q costs in all,
+   Infinity for a cell that does not end it; g.q the best); without, it stops once the cheapest left costs more than stop. Fills D (the cells
+   it did not settle Infinity) and via */
+function* g2Dij(W, s, rev, pen, stop, D, via, g) {
+  const Z = W.Z, nx = Z.nx, nz = Z.nz, c = Z.c, HW = Z.HW, pass = W.pass, tf = W.tf, h = Z.h, up = G2W.up, H = g2Heap(), n = nx * nz, done = new Uint8Array(n), vm = 1 / G2W.spd.foot[0];
+  const hx = g ? q => { const dx = (q % nx + .5) * c - g.x, dz = -HW + ((q / nx | 0) + .5) * c - g.z, d = Math.sqrt(dx * dx + dz * dz) - g.r; return d > 0 ? d * vm : 0; } : () => 0;
+  D.fill(Infinity); via.fill(-1); D[s] = 0; H.push(hx(s), s); let k = 0, cut = false;
+  while (H.n) {
+    const u = H.pop(); if (done[u]) continue;
+    if (g) { if (D[u] + hx(u) >= g.best) { cut = true; break; } } else if (D[u] > stop) { cut = true; break; }
+    done[u] = 1;
+    if (g) { const v = g.at(u); if (v < g.best) { g.best = v; g.q = u; } }
+    const ui = u % nx, uj = u / nx | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const q = j * nx + i; if (done[q] || !pass[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const a = rev ? q : u, b = rev ? u : q;
+      let w = (tf[a] + tf[b]) * (di && dj ? .7071 : .5) + up * Math.max(0, h[b] - h[a]); if (pen) w *= pen[q];
+      w += D[u]; if (w < D[q]) { D[q] = w; via[q] = u; H.push(w + hx(q), q); }
+    }
+    if (++k % G2W.rt.pops === 0) yield;
+  }
+  if (cut) for (let q = 0; q < n; q++) if (!done[q]) D[q] = Infinity;
+}
+/* the tree toward region r's cell from the cells within reach of its ring (G2W.rt.arr m; the ways' last stretch), kept on W */
+function* g2Tree(W, r) {
+  const o = W.to.get(r); if (o) return o;
+  const n = W.pass.length, D = new Float32Array(n), via = new Int32Array(n);
+  yield* g2Dij(W, W.n[r].q, true, null, 3 * (G2W.rt.arr + W.Z.c) / G2W.spd.foot[2], D, via);
+  const t = { D, via }; W.to.set(r, t); return t;
+}
+/* the cells of the way to cell q down a tree (from its root to q; rev: from q to the root) */
+function g2Cells(tr, q, rev) { const l = []; for (let w = q; w !== -1; w = tr.via[w]) l.push(w); if (l.length && tr.D[l[l.length - 1]] !== 0) return null; return rev ? l : l.reverse(); }
+/* the bearing (radians, atan2 z x) from region b's place of the last cell of a way G2W.rt.arr m or more from it (walking back from b) */
+function g2Arr(W, cells, b) {
+  const o = W.n[b];
+  for (let i = cells.length - 1; i >= 0; i--) { const p = apXZ(W.Z, cells[i]); if (hdist(p, o) >= G2W.rt.arr) return Math.atan2(p.z - o.z, p.x - o.x); }
+  const p = apXZ(W.Z, cells[0]); return Math.atan2(p.z - o.z, p.x - o.x);
+}
+/* the share of way A's cells (but its ends) within a cell of way B's, both ways round the larger (0 to 1) */
+function g2Lap(W, A, B, a, b) {
+  const Z = W.Z, nx = Z.nx, E = G2W.rt.end, oa = W.n[a], ob = W.n[b], far = q => { const p = apXZ(Z, q); return hdist(p, oa) > E && hdist(p, ob) > E; };
+  const one = (X, Y) => {
+    const m = new Set(); for (const q of Y) { const i = q % nx, j = q / nx | 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) m.add((j + dj) * nx + i + di); }
+    let n = 0, k = 0; for (const q of X) if (far(q)) { n++; if (m.has(q)) k++; }
+    return n ? k / n : 0;
+  };
+  return Math.max(one(A, B), one(B, A));
+}
+const g2Ang = (a, b) => Math.abs(wrap(a - b)) * 180 / Math.PI;
+/* a route of the cells of a way: length, foot time, the regions it crosses, its arrival and how it stands against the ways before (R) */
+function g2Rt(W, cells, a, b, R) {
+  const w = g2Way(W.Z, cells), rg = []; for (const q of cells) { const r = W.lab[q]; if (r >= 0 && rg[rg.length - 1] !== r) rg.push(r); }
+  let tf = 0; for (let i = 1; i < cells.length; i++) { const p = cells[i - 1], q = cells[i], dg = !(Math.abs(q - p) === 1 || Math.abs(q - p) === W.Z.nx); tf += (W.tf[p] + W.tf[q]) * (dg ? .7071 : .5) + G2W.up * Math.max(0, W.Z.h[q] - W.Z.h[p]); }
+  const arr = g2Arr(W, cells, b), lap = R.map(o => g2Lap(W, cells, o.cells, a, b)), ang = R.map(o => g2Ang(arr, o.arr));
+  return Object.assign(w, { cells: Int32Array.from(cells), rg, tf: Math.round(tf), arr, lap: lap.length ? Math.max(...lap) : 0, ang: ang.length ? Math.min(...ang) : 180,
+    div: R.every((o, i) => lap[i] <= G2W.rt.lap && ang[i] >= G2W.rt.ang) });
+}
+/* a job's pieces, each timed into M.ms (not the frames between them) */
+function* g2Run(J, M) { for (;;) { const t = AIB.now(), r = J.next(); M.ms += AIB.now() - t; if (r.done) return r.value; yield; } }
+/* the routes from region a to region b, a piece at a time (yields); the list, also kept on W */
+function* g2RouteJob(W, a, b) {
+  const key = a * 65536 + b; if (W.rc.has(key)) return W.rc.get(key);
+  const M = { ms: 0 }, R = yield* g2Run(g2Way3(W, a, b), M);
+  G2WB.routes++; G2WB.rms += M.ms; if (M.ms > G2WB.rworst) G2WB.rworst = M.ms;
+  W.rc.set(key, R); return R;
+}
+function* g2Way3(W, a, b) {
+  const P = G2W.rt, Z = W.Z, n = W.pass.length, R = [];
+  if (a === b || !W.n[a] || !W.n[b]) return R;
+  const oa = W.n[a], ob = W.n[b], sa = oa.q, sb = ob.q, D = new Float32Array(n), via = new Int32Array(n);
+  const g1 = { x: ob.x, z: ob.z, r: 0, best: Infinity, q: -1, at: q => (q === sb ? D[q] : Infinity) };
+  yield* g2Dij(W, sa, false, null, Infinity, D, via, g1);
+  const c1 = g1.q === sb ? g2Cells({ D, via }, sb, false) : null;
+  if (!c1) return R;
+  R.push(g2Rt(W, c1, a, b, R));
+  const to = yield* g2Tree(W, b);
+  /* the ring about b: its cells that reach b and their bearings */
+  const ring = [], Rc = Math.ceil(P.arr / Z.c) + 1, bi = sb % Z.nx, bj = sb / Z.nx | 0, ok = new Uint8Array(n), pen = new Float32Array(n), E = P.end;
+  for (let j = Math.max(0, bj - Rc); j <= Math.min(Z.nz - 1, bj + Rc); j++) for (let i = Math.max(0, bi - Rc); i <= Math.min(Z.nx - 1, bi + Rc); i++) {
+    const q = j * Z.nx + i, p = apXZ(Z, q), d = hdist(p, ob); if (Math.abs(d - P.arr) <= Z.c * .75 && to.D[q] < Infinity) ring.push([q, Math.atan2(p.z - ob.z, p.x - ob.x)]);
+  }
+  for (let k = 1; k < P.n && ring.length; k++) {
+    let best = null; ok.fill(0); let any = false;
+    for (const [q, br] of ring) if (R.every(o => g2Ang(br, o.arr) >= P.ang)) { ok[q] = 1; any = true; }
+    if (!any) break;
+    for (let tr = 0, f = P.pen; tr < P.tries; tr++, f *= 2) {
+      pen.fill(1);
+      for (const o of R) for (const q of o.cells) { const i = q % Z.nx, j = q / Z.nx | 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const v = (j + dj) * Z.nx + i + di; if (v >= 0 && v < n && pen[v] === 1) { const p = apXZ(Z, v); if (hdist(p, oa) > E && hdist(p, ob) > E) pen[v] = 1 + f; } } }
+      const g = { x: ob.x, z: ob.z, r: P.arr + Z.c * .75, best: Infinity, q: -1, at: q => (ok[q] ? D[q] + to.D[q] : Infinity) };
+      yield* g2Dij(W, sa, false, pen, Infinity, D, via, g);
+      if (g.q < 0) break;
+      const head = g2Cells({ D, via }, g.q, false), tail = g2Cells(to, g.q, true); if (!head || !tail) break;
+      const r = g2Rt(W, head.concat(tail.slice(1)), a, b, R);
+      if (r.len > P.long * R[0].len) break;
+      if (!best || (r.div && !best.div) || (r.div === best.div && r.lap < best.lap)) best = r;
+      if (r.div) break;
+    }
+    if (!best) break;
+    R.push(best);
+  }
+  return R;
+}
+/* the routes from a to b while the ground stands: at once (a question, a test) */
+function g2Now(W, a, b) { const k = a * 65536 + b; return W.rc.has(k) ? W.rc.get(k) : (() => { const J = g2RouteJob(W, a, b); let r; do r = J.next(); while (!r.done); return r.value; })(); }
+/* the routes from a to b if made (null: asked, a piece a frame in g2Step) */
+function g2Routes(W, a, b) { const k = a * 65536 + b; if (W.rc.has(k)) return W.rc.get(k); if (!W.rq.some(o => o[0] === a && o[1] === b)) W.rq.push([a, b]); return null; }
+const g2Ask = g2Routes;
+/* every point to every other: the routes and whether the pair has two different ones (overlap G2W.rt.lap or less and arrivals G2W.rt.ang
+   degrees or more apart: the criterion of G1). out: { pairs, ok, share, byPt: [{ nm, n, ok }], laps, angs, ratio } */
+function g2Pairs(W) {
+  const P = W.n.filter(o => o.p >= 0), out = { pairs: 0, ok: 0, share: 0, byPt: P.map(o => ({ nm: o.nm, n: 0, ok: 0 })), laps: [], angs: [], ratio: [], none: 0 };
+  P.forEach((pb, ib) => P.forEach(pa => {
+    if (pa === pb) return;
+    const R = g2Now(W, pa.i, pb.i); out.pairs++; out.byPt[ib].n++;
+    let ok = false, bl = 1, ba = 0;
+    for (let i = 0; i < R.length; i++) for (let j = i + 1; j < R.length; j++) {
+      const l = g2Lap(W, R[i].cells, R[j].cells, pa.i, pb.i), g = g2Ang(R[i].arr, R[j].arr);
+      if (l <= G2W.rt.lap && g >= G2W.rt.ang) { ok = true; if (l < bl || !(bl <= G2W.rt.lap)) { bl = l; ba = g; } }
+      else if (!ok && (l < bl)) { bl = l; ba = g; }
+    }
+    if (R.length < 2) out.none++;
+    if (ok) { out.ok++; out.byPt[ib].ok++; }
+    if (R.length >= 2) { out.laps.push(bl); out.angs.push(ba); out.ratio.push(R[R.length - 1].len / Math.max(1, R[0].len)); }
+  }));
+  out.share = out.pairs ? out.ok / out.pairs : 0;
+  return out;
+}
+/* side t's belief, made or kept */
+function g2Bel(C, W) {
+  const N = W.n.length, B = C.g2;
+  if (B && B.W === W) return B;
+  const o = { W, T: -1, f: new Float32Array(N), ft: new Float32Array(N).fill(-1), now: new Float32Array(N), art: new Uint8Array(N), fo: new Float32Array(N), sq: new Uint16Array(N), veh: new Uint16Array(N), watch: new Uint8Array(N),
+    hold: new Int8Array(N).fill(-1), v: new Float32Array(N), tr: new Float32Array(N), l: new Float32Array(N), dng: new Float32Array(N), vo: new Float32Array(N), ve: new Float32Array(N), peak: 0, n: 0 };
+  if (B && B.W && B.W.N !== undefined) {   // a new ground: carry what was known over to the regions now at the same places
+    for (let r = 0; r < B.W.n.length; r++) if (B.f[r] > 0) { const s = g2At(W, B.W.n[r].x, B.W.n[r].z); if (s >= 0) { o.f[s] += B.f[r]; o.ft[s] = Math.max(o.ft[s], B.ft[r]); } }
+    o.peak = B.peak;
+  }
+  return (C.g2 = o);
+}
+/* the side's own vehicles: its roll, the dead and the lost taken off */
+function g2Own(t) { const R = S.g2r && S.g2r[t]; if (!R) return []; const l = R.filter(u => !u.dead && !u.gone && u.team === t); S.g2r[t] = R.filter(u => !u.dead && !u.gone); return l; }
+/* one look of side C at the world: its belief and its values, by region */
+function g2Sense(C) {
+  const W = g2W(); if (!W || !C) return null;
+  const a0 = AIB.now(), t = C.t, V = CMD.val, B = g2Bel(C, W), N = W.N, dt = B.T >= 0 ? Math.max(0, S.t - B.T) : 0, Bl = G2W.bel;
+  B.T = S.t; B.n++;
+  const now = B.now.fill(0), art = B.art.fill(0), fo = B.fo.fill(0), sq = B.sq.fill(0), veh = B.veh.fill(0), watch = B.watch.fill(0);
+  for (const o of C.known) {
+    if (o.dead) continue;
+    const r = g2At(W, sX(o, t), sZ(o, t)); if (r < 0) continue;
+    now[r] += o.man ? V.inf : V[tk(o)] || 1; if (!o.man && tk(o) === 'art') art[r]++;
+  }
+  for (const q of S.squads) {
+    if (q.team !== t || q.net || !(q.live > 0)) continue;
+    const L = q.men.find(m => !m.dead); if (!L) continue;
+    const r = g2At(W, L.x, L.z); if (r >= 0) { fo[r] += q.live * V.inf; sq[r]++; watch[r] = 1; }
+  }
+  for (const u of g2Own(t)) { if (u.fixed || !V[u.kind]) continue; const r = g2At(W, u.x, u.z); if (r >= 0) { fo[r] += V[u.kind]; veh[r]++; watch[r] = 1; } }
+  let tot = 0, sum = 0;
+  for (let r = 0; r < N; r++) {
+    const k = Math.pow(.5, dt / (watch[r] ? Bl.seen : Bl.half)), f = Math.max(now[r], B.f[r] * k);
+    B.f[r] = f < .05 ? 0 : f; if (now[r] > 0) B.ft[r] = S.t;
+    tot += now[r]; sum += B.f[r];
+  }
+  B.peak = Math.max(tot, B.peak * Math.pow(.5, dt / (Bl.half * 4)), 0);
+  for (const o of W.n) B.hold[o.i] = o.p >= 0 ? S.cq.p[o.p].hold : -1;
+  const M = C.tm, v = B.v.fill(0), tr = B.tr.fill(0), l = B.l.fill(0);
+  if (M && M.v && M.v.length === W.lab.length) {
+    const cn = new Float32Array(N);
+    for (let q = 0; q < W.lab.length; q++) { const r = W.lab[q]; if (r < 0) continue; cn[r]++; v[r] += M.v[q]; l[r] += M.l[q]; if (M.t[q] > tr[r]) tr[r] = M.t[q]; }
+    for (let r = 0; r < N; r++) if (cn[r]) { v[r] /= cn[r]; l[r] /= cn[r]; }
+  }
+  const dng = B.dng.fill(0), tt = W.tt, eta = Bl.eta;
+  for (let s = 0; s < N; s++) { const f = B.f[s]; if (!(f > 0)) continue; for (let r = 0; r < N; r++) { const d = tt[s * N + r]; if (d < Infinity) dng[r] += f * eta / (eta + d); } }
+  g2Val(C, W, B);
+  const ms = AIB.now() - a0; G2WB.senses++; G2WB.sense += ms; if (ms > G2WB.sworst) G2WB.sworst = ms;
+  B.tot = sum; return B;
+}
+/* what each region is worth to side C: to keep (vo) and to take (ve) */
+function g2Val(C, W, B) {
+  const t = C.t, Vl = G2W.val, dw = G2W.dw[docK(C)] || G2W.dw.balanced, pw = (S.per && G2W.pw[S.per[t]]) || {}, w = k => pw[k] || 1, vo = B.vo.fill(0), ve = B.ve.fill(0);
+  const keep = (x, z, v, k) => { const r = g2At(W, x, z); if (r >= 0) vo[r] += v * w(k) * (pw.keep || 1) * dw[0]; }, take = (x, z, v, k) => { const r = g2At(W, x, z); if (r >= 0) ve[r] += v * w(k) * dw[1]; };
+  for (const p of S.cq.p) {
+    const v = p.base >= 0 ? Vl.base : p.tw ? (p.big ? Vl.town : Vl.vil) : Vl.pt, k = p.base >= 0 ? 'base' : 'pt';
+    if (p.hold === t || p.base === t) keep(p.x, p.z, v, k); else take(p.x, p.z, v, k);
+  }
+  for (const f of SIDES()) {
+    const s = aidSeat(f); if (!s) continue;
+    if (f === t) keep(s.x, s.z, Vl.seat, 'seat'); else if (foeSide(t, f) && typeof sedeKn === 'function' && sedeKn(C, f)) take(s.x, s.z, Vl.seat, 'seat');
+  }
+  if (S.eco) {
+    for (const e of S.eco.l) if (e.team === t && !e.dead) keep(e.x, e.z, Vl.eco[e.k] || 1, 'eco');
+    const kn = S.eco.d && S.eco.d[t] ? S.eco.d[t].kn : null;
+    if (kn) for (const id in kn) { const e = kn[id]; if (e && !e.dead && e.t !== t && foeSide(t, e.t)) take(e.x, e.z, Vl.eco[e.k] || 1, 'eco'); }
+  }
+  for (const b of S.sup) if (b.team === t && !b.dead && !b.gone) keep(b.x, b.z, Vl.sup, 'sup');
+  if (S.cn && S.cn.nodes && S.cn.nodes[t]) for (const o of S.cn.nodes[t]) keep(o.x, o.z, Vl.rad, 'rad');
+  for (const f of S.forts) if (f.team === t && !f.dead && f.k === POSTS.dome.k && f.prog >= 1) keep(f.x, f.z, Vl.dome, 'dome');
+  for (let r = 0; r < W.N; r++) if (B.art[r]) ve[r] += Vl.art * B.art[r] * w('art') * dw[1];
+}
+/* a small hash draw: the side, k and the clock (never Math.random) */
+function g2Rng(t, k) { let s = (Math.imul(t + 1, 0x9e3779b1) ^ Math.imul(k + 7, 0x85ebca6b) ^ Math.imul(Math.floor(S.t) + 13, 0xc2b2ae35)) >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
+/* n guesses of the enemy side C does not see, each the strength by region: what it knows of, and the rest of what it has seen at most and
+   G2W.bel.prior more, spread over the regions it does not watch (more where the enemy holds the point, and on its side of the front) */
+function g2Hyp(C, n, k) {
+  const W = g2W(); if (!W || !C) return [];
+  const B = C.g2 && C.g2.W === W ? C.g2 : g2Sense(C), N = W.N, Bl = G2W.bel, rest = Math.max(0, B.peak - B.tot) + Bl.prior, wt = new Float32Array(N), out = [];
+  let sw = 0;
+  for (let r = 0; r < N; r++) { if (B.watch[r]) continue; const e = B.hold[r] >= 0 && foeSide(C.t, B.hold[r]) ? Bl.hold : 1; wt[r] = e * (1 + Bl.front * Math.max(0, -B.l[r])); sw += wt[r]; }
+  for (let h = 0; h < n; h++) {
+    const g = g2Rng(C.t, (k || 0) * 31 + h), d = new Float32Array(N); let s = 0;
+    for (let r = 0; r < N; r++) if (wt[r] > 0) { d[r] = -Math.log(1 - g() * .999999) * wt[r]; s += d[r]; }
+    for (let r = 0; r < N; r++) d[r] = B.f[r] + (s > 0 ? rest * d[r] / s : 0);
+    out.push(d);
+  }
+  return out;
+}
+/* each frame on the host (after the tactical map's): the ground's rebuild when a bridge fell, a piece of an asked route, each side's look on its turn */
+function g2Step(dt) {
+  if (!g2Can() || !S.cmd) return;
+  g2Ground(S.T);
+  if (S.g2J) S.g2J = aiJob(S.g2J, 1);
+  const W = S.T.g2w; if (!W) return;
+  if (!S.g2R && W.rq.length) { const [a, b] = W.rq.shift(); S.g2R = g2RouteJob(W, a, b); }
+  if (S.g2R) S.g2R = aiJob(S.g2R, G2W.rt.per);
+  if (!S.g2T || S.g2T.length !== SIDES().length) S.g2T = bySide(t => (t + 1) * G2W.bel.every / SIDES().length);
+  for (const t of SIDES()) if (S.cmd[t] && (S.g2T[t] -= dt) <= 0) { S.g2T[t] += G2W.bel.every; g2Sense(S.cmd[t]); }
+}
+tmStep = (g => dt => { g(dt); if (G2W.on) g2Step(dt); })(tmStep);
+/* each side's roll of the vehicles it fielded (its own, never the world's list) */
+addUnit = (g => (...a) => { const u = g(...a); if (u && S && isSide(u.team)) { const R = S.g2r || (S.g2r = []); (R[u.team] || (R[u.team] = [])).push(u); } return u; })(addUnit);
+/* gask mundo: side t's regions (x, z, kind, its own strength, the enemy it believes there, s since it was last seen (-1 never), worth to keep and
+   to take, who holds it), the edges (a, b, m, s on foot) and, with x z, the routes to the region nearest x z (a point within G2W.ask m) from
+   region id (its base's without it): m, minutes on foot, on wheels and on tracks, the bearing it arrives by (degrees on the map: 0 along +x, 90 along +z), its overlap with the ones before
+   (%), different (1), the enemy's sight along it (%), the most enemy believed on it, every other cell (G2W.pts at most) */
+function g2Answer(t, q) {
+  if (!G2W.on) return { why: 'off' };
+  const W = g2W(); if (!W) return { why: 'off' };
+  const C = cmdOf(t), B = C.g2 && C.g2.W === W ? C.g2 : g2Sense(C), R = v => Math.round(v), r1 = v => Math.round(v * 10) / 10;
+  const out = { age: Math.round((S.t - B.T) * 10) / 10, k: G2W.K,
+    n: W.n.map(o => [R(o.x), R(o.z), G2W.K.indexOf(o.k), r1(B.fo[o.i]), r1(B.f[o.i]), B.ft[o.i] < 0 ? -1 : R(S.t - B.ft[o.i]), r1(B.vo[o.i]), r1(B.ve[o.i]), B.hold[o.i]]),
+    nm: W.n.map(o => o.nm), e: W.e.map(e => [e.a, e.b, e.len, R(e.tf)]) };
+  if (Number.isFinite(q.x) && Number.isFinite(q.z)) {
+    if (!gMapOk(q.x, q.z)) return { why: 'map' };
+    let b = -1, bd = G2W.ask; for (const o of W.n) if (o.p >= 0) { const d = hdist(o, q); if (d < bd) { bd = d; b = o.i; } }
+    if (b < 0) b = g2At(W, q.x, q.z); if (b < 0) return { why: 'map' };
+    const a = Number.isInteger(q.id) && q.id >= 0 && q.id < W.N ? q.id : g2At(W, S.base[t].x, S.base[t].z);
+    if (a < 0 || a === b) return { why: 'way' };
+    const M = C.tm, rts = g2Now(W, a, b);
+    out.r = { a, b, nm: [W.n[a].nm, W.n[b].nm], w: rts.map(r => {
+      let v = 0, f = 0; for (const c of r.cells) { if (M && M.v) v += M.v[c]; if (B.f[W.lab[c]] > f) f = B.f[W.lab[c]]; }
+      return { len: r.len, min: r1(r.tf / 60), wh: r1(r.tw / 60), tr: r1(r.tk / 60), arr: R(((r.arr * 180 / Math.PI) % 360 + 360) % 360), lap: R(r.lap * 100), div: r.div ? 1 : 0,
+        exp: R(v / Math.max(1, r.cells.length) * 100), f: r1(f), rg: r.rg, pts: [...r.cells].filter((c, i) => i % 2 === 0 || i === r.cells.length - 1).slice(-G2W.pts).map(c => { const p = apXZ(W.Z, c); return [R(p.x), R(p.z)]; }) };
+    }) };
+  }
+  return out;
+}
+genQuery = (f => (t, q) => (q && q.q === 'mundo' && isSide(t) ? g2Answer(t, q) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => { if (!(q && q.q === 'mundo' && isSide(s))) return f(s, q); const r = g2Answer(s, q); return r.why ? { ok: false, why: r.why, id: 0 } : { ok: true, why: '', id: 0, r }; })(genAnswer);
+newState = (g => (e, m, o) => { const s = g(e, m, o); if (G2W.on && s && s.T && !(s.net && !s.host)) { s.g2J = s.g2R = null; g2Ground(s.T, true); } return s; })(newState);   // the ground's part at the load, not in a frame
 /* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
    Four procedures of the general, made through opNew (so the person and the MCP have them too: man k=ambush | interdict | guard, x z), each
    reading only side C's tactical map C.tm (what the side knows) and its habits of the enemy (C.hu, C.hp: what the side itself has seen pass):

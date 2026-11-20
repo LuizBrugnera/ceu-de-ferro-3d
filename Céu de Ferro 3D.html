@@ -23783,7 +23783,7 @@ genState = (g => t => {
   const L = new Map(V.sq.map(e => [e[0], e]));
   for (const q of o.sq) { const e = L.get(q.id); q.link = e ? e[1] : 2; if (e && e[2] !== -2) q.eta = e[2]; }
   o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df,
-    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null })) };   // the gaps (CNR) and the fix on its way to each
+    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null, note: e[5] || '' })) };   // the gaps (CNR) and the fix on its way to each
   return o;
 })(genState);
 /* ---------- abstract orders and routes (W21) ----------
@@ -25137,8 +25137,17 @@ step = (g => dt => { g(dt); if ((!S.net || S.host) && (S.aidT = (S.aidT || 0) - 
    the enemy watches more than vis (the tactical map's v) and with no enemy it knows of within foe m; when no relay can be had there (cap,
    cost, no builder, no way) the vehicle or an operator goes to that site instead, and with no safe site nothing goes. A relay ordered by
    the AI hands its builders back once it is up; a fix not done in T s is given up. CNB: what the net's step and the gap planner cost,
-   ms a call (read only). No random number is drawn here */
-const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200] };
+   ms a call (read only). No random number is drawn here.
+   The builder and the site together (cf-radio-general): the AI names its builder itself (cnWho): the free squad nearest the safe site,
+   the engineers when they are no more than engX m farther, never one that gave a relay up in the last ban s; the site is then picked
+   again with the builder's walk to it weighed in (wk a reach of walk against the score), so that the relay goes up where someone can get
+   to. Within walk m of way (way times the straight line) the relay is ordered; farther, the free radio vehicle or an operator goes first
+   (it covers now) and the relay is ordered only when neither can. A relay's order is given up after T s plus CGN.walkK s a m of the
+   builder's walk (it was T s flat, and a builder 3 km off never got there: the general gave it up, the builder walked back, and the
+   general sent it again, for ever). Each gap the AI cannot close says why in the diary (key gapx, as the others), and each gap has a line
+   for the view (note: the builder's walk left or the work's progress, or why nothing goes) */
+const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200],
+  walk: 1800, way: 1.3, engX: 600, wk: 1, ban: 300, pool: 6 };
 const CNB = { look: 0, lookN: 0, lookW: 0, fix: 0, fixN: 0, fixW: 0,
   stat() { const r = v => Math.round(v * 1000) / 1000; return { look: r(CNB.lookN ? CNB.look / CNB.lookN : 0), lookWorst: r(CNB.lookW), lookN: CNB.lookN, fix: r(CNB.fixN ? CNB.fix / CNB.fixN : 0), fixWorst: r(CNB.fixW), fixN: CNB.fixN }; } };
 FORT.rel = { k: 8, name: 'Antena de rádio', obj: 'mast', size: [2.6, 2.6, 7], time: 60, cap: 3, put: [5, 9], pad: .6, road: 9, min: 1, near: 0, back: 0, conceal: 0, pitch: 9, cost: [30, 40], garr: [], cn: 1 };
@@ -25181,7 +25190,7 @@ function cnGaps(t) {
   return G.sort((a, b) => b.w - a.w || a.ids[0] - b.ids[0]);
 }
 /* where a relay (or, with car, a radio vehicle) can cover gap g for side t: the furthest back toward its base, unwatched and clear of the known enemy */
-function cnSite(t, g, car) {
+function cnSite(t, g, car, from) {
   const C = cmdOf(t), b = S.base[t], R = cnRelR(), dx = b.x - g.x, dz = b.z - g.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, e = lsFoeBase(t, g.x, g.z);
   let best = null, bs = Infinity;
   for (let d = 0; d <= Math.min(R * CNR.keep, L); d += CNR.step) for (const l of CNR.lat) {
@@ -25189,16 +25198,17 @@ function cnSite(t, g, car) {
     if (!gMapOk(x, z) || !g.m.every(p => Math.hypot(p.x - x, p.z - z) < R * .95) || cnJam(t, x, z) > 0) continue;
     const v = cnWatch(C, x, z); if (v > CNR.vis || cmdKnown(C, x, z, CNR.foe) > 0) continue;
     if (!car && FORT.K[FORT.rel.k] && fortWhy(FORT.rel.k, t, x, z, headTo(x, z, e.x, e.z), true)) continue;
-    const s = v - d / R * .5 + Math.abs(l) / R * .2;
+    const s = v - d / R * .5 + Math.abs(l) / R * .2 + (from ? Math.hypot(from.x - x, from.z - z) / R * CNR.wk : 0);   // with a builder: its walk there counts (cf-radio-general)
     if (s < bs) { bs = s; best = { x, z, v }; }
   }
   return best;
 }
 /* the fix of side C on its way for gap g: 1 a relay, 2 a radio vehicle, 3 an operator; 0 none */
-function cnFixOf(C, g) {
+function cnFixOf(C, g) { const f = cnFixAt(C, g); return !f ? 0 : f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3; }
+function cnFixAt(C, g) {
   const R = cnRelR();
-  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3;
-  return 0;
+  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f;
+  return null;
 }
 /* side t's relays: standing or being built, and those ordered whose site has not been started yet */
 function cnRels(t) {
@@ -25211,7 +25221,7 @@ GC.fort = (G => ({ d: G.d, r: G.r, f(t, c, by, R) {
   if (S.net && !Net.crl) return gBad('crl');
   if (cnRels(t) >= FORT.rel.cap) return gBad('rcap');
   const r = G.f(t, c, by, R);
-  if (r.ok) { const C = cmdOf(t); (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, by }); }
+  if (r.ok) { const C = cmdOf(t), Tm = Number.isFinite(c.walk) && c.walk > 0 ? CNR.T + c.walk * CGN.walkK : CNR.T; (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, Tm, by }); }   // the deadline counts the builder's walk (cf-radio-general)
   return r;
 } }))(GC.fort);
 /* the side's free radio vehicle of the AI nearest x z */
@@ -25245,7 +25255,7 @@ function cnCover(t, c, by) {
   const p = railOf(c.x, c.z), r = gSend(t, 'move', c.x, c.z, qs, 1, rt || [], () => ({ x: c.x, z: c.z, O: { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, fast: 1, mk: 'support' } }));
   if (!r) return gBad('way');
   r.op.v = 'radio'; gWhy(r.qs, why);
-  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, by });
+  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, Tm: CNR.T + CNR.hold + (Number.isFinite(c.walk) && c.walk > 0 ? c.walk * CGN.walkK : 0), by });   // the deadline counts the walk (cf-radio-general)
   gLog(t, 'radio', 'Operador de rádio a caminho ' + gNear(c.x, c.z) + ' com a sua esquadra: cobrir a rede ali' + (c.why && by === 'ai' ? ' (' + c.why + ')' : ''), { x: c.x, z: c.z }, null);
   return gYes(r.op.id);
 }
@@ -25256,13 +25266,20 @@ function cnFixed(C, x) {
   if (x.k === 'rel') {
     const f = S.forts.find(f => f.team === t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
     if (f && f.prog >= 1) { free(); return true; }
-    if (!f && (!op || op.over || !opLive(op).length)) return true;
-    if (S.t - x.T0 > CNR.T) { free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo: o general desiste dela', x, null); return true; }
+    const ban = () => { if (x.by !== 'ai' || !op) return; const B = C.cnBan || (C.cnBan = {}); for (const q of op.sq) B[q.id] = S.t + CNR.ban; };   // the builders that gave it up are not sent to a relay again for a while
+    if (!f && (!op || op.over || !opLive(op).length)) {
+      if (x.by === 'ai') { ban(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ': os construtores não puderam erguê-la (' + (op && opLive(op).length ? 'sem lugar para ela ali' : 'perdidos ou desviados') + '); o general procura outro jeito de cobrir a brecha', x, 'relno' + Math.round(x.x / 500) + ',' + Math.round(x.z / 500)); }
+      return true;
+    }
+    if (S.t - x.T0 > (x.Tm || CNR.T)) {
+      const q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.round(Math.hypot(L.x - x.x, L.z - x.z)) : -1;
+      ban(); free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo (' + Math.round(S.t - x.T0) + ' s' + (f ? ', obra em ' + Math.round(f.prog * 100) + '%' : d >= 0 ? ', construtores ainda a ' + d + ' m' : '') + '): o general desiste dela', x, null); return true;
+    }
     return false;
   }
   if (x.k === 'car') return x.u.dead || x.u.gone || !x.u.cnG;
   if (!op || op.over || !opLive(op).length) return true;
-  if (S.t - x.T0 > CNR.T + CNR.hold) { free(); return true; }
+  if (S.t - x.T0 > (x.Tm || CNR.T + CNR.hold)) { free(); return true; }
   return false;
 }
 /* the commander's part, each plan (after its works): the gaps, and the AI closing the heaviest open one */
@@ -25276,12 +25293,48 @@ function cnFix(t) {
   try {
     if (genBy(t, 'sup') !== 'ai' || F.length >= CNR.max) return;
     const g = G.find(g => g.w >= CNR.min && !cnFixOf(C, g)); if (!g) return;
-    const s = cnSite(t, g, false), why = 'brecha na rede ' + gNear(g.x, g.z) + ': ' + gSqTxt(g.n) + ' sem ligação';
-    if (s && genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), why }, 'ai').ok) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ' (' + gSqTxt(g.n) + ' sem ligação): antena de rádio ordenada ' + gNear(s.x, s.z), s, 'gap' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
+    const key = Math.round(g.x / 500) + ',' + Math.round(g.z / 500), at = gNear(g.x, g.z), sq = gSqTxt(g.n) + ' sem ligação', why = 'brecha na rede ' + at + ': ' + sq;
+    const s0 = cnSite(t, g, false), b = s0 ? cnWho(t, s0) : null, s = b ? cnSite(t, g, false, gLead(b)) || s0 : s0, w = b ? hdist(gLead(b), s) * CNR.way : Infinity;   // the builder first, then the site with its walk weighed in
+    const rel = () => {
+      const r = genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), ids: [b.id], walk: Math.round(w), why }, 'ai');
+      if (r.ok) gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): antena de rádio ordenada ' + gNear(s.x, s.z) + ', ' + sqName(b) + ' a ' + (w / 1000).toFixed(1).replace('.', ',') + ' km de caminhada', s, 'gap' + key);
+      return r;
+    };
+    let r1 = null;
+    if (s && b && w <= CNR.walk && (r1 = rel()).ok) return;
     const v = s || cnSite(t, g, true);
-    if (!v) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
-    genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai');
-  } finally { const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms; }
+    if (!v) { g.note = 'SEM LUGAR SEGURO'; return gLog(t, 'radio', 'Brecha na rede ' + at + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + key); }
+    if (cnCar(t, v.x, v.z) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai').ok) return;   // the free radio vehicle drives there: it covers now
+    const o = gPick(t, {}, v.x, v.z, CNR.pool).find(cnOp), wo = o ? hdist(gLead(o), v) * CNR.way : Infinity;   // else whoever walks less: an operator's squad or the relay's builder
+    if (o && !(s && b && !r1 && w < wo) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), ids: [o.id], walk: Math.round(wo), why }, 'ai').ok) return;
+    if (s && b && !r1 && (r1 = rel()).ok) return;   // far, and no vehicle or nearer operator: the relay all the same, with the time its walk takes
+    const no = !s ? 'nenhum lugar para uma antena' : !b ? 'nenhuma esquadra livre para construir a antena' : 'antena recusada: ' + (GEN.no[r1 && r1.why] || (r1 && r1.why) || '?').toLowerCase();
+    g.note = !b && s ? 'SEM CONSTRUTOR LIVRE' : r1 && r1.why === 'rcap' ? 'LIMITE DE ANTENAS' : r1 && r1.why === 'cost' ? 'SEM RECURSOS PARA A ANTENA' : 'SEM REFORÇO POSSÍVEL';
+    gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): ' + no + ', e nenhum veículo-rádio ou operador livre; a rede segue com o buraco', g, 'gapx' + key);
+  } finally {
+    for (const g of G) if (!g.note) { const f = cnFixAt(C, g); if (f) g.note = cnNote(C, f); }
+    const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms;
+  }
+}
+/* the AI's builder of a relay at s: the free squad nearest it (the engineers when no more than engX m farther), none that gave one up lately */
+function cnWho(t, s) {
+  const B = cmdOf(t).cnBan, l = gPick(t, {}, s.x, s.z, CNR.pool).filter(q => !(B && B[q.id] > S.t));
+  if (!l.length) return null;
+  const d = q => hdist(gLead(q), s), n = l[0], e = l.find(q => q.job === 'eng');
+  return e && d(e) <= d(n) + CNR.engX ? e : n;
+}
+/* the view's line for a gap with a fix on its way: the relay's progress or its builders' distance left, the vehicle's */
+function cnNote(C, x) {
+  const km = m => (m / 1000).toFixed(1).replace('.', ',') + ' KM';
+  if (x.k === 'rel') {
+    const f = S.forts.find(f => f.team === C.t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
+    if (f) return 'EM OBRA · ' + Math.round(f.prog * 100) + '%';
+    const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q);
+    return L ? 'CONSTRUTORES A ' + km(Math.hypot(L.x - x.x, L.z - x.z)) : '';
+  }
+  if (x.k === 'car') return x.u && x.u.trip ? 'A ' + km(Math.hypot(x.u.x - x.x, x.u.z - x.z)) : 'NO LUGAR';
+  const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.hypot(L.x - x.x, L.z - x.z) : 0;
+  return L ? (d < 100 ? 'NO LUGAR' : 'A ' + km(d)) : '';
 }
 fortPlan = (g => (t, sq) => { g(t, sq); cnFix(t); })(fortPlan);
 /* after each look of the net: the vehicles sent to cover a place (on its way, then holding), and the relays (ready, lost, spotted) */
@@ -25325,7 +25378,7 @@ fortTargets = (g => (u, all) => { g(u, all); for (const f of S.forts) if (f.cg &
 cnVM = (g => t => {
   const V = g(t); if (!V) return V;
   const C = S.cmd && S.cmd[t], r = Math.round;
-  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e)]);
+  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e), e.note || '']);   // the note: what the general is doing about it, or why nothing goes (cf-radio-general)
   return V;
 })(cnVM);
 /* ---------- analytics (ANA): what a match was, for the after-action review and for balancing ----------
@@ -38030,7 +38083,7 @@ function gNet(g, V, P, now) {
     if (!Array.isArray(e) || !fin(e[0], e[1], e[2]) || !gOn(P, e[0], e[1], e[2] * P.s + 30)) continue;
     const x = P.X(e[0]), y = P.Y(e[1]), R = Math.max(10 * k, e[2] * P.s), c = '#ffb347';
     gHatch(g, x, y, R, c, .22); g.setLineDash([8, 5]); gRing(g, x, y, R, c, 1.6); g.setLineDash([]);
-    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); if (GF[e[4]]) gTxt(g, GF[e[4]], x, y - R + 7 * k, 9 * k, c, 'center'); }
+    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); const nt = typeof e[5] === 'string' ? e[5].slice(0, 40) : ''; if (GF[e[4]] || nt) gTxt(g, (GF[e[4]] || '') + (GF[e[4]] && nt ? ' · ' : '') + nt, x, y - R + 7 * k, 9 * k, c, 'center'); }
   }
   for (const j of Array.isArray(N.jam) ? N.jam : []) {
     if (!Array.isArray(j) || !fin(j[0], j[1], j[2]) || !gOn(P, j[0], j[1], j[2] * P.s + 20)) continue;

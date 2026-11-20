@@ -37432,9 +37432,12 @@ function buildWorld() {
   pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
   pg.setAttribute('pc', new THREE.BufferAttribute(new Float32Array(MAXP * 4), 4));
   pg.setAttribute('size', new THREE.BufferAttribute(new Float32Array(MAXP), 1));
-  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 } },
-    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; uniform float scale; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
-    fragmentShader: 'varying vec4 vc; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; gl_FragColor = vec4(vc.rgb, vc.a * smoothstep(0.5, 0.15, d)); }' }));
+  /* what glows (fire, flashes, tracers, a motor's flame: red at full, pc.r 1) is drawn as it is; the rest (smoke, dust, a smoke screen, a
+     soldier's speck) takes the day's light (amb, as the bursts' smoke of XFX) and the haze (fC from fN to fF m), so that a smoke screen
+     does not glow white at night nor stand sharp in the fog (skyScene sets them each frame) */
+  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 }, amb: { value: 1 }, fC: { value: new THREE.Color() }, fN: { value: 1e9 }, fF: { value: 2e9 } },
+    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; varying float vd; uniform float scale; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); vd = -mv.z; gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'varying vec4 vc; varying float vd; uniform float amb, fN, fF; uniform vec3 fC; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; float lit = step(vc.r, 0.98); vec3 c = mix(vc.rgb, vc.rgb * amb, lit); c = mix(c, fC, smoothstep(fN, fF, vd) * lit); gl_FragColor = vec4(c, vc.a * smoothstep(0.5, 0.15, d)); }' }));
   sparks.frustumCulled = false; scene.add(sparks);
   shadows = [];
   for (let i = 0; i < 14; i++) {
@@ -37605,9 +37608,11 @@ function vegMat(o) {
    the far crowns do not thin to nothing */
 const VAK = d => ' vAk = 1.0 + .3 * max(0.0, log2(' + d + ' / 45.0));\n';
 /* the dither of the bands, by the distance d: positive keeps a fragment under the value, negative keeps it over (the other side of
-   the same dither, so two bands that meet share every pixel without a gap) */
+   the same dither, so two bands that meet share every pixel without a gap): at a share t of the fade the band going out keeps the
+   noise under 1 - t and the band coming in the noise over 1 - t, so t - 1 (it was -t, and at the fade's far end both kept almost
+   nothing: a ring of trees round the eye stood as a few dots; tests/veg-fade.js) */
 const VFADE = 'float vegD = distance((modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz, uEye);\n' +
-  ' vFade = vegD < uBand.y ? (uBand.x < 0.0 ? 1.0 : -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0)) : 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0);\n' +
+  ' vFade = vegD < uBand.y ? (uBand.x < 0.0 ? 1.0 : clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0) - 1.0) : 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0);\n' +
   ' if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' + VAK('vegD');
 const VWIND = 'float vegW = clamp((position.y + 12.0) / 26.0, 0.0, 1.0); vegW *= vegW * uWind * step(.85, instanceMatrix[1].y / length(instanceMatrix[1].xyz));\n' +
   ' float vegP = instanceMatrix[3].x * .043 + instanceMatrix[3].z * .061;\n' +
@@ -37624,7 +37629,7 @@ function vegImpMat(tex) {
       ' vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), -h, el * .85));\n' +
       ' transformed = vegC + (rgt * position.x + up * (position.y + 12.0)) * ip.w;\n' +
       ' vImpUv = vec2(uv.x * .5 + ik * .5, uv.y); vImpC = ic;\n' +
-      ' float vegD = dE; vFade = 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0); if (vegD < uBand.y) vFade = -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0); if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' +
+      ' float vegD = dE; vFade = 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0); if (vegD < uBand.y) vFade = clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0) - 1.0; if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' +
       ' if (ip.w <= 0.0) transformed = vec3(0.0, -1e5, 0.0);\n' + VAK('dE'),
     normal: 'objectNormal = normalize(vec3(0.0, 1.0, 0.0) + .6 * normalize(vec3(uEye.x - ip.x, 0.0, uEye.z - ip.z) + vec3(1e-4, 0.0, 0.0)));\n',
     color2: 'vColor = vImpC;\n' });
@@ -44434,6 +44439,14 @@ skyScene = (g => () => {
       if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
     }
   }
+})(skyScene);
+/* the sparks' smoke, dust and screens: the day's light and the haze as drawn this frame (the same as XFX's smoke) */
+skyScene = (g => () => {
+  g();
+  const u = typeof sparks !== 'undefined' && sparks && sparks.material.uniforms;
+  if (!u || !u.amb || !S || !S.sky || !scene) return;
+  u.amb.value = .16 + .84 * clamp(S.sky.L, 0, 1);
+  if (scene.fog) { u.fN.value = scene.fog.near; u.fF.value = scene.fog.far; u.fC.value.copy(scene.fog.color); } else { u.fN.value = 1e9; u.fF.value = 2e9; }
 })(skyScene);
 /* the renderer's pixels: the level's most per CSS pixel */
 resize = (g => () => { g(); const d = Math.min(dpr, GFXQ[GFX.lv].dpr); if (renderer && d !== renderer.getPixelRatio()) { renderer.setPixelRatio(d); renderer.setSize(cw, ch, false); } })(resize);

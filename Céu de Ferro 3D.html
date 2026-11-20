@@ -35344,6 +35344,45 @@ function poseMan(m, put) {
   R.root.updateMatrixWorld(true);
   put(R.torso, c[0]); put(R.head, SKIN); put(R.helm, c[2] || c[1]); put(R.arm[0], c[0]); put(R.arm[1], c[0]); put(R.leg[0], c[1]); put(R.leg[1], c[1]); put(R.gunB, GUNC);
 }
+/* ---------- projectiles A (cf-miras-impl): the right shape per round and a cheap trail ----------
+   The shapes are made once and shared (geometry keep: kill() leaves them): a howitzer shell (ogive with its copper band), a mortar bomb
+   (teardrop with a finned tail), a launcher's rocket (body, nose and four fins), a missile (the same, white and longer). The light and the
+   smoke go in the sparks pool, never a puff per round: a flame at the tail while the motor burns, and a ribbon of PJ.n points of smoke
+   behind a rocket or a missile, taken every PJ.every s and fading over PJ.life s (kept in a WeakMap, so the sim's objects carry nothing).
+   burn: s a launcher's rocket burns (a missile reads its own motor, D.mot) */
+const PJ = { geo: {}, n: 12, every: .07, life: 2.6, burn: 1.8, tr: new WeakMap() };
+function pjGeo(k) {
+  if (PJ.geo[k]) return PJ.geo[k];
+  const lathe = (pts, seg) => { const g = new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg); g.rotateZ(-Math.PI / 2); return g; };
+  const fin = (l, h) => { const g = new THREE.BoxGeometry(l, h, .03); g.translate(-l / 2, 0, 0); return g; };
+  const g = k === 'shell' ? lathe([[0, -1.5], [.3, -1.5], [.34, -1.25], [.36, -1.15], [.34, -1.05], [.34, -.1], [.29, .45], [.19, .95], [.07, 1.35], [0, 1.45]], 9)
+    : k === 'band' ? lathe([[.355, -1.24], [.37, -1.15], [.355, -1.06]], 9)
+    : k === 'mort' ? lathe([[0, -.75], [.07, -.75], [.07, -.35], [.16, -.12], [.2, .1], [.2, .25], [.13, .55], [0, .68]], 8)
+    : k === 'mfin' ? fin(.36, .42)
+    : k === 'rkt' ? lathe([[0, -1.5], [.16, -1.5], [.17, -1.4], [.17, .9], [.12, 1.2], [0, 1.5]], 7)
+    : k === 'rfin' ? fin(.5, .5)
+    : k === 'msl' ? lathe([[0, -2.1], [.2, -2.1], [.22, -1.95], [.22, 1.5], [.15, 1.85], [0, 2.1]], 8)
+    : fin(.7, .72);
+  g.userData.keep = 1; return (PJ.geo[k] = g);
+}
+function pjMesh(k) {
+  const g = new THREE.Group(), add = (gk, m, rx, x) => { const o = new THREE.Mesh(pjGeo(gk), m); if (rx !== undefined) { o.rotation.x = rx; o.position.x = x; } g.add(o); return o; };
+  if (k === 'shell') { add('shell', mat(0x4b5136)); add('band', mat(0xb8743a)); }
+  else if (k === 'mort') { add('mort', mat(0x3b4430)); for (let i = 0; i < 2; i++) add('mfin', mat(0x3b4430), i * Math.PI / 2, -.4); }
+  else if (k === 'rkt') { add('rkt', mat(0x55594a)); for (let i = 0; i < 2; i++) add('rfin', mat(0x3d4136), i * Math.PI / 2 + Math.PI / 4, -1.2); }
+  else { add('msl', mat(0xeceae2)); for (let i = 0; i < 2; i++) add('mslfin', mat(0xc9c7bf), i * Math.PI / 2 + Math.PI / 4, -1.55); }
+  return g;
+}
+/* the kind of a howitzer-arc round: a launcher's rocket (its weapon has a salvo), a mortar bomb (a soldier fired it), or a shell */
+const pjKind = b => (b.o && b.o.sal ? 'rkt' : b.by && b.by.man ? 'mort' : 'shell');
+/* the round's tail: where a flame and the ribbon start, len m behind its centre along v */
+function pjTail(o, vx, vy, vz, len) { const V = Math.hypot(vx, vy, vz) || 1; return [o.x - vx / V * len, o.y - vy / V * len, o.z - vz / V * len]; }
+function pjTrail(o, p, on) {
+  let t = PJ.tr.get(o);
+  if (!t) { t = { a: new Float32Array(PJ.n * 4), i: 0, n: 0, at: -1 }; PJ.tr.set(o, t); }
+  if (on && S.t - t.at >= PJ.every) { t.a.set([p[0], p[1], p[2], S.t], t.i * 4); t.i = (t.i + 1) % PJ.n; t.n = Math.min(PJ.n, t.n + 1); t.at = S.t; }
+  return t;
+}
 function syncScene(dt) {
   frameId++; syncObjs(dt || 0);
   trnScene();
@@ -35379,8 +35418,8 @@ function syncScene(dt) {
   fortScene();
   vegFrame(dt);
   sync(S.debris, gDebris, debrisMesh, (o, m) => { m.position.set(o.x, o.y, o.z); m.quaternion.set(o.q.x, o.q.y, o.q.z, o.q.w); });
-  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? new THREE.Mesh(cylX(.34, .1, 3, 6), mat(0x2f322e)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
-  sync(S.missiles, gMissiles, () => new THREE.Mesh(cylX(.22, .22, 4.2, 6), mat(0xeceae2)), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
+  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
+  sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
   let n = 0; const bp = tracers.geometry.attributes.position.array;
   let k = 0; const pp = sparks.geometry.attributes.position.array, pc = sparks.geometry.attributes.pc.array, ps = sparks.geometry.attributes.size.array;
@@ -35407,9 +35446,32 @@ function syncScene(dt) {
     else { pc.set([1, .93, .6, a], k * 4); ps[k] = 2.2; }
     k++;
   }
-  for (const b of S.bombs) {   // a howitzer round is a dark speck that never shrinks below a few pixels, so its arc can be followed
-    if (b.k !== 'he' || k >= MAXP) continue;
-    pp.set([b.x, b.y, b.z], k * 3); pc.set(b.t < .6 ? [1, .8, .45, 1] : [.12, .12, .11, .95], k * 4); ps[k++] = Math.max(1.2, px * .9 * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z));
+  const ribbon = t => {   // a round's smoke ribbon, oldest first: thin and dense near the tail, wide and thin as it ages
+    for (let j = 0; j < t.n && k < MAXP; j++) {
+      const q = ((t.i - t.n + j) % PJ.n + PJ.n) % PJ.n * 4, age = S.t - t.a[q + 3], a = 1 - age / PJ.life;
+      if (a <= 0) continue;
+      pp.set([t.a[q], t.a[q + 1], t.a[q + 2]], k * 3); pc.set([.8, .79, .76, a * .5], k * 4); ps[k++] = 1.1 + age * 2.4;
+    }
+  };
+  const flame = (p, r) => {   // the motor's flame: a hot core over an orange halo, never below a few pixels
+    if (k >= MAXP - 1) return;
+    const sz = Math.max(r, px * 1.4 * Math.hypot(p[0] - cam.x, p[1] - cam.y, p[2] - cam.z));
+    pp.set([p[0], p[1], p[2], p[0], p[1], p[2]], k * 3); pc.set([1, .55, .18, .8, 1, .93, .7, 1], k * 4); ps[k++] = sz * 2.4; ps[k++] = sz;
+  };
+  for (const b of S.bombs) {   // a howitzer round is a speck that never shrinks below a few pixels, so its arc can be followed; a rocket burns and smokes
+    if (k >= MAXP) break;
+    if (b.k === 'rocket') { const tl = pjTail(b, b.vx, b.vy, b.vz, 1.4); flame(tl, .5); ribbon(pjTrail(b, tl, true)); continue; }
+    if (b.k !== 'he') continue;
+    const kind = pjKind(b), d = Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z);
+    if (kind === 'rkt') { const on = b.t < PJ.burn, tl = pjTail(b, b.vx, b.vy, b.vz, 1.6); if (on) flame(tl, .7); ribbon(pjTrail(b, tl, on)); if (on) continue; }
+    if (k >= MAXP) break;
+    pp.set([b.x, b.y, b.z], k * 3); pc.set(b.t < .6 && kind !== 'rkt' ? [1, .8, .45, 1] : kind === 'mort' ? [.16, .18, .13, .95] : [.12, .12, .11, .95], k * 4); ps[k++] = Math.max(1.2, px * .9 * d);
+  }
+  for (const m of S.missiles) {   // a missile: the flame while its motor burns, and the ribbon it leaves
+    if (k >= MAXP) break;
+    const D = m.D, mot = D && D.mot, on = !m.gone && (!mot || m.age < mot[0] + (mot[3] ? mot[2] : 0)), d = m.d || { x: 1, y: 0, z: 0 }, tl = pjTail(m, d.x, d.y, d.z, 2.2);
+    if (on) flame(tl, .6);
+    ribbon(pjTrail(m, tl, on));
   }
   for (const m of S.men) {   // far off a soldier is a dark speck that never shrinks below a couple of pixels, so a squad can be made out
     const d = Math.hypot(m.x - cam.x, m.y - cam.y, m.z - cam.z), sz = px * .75 * d;

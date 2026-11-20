@@ -8993,11 +8993,12 @@ function scan(u) {
   const A = u.ai; A.fd = 1e9; A.blocked = S.t < A.rest; let held = null;
   for (const o of S.units) {
     if (o === u || o.dead) continue;
-    if (o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
+    if (o.team !== u.team) { if (!HON.on) A.fd = Math.min(A.fd, hdist(o, u)); }
     else if (u.rail && !u.trip && o.rail && !o.trip && o.ri === u.ri && o.lane === u.lane) { const d = (o.s - u.s) * u.ds; if (d > 0 && d < 22) held = o; }
   }
   if (held && !orgPass(u, held)) A.blocked = true;   // held up in its lane: it passes in the other one when that is free (ORG)
-  for (const o of S.men) if (!o.dead && o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
+  if (HON.on) A.fd = honFd(u, u);   // CEREBRO honestidade: the nearest enemy the vehicle believes
+  else for (const o of S.men) if (!o.dead && o.team !== u.team) A.fd = Math.min(A.fd, hdist(o, u));
 }
 /* ---------- vehicle trips (map version 4): a vehicle on its axis goes by the network to a place off it and rides the way as it rides a route ----------
    u.trip = { p the way (a polyline of tripOf, mode veh), s how far along, ri s1 the axis and s it ends on (none when it ends off the axes), T the
@@ -9952,9 +9953,9 @@ function squadThink(q) {
   if (q.rd && q.rd.st === 'ride') return manRideThink(q);   // map version 4: aboard a vehicle (MAN.ride)
   const live = q.men.filter(m => !m.dead && !m.down), L = live[0], r = S.T.routes[q.ri], O = q.ord || (q.ord = { k: 'escort' });
   q.live = live.length; if (!L) return;
-  q.fd = 1e9;
-  for (const o of S.units) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
-  for (const o of S.men) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
+  q.fd = HON.on ? honFd(q, L) : 1e9;   // CEREBRO honestidade: the nearest enemy it believes
+  if (!HON.on) for (const o of S.units) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
+  if (!HON.on) for (const o of S.men) if (!o.dead && o.team !== q.team) q.fd = Math.min(q.fd, hdist(o, L));
   if (!q.state && live.length <= q.n0 * (q.mil ? CIV.mil.rout : IAI.rout) * vetK(q, 'brk')) { q.state = 1; q.s0 = clamp(q.s - q.ds * IAI.back, 0, r.len); if (L.smk > 0) L.ctl.nade = 2; }
   if (q.state) { q.at = false; if (q.tp) { q.ts = Math.max(0, q.ts - MAN.run * IAI.think * .8); tripS(q); } else q.s += clamp(q.s0 - q.s, -MAN.run * IAI.think * .8, MAN.run * IAI.think * .8); return; }   // routed on a trip: back along it
   cmdSquad(q, L, O);
@@ -10322,7 +10323,7 @@ function sqMan(m, A, q, best) {
   c.rl = !A.los && !(a.rl > 0) && a.d.mag > 1 && a.mag < a.d.mag * I.rl;
   if (dHide(m, A, q) || A.brk > S.t) { A.gx = A.bx; A.gz = A.bz; A.run = hdist(m, { x: A.bx, z: A.bz }) > 6; A.st = A.run ? 0 : A.dhide && !m.cbin ? 2 : 1; return; }
   A.dhide = 0; A.dof = null;
-  for (const b of S.bombs) if (b.k === 'nade' && b.by !== m && Math.abs(b.x - m.x) < I.nade && Math.abs(b.z - m.z) < I.nade && b.y - hgt(b.x, b.z) < 2) {   // a grenade by him: away from it
+  for (const b of S.bombs) if (b.k === 'nade' && b.by !== m && Math.abs(b.x - m.x) < I.nade && Math.abs(b.z - m.z) < I.nade && b.y - hgt(b.x, b.z) < 2 && honNade(m, b)) {   // a grenade by him that he knows of (CEREBRO honestidade): away from it
     const dx = m.x - b.x, dz = m.z - b.z, d = Math.hypot(dx, dz) || 1, p = clearOf(m.x + dx / d * 10, m.z + dz / d * 10, 1, {});
     A.bx = A.gx = p.x; A.bz = A.gz = p.z; A.brk = Math.max(S.t + 2, b.fz === undefined ? 0 : b.fz + .3); A.run = true; A.st = 0; return;   // away until it has gone off (NADE: a fuse)
   }
@@ -14130,6 +14131,84 @@ function belief(o) {
   o.belT = { thr, top, n: B.size }; return o.belT;
 }
 const belTop = (o, f) => { let best = null; if (o.bel) for (const [t, b] of o.bel) if (!t.dead && f(b, t) && (!best || b.thr > best.thr)) best = Object.assign(b, { o: t }); return best; };
+/* ---------- CEREBRO: honestidade (P7) ----------
+   What the AI's mind reads of the enemy is what its perception has, never the world's lists (the research's table 2.6). HON.on 0 brings the
+   old readings back (the A × B of P6 and P7's own tournament); the old code keeps them behind HON.on, and calls these at:
+   squadThink (q.fd), scan (A.fd of a vehicle), cmdSquad (an ambush's count in its killing ground), sqMan (the grenade a man runs from),
+   drInc (where the fire coming in is from) and listen (wrapped here).
+   honFd(o, at): how near the nearest enemy o believes is (o.bel, belief: its own meters and what its side told it), from at (a squad's
+   leader, a vehicle), over contacts fresh within fresh s (an aircraft does not count, as before); none: 1e9.
+   honKz(q, kz): the enemy q believes in its killing ground, counted as cmdSquad counted the true ones (a vehicle 2, a man 1, 9 in the middle).
+   honEar(o, s): where o hears the report of s from: its bearing off by ear.a rad, more the farther (ear.d at ear.R m) and among buildings
+   (ear.urb with town or more of them within ear.r m: the echo), its range a guess (ear.k of it, twice among buildings). The error is
+   o's own for that shooter (the same echo while they stay put) with a little drift; only sight (the ladder) firms the place up.
+   honNade(m, b): does m know of grenade b: seen (in front within nade.cone rad and nade.see m, with a line to it), heard landing within
+   nade.ear m, or a mate's shout "Granada!" within nade.voz m that he reacts to after nade.react s; a friendly grenade its thrower called
+   ("Lá vai granada!"). Who knows it, he shouts it himself */
+const HON = { on: 1, every: .5, fresh: 12, air: { plane: 1, heli: 1 },
+  ear: { a: .05, d: .2, R: 1500, urb: .35, town: 6, r: 60, k: .3, drift: .25 },
+  nade: { cone: 1.05, see: 30, ear: 5, voz: 25, react: .35 } };
+/* o's beliefs, brought up to date at most every HON.every s (mindThink brings them up to date too) */
+function honBel(o) { if (!(S.t - (o.belS === undefined ? -99 : o.belS) < HON.every)) { belief(o); o.belS = S.t; } return o.bel; }
+function honFd(o, at) {
+  const B = honBel(o); let d = 1e9;
+  if (B && at) for (const [t, b] of B) if (!HON.air[b.c] && S.t - b.t < HON.fresh) d = Math.min(d, Math.hypot(b.x - at.x, b.z - at.z));
+  return d;
+}
+function honKz(q, kz, A) {
+  const B = honBel(q); let n = 0;
+  if (B) for (const [t, b] of B) {
+    if (HON.air[b.c] || S.t - b.t > 2 || Math.abs(b.x - kz.x) >= A.kz || Math.abs(b.z - kz.z) >= A.kz) continue;
+    n += Math.hypot(b.x - kz.x, b.z - kz.z) < A.kz * INC.amb.mid ? 9 : MIND.thr[b.c] && !HONM[b.c] ? 2 : 1;
+  }
+  return n;
+}
+const HONM = { man: 1, mg: 1, at: 1, snp: 1, '?': 1 };   // the classes that count as a man in a killing ground ('?': not made out yet)
+/* how built up the place is, 0 to 1 (buildings within ear.r m), kept per 50 m cell for 30 s */
+const HONU = new Map();
+function honTown(x, z) {
+  const k = Math.round(x / 50) * 4096 + Math.round(z / 50), c = HONU.get(k);
+  if (c && S.t - c.t < 30 && c.S === S) return c.u;
+  let n = 0; for (const o of near(x, z, HON.ear.r)) if (o.B) n++;
+  const u = Math.min(1, n / HON.ear.town); if (HONU.size > 4096) HONU.clear(); HONU.set(k, { u, t: S.t, S }); return u;
+}
+const honKey = o => (o.ai && o.ai.seed !== undefined ? o.ai.seed : o.seed !== undefined ? o.seed : o.id || 0);
+function honEar(o, s) {
+  const E = HON.ear, dx = s.x - o.x, dz = s.z - o.z, d = Math.hypot(dx, dz) || 1, u = honTown(o.x, o.z), ko = honKey(o), ks = honKey(s), tb = Math.floor(S.t / 2);
+  const n1 = (hash2(ko, ks, 1) * 2 - 1) * (1 - E.drift) + (hash2(ko, ks, tb + 3) * 2 - 1) * E.drift, n2 = hash2(ks, ko, 2) * 2 - 1;
+  const ea = (E.a + E.d * Math.min(1, d / E.R) + E.urb * u) * n1, r = Math.max(5, d * (1 + E.k * (1 + u) * n2)), a = Math.atan2(dz, dx) + ea;
+  return { x: o.x + Math.cos(a) * r, z: o.z + Math.sin(a) * r, d, ea };
+}
+/* drInc's hook: where m makes the shot that hit near him come from (by itself when the honesty is off) */
+const honSrc = (m, by) => (HON.on ? honEar(m, by) : by);
+/* a shot heard by the other side's AI turns it that way: as listen did, but to where it hears it (honEar), not to the shooter.
+   The world's lists are read here as the sound itself: who fired and who is within earshot (a perception function) */
+listen = (g => () => {
+  if (!HON.on) return g();
+  for (const l of [S.units, S.men, S.planes]) for (const s of l) {
+    if (s.dead || S.t - shotAt(s) > SPOT.every + .1) continue;
+    const R = HEAR.fire[tclass(s)]; if (!R) continue;
+    for (const l2 of [S.units, S.men, S.planes]) for (const o of l2) if (!o.dead && o.ai && o.team !== s.team && dist(o, s) < R) { const p = honEar(o, s); o.ln = { x: p.x, z: p.z, t: S.t, of: s }; }
+  }
+})(listen);
+/* grenades: who knows of each, and the shouts (b → { m: Map(man → s he knows it from), y: [{ x, z, t, team }] }) */
+const HONG = new WeakMap();
+function honNade(m, b) {
+  if (!HON.on || !m.ai) return true;
+  if (b.team === m.team) return true;   // a friend's: its thrower called it
+  let g = HONG.get(b); if (!g) HONG.set(b, g = { m: new Map(), y: [] });
+  const k = g.m.get(m); if (k !== undefined) return S.t >= k;
+  const N = HON.nade, dx = b.x - m.x, dz = b.z - m.z, d = Math.hypot(dx, dz);
+  let at = -1;
+  if (d < N.ear && b.y - hgt(b.x, b.z) < 2) at = S.t;   // heard it land
+  else if (d < N.see && Math.abs(wrap(Math.atan2(-dz, dx) - gaze(m, 'man'))) < N.cone && los(m, eyeY(m), b, b.y + .1)) at = S.t;   // saw it
+  else for (const y of g.y) if (y.team === m.team && Math.hypot(y.x - m.x, y.z - m.z) < N.voz) { at = Math.max(S.t, y.t + N.react); break; }   // a mate's shout
+  if (at < 0) return false;
+  g.m.set(m, at);
+  if (at === S.t && !m.down) { g.y.push({ x: m.x, z: m.z, t: S.t, team: m.team }); if (typeof say === 'function' && typeof SAYC !== 'undefined') say(m, SAYC.nade, 0, true); }   // "Granada!"
+  return S.t >= at;
+}
+/* ---------- end CEREBRO: honestidade ---------- */
 /* how strong o still is, 0 to 1 */
 const mStr = o => (o.men ? o.men.filter(m => !m.dead && !m.down).length / Math.max(1, o.n0 || o.men.length) : o.max ? o.hp / o.max : o.def && o.def.hp ? o.hp / o.def.hp : 1);
 const leash = o => (o.mis ? o.mis.area.r * (o.mis.lat === 2 ? 1.5 : 1) : 1e9);
@@ -14702,7 +14781,7 @@ function drInc(m, by, vx, vz, w) {
   const l = q.drW || (q.drW = []), L = l[l.length - 1];
   if (L && S.t - L.t < .25 && w <= L.w) return;
   const vl = Math.hypot(vx || 0, vz || 0); let ux, uz;
-  if (vl > 1) { ux = -vx / vl; uz = -vz / vl; } else { const dx = by.x - m.x, dz = by.z - m.z, dl = Math.hypot(dx, dz) || 1; ux = dx / dl + qr(-.25, .25); uz = dz / dl + qr(-.25, .25); }
+  if (vl > 1) { ux = -vx / vl; uz = -vz / vl; } else { const p = honSrc(m, by), dx = p.x - m.x, dz = p.z - m.z, dl = Math.hypot(dx, dz) || 1; ux = dx / dl + qr(-.25, .25); uz = dz / dl + qr(-.25, .25); }
   const h = m.ln && m.ln.of === by && S.t - m.ln.t < 3 ? m.ln : null;
   l.push({ t: S.t, w, x: m.x, z: m.z, ux, uz, hx: h ? h.x : undefined, hz: h ? h.z : undefined }); if (l.length > 16) l.shift();
 }
@@ -17736,9 +17815,9 @@ function cmdSquad(q, L, O) {
   if (O.k !== 'ambush' || !op) { if (hot) q.hotT = S.t + A.calm; q.hf = !(S.t < q.hotT); return; }
   if (!op.sprung) {
     if (!hot && O.kz) {
-      let n = 0;
-      for (const o of S.units) if (!o.dead && o.team !== q.team && Math.abs(o.x - O.kz.x) < A.kz && Math.abs(o.z - O.kz.z) < A.kz) n += Math.hypot(o.x - O.kz.x, o.z - O.kz.z) < A.kz * INC.amb.mid ? 9 : 2;
-      for (const o of S.men) if (!o.dead && o.team !== q.team && !o.in && Math.abs(o.x - O.kz.x) < A.kz && Math.abs(o.z - O.kz.z) < A.kz) n += Math.hypot(o.x - O.kz.x, o.z - O.kz.z) < A.kz * INC.amb.mid ? 9 : 1;
+      let n = HON.on ? honKz(q, O.kz, A) : 0;   // CEREBRO honestidade: the enemy it sees in its killing ground
+      if (!HON.on) for (const o of S.units) if (!o.dead && o.team !== q.team && Math.abs(o.x - O.kz.x) < A.kz && Math.abs(o.z - O.kz.z) < A.kz) n += Math.hypot(o.x - O.kz.x, o.z - O.kz.z) < A.kz * INC.amb.mid ? 9 : 2;
+      if (!HON.on) for (const o of S.men) if (!o.dead && o.team !== q.team && !o.in && Math.abs(o.x - O.kz.x) < A.kz && Math.abs(o.z - O.kz.z) < A.kz) n += Math.hypot(o.x - O.kz.x, o.z - O.kz.z) < A.kz * INC.amb.mid ? 9 : 1;
       hot = n >= A.n;
     }
     if (hot || (P && P.man && !P.dead && P.team === q.team && S.t - P.shotT < 1 && hdist(P, L) < A.join)) cmdSpring(op);

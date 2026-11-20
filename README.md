@@ -286,7 +286,7 @@ Homem-bomba e carro-bomba: armam 2 s depois de entrar em campo e explodem perto 
 
 | Tecla | Ação |
 | --- | --- |
-| W / S, A / D | Manche (no clássico); com o mouse, A / D rolam à mão e W / S são o motor |
+| W / S, A / D | Manche (no clássico); com o mouse, A / D rolam à mão e W / S sobem e descem o bico (S levanta o nariz, W abaixa). O motor é só Shift / Z |
 | Q / E | Leme |
 | Shift / Z | Mais e menos motor |
 | Espaço ou botão esquerdo | Canhão |

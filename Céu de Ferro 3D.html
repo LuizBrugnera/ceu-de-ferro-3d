@@ -24124,7 +24124,7 @@ const sus = t => { const a = S.msus || (S.msus = bySide(() => [])); return a[t] 
 /* the pouch: a sapper's mines are filled where its charges are */
 addMan = (g => (id, team, x, z, h) => { const m = g(id, team, x, z, h); if (m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } return m; })(addMan);
 refill = (g => (m, dep) => { g(m, dep); if (dep && m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } })(refill);
-const sapShort = m => !!m.def.sap && !!m.mn && m.mn.some((n, i) => n < SAP.mines[i]);
+const sapShort = m => !!m.def.sap && !!m.mn && m.mn.some((n, i) => n < (i < 2 ? SAP.mines[i] : SAP.ied || 0));   // [2]: the command IEDs of a kit with ied (cf-slots-arma)
 /* ---------- the Insurgents (cf-insurgentes-conteudo; NOT TESTED, see docs/nao-testado/cf-insurgentes-conteudo.md) ----------
    A third faction of the modern front, as data in the tables the two modern sides use, kept out of every list a match picks from today:
    its kits are in KITS but in no INF list, its vehicles are in TRNS but not enumerable (as REC's), its tanks and rocket technical carry
@@ -24323,18 +24323,18 @@ function mineDrop(o) { o.gone = true; S.mines = alive(mines()); S.mv = (S.mv || 
 /* it goes off: the burst, the track, and what both sides learn of it. here: set off by what this client simulates, so it is told on */
 function mineBoom(o, v, here) {
   if (o.gone) return;
-  const A = o.k ? SAP.ap : SAP.at;
+  const A = o.k === 2 ? SAP.cmd : o.k ? SAP.ap : SAP.at;
   mineDrop(o);
   (S.mgone || (S.mgone = new Set())).add(o.id);
-  explode(o.x, o.y + .3, o.z, A.blast, A.dmg, null, o.team, 1, 0);
-  if (v && !o.k && v.kind && !v.net && !v.dead && v.def.parts && v.def.parts.ix) {
+  explode(o.x, o.y + .3, o.z, A.blast, A.dmg, o.k === 2 && o.by && !o.by.dead ? o.by : null, o.team, 1, 0);
+  if (v && o.k !== 1 && v.kind && !v.net && !v.dead && v.def.parts && v.def.parts.ix) {
     const D = v.def.parts, s = (o.x - v.x) * Math.sin(v.h) + (o.z - v.z) * Math.cos(v.h) > 0 ? 1 : -1;
     const i = ['trackL', 'trackR', 'wheelL', 'wheelR'].map(id => D.ix[id]).find(i => i !== undefined && D[i].side === s && v.parts[i].hp > 0);
     if (i !== undefined) { gone(v, i, null); refit(v); }
   }
   if (NSD() > 2) { for (const t of v && v.team >= 0 && v.team !== o.team ? [v.team] : sdsOf().filter(t => t !== o.team)) sus(t).push({ x: o.x, z: o.z, t: S.t }); }   // 3 sides: the side that ran on it (not known: every other side)
   else { const t = 1 - o.team; sus(t).push({ x: o.x, z: o.z, t: S.t }); }
-  if (S.my && !S.my.dead && hdist(S.my, o) < 120) S.floats.push({ x: o.x, y: o.y + 4, z: o.z, text: 'Mina! ' + mineName(o.k, o.team), life: 2.4 });
+  if (S.my && !S.my.dead && hdist(S.my, o) < 120) S.floats.push({ x: o.x, y: o.y + 4, z: o.z, text: (o.k === 2 ? 'IED! ' : 'Mina! ') + mineName(o.k, o.team), life: 2.4 });
   if (!S.net) return;
   if (S.host) Net.send('mboom', { id: o.id, k: o.k, s: o.team, p: [+o.x.toFixed(1), +o.z.toFixed(1)] });
   else if (here) Net.send('mreq', { k: 3, id: o.id });
@@ -24343,7 +24343,7 @@ function mineBoom(o, v, here) {
 function mineStep(dt) {
   const L = S.mines; if (!L || !L.length) return;
   for (const o of L) {
-    if (o.gone || S.t < o.armT) continue;
+    if (o.gone || S.t < o.armT || o.k === 2) continue;   // k 2, a command IED: only its phone sets it off (cf-slots-arma)
     const A = o.k ? SAP.ap : SAP.at; let v = null;
     if (o.k) { for (const m of S.men) if (!m.dead && (!m.net || S.host) && !m.in && m.team !== o.team && Math.abs(m.x - o.x) < A.r && Math.abs(m.z - o.z) < A.r && hdist(m, o) < A.r) { v = m; break; } }
     else for (const u of S.units) if (!u.dead && (!u.net || S.host) && u.team !== o.team && Math.abs(u.x - o.x) < A.r + 3 && Math.abs(u.z - o.z) < A.r + 3 && hdist(u, o) < A.r && u.y - hgt(u.x, u.z) < 3) { v = u; break; }
@@ -24363,7 +24363,7 @@ function mineStep(dt) {
 /* the sapper lifts a mine its side knows: solo or on the host; own: back into the pouch of who lifted it */
 function mineLift(o, m) {
   if (o.gone || !mineKnown(o, m.team)) return false;
-  if (o.team === m.team && m.mn) m.mn[o.k]++;
+  if (o.team === m.team && m.mn && m.mn[o.k] !== undefined) m.mn[o.k]++;
   mineDrop(o); return true;
 }
 /* ---------- sabotage: a sapper's charge against a parked vehicle, a fixed AA or a set-down radio ---------- */
@@ -24410,8 +24410,8 @@ build = (g => (P, I, key, trig) => {
   if (I.ordA) { S.mm = null; return; }
   if (!trig || B.why || S.bh || S.t < (P.mlT || 0)) return;
   S.bh = true; P.mlT = S.t + SAP.cool; P.mn[B.k]--;
-  if (S.net && !S.host) { Net.send('mreq', { k: B.k, p: [+B.x.toFixed(1), +B.z.toFixed(1)] }); S.mw = { k: B.k, x: B.x, z: B.z, T: S.t + 2.5 }; }
-  else { mineLay(B.k, P.team, B.x, B.z); say(mineName(B.k, P.team) + ' armada em ' + SAP.arm + ' s'); }
+  if (S.net && !S.host) { Net.send('mreq', { k: B.k === 2 ? 4 : B.k, p: [+B.x.toFixed(1), +B.z.toFixed(1)] }); S.mw = { k: B.k, x: B.x, z: B.z, T: S.t + 2.5 }; }
+  else { const o = mineLay(B.k, P.team, B.x, B.z); if (o && B.k === 2) { o.by = P; o.pid = 'me'; } say(mineName(B.k, P.team) + (B.k === 2 ? ' armado em ' : ' armada em ') + SAP.arm + ' s'); }
 })(build);
 /* V by a mine its side knows starts the lift (S.ml); moving away, running or firing breaks it off */
 function sapLift(P, vk, say) {
@@ -24458,7 +24458,7 @@ Net.rx.mine = m => {
   if (!S || !S.net || S.host || !Array.isArray(m.e) || !Number.isInteger(m.i) || !Number.isInteger(m.n)) return;
   if (Number.isInteger(m.s)) S.mseq = Math.max(S.mseq || 0, m.s);
   const b = m.i && S.mbuf && S.mbuf.q === m.q ? S.mbuf : (S.mbuf = { q: m.q, l: [] });
-  for (const e of m.e) if (Array.isArray(e) && e.length === 6 && (e[1] === 0 || e[1] === 1) && isSide(e[2])) b.l.push(e);
+  for (const e of m.e) if (Array.isArray(e) && e.length === 6 && (e[1] === 0 || e[1] === 1 || e[1] === 2) && isSide(e[2])) b.l.push(e);
   if (m.i !== m.n - 1) return;
   const was = new Map(mines().map(o => [o.id, o])), now = [];
   for (const [id, k, team, x, z, kn] of b.l) {
@@ -24472,8 +24472,8 @@ Net.rx.mine = m => {
 Net.rx.mboom = m => {
   if (!S || !S.net || !Array.isArray(m.p)) return;
   if (S.mgone && S.mgone.has(m.id)) return;
-  const o = mines().find(o => o.id === m.id) || { id: m.id, k: m.k ? 1 : 0, team: isSide(m.s) ? m.s : m.s ? 1 : 0, x: m.p[0], y: hgt(m.p[0], m.p[1]), z: m.p[1], kn: ALL(), gone: false };
-  const P = S.my, A = o.k ? SAP.ap : SAP.at, v = P && !P.dead && !o.k ? [P, P.in].find(u => u && u.kind && !u.net && hdist(u, o) < A.r + 2) : null;
+  const o = mines().find(o => o.id === m.id) || { id: m.id, k: m.k === 2 ? 2 : m.k ? 1 : 0, team: isSide(m.s) ? m.s : m.s ? 1 : 0, x: m.p[0], y: hgt(m.p[0], m.p[1]), z: m.p[1], kn: ALL(), gone: false };
+  const P = S.my, A = o.k === 2 ? SAP.cmd : o.k ? SAP.ap : SAP.at, v = P && !P.dead && o.k !== 1 ? [P, P.in].find(u => u && u.kind && !u.net && hdist(u, o) < A.r + 2) : null;
   mineBoom(o, v || null, false);
 };
 Net.rx.mreq = m => {
@@ -34629,7 +34629,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     }
     const amb = cueAmb(P);
     if (amb) txt(amb === 3 ? 'EMBOSCADA: AGUARDE' : 'EMBOSCADA: FOGO!', cw / 2, ch * .32, 15 * u, amb === 3 ? acc : FOE, 'center', disp);
-    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b)), eb = !B && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
+    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
     if (B) {   // build mode: what the outline says
       txt('CONSTRUIR BASE DE SUPRIMENTO', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
       txt(B.why ? BWHY[B.why] : 'Clique: começar a obra aqui  ·  botão direito ou N: cancelar', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
@@ -34645,13 +34645,14 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   txt('SAÚDE', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.hp / P.max, P.hp < P.max * .45 ? FOE : ink); y += 15 * u;
   txt('FÔLEGO', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.stam, P.wind ? FOE : acc); y += 19 * u;
   txt(st.name.toUpperCase() + (P.run ? ' · CORRENDO' : P.ctl.ads ? ' · MIRANDO' : ''), L, y, 14 * u, ink); y += 20 * u;
+  const gad = !!(P.sl && P.sl.n >= 3);   // a compartment of 3 to 5 in hand (cf-slots-arma)
   P.arms.forEach((m, i) => {
-    const d = m.d, on = i === P.w;
-    txt((on ? '▸ ' : '  ') + d.name + (d.k ? ' ×' + (m.mag + m.res) : '  ' + m.mag + ' + ' + m.res + (d.lmg && d.mag > 40 ? ' cintas' : ' pentes')), L, y, 12.5 * u, m.mag + m.res ? (on ? ink : dim) : FOE); y += 15 * u;
+    const d = m.d, on = i === P.w && !gad;
+    txt((i + 1) + (on ? ' ▸ ' : '   ') + d.name + (d.k ? ' ×' + (m.mag + m.res) : '  ' + m.mag + ' + ' + m.res + (d.lmg && d.mag > 40 ? ' cintas' : ' pentes')), L, y, 12.5 * u, m.mag + m.res ? (on ? ink : dim) : FOE); y += 15 * u;
     if (m.rl > 0) { bar(L, y + 1, 158 * u, 5 * u, 1 - m.rl / d.rl, acc); y += 10 * u; }
   });
-  txt('F GRANADA ×' + P.nades + '   G FUMAÇA ×' + P.smk, L, y + 3 * u, 12.5 * u, P.nades + P.smk ? ink : dim);
-  txt('N KIT DE BASE ×' + P.kit + '   CARGA ×' + P.chg, L, y + 19 * u, 12.5 * u, P.kit + P.chg ? ink : dim);
+  y = slotHud(P, L, y, u, ink, acc, dim);
+  txt('N KIT DE BASE ×' + P.kit + '   CARGA ×' + P.chg, L, y + 3 * u, 12.5 * u, P.kit + P.chg ? ink : dim);
   if (P.dead) return;
   const W = 190 * u, H = 96 * u, x0 = 14, y0 = ch - 14 - H, C = cover(P), hs = stOf(P.hp / P.max), ls = P.wl > 5 ? 2 : P.wl > 0 ? 1 : 0, as = P.wa > 4 ? 2 : P.wa > 0 ? 1 : 0;
   const part = (x, yy, w2, h2, s) => { hx.beginPath(); hx.rect(x0 + x * u, y0 + yy * u, w2 * u, h2 * u); hx.fillStyle = DCOL[s]; hx.fill(); hx.strokeStyle = 'rgba(8,12,13,.75)'; hx.lineWidth = .8; hx.stroke(); };
@@ -38533,6 +38534,11 @@ const PWHY = { era: 'A cúpula antifoguete só existe na frente atual', cost: 'S
 hudFort = (g => (P, u, ink, acc, disp) => {
   const B = S.fm, M = S.mm, dim = 'rgba(158,170,162,.95)';
   if (!(B && B.k >= 3) && !M) { g(P, u, ink, acc, disp); return sapHud(P, u, ink, acc, dim); }
+  if (M && M.sl) {   // picked in compartment 4 (cf-slots-arma): only what it lays and why not
+    txt('ARMAR ' + mineName(M.k, P.team).toUpperCase() + '  ×' + (P.mn ? P.mn[M.k] | 0 : 0), cw / 2, ch * .6, 15 * u, acc, 'center', disp);
+    txt(M.why ? SAP.why[M.why] || M.why : 'Clique: armar aqui  ·  4: próximo  ·  botão direito ou 1: a arma', cw / 2, ch * .6 + 22 * u, 13 * u, M.why ? FOE : '#8fe39a', 'center');
+    return sapHud(P, u, ink, acc, dim);
+  }
   const names = ['BASE', 'TRINCHEIRA', 'SACOS'].concat(POSTK.filter(F => !F.era || F.era === S.era).map(F => F.name.toUpperCase()), P.def.sap ? [7, 9, 10].filter(k => FORT.K[k]).map(k => FORT.K[k].name.toUpperCase()) : [], FORT.rel ? [FORT.rel.name.toUpperCase()] : [], P.def.sap && sapOn() ? ['MINA AT', 'MINA AP'] : []);
   const cur = M ? names.length - 2 + M.k : names.indexOf(FORT.K[B.k].name.toUpperCase()), w = Math.min(120 * u, cw * .9 / names.length);
   let x = cw / 2 - w * (names.length - 1) / 2;
@@ -40205,7 +40211,7 @@ function vmRender() {
   for (const V of VM.M.values()) V.root.visible = false;
   if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; return; }
   if (scoped(P) && camSt.ak > .5) return;   // the scope is the view
-  const a = P.arms[P.w], d = a && a.d, pk = vmPick(d, P.def); if (!pk) return;
+  const a = P.arms[P.w], d = a && a.d, gp = slotVm(P), pk = (gp && vmGet(gp) && gp) || vmPick(d, P.def); if (!pk) return;   // a compartment's item with a model (cf-slots-arma), else the weapon of before
   for (const o of P.arms) { const q = o !== a && vmPick(o.d, P.def); if (q && q.id) packGet(q.id); }   // the other weapon too, so a swap finds it here
   const V = vmGet(pk); if (!V) return;
   vmInit();
@@ -40382,6 +40388,196 @@ gorTarget = (g => (px, py, shift) => {
   gorSend(c); GOR.mode = ''; gorBar();
 })(gorTarget);
 /* ===== end of the trenches cut into the ground and the tunnels' mouths ===== */
+/* ---------- the soldier's compartments (SLOT; cf-slots-arma, NOT TESTED: docs/nao-testado/cf-slots-arma.md) ----------
+   On foot, outside every menu, the player's soldier takes what is in hand by number: 1 the small arm, 2 the special (launcher, missile,
+   mortar, the sniper's pistol) when the kit has one, 3 the hand grenades (explosive, smoke), 4 what is laid (every soldier's demolition
+   charge; a sapper's AT and AP mines, the IED planter's pressure plate, anti-personnel and command IEDs), 5 what is set off (the IED
+   planter's phone, which sets off the command IEDs it laid within phone m; the suicide bomber's vest). The same number again goes to the
+   next item of that compartment; Q, the right button and 1 or 2 go back to a weapon. 6 to 9 stay what they were (night vision, flare,
+   help). An item is used on the click with the rules it had under N and F/G: a mine is the sapper's S.mm (its outline, mineWhy, the side's
+   cap, the host), the charge goes where N would set it (a bridge's end, an enemy base or site, the sapper's parked vehicle, a fixed AA
+   or a radio, the wall ahead), a grenade is thrown as F and G throw it. The AI keeps its own ways (the general, the soldier's mind): none
+   of this is its. cmd: the command IED's burst (the AI's command IED's, INS.ied); ied: how many a kit with ied carries. Online a guest asks the
+   host: mreq k 4 lays a command IED, 5 its phone, 6 its vest */
+const SLOT = { keys: { Digit1: 1, Digit2: 2, Digit3: 3, Digit4: 4, Digit5: 5 }, phone: 600 };
+SAP.ied = 2;
+SAP.cmd = { r: INS.ied.r, dmg: INS.ied.dmg, blast: INS.ied.blast };
+SAP.names.modern[2][2] = 'IED de comando';
+KITS.insSapper.ied = 1;
+addMan = (g => (id, team, x, z, h) => { const m = g(id, team, x, z, h); if (m.def.ied && m.mn) m.mn[2] = SAP.ied; return m; })(addMan);
+refill = (g => (m, dep) => { g(m, dep); if (dep && m.def.ied && m.mn) m.mn[2] = SAP.ied; })(refill);
+/* the items of compartment n of soldier P: { k, s short name, c how many, m the mine kind } */
+function slotComp(P, n) {
+  const d = P.def, l = [];
+  if (n === 3) l.push({ k: 'nade', s: 'Granada', c: P.nades | 0 }, { k: 'smk', s: 'Fumaça', c: P.smk | 0 });
+  else if (n === 4) {
+    if (d.sap && sapOn() && P.mn) for (let k = 0; k < (d.ied ? 3 : 2); k++) l.push({ k: 'mine', m: k, s: mineName(k, P.team) || (k === 2 ? 'IED de comando' : k ? 'Mina AP' : 'Mina AT'), c: P.mn[k] | 0 });
+    l.push({ k: 'chg', s: 'Carga de demolição', c: P.chg | 0 });
+  } else if (n === 5) {
+    if (d.ied && sapOn()) l.push({ k: 'phone', s: 'Celular', c: iedMine(P).length });
+    if (d.bomb === 'man') l.push({ k: 'vest', s: BOMB.man.name, c: P.bGone ? 0 : 1 });
+  }
+  return l;
+}
+/* the item in hand, or null with a weapon in hand */
+const slotIt = P => { const L = P && P.sl; if (!L || L.n < 3) return null; const l = slotComp(P, L.n); return l[Math.min(L.i[L.n] | 0, l.length - 1)] || null; };
+/* back to the weapon in hand */
+function slotOff(P) {
+  const L = P.sl; if (!L) return;
+  if (L.mm && S.mm && S.mm.sl) S.mm = null;
+  L.mm = false; L.tg = null; L.n = P.ctl.w + 1;
+}
+/* the command IEDs this player set, in this life or an earlier one (pid 'me'; on the host a guest's are its player id); online a guest
+   knows only its side's rows: all of those */
+const iedMine = P => mines().filter(o => o.k === 2 && !o.gone && o.team === P.team && (o.pid === undefined || o.pid === 'me'));
+/* they go off: those armed, within the phone's reach; the burst breaks the track of an enemy vehicle on it */
+function iedGo(m, l) {
+  let n = 0;
+  for (const o of l) {
+    if (o.gone || S.t < o.armT || hdist(o, m) > SLOT.phone) continue;
+    const r = SAP.cmd.r, v = S.units.find(u => !u.dead && !u.gone && u.team !== o.team && u.kind !== 'plane' && Math.abs(u.x - o.x) < r && Math.abs(u.z - o.z) < r && hdist(u, o) < r && u.y - hgt(u.x, u.z) < 3);
+    o.by = m;   // the burst is the body that set it off
+    mineBoom(o, v && !v.net ? v : null, false); n++;
+  }
+  return n;
+}
+/* what the demolition charge would go on from where P stands, in N's order: a bridge's end, then (a sapper, with no enemy base at hand)
+   a parked vehicle, a fixed AA or a radio, then an enemy base or economy site, then the wall ahead */
+function chgTarget(P) {
+  const br = brOn() ? brNear(P) : null;
+  if (br) { const e = brEnd(br, P); return { k: 'br', o: br, x: e.x, z: e.z, s: brName(br) }; }
+  const foe = S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
+  if (!foe && P.def.sap) { const t = sabTarget(P); if (t) return { k: 'sab', o: t, x: t.x, z: t.z, s: t.name || 'alvo parado' }; }
+  if (foe) return { k: 'base', o: foe, x: foe.x, z: foe.z, s: foe.name || 'base inimiga' };
+  const e = manEye(P), f = P.f, D = CITY.plant, o = ray(e.x, e.y, e.z, e.x + f.x * D, e.y + f.y * D, e.z + f.z * D, 0);
+  if (o && o.B && RAY.e >= 0 && RAY.e < o.B.oS) { const t = clamp(RAY.t, 0, 1) * D; return { k: 'wall', o, x: e.x + f.x * t, z: e.z + f.z * t, y: e.y + f.y * t, s: 'parede' }; }
+  return null;
+}
+function chgSet(P, T) {
+  if (!T) return 'Nenhum alvo ao alcance da carga';
+  const ok = T.k === 'br' ? brPlant(P, T.o) : T.k === 'sab' ? sabPlant(P, T.o) : T.k === 'base' ? plant(P, T.o) : bldPlant(P);
+  return ok ? 'Carga armada' + (T.k === 'br' ? ' na ' + T.s.toLowerCase() : '') + ': afaste-se' : 'Sem carga de demolição';
+}
+/* the vest: armed B.arm s after the bomber entered (the host's bArm; a guest keeps its own count, bA) */
+const vestArm = P => (P.bArm !== undefined ? P.bArm : P.sl ? P.sl.bA : S.t);
+function vestGo(P) {
+  if (P.bGone) return '';
+  const T = vestArm(P); if (S.t < T) return 'Colete armando: ' + Math.ceil(T - S.t) + ' s';
+  if (S.net && !S.host) { Net.send('mreq', { k: 6 }); return 'Detonando'; }
+  bombGo(P); return '';
+}
+function phoneGo(P) {
+  const all = iedMine(P), l = all.filter(o => hdist(o, P) < SLOT.phone);
+  if (!all.length) return 'Nenhum IED de comando armado';
+  if (!l.length) return 'Sem sinal: os IEDs estão a mais de ' + SLOT.phone + ' m';
+  if (l.every(o => S.t < o.armT)) return 'IED ainda armando';
+  if (S.net && !S.host) { Net.send('mreq', { k: 5 }); return 'Sinal enviado'; }
+  const n = iedGo(P, l); return n === 1 ? 'IED detonado' : n + ' IEDs detonados';
+}
+/* the hands: after walk (and the N, F, G and Q it already reads), the number asked for (P.slq, from the keys) and the item in hand */
+walk = (g => (P, I, dt) => {
+  g(P, I, dt);
+  if (!P.man || P !== S.my) return;
+  const L = P.sl || (P.sl = { n: P.ctl.w + 1, i: [], f: !!I.fire, q: !!I.yawL, a: !!I.ordA, mm: false, tg: null, bA: S.t + BOMB.man.arm }), c = P.ctl;
+  const fe = !!I.fire && !L.f, qe = !!I.yawL && !L.q, ae = !!I.ordA && !L.a; L.f = !!I.fire; L.q = !!I.yawL; L.a = !!I.ordA;
+  let n = P.slq | 0; P.slq = 0;
+  if (P.dead || P.in || S.dr || S.dm) return slotOff(P);
+  const say = text => text && S.floats.push({ x: P.x + S.aim.d.x * 3, y: P.y + 3, z: P.z + S.aim.d.z * 3, text, life: 2.2 });
+  if (n === 1 || n === 2) {
+    if (!P.arms[n - 1]) say('Nada no compartimento 2');
+    else { const was = L.n; c.w = n - 1; slotOff(P); if (was >= 3) P.swT = Math.max(P.swT, S.t + MAN.swap * .5); }
+  } else if (n >= 3) {
+    const l = slotComp(P, n);
+    if (!l.length) say('Nada no compartimento ' + n);
+    else {
+      if (L.mm && S.mm && S.mm.sl) S.mm = null;
+      L.mm = false; L.tg = null; S.bm = null; if (S.fm) S.fm = null;
+      L.i[n] = L.n === n ? ((L.i[n] | 0) + 1) % l.length : Math.min(L.i[n] | 0, l.length - 1); L.n = n;
+      P.swT = Math.max(P.swT, S.t + MAN.swap * .5);   // the hand goes down and comes up with it (the first person's swap)
+    }
+  }
+  if (L.n < 3) { L.n = c.w + 1; return; }
+  if (S.bm || (S.fm && !L.mm)) return slotOff(P);   // N's build mode took the hands
+  if (qe) return slotOff(P);   // Q: back to the weapon walk just switched to
+  const l = slotComp(P, L.n), it = l[Math.min(L.i[L.n] | 0, l.length - 1)];
+  if (!it) return slotOff(P);
+  if (it.k === 'mine') {   // the sapper's build() lays it on the click, by its rules; the right button or N ending it ends this
+    if (L.mm && !S.mm) return slotOff(P);
+    if (L.mm && S.mm.k !== it.m) { const j = l.findIndex(o => o.k === 'mine' && o.m === S.mm.k); if (j >= 0) L.i[L.n] = j; S.mm.sl = 1; return; }
+    if (!S.mm || S.mm.k !== it.m) S.mm = { k: it.m, P, sl: 1 };
+    L.mm = true; return;
+  }
+  c.fire = false; c.ads = false;
+  if (ae) return slotOff(P);
+  if (it.k === 'chg') L.tg = chgTarget(P);
+  if (!fe) return;
+  if (it.k === 'nade' || it.k === 'smk') { if (it.c > 0) c.nade = it.k === 'nade' ? 1 : 2; else say(it.k === 'nade' ? 'Sem granadas' : 'Sem granadas de fumaça'); }
+  else if (it.k === 'chg') say(chgSet(P, L.tg));
+  else if (it.k === 'phone') say(phoneGo(P));
+  else if (it.k === 'vest') say(vestGo(P));
+})(walk);
+/* the keys 1 to 5: only on foot, out of a vehicle and of every menu, not flying a drone; elsewhere they are what they were */
+addEventListener('keydown', e => {
+  const n = SLOT.keys[e.code];
+  if (!n || e.repeat || playMode !== 'play' || paused || sw.on || GV.on || !S || !S.my || !S.my.man || S.my.dead || S.my.in || S.dr || S.dm || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+  S.my.slq = n;
+});
+/* online, the host does what a guest's soldier asks: 4 lay a command IED at p, 5 its phone, 6 its vest */
+Net.rx.mreq = (g => m => {
+  if (!m || !(m.k === 4 || m.k === 5 || m.k === 6)) return g(m);
+  const G = Net.ghosts.get(m.from);
+  if (!S || !S.net || !S.host || !G || G.dead || !G.man || !Net.sap) return;
+  if (m.k === 4 && G.def.ied && Array.isArray(m.p) && Math.hypot(m.p[0] - G.x, m.p[1] - G.z) < SAP.put + 4) { const o = mineLay(2, G.team, m.p[0], m.p[1]); if (o) { o.by = G; o.pid = m.from; } }
+  else if (m.k === 5 && G.def.ied) { const l = mines().filter(o => o.k === 2 && !o.gone && o.team === G.team), own = l.filter(o => o.pid === m.from); iedGo(G, own.length ? own : l.filter(o => o.pid === undefined)); }
+  else if (m.k === 6 && bombOf(G) && !G.bGone && G.bArm !== undefined && S.t >= G.bArm) bombGo(G);
+})(Net.rx.mreq);
+/* first person: the grenade and the mine have a model in the pack; the charge, the phone and the vest show the weapon of before */
+function slotVm(P) {
+  const it = slotIt(P); if (!it) return null;
+  if (it.k === 'nade' || it.k === 'smk') return { key: 'slot:w_grenade', id: 'w_grenade', len: .1, cls: 'pistol' };
+  if (it.k === 'mine') return { key: 'slot:p_mine', id: 'p_mine', len: .26, cls: 'pistol' };
+  return null;
+}
+/* the HUD: the compartments 3 to 5 under the weapons, one line each, the one in hand marked; and in the middle, what the item in hand does */
+function slotHud(P, L0, y, u, ink, acc, dim) {
+  const it = slotIt(P), n0 = P.sl && it ? P.sl.n : 0; y += 3 * u;
+  for (let n = 3; n <= 5; n++) {
+    const l = slotComp(P, n); if (!l.length) continue;
+    const on = n === n0, j = on ? Math.min(P.sl.i[n] | 0, l.length - 1) : -1;
+    txt(n + (on ? ' ▸ ' : '   ') + l.map((o, i) => (i === j ? '[' + o.s + ']' : o.s) + (o.k === 'vest' ? '' : ' ×' + o.c)).join('  '), L0, y, 12.5 * u, on ? acc : l.some(o => o.c > 0) ? ink : dim);
+    y += 15 * u;
+  }
+  return y + 1 * u;
+}
+hudMan = (g => (P, u, ink, acc, disp, blink, seat) => {
+  g(P, u, ink, acc, disp, blink, seat);
+  const it = slotIt(P); if (!it || P.dead || P.in || S.dr || S.dm || it.k === 'mine') return;
+  const y = ch * .6, dim = 'rgba(158,170,162,.95)', ok = '#8fe39a', say = (a, b, bad) => { txt(a, cw / 2, y, 14 * u, acc, 'center', disp); txt(b, cw / 2, y + 20 * u, 12 * u, bad ? FOE : ok, 'center'); };
+  const back = '  ·  botão direito ou 1: a arma';
+  if (it.k === 'nade' || it.k === 'smk') say((it.k === 'nade' ? 'GRANADA DE MÃO' : 'GRANADA DE FUMAÇA') + '  ×' + it.c, it.c ? 'Clique: lançar  ·  3: ' + (it.k === 'nade' ? 'fumaça' : 'explosiva') + back : 'Sem granadas: reabasteça perto de um caminhão ou numa base', !it.c);
+  else if (it.k === 'chg') {
+    const T = P.sl.tg;
+    if (T) { const q = proj(T.x, T.y !== undefined ? T.y : hgt(T.x, T.z) + 1.2, T.z); if (q.front) { bracket(q.x, q.y, 18, acc); txt(T.s.toUpperCase(), q.x, q.y + 24, 11 * u, acc, 'center'); } }
+    say('CARGA DE DEMOLIÇÃO  ×' + it.c + (T ? '  ·  ALVO: ' + T.s.toUpperCase() : ''), !it.c ? 'Sem carga: reabasteça num depósito' : T ? 'Clique: armar (explode em ' + BLD.charge.fuse + ' s)' + back : 'Sem alvo ao alcance: ponte, base ou instalação inimiga' + (P.def.sap ? ', veículo parado, antiaérea fixa, rádio' : '') + ' ou a parede à frente (' + CITY.plant + ' m)', !it.c || !T);
+  } else if (it.k === 'phone') {
+    const l = iedMine(P);
+    for (const o of l) { const q = proj(o.x, o.y + 1, o.z); if (onScr(q)) { bracket(q.x, q.y, 10, hdist(o, P) < SLOT.phone ? acc : dim, true); txt(Math.round(hdist(o, P)) + ' m', q.x, q.y + 16, 10 * u, dim, 'center'); } }
+    say('CELULAR  ·  ' + l.length + (l.length === 1 ? ' IED DE COMANDO' : ' IEDS DE COMANDO'), l.length ? 'Clique: detonar os que estão a até ' + SLOT.phone + ' m' + back : 'Nenhum armado: 4 escolhe o IED de comando, o clique o planta', !l.length);
+  } else if (it.k === 'vest') {
+    const T = vestArm(P), w = S.t < T;
+    say('COLETE EXPLOSIVO  ·  ' + (w ? 'ARMANDO ' + Math.ceil(T - S.t) + ' s' : 'ARMADO'), w ? 'Espere armar' : 'Clique: detonar (raio de ' + BOMB.man.r + ' m). Com inimigo a ' + BOMB.man.trig + ' m ele explode sozinho', w);
+  }
+})(hudMan);
+/* the hangar's keys and the briefing */
+LEGEND.inf = (g => (d, o) => {
+  const rows = g(d, o), i = rows.findIndex(r => r && r[0] === 'F'), sp = d.arms[1];
+  const four = d.sap ? (d.ied ? 'IED de placa de pressão, IED antipessoal, IED de comando e a carga de demolição' : 'mina anticarro, mina antipessoal e a carga de demolição') : 'a carga de demolição';
+  const five = d.ied ? '; 5 o celular, que detona os seus IEDs de comando a até ' + SLOT.phone + ' m' : d.bomb === 'man' ? '; 5 o colete: o clique o detona' : '';
+  rows.splice(i < 0 ? rows.length : i, 0, ['1 a 5', 'Compartimentos, a pé: 1 ' + d.arms[0].name + (sp ? ', 2 ' + sp.name : '') + ', 3 granadas (de mão e de fumaça), 4 ' + four + five + '. A mesma tecla de novo passa ao próximo item do compartimento; o contorno ou o alvo aparece na frente e o clique usa. Q, o botão direito, 1 ou 2 voltam à arma. N, F e G continuam valendo']);
+  return rows;
+})(LEGEND.inf);
+BRIEF.inf = (g => (d, o) => g(d, o) + (d.ied ? ' Como Plantador de IED, o compartimento 4 tem também o IED de comando (' + SAP.ied + ' por vez): ele não explode com quem passa, só com o seu celular (compartimento 5, a até ' + SLOT.phone + ' m), quando você quiser.' : '') + (d.bomb === 'man' ? ' O colete arma ' + BOMB.man.arm + ' s depois que você entra; com 5 e o clique ele explode na hora, e com um inimigo a ' + BOMB.man.trig + ' m explode sozinho.' : ''))(BRIEF.inf);
+/* ===== end of the soldier's compartments ===== */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

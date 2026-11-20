@@ -31375,6 +31375,337 @@ anaReport = (g => (ev, me) => {
   return R;
 })(anaReport);
 /* ===== end of the guerrilla mind ===== */
+/* ---------- the Insurgents and the civilians (ICV, cf-insurgente-civis; NOT TESTED: docs/nao-testado/cf-insurgente-civis.md) ----------
+   The captain's "insurgente deve ganhar recurso ao matar ou recrutar civis, e civis devem ter mais chance de se juntar aos insurgentes".
+   Only where the battle is simulated (host or solo) and only in a match with a side of the Insurgents (civIns() >= 0, three sides on the
+   modern front); with two sides nothing here runs, nothing is drawn. It touches the old code only by wrapping (civToll, civRecruit,
+   civRevolt, GC.mil, roeBar, grlSit, grlScore, genState, anaReport, ecoInit) and adds two orders (rcr, saq) and two guerrilla tactics (rcv, ter).
+   - The sympathy of each town for the Insurgents, S.icv.sym[bi] in -1..1: ICV.sym.base, plus a memory (mem: what happened there, fading by
+     half every half s) and the town's state now (terms, recomputed every ICV.every s):
+       memory: + vk for each civilian of the town a regular side (not the Insurgents) killed (vengeance), regK of it in the towns within reg m;
+               - ik for each one the Insurgents killed (terror), regK of it around; + rec for each one recruited (family ties);
+               - aidM each look a regular ambulance or repair truck stands by it (help remembered); - loot when it is looted;
+       state:  + ruin times the share of its houses down; + hold when the Insurgents hold its point, + men for each of their soldiers in it
+               (to menMax); - reg0 for each soldier of a regular side that has not killed 2 of its people (to regMax) and - regHold when
+               such a side holds its point (the regular presence that protects it); - aid while a regular ambulance or repair truck is
+               within aidR m; + ev when it has been evacuated, + aband when no regular side holds it nor stands in it (poverty, abandon);
+               + hateReg when it turned against a regular side (W14 rage), hateIns when it turned against the Insurgents.
+     A change of level (cold, neutral, warm, hot) goes to the Insurgents' log (kind grl) with the reasons.
+   - Joining on its own: every ICV.every s each town not against the Insurgents, with more than join.keep people home and sympathy over
+     join.min, sends civilians to them at join.base + join.k x sympathy a minute; they gather (pend) and arm a militia squad of the
+     Insurgents in the town (civTake with the Insurgents' own caps, ICV.cap) once join.sq of them wait, or join.wait s after the first. What
+     cannot be armed (the caps, the men's cap) goes to the base: the civilian leaves and the side gets res.res.
+   - Recruiting (rcr {pi | x,z}, the same for the AI, a person and the MCP; only the Insurgents): one of their soldiers (not militia) in the
+     town; it takes rcr.T s, broken off if none of them stays or a regular soldier comes into the town; then each of up to rcr.n people at
+     home says yes with rcr.base + rcr.k x sympathy (lo..hi), and those who do join (militia, else the base). Once every rcr.cd s a town, rcr.max at once.
+   - Every civilian recruited by the Insurgents (by any way: rcr, joining, the militia order, a revolt, the player's key) brings res.rec.
+   - Killing civilians: the Insurgents get kill.en and kill.mt for each (terror and plunder) and, with kill.free, do not pay the tickets W14
+     takes (the regular sides still pay); the town's sympathy falls by ik (and regK of it around), and 5 deaths still turn it (CIV.rage).
+   - Looting (saq {pi | x,z}): ter.men of their soldiers in a town not of theirs nor hot for them: + ter.loot, - lootSym of its sympathy, once
+     every ter.lootCd s a town.
+   - A town that turned and arms for the Insurgents (civRevolt) does it every ICV.rv s (CIV.mil.every for the others), within ICV.cap.
+   - The AI general of the Insurgents (GRL): rcv (recruit where the sympathy is: sends a free squad, then the order) and ter (terror and
+     plunder when its economy is low and the towns do not like it much anyway: a raid on a hostile town, the loot, and its rules of
+     engagement no longer hold fire for civilians); both scored as the other tactics, with the reason in the log.
+   - genState(t).icv for the Insurgents' side (sympathy by town and why, the recruited, the joined, the killed, the loot), the AAR (R.icv). */
+const ICV = { on: 1, every: 5,
+  sym: { base: .1, half: 600, vk: .12, ik: .2, reg: 1500, regK: .4, rec: .02, ruin: .5, hold: .12, men: .02, menMax: .15, reg0: .015, regMax: .2, regHold: .12,
+    aid: .15, aidR: 300, aidM: .01, ev: .1, aband: .1, hateReg: .25, hateIns: -.6, warm: .3, hot: .6, cold: -.3 },
+  join: { base: .2, k: 1.5, min: -.2, keep: 2, sq: 2, wait: 60, cap: 12 },   // civilians a minute a town
+  rcr: { T: 30, n: 4, base: .45, k: .45, lo: .1, hi: .95, cd: 90, max: 3 },
+  cap: { town: 8, side: 24 },
+  rv: 75,
+  res: { rec: { en: 8, mt: 6 }, res: { en: 18, mt: 12 } },
+  kill: { en: 10, mt: 6, free: 1, say: 6 },
+  ter: { roe: 1, men: 3, max: .3, loot: { en: 40, mt: 30 }, lootSym: .15, lootCd: 240 },
+  lv: ['hostil', 'neutra', 'simpática', 'ardorosa'] };
+Object.assign(GEN.cn, { rcr: 'recrutamento', saq: 'saque' });
+Object.assign(GEN.no, { ins: 'Só os Insurgentes recrutam e saqueiam assim', rcr0: 'Nenhum soldado nosso (fora a milícia) na vila', rcrN: 'Já há recrutamento nessa vila',
+  rcrMax: 'Recrutamentos demais ao mesmo tempo', saq0: 'Poucos soldados nossos na vila para saquear', saqOwn: 'A vila é nossa ou nos apoia: saquear não', reg: 'Soldado inimigo na vila' });
+const icvSim = () => !!ICV.on && !!S && !!S.civs && (!S.net || S.host);
+const icvIns = () => (ICV.on && S && S.T ? civIns() : -1);
+const icvD = () => S.icv || (S.icv = { sym: {}, mem: {}, why: {}, lvl: {}, pend: {}, pendT: {}, joined: {}, dr: [], cl: {}, loot: {}, kq: { n: 0, en: 0, mt: 0, bi: {} },
+  st: sdsOf().map(() => ({ rec: 0, join: 0, base: 0, kill: 0, loot: 0, en: 0, mt: 0 })), T: 0 });
+const icvSt = t => { const D = icvD(); return D.st[t] || (D.st[t] = { rec: 0, join: 0, base: 0, kill: 0, loot: 0, en: 0, mt: 0 }); };
+const icvLv = s => (s <= ICV.sym.cold ? 0 : s >= ICV.sym.hot ? 3 : s >= ICV.sym.warm ? 2 : 1);
+const icvPct = s => Math.round(s * 100) + '%';
+const icvPt = b => towns().find(w => hdist(w, b) < 150) || null;
+/* the town (bi, b, w its point or place) of an order: pi a point, else x z within a town */
+function icvTown(c) {
+  let w = null, b = null;
+  if (Number.isInteger(c.pi)) { w = gPts()[c.pi]; if (!w) return null; b = S.T.burgs.find(o => hdist(o, w) < 150) || null; }
+  else if (gMapOk(c.x, c.z)) { const q = { x: c.x, z: c.z }; b = S.T.burgs.filter(o => hdist(o, q) < o.ru + 100).sort((p, r) => hdist(p, q) - hdist(r, q))[0] || null; w = b && (icvPt(b) || { x: b.x, z: b.z }); }
+  if (!b || !w) return null;
+  return { b, w, bi: S.T.burgs.indexOf(b) };
+}
+/* the side's stock grows by en mt (where the economy is simulated); what it got */
+function icvRes(t, en, mt, k) {
+  const d = ecoSim() && S.eco.d && S.eco.d[t]; if (!d) return false;
+  d.en = Math.min(ECO.cap.en, d.en + en); d.mt = Math.min(ECO.cap.mt, d.mt + mt);
+  const s = icvSt(t); s.en += en; s.mt += mt;
+  anaCv('icvr', t, { w: k, en, mt });
+  return true;
+}
+/* a mark in the town's memory, and less of it in the towns within ICV.sym.reg m */
+function icvMem(bi, v) {
+  const B = S.T.burgs, b = B[bi]; if (!b) return;
+  const M = icvD().mem;
+  B.forEach((o, i) => { if (i === bi) M[i] = (M[i] || 0) + v; else if (hdist(o, b) < ICV.sym.reg) M[i] = (M[i] || 0) + v * ICV.sym.regK; });
+}
+/* the houses of the town (once a terrain) */
+function icvHs(bi) {
+  const T = S.T, H = T.icvHs || (T.icvHs = {});
+  if (!H[bi]) { const b = T.burgs[bi]; H[bi] = T.houses.filter(o => hdist(o, b) < b.ru + 30); }
+  return H[bi];
+}
+/* the militia caps of the Insurgents while fn runs (and n men for the squad when given) */
+function icvCaps(fn, n) {
+  const M = CIV.mil, o = { n: M.n, town: M.town, side: M.side };
+  if (n) M.n = n; M.town = Math.max(M.town, ICV.cap.town); M.side = Math.max(M.side, ICV.cap.side);
+  try { return fn(); } finally { Object.assign(M, o); }
+}
+/* n civilians of town bi go over to the Insurgents (why: 'ades' on their own, 'rcr' recruited): a militia squad in the town for as many as
+   it can take, the rest to the base (they leave the town, res.res each); logged with the reason */
+function icvArm(bi, n, why, reason) {
+  const t = icvIns(), b = S.T.burgs[bi]; if (t < 0 || !b || n < 1) return 0;
+  const w = icvPt(b) || { x: b.x, z: b.z }, nm = civName(b);
+  const q = civHates(bi, t) ? null : icvCaps(() => civTake(w, t, why === 'rcr' ? 'rcr' : 'ades'), n);
+  const got = q ? q.men.length : 0;
+  let rest = 0;
+  if (got < n) {
+    const L = S.civs.filter(c => !c.dead && !c.gone && !c.net && c.g && c.g.b === b && c.mode < 4).sort((p, r) => hdist(p, w) - hdist(r, w)).slice(0, n - got);
+    for (const c of L) { c.gone = true; S.civI.delete(c.id); S.civX.push({ id: c.id, x: +c.x.toFixed(1), z: +c.z.toFixed(1), t: S.t }); rest++; }
+    if (rest) icvRes(t, ICV.res.res.en * rest, ICV.res.res.mt * rest, 'base');
+  }
+  const s = icvSt(t), all = got + rest; if (!all) return 0;
+  if (why === 'rcr') s.rec += all; else s.join += all;
+  s.base += rest;
+  const J = icvD().joined; J[bi] = (J[bi] || 0) + all;
+  anaCv('icvj', t, { b: bi, n: all, mil: got, why });
+  gLog(t, 'grl', (why === 'rcr' ? 'Recrutamento em ' + nm + ': ' : 'Adesão em ' + nm + ': ') + (all > 1 ? all + ' civis se juntaram a nós' : 'um civil se juntou a nós') + (got ? '; milícia de ' + got + ' na vila' : '') +
+    (rest ? '; ' + rest + ' para a base (+' + ICV.res.res.en * rest + ' energia, +' + ICV.res.res.mt * rest + ' metal)' : '') + (reason ? ' — ' + reason : ''), b, null);
+  return all;
+}
+/* each town's sympathy now, and its reasons (the terms over 0.02, the largest first) */
+function icvLook(e) {
+  const t = icvIns(), D = icvD(), B = S.T.burgs, C = civD(), K = ICV.sym, fade = Math.pow(.5, e / K.half);
+  const H = B.map(() => ({ home: 0, ev: false }));
+  for (const c of S.civs) { if (c.dead || c.gone || c.net || !c.g || !c.g.b) continue; const i = B.indexOf(c.g.b); if (i < 0) continue; if (c.mode < 4) H[i].home++; if (c.g.ev) H[i].ev = true; }
+  const regs = sdsOf().filter(s => !insT(s));
+  B.forEach((b, bi) => {
+    const m = (D.mem[bi] || 0) * fade; D.mem[bi] = Math.abs(m) < 1e-3 ? 0 : m;
+    const f = C.foe[bi] | 0, h = C.hits[bi] || [], R = b.ru + 30, near = o => Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R;
+    let im = 0, rm = 0, regIn = false;
+    for (const o of S.men) { if (o.dead || o.in || !near(o)) continue; if (o.team === t) im++; else if (regs.includes(o.team)) { regIn = true; if ((h[o.team] | 0) < 2) rm++; } }
+    let aid = false;
+    for (const u of S.units) if (!u.dead && !u.gone && regs.includes(u.team) && u.def && (u.def.svc === 'amb' || u.def.svc === 'rpr') && hdist(u, b) < b.ru + K.aidR) { aid = true; break; }
+    if (aid) D.mem[bi] = (D.mem[bi] || 0) - K.aidM;
+    const p = icvPt(b), held = p ? p.hold : -1, hs = icvHs(bi), ruin = hs.length ? hs.filter(o => S.os[o.id] >= 2).length / hs.length : 0;
+    const T = [];
+    const add = (v, why) => { if (Math.abs(v) >= .02) T.push({ v, why }); };
+    add(D.mem[bi] || 0, (D.mem[bi] || 0) > 0 ? 'memória: civis mortos pelo inimigo, recrutados' : 'memória: civis mortos por nós, saque, ajuda do inimigo');
+    add(K.ruin * ruin, Math.round(ruin * 100) + '% das casas destruídas');
+    if (held === t) add(K.hold, 'o ponto é nosso');
+    add(Math.min(K.menMax, K.men * im), im + ' soldado(s) nosso(s) na vila');
+    if (rm) add(-Math.min(K.regMax, K.reg0 * rm), rm + ' soldado(s) do inimigo protegendo a vila');
+    if (held >= 0 && regs.includes(held) && (h[held] | 0) < 2) add(-K.regHold, 'o inimigo (' + civSide(held) + ') guarda a vila');
+    if (aid) add(-K.aid, 'ambulância ou caminhão de reparo do inimigo atende ali');
+    if (H[bi].ev) add(K.ev, 'a vila foi evacuada');
+    if (!regIn && !(held >= 0 && regs.includes(held))) add(K.aband, 'abandonada pelos lados regulares');
+    if (regs.some(s => f & (1 << s))) add(K.hateReg, 'revoltada contra ' + regs.filter(s => f & (1 << s)).map(civSide).join(' e '));
+    if (t >= 0 && f & (1 << t)) add(K.hateIns, 'revoltada contra nós');
+    T.sort((a, c) => Math.abs(c.v) - Math.abs(a.v));
+    const v = clamp(K.base + T.reduce((a, o) => a + o.v, 0), -1, 1);
+    D.sym[bi] = v; D.why[bi] = T.slice(0, 3).map(o => o.why + ' (' + (o.v > 0 ? '+' : '') + Math.round(o.v * 100) + ')').join('; ');
+    D.home = D.home || {}; D.home[bi] = H[bi].home;
+    const l = icvLv(v);
+    if (D.lvl[bi] === undefined) D.lvl[bi] = l;
+    else if (l !== D.lvl[bi]) { const up = l > D.lvl[bi]; D.lvl[bi] = l; gLog(t, 'grl', 'Simpatia de ' + civName(b) + ' por nós ' + (up ? 'sobe' : 'cai') + ': ' + ICV.lv[l] + ' (' + icvPct(v) + ') — ' + (D.why[bi] || 'sem motivo forte'), b, 'icvl' + bi + ':' + l); }
+  });
+  return H;
+}
+/* the joining on its own, each look */
+function icvJoin(e, H) {
+  const t = icvIns(), D = icvD(), J = ICV.join, B = S.T.burgs;
+  B.forEach((b, bi) => {
+    const v = D.sym[bi] || 0, home = H[bi] ? H[bi].home : 0;
+    if (!civHates(bi, t) && home - (D.pend[bi] || 0) > J.keep && v > J.min && (D.joined[bi] || 0) < J.cap) {
+      const rate = Math.max(0, J.base + J.k * v), p = 1 - Math.exp(-rate * e / 60);
+      if (Math.random() < p) { if (!D.pend[bi]) D.pendT[bi] = S.t; D.pend[bi] = (D.pend[bi] || 0) + 1; }
+    }
+    const n = D.pend[bi] || 0;
+    if (n && (n >= J.sq || S.t - (D.pendT[bi] || 0) > J.wait)) { D.pend[bi] = 0; icvArm(bi, n, 'ades', 'simpatia ' + icvPct(v) + ': ' + (D.why[bi] || '')); }
+  });
+}
+/* the recruiting drives under way */
+function icvDrives() {
+  const t = icvIns(), D = icvD(), regs = sdsOf().filter(s => !insT(s));
+  for (const d of D.dr) {
+    if (d.over) continue;
+    const b = S.T.burgs[d.bi], nm = civName(b), R = b.ru + 30, near = o => !o.dead && !o.in && Math.abs(o.x - b.x) < R && Math.abs(o.z - b.z) < R && hdist(o, b) < R;
+    const ours = S.men.some(o => near(o) && o.team === t && !o.mil), reg = S.men.some(o => near(o) && regs.includes(o.team));
+    if (!ours || reg) { d.over = 1; gLog(t, 'grl', 'Recrutamento em ' + nm + ' interrompido: ' + (reg ? 'soldado inimigo na vila' : 'nenhum dos nossos ficou lá'), b, null); continue; }
+    if (S.t < d.T) continue;
+    d.over = 1;
+    const v = D.sym[d.bi] || 0, P = civHates(d.bi, t) ? 0 : clamp(ICV.rcr.base + ICV.rcr.k * v, ICV.rcr.lo, ICV.rcr.hi);
+    const L = S.civs.filter(c => !c.dead && !c.gone && !c.net && c.g && c.g.b === b && c.mode < 4).slice(0, ICV.rcr.n);
+    let a = 0; for (let i = 0; i < L.length; i++) if (Math.random() < P) a++;
+    if (a) icvArm(d.bi, a, 'rcr', a + ' de ' + L.length + ' aceitaram (chance ' + icvPct(P) + ', simpatia ' + icvPct(v) + ')');
+    else gLog(t, 'grl', 'Recrutamento em ' + nm + ': ninguém aceitou (' + L.length + ' procurados, chance ' + icvPct(P) + ', simpatia ' + icvPct(v) + ')', b, null);
+  }
+  D.dr = D.dr.filter(d => !d.over);
+}
+/* the word on the civilians the Insurgents killed and what it brought, ICV.kill.say s after the first of a run */
+function icvKillSay() {
+  const t = icvIns(), K = icvD().kq; if (!K.n || S.t < K.T) return;
+  const B = S.T.burgs, nms = Object.keys(K.bi).map(i => civName(B[i])).join(', ');
+  gLog(t, 'grl', 'Terror e saque: ' + (K.n > 1 ? K.n + ' civis mortos' : 'um civil morto') + ' por nós (+' + Math.round(K.en) + ' energia, +' + Math.round(K.mt) + ' metal' + (ICV.kill.free ? ', sem custo de tíquetes' : '') + ')' + (nms ? '; a simpatia cai em ' + nms : ''), null, null);
+  icvD().kq = { n: 0, en: 0, mt: 0, bi: {} };
+}
+function icvStep(dt) {
+  if (!icvSim() || S.over || !S.civs.length || (S.cq && S.cq.ph)) return;
+  if (icvIns() < 0) return;
+  const D = icvD();
+  if ((D.T -= dt) > 0) return;
+  const e = ICV.every - D.T; D.T = ICV.every;
+  const H = icvLook(e);
+  icvJoin(e, H); icvDrives(); icvKillSay();
+}
+civStep = (g => dt => { g(dt); try { icvStep(dt); } catch (er) { grlErr('icv', er); } })(civStep);
+/* a new match: a new record */
+ecoInit = (g => () => { if (S) S.icv = null; return g(); })(ecoInit);
+/* ---- the hooks on the laws of war ---- */
+civToll = (g => (c, by) => {
+  const t = by && civT(by.team) ? by.team : -1, ins = icvIns();
+  if (ins < 0 || t < 0 || !icvSim()) return g(c, by);
+  const bi = civBi(c), Q = S.cq, tk0 = Q ? Q.tk[t] : 0;
+  g(c, by);
+  if (t === ins) {
+    const D = civD(), paid = Q ? tk0 - Q.tk[t] : 0;
+    if (ICV.kill.free && paid > 0) { Q.tk[t] += paid; D.tk[t] -= paid; D.say[t].tk = Math.max(0, D.say[t].tk - paid); }
+    const K = icvD().kq; if (!K.n) K.T = S.t + ICV.kill.say;
+    K.n++; if (bi >= 0) K.bi[bi] = 1;
+    if (icvRes(t, ICV.kill.en, ICV.kill.mt, 'kill')) { K.en += ICV.kill.en; K.mt += ICV.kill.mt; }
+    icvSt(t).kill++;
+    if (bi >= 0) icvMem(bi, -ICV.sym.ik);
+  } else if (!insT(t) && bi >= 0) icvMem(bi, ICV.sym.vk);
+})(civToll);
+civRecruit = (g => (c, team, own) => {
+  const bi = c && !c.net ? civBi(c) : -1, m = g(c, team, own);
+  if (m && icvSim() && team === icvIns()) { icvRes(team, ICV.res.rec.en, ICV.res.rec.mt, 'rec'); if (bi >= 0) icvMem(bi, ICV.sym.rec); }
+  return m;
+})(civRecruit);
+civRevolt = (g => bi => {
+  const ins = icvIns(); if (ins < 0 || civArms(bi) !== ins) return g(bi);
+  const D = civD(), was = D.rv[bi];
+  icvCaps(() => g(bi));
+  if (D.rv[bi] !== was) D.rv[bi] = S.t + ICV.rv;
+})(civRevolt);
+GC.mil.f = (f => (t, c, by, R) => (icvIns() >= 0 && t === icvIns() ? icvCaps(() => f(t, c, by, R)) : f(t, c, by, R)))(GC.mil.f);
+/* ---- the orders ---- */
+GC.rcr = { d: 'def', f(t, c, by) {
+  if (!insT(t) || icvIns() !== t) return gBad('ins');
+  const Z = icvTown(c); if (!Z) return gBad(Number.isInteger(c.pi) || gMapOk(c.x, c.z) ? 'at' : 'map');
+  const { b, bi } = Z, D = icvD(), k = bi + ':' + t, R = b.ru + 30;
+  if (civHates(bi, t)) return gBad('hate');
+  if (!S.civs || !S.civs.some(o => !o.dead && !o.gone && !o.net && o.g && o.g.b === b && o.mode < 4)) return gBad('nociv');
+  if (D.dr.some(d => d.bi === bi && !d.over)) return gBad('rcrN');
+  if (D.dr.filter(d => !d.over).length >= ICV.rcr.max) return gBad('rcrMax');
+  if (S.t < (D.cl[k] || 0)) return gBad('cool');
+  if (!S.men.some(m => !m.dead && !m.in && !m.mil && m.team === t && hdist(m, b) < R)) return gBad('rcr0');
+  if (S.men.some(m => !m.dead && !m.in && m.team !== t && !insT(m.team) && civT(m.team) && hdist(m, b) < R)) return gBad('reg');
+  D.cl[k] = S.t + ICV.rcr.cd;
+  D.dr.push({ bi, T: S.t + ICV.rcr.T, by });
+  gLog(t, 'grl', 'Recrutamento começou em ' + civName(b) + ' (' + ICV.rcr.T + ' s; simpatia ' + icvPct(D.sym[bi] || 0) + ')' + (c.why ? ': ' + c.why : ''), b, null);
+  return gYes();
+} };
+GC.saq = { d: 'atk', f(t, c, by) {
+  if (!insT(t) || icvIns() !== t) return gBad('ins');
+  const Z = icvTown(c); if (!Z) return gBad(Number.isInteger(c.pi) || gMapOk(c.x, c.z) ? 'at' : 'map');
+  const { b, w, bi } = Z, D = icvD(), R = b.ru + 30, v = D.sym[bi] || 0;
+  if ((w.hold !== undefined && w.hold === t) || v > ICV.ter.max) return gBad('saqOwn');
+  if (S.t < (D.loot[bi] || 0)) return gBad('cool');
+  if (S.men.filter(m => !m.dead && !m.in && m.team === t && hdist(m, b) < R).length < ICV.ter.men) return gBad('saq0');
+  D.loot[bi] = S.t + ICV.ter.lootCd;
+  icvRes(t, ICV.ter.loot.en, ICV.ter.loot.mt, 'loot'); icvMem(bi, -ICV.ter.lootSym); icvSt(t).loot++;
+  civAlarm(b.x, b.z, b.ru + 60);
+  anaCv('icvl', t, { b: bi });
+  gLog(t, 'grl', 'Saque em ' + civName(b) + ': +' + ICV.ter.loot.en + ' energia, +' + ICV.ter.loot.mt + ' metal; a simpatia da vila cai (era ' + icvPct(v) + ')' + (c.why ? ' — ' + c.why : ''), b, null);
+  return gYes();
+} };
+/* ---- the general of the Insurgents: two more tactics ---- */
+Object.assign(GRL.nm, { rcv: 'Recrutar nas vilas', ter: 'Terror e saque' });
+Object.assign(GRL.cd, { rcv: 45, ter: 120 });
+Object.assign(GRL.per.ins, { rcv: 1.3, ter: .9 }); Object.assign(GRL.per.gue, { rcv: 1.1 }); Object.assign(GRL.per.log, { rcv: 1.2, ter: 1.1 }); Object.assign(GRL.per.blz, { ter: 1.2 });
+grlSit = (g => C => {
+  const X = g(C), t = C.t, D = S.icv, B = S.T.burgs || [];
+  X.icv = []; X.icvBest = null; X.symAvg = 0; X.terT = null;
+  if (!D || icvIns() !== t) return X;
+  let n = 0;
+  B.forEach((b, bi) => {
+    const v = D.sym[bi], home = D.home ? D.home[bi] || 0 : 0; if (v === undefined || !home) return;
+    X.symAvg += v; n++;
+    const p = icvPt(b), mine = !!p && p.hold === t;
+    const o = { bi, b, v, home, mine, nm: civName(b), d: hdist(b, S.base[t]) };
+    X.icv.push(o);
+    if (!civHates(bi, t) && v > ICV.join.min && !D.dr.some(d => d.bi === bi) && S.t >= (D.cl[bi + ':' + t] || 0)) {
+      const s = (v + .5) * Math.min(6, home) / (1 + o.d / 6000); if (!X.icvBest || s > X.icvBest.s) X.icvBest = Object.assign({ s }, o);
+    }
+    if (!mine && v <= ICV.ter.max && S.t >= (D.loot[bi] || 0)) { const s = (ICV.ter.max - v + .2) * Math.min(6, home) / (1 + o.d / 5000); if (!X.terT || s > X.terT.s) X.terT = Object.assign({ s }, o); }
+  });
+  X.symAvg = n ? X.symAvg / n : 0;
+  X.icvN = X.icv.filter(o => o.v >= ICV.sym.warm).length;
+  return X;
+})(grlSit);
+grlScore = (g => (C, X, k) => {
+  if (k === 'rcv') { const b = X.icvBest; return [b ? .5 + .5 * clamp(b.v, 0, 1) + .15 * Math.min(2, X.icvN || 0) + (X.R < 1 ? .2 : 0) : .05, b ? (X.icvN || 0) + ' vila(s) simpática(s); a melhor para recrutar: ' + b.nm + ' (simpatia ' + icvPct(b.v) + ', ' + b.home + ' civis): combatentes e recursos' : 'nenhuma vila com quem recrutar']; }
+  if (k === 'ter') { const a = X.terT; return [a ? Math.max(.05, .3 + (X.eco < 1 ? .5 * (1 - X.eco) + .2 : 0) - .5 * Math.max(0, X.symAvg)) : .05, a ? 'economia ' + gN(X.eco) + ', simpatia média das vilas ' + icvPct(X.symAvg) + ': saque e terror em ' + a.nm + ' (simpatia ' + icvPct(a.v) + ') dão recursos, mas custam a simpatia' : 'nenhuma vila hostil para saquear']; }
+  return g(C, X, k);
+})(grlScore);
+GRLDO.rcv = (C, X) => {
+  const t = C.t, b = X.icvBest; if (!b) return false;
+  const R = b.b.ru + 30, here = S.men.some(m => !m.dead && !m.in && !m.mil && m.team === t && hdist(m, b.b) < R);
+  if (here) { const r = genCmd(t, { c: 'rcr', x: Math.round(b.b.x), z: Math.round(b.b.z), why: 'simpatia ' + icvPct(b.v) }, 'ai'); return grlOk(r); }
+  const q = grlFree(t).filter(q => !q.mil).map(q => ({ q, L: mbLead(q) })).filter(o => o.L).sort((p, r) => hdist(p.L, b.b) - hdist(r.L, b.b))[0];
+  if (!q || hdist(q.L, b.b) > 4000) return false;
+  grlGo(C, [q.q], { x: b.b.x, z: b.b.z }, ICV.rcr.T + 150, 'recrutar na vila');
+  gLog(t, 'grl', GRL.nm.rcv + ': esquadra ' + grlNear(q.L) + ' vai a ' + b.nm + ' recrutar (simpatia ' + icvPct(b.v) + ', ' + b.home + ' civis)', b.b, null);
+  return true;
+};
+GRLDO.ter = (C, X) => {
+  const t = C.t, a = X.terT; if (!a) return false;
+  const R = a.b.ru + 30, n = S.men.filter(m => !m.dead && !m.in && m.team === t && hdist(m, a.b) < R).length;
+  if (n >= ICV.ter.men) return grlOk(genCmd(t, { c: 'saq', x: Math.round(a.b.x), z: Math.round(a.b.z), why: 'terror e saque' }, 'ai'));
+  if (!grlOk(grlRaid(t, a.b, 1, 'terror e saque'))) return false;
+  gLog(t, 'grl', GRL.nm.ter + ': incursão em ' + a.nm + ' (simpatia ' + icvPct(a.v) + ', economia ' + gN(X.eco) + '); custa a simpatia da vila', a.b, null);
+  return true;
+};
+/* ter: the Insurgents' AI no longer holds fire for the civilians it sees (the person's fire is never held: roeBar warns him only) */
+roeBar = (g => (t, x, z, r, o) => (ICV.on && ICV.ter.roe && insT(t) && grlHasT(t, 'ter') ? false : g(t, x, z, r, o)))(roeBar);
+/* ---- what the general and the review see ---- */
+function icvView(t) {
+  const D = S.icv; if (!D || t !== icvIns()) return null;
+  const B = S.T.burgs || [];
+  return { towns: B.map((b, i) => ({ i, name: civName(b), x: Math.round(b.x), z: Math.round(b.z), sym: Math.round((D.sym[i] || 0) * 100), lv: ICV.lv[icvLv(D.sym[i] || 0)], home: D.home ? D.home[i] || 0 : 0, joined: D.joined[i] || 0, why: D.why[i] || '' }))
+    .filter(o => o.home || o.joined), drives: D.dr.filter(d => !d.over).map(d => ({ name: civName(B[d.bi]), left: Math.max(0, Math.round(d.T - S.t)) })), ...icvSt(t) };
+}
+genState = (g => t => { const o = g(t); if (o && icvIns() === t) o.icv = icvView(t); return o; })(genState);
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  const L = ev.filter(e => e.k === 'cv' && (e.c === 'icvj' || e.c === 'icvl' || e.c === 'icvr'));
+  if (!L.length) return R;
+  const hide = anaHide(me, R.ns, R.over);
+  R.icv = anaSides(R.ns).map(s => {
+    if (hide && s !== me) return null;
+    const of = c => L.filter(e => e.s === s && e.c === c);
+    const j = of('icvj'), r = of('icvr');
+    if (!j.length && !r.length) return null;
+    return { rec: j.filter(e => e.why === 'rcr').reduce((a, e) => a + (e.n || 0), 0), join: j.filter(e => e.why !== 'rcr').reduce((a, e) => a + (e.n || 0), 0), mil: j.reduce((a, e) => a + (e.mil || 0), 0),
+      kill: r.filter(e => e.w === 'kill').length, loot: of('icvl').length, en: Math.round(r.reduce((a, e) => a + (e.en || 0), 0)), mt: Math.round(r.reduce((a, e) => a + (e.mt || 0), 0)) };
+  });
+  return R;
+})(anaReport);
+/* ===== end of the Insurgents and the civilians ===== */
 /* ---------- CEREBRO: contrato (P0, cf-lideres; não testado além de tests/brain.js, see docs/nao-testado/cf-lideres-p0.md) ----------
    The contract between the layers of the brain of the AI's soldiers and squads (the architecture of cf-cerebro-pesquisa, its §2.5): one layer,
    one question. The general says where and what for, the squad's leader how the squad does it now, the fire team who covers and who moves, the
@@ -43470,6 +43801,54 @@ function rtsMini(g, V) {
 Net.ui.refused = (f => code => { RTS.want = 0; f(code); })(Net.ui.refused);
 Net.ui.lost = (f => joined => { RTS.want = 0; f(joined); })(Net.ui.lost);
 /* ===== end of the commander's camera ===== */
+/* ---------- the Insurgents and the civilians on the page (ICV, cf-insurgente-civis; NOT TESTED: docs/nao-testado/cf-insurgente-civis.md) ----------
+   Defesa tab, only on the Insurgents' side: Recrutar and Saquear (a click on a town: GC.rcr, GC.saq) and each town's sympathy for us, why,
+   and how many joined (icvView on the host or solo; a guest asks its host for the state). The review: "Civis e Insurgentes" (R.icv). */
+Object.assign(GORW, { rcr: 1, saq: 1 });
+Object.defineProperties(GORT, {
+  rcr: { enumerable: true, get: () => 'Recrutar: clique numa vila com um soldado nosso (' + ICV.rcr.T + ' s; a chance sobe com a simpatia)' },
+  saq: { enumerable: true, get: () => 'Saquear: clique numa vila hostil com ' + ICV.ter.men + ' soldados nossos (recursos, mas a simpatia cai)' } });
+gorTarget = (g => (px, py, shift) => {
+  const m = GOR.mode; if (m !== 'rcr' && m !== 'saq') return g(px, py, shift);
+  const w = gorW(px, py), pt = gorPt(px, py), r1 = v => Math.round(v * 10) / 10;
+  gorSend(Object.assign({ c: m }, pt ? { pi: pt.i } : { x: r1(w.x), z: r1(w.z) }));
+  if (!shift) GOR.mode = '';
+  GOR.sig = {}; gorBar();
+})(gorTarget);
+function icvBox() {
+  let el = $('#gcIcv'); if (el) return el;
+  const w = $('#gcWork'); if (!w) return null;
+  el = gE('section'); el.id = 'gcIcv';
+  const h = gE('h3', '', 'Civis: simpatia e recrutamento'); h.title = 'Quanto cada vila apoia os Insurgentes, por quê, e quantos civis se juntaram';
+  const b = gE('div', 'gc-row'); b.id = 'gcIcvB';
+  const l = gE('ul', 'gc-list'); l.id = 'gcIcvL';
+  const n = gE('p', 'gc-note'); n.id = 'gcIcvN';
+  el.append(h, b, l, n); w.after(el);
+  return el;
+}
+gorDefP = (g => V => {
+  g(V);
+  const me = S && S.me, box = icvBox(); if (!box) return;
+  if (!insT(me)) { box.hidden = true; return; }
+  box.hidden = false;
+  const host = !S.net || S.host, st = host ? null : gorQ('state'), v = host ? icvView(me) : st && st.icv, tac = gorTac();
+  const sg = JSON.stringify([v && v.towns.map(o => [o.i, o.sym, o.home, o.joined, o.why]), v && v.drives, v && [v.rec, v.join, v.kill, v.loot], GOR.mode, tac]);
+  if (GOR.sig.icv === sg) return; GOR.sig.icv = sg;
+  const btn = gorBtn;
+  gorFill('#gcIcvB', [btn('Recrutar', { a: 'mode', m: 'rcr' }, GORT.rcr, GOR.mode === 'rcr', !tac), btn('Saquear', { a: 'mode', m: 'saq' }, GORT.saq, GOR.mode === 'saq', !tac)]);
+  const L = v ? v.towns.slice().sort((a, b) => b.sym - a.sym) : [];
+  gorFill('#gcIcvL', L.length ? L.map(o => { const li = gorLi(o.name + ' · ' + o.lv + ' ' + o.sym + '% · ' + o.home + ' civis' + (o.joined ? ' · ' + o.joined + ' conosco' : '') + (o.why ? ' — ' + o.why : ''), []); return li; }) : gorNone(v ? 'Nenhuma vila com gente' : 'Sem dados ainda'));
+  $('#gcIcvN').textContent = v ? 'Recrutados ' + (v.rec | 0) + ' · adesões ' + (v.join | 0) + ' · civis mortos por nós ' + (v.kill | 0) + ' · saques ' + (v.loot | 0) + ' · ganho +' + Math.round(v.en || 0) + ' energia, +' + Math.round(v.mt || 0) + ' metal' +
+    (v.drives && v.drives.length ? ' · recrutando: ' + v.drives.map(d => d.name + ' (' + d.left + ' s)').join(', ') : '') : '';
+})(gorDefP);
+aarShow = (g => (R, sub) => {
+  g(R, sub);
+  if (!R || !R.icv || !R.icv.some(Boolean)) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), ol = aarEl('ol', 'aar-dec');
+  R.icv.forEach((d, s) => { if (!d) return; const li = aarEl('li'); li.append(aarEl('b', aarK(s), N(s))); li.append(document.createTextNode(' recrutou ' + d.rec + ' civis, ' + d.join + ' se juntaram sozinhos (' + d.mil + ' na milícia); matou ' + d.kill + ' civis e saqueou ' + d.loot + ' vez(es): +' + d.en + ' energia, +' + d.mt + ' metal')); ol.append(li); });
+  b.append(aarEl('h3', '', 'Civis e Insurgentes'), ol);
+})(aarShow);
+/* ===== end of the Insurgents and the civilians on the page ===== */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

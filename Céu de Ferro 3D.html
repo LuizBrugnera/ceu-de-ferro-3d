@@ -30926,6 +30926,154 @@ anaReport = (g => (ev, me) => {
   return R;
 })(anaReport);
 /* ===== end of the guerrilla mind ===== */
+/* ---------- CEREBRO: contrato (P0, cf-lideres; não testado além de tests/brain.js, see docs/nao-testado/cf-lideres-p0.md) ----------
+   The contract between the layers of the brain of the AI's soldiers and squads (the architecture of cf-cerebro-pesquisa, its §2.5): one layer,
+   one question. The general says where and what for, the squad's leader how the squad does it now, the fire team who covers and who moves, the
+   soldier how he does his part and lives. Orders go down, reports come up; nobody reaches into the muscles of the layer under it.
+   Each package of the brain is its own section (CEREBRO: <name>) and touches the old code only by wrapping, as the rest of the page does; this one
+   holds the shared objects and the clock, and decides nothing.
+   BRAIN: on (0: every hook of this section is a no-op and the battle is the one before, to the bit; tests/brain.js), voz m a shout carries,
+   sinal m a hand signal is seen (with a line of sight), lead s a succession takes at most, eye m from the player that counts as near (LOD),
+   hz the cadences of the layers: lid (the squad's leader), eq (its fire teams), sold [L0, L1, L2, L3] (the soldier's utility by his level
+   of detail, 0: none: L0 in contact and near, L1 in contact and far, L2 moving without contact, L3 a quiet post), voice and sign s a report
+   takes by voice and by sign (by radio, the command net's: radio s, or lost with no link), rx reports a squad keeps, keep s a contact stays on
+   its board, cbMax brain events a match (the analytics' cap is shared).
+   The objects (created where the battle is simulated, by addSquad and addMan, and for any squad met without them by brainTick):
+     q.bb, the squad's board: ord the order it holds (ord), cont what it knows of the enemy (a Map, key → { x, z, c class, g rung, t, de who
+       reported it }), est by man (wounded, ammunition, morale), plano the method under way ({ proc, passo, tarefas }), conf its confidence
+       (-2..2), fl its front line, inq the reports on their way, rx the last ones that came; ev a pending event that makes the leader think now.
+     q.lid the soldier who leads it (a man of the squad, not an abstraction), q.eq its fire teams [{ id 'A' | 'B', men, lid, tar, papel }]:
+       A the even numbers after the leader, B the odd ones (the split the drills already use); q.tec the movement technique its leader chose.
+     m.rf his reflex under way ({ k, ate }), m.mo his suppression, morale and state ({ s, m, est }), m.tar the task his team gave him.
+   ord(k, de, a): an order (k mover manter assalto base lance vigiar recuar limpar evacuar seguir cavar; por its purpose, area, alvo, setor,
+     apos the task it waits for, sinal what starts it, roe, lat, tec). brainOrd(to, o) gives it to a squad, a team or a soldier: one each,
+     the new one replaces the old.
+   rel(k, de, a): a report (k contato feito nao-da ferido baixa municao moral prisioneiro pos). brainRel(q, r) sends it to squad q's leader:
+     by voice within voz m, by sign within sinal m in sight, else by radio when the squad is on the command net, else it is lost; it comes
+     after that channel's time and a contact goes on the board. A leader knows only what he perceives and what reaches him.
+   fala(m, k, dados): what a man says; P5 (falas e balões) makes it heard and seen. Here a stub that records it (m.fala and a brain event).
+   Hooks for the packages: brainHook(layer, f), layer 'lid' f(q, dt), 'eq' f(q, e, dt), 'sold' f(m, q, dt, lod), 'rel' f(q, r) on a report
+   that came; each runs at its layer's cadence (the leader also at once on q.bb.ev). brainEv(k, s, d): a brain event ('cb', subkind c) for the
+   analytics. brainTick runs every step where the battle is simulated, its time is part of the AI's frame (AIB.u) and of BRAIN's own meter (ms an
+   average of the last steps, tot and nf the match's sum and steps, msMax its worst; AIB.stat() reads them as brain, brainNow and brainMax) */
+const BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3, eye: 300, hz: { lid: 1, eq: 2, sold: [5, 2, 0, 0] }, voice: .6, sign: 1.2, radio: 3, rx: 24, keep: 60, cbMax: 4000,
+  hk: { lid: [], eq: [], sold: [], rel: [] }, ms: 0, msMax: 0, ema: .05, tot: 0, nf: 0, S: null };
+const ord = (k, de, a = {}) => ({ id: (S.ordN = (S.ordN || 0) + 1), k, de, t: S.t, por: a.por, area: a.area, alvo: a.alvo, setor: a.setor, apos: a.apos, sinal: a.sinal, roe: a.roe, lat: a.lat, tec: a.tec });
+const rel = (k, de, a = {}) => ({ k, de, t: S.t, x: a.x, z: a.z, c: a.c, n: a.n, g: a.g, conf: a.conf });
+const brainSim = () => !!BRAIN.on && !!S && (!S.net || S.host);
+const brainHook = (layer, f) => { BRAIN.hk[layer].push(f); return f; };
+function brainEv(k, s, d) {
+  if (!brainSim()) return;
+  const N = S.cbN || (S.cbN = {}); N[k] = (N[k] || 0) + 1;
+  if (typeof anaLive === 'function' && anaLive() && (S.cbE = (S.cbE || 0) + 1) <= BRAIN.cbMax) anaPush(Object.assign({ k: 'cb', t: anaR(S.t), s, c: k }, d));
+}
+function brainSay(m, k, dados) {
+  if (!brainSim() || !m || m.dead) return;
+  m.fala = { k, t: S.t, d: dados || null };
+  brainEv('fala', m.team, { f: k });
+}
+const fala = (m, k, dados) => brainSay(m, k, dados);
+const brainUp = m => !!m && !m.dead && !m.down && !!m.ai;
+/* a soldier's own parts of the brain */
+function brainMan(m) { if (!m.mo) { m.rf = { k: null, ate: 0 }; m.mo = { s: 0, m: 1, est: 'firme' }; m.tar = null; } return m; }
+/* a squad's parts: its board, its leader (the first man standing) and its two fire teams */
+function brainSq(q) {
+  if (q.bb) return q;
+  q.bb = { ord: null, cont: new Map(), est: {}, plano: null, conf: 0, fl: null, inq: [], rx: [], ev: null };
+  q.lid = q.men.find(brainUp) || null; q.tec = null;
+  q.eq = [{ id: 'A', men: [], lid: null, tar: null, papel: 'seguir' }, { id: 'B', men: [], lid: null, tar: null, papel: 'seguir' }];
+  brainTeams(q);
+  q.lidT = (hash2(q.team + 1, q.id | 0, 5.3) || 0) / BRAIN.hz.lid; q.eqT = (hash2(q.team + 1, q.id | 0, 7.1) || 0) / BRAIN.hz.eq;
+  return q;
+}
+/* the teams from the squad's men as they are now: other parts of the game move men in and out of a squad (sappers drawn from it, a garrison
+   split, a man swapped for another), so when its roll changes (eqN its length when last made, a man not stamped bq with it) they are made again; the leader stays while
+   he is one of its men (a fallen leader's succession is the leader's package, P3) */
+function brainTeams(q) {
+  if (!q.men.includes(q.lid)) q.lid = q.men.find(brainUp) || null;
+  for (const e of q.eq) { e.men.length = 0; }
+  for (const m of q.men) { brainMan(m); m.bq = q; if (m !== q.lid && m.ai) q.eq[(m.ai.i | 0) & 1 ? 1 : 0].men.push(m); }
+  for (const e of q.eq) if (!e.men.includes(e.lid)) e.lid = e.men.find(brainUp) || null;
+  q.eqN = q.men.length; q.eqL = q.lid;
+}
+const brainRoll = q => { if (q.men.length !== q.eqN || q.lid !== q.eqL) return true; for (const m of q.men) if (m.bq !== q) return true; return false; };
+/* an order to a squad (its board), a fire team or a soldier: one each, the new one replaces the old */
+function brainOrd(to, o) {
+  if (!brainSim() || !to || !o) return null;
+  if (to.men && to.bb) { to.bb.ord = o; to.bb.ev = to.bb.ev || 'ord'; }
+  else if (to.men) to.tar = o;   // a fire team
+  else to.tar = o;
+  brainEv('ord', to.team !== undefined ? to.team : o.de && o.de.team, { o: o.k, id: o.id });
+  return o;
+}
+/* how a report from de reaches q's leader: voice, sign, radio or not at all; and when */
+function brainChan(q, de) {
+  const L = q.lid; if (!brainUp(L) || !de) return null;
+  if (de === L) return { ch: 'eu', dt: 0 };
+  const d = Math.hypot(de.x - L.x, de.z - L.z);
+  if (d <= BRAIN.voz) return { ch: 'voz', dt: BRAIN.voice };
+  if (d <= BRAIN.sinal && los(de, eyeY(de), L, eyeY(L))) return { ch: 'sinal', dt: BRAIN.sign };
+  if (typeof cnOn === 'function' && cnOn() && q.cnL === 2) return { ch: 'radio', dt: BRAIN.radio };
+  return null;
+}
+function brainRel(q, r) {
+  if (!brainSim() || !q || !r) return false;
+  brainSq(q);
+  const c = brainChan(q, r.de); if (!c) return false;
+  r.ch = c.ch; r.at = S.t + c.dt; q.bb.inq.push(r); if (q.bb.inq.length > BRAIN.rx) q.bb.inq.shift();
+  return true;
+}
+/* a report that came: into the board (a contact by its key: the object reported when the reporter knew it, else a grid cell), then the hooks */
+function brainGot(q, r) {
+  const B = q.bb; B.rx.push(r); if (B.rx.length > BRAIN.rx) B.rx.shift();
+  if (r.k === 'contato' && r.x !== undefined) {
+    const key = r.o || ((Math.round(r.x / 25) * 4096 + Math.round(r.z / 25)) | 0), was = B.cont.get(key);
+    if (!was || was.t <= r.t || (r.g || 0) > (was.g || 0)) B.cont.set(key, { x: r.x, z: r.z, c: r.c, g: r.g || 1, t: r.t, de: r.de });
+    B.ev = B.ev || 'contato';
+  }
+  for (const f of BRAIN.hk.rel) f(q, r);
+}
+/* a soldier's level of detail: 0 in contact and near the player, 1 in contact, 2 moving, 3 a quiet post */
+function brainLod(m, q) {
+  const con = (q.bb && q.bb.cont.size > 0) || (m.mo && m.mo.s > .05) || S.t - (m.hitT || -99) < 10;
+  if (con) { const P = S.my; return P && !P.dead && Math.abs(P.x - m.x) < BRAIN.eye && Math.abs(P.z - m.z) < BRAIN.eye && Math.hypot(P.x - m.x, P.z - m.z) < BRAIN.eye ? 0 : 1; }
+  return q.at ? 3 : 2;
+}
+/* the brain's clock, every step where the battle is simulated */
+function brainTick(dt) {   // indexed loops and no closures: nothing allocated on the way, so no collection lands inside the brain's time
+  const H = BRAIN.hk, hz = BRAIN.hz, Q = S.squads, nl = H.lid.length, ne = H.eq.length, ns = H.sold.length;
+  for (let j = 0; j < Q.length; j++) {
+    const q = Q[j]; if (q.net || !(q.live > 0) || q.mil) continue;
+    const B = q.bb || brainSq(q).bb;
+    if (B.inq.length) for (let i = 0; i < B.inq.length;) { const r = B.inq[i]; if (r.at <= S.t) { B.inq.splice(i, 1); brainGot(q, r); } else i++; }
+    if ((q.lidT -= dt) <= 0 || B.ev) {   // the roll and the board are kept at the leader's pace
+      q.lidT = 1 / hz.lid; if (brainRoll(q)) brainTeams(q);
+      if (B.cont.size) B.cont.forEach(brainOld, B.cont);
+      const e = B.ev; B.ev = null; for (let i = 0; i < nl; i++) H.lid[i](q, dt, e);
+    }
+    if ((q.eqT -= dt) <= 0) { q.eqT = 1 / hz.eq; for (let k = 0; k < q.eq.length; k++) for (let i = 0; i < ne; i++) H.eq[i](q, q.eq[k], dt); }
+    if (ns) for (let k = 0; k < q.men.length; k++) {   // a soldier's level of detail is looked at when his time comes, not every step
+      const m = q.men[k]; if (!brainUp(m)) continue;
+      if (m.utT === undefined) m.utT = hash2(m.x, m.z, 9.1) * .2;
+      if ((m.utT -= dt) > 0) continue;
+      const l = brainLod(m, q), r = hz.sold[l];
+      if (!r) { m.utT = 1; continue; }
+      m.utT = 1 / r; for (let i = 0; i < ns; i++) H.sold[i](m, q, dt, l);
+    }
+  }
+}
+function brainOld(c, k) { if (S.t - c.t > BRAIN.keep) this.delete(k); }
+addSquad = (g => (...a) => { const q = g(...a); if (brainSim()) brainSq(q); return q; })(addSquad);
+addMan = (g => (...a) => { const m = g(...a); if (brainSim()) brainMan(m); return m; })(addMan);
+step = (g => dt => {
+  g(dt);
+  if (!brainSim() || !S.squads) return;
+  const a = AIB.now(); brainTick(dt); const d = AIB.now() - a;
+  if (BRAIN.S !== S) { BRAIN.S = S; BRAIN.ms = BRAIN.msMax = BRAIN.tot = BRAIN.nf = 0; }
+  AIB.u += d; BRAIN.ms += (d - BRAIN.ms) * BRAIN.ema; if (d > BRAIN.msMax) BRAIN.msMax = d; BRAIN.tot += d; BRAIN.nf++;
+})(step);
+/* the brain's share of the AI's frame, beside the meter's own reading */
+AIB.stat = (g => () => Object.assign(g(), { brain: Math.round((BRAIN.nf ? BRAIN.tot / BRAIN.nf : 0) * 1000) / 1000, brainNow: Math.round(BRAIN.ms * 1000) / 1000, brainMax: Math.round(BRAIN.msMax * 1000) / 1000 }))(AIB.stat);
 /* ---------- the soldier's body and voice (cf-cerebro-soldado, part 1: what does not depend on how the soldier decides) ----------
    Seen in Defilade (docs/nao-testado/cf-cerebro-soldado.md) and asked by the captain: grenades that behave as grenades, cover read from
    the ground itself, a blast that throws a man and leaves him reeling, and soldiers that talk (balloons over their heads). How a soldier

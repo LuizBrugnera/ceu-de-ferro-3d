@@ -36914,6 +36914,184 @@ genCard = (f => (t, id) => {
   return c;
 })(genCard);
 /* ---------- end of the medic (cf-medico) ---------- */
+/* ---------- GENERAL 2: operacao (G4, cf-g2-g4-operacao; medido: docs/nao-testado/cf-g2-g4-operacao.md) ----------
+   The captain's decision of 2026-11-20 ("1A, 2A, 3C": the General 2 of the open-source survey, §5.1 item 2 and the G4 row of §6): the
+   operation between what the side goes for (G3 not yet: today's objectives, cqAim, and the seat's) and the squads that do it. The survey's
+   numbers on the general of before: 0,18 assault a match at H-hour, 58% of the forming-ups cut by their deadline, the flank 0%, "no strength to
+   attack" some 80 times a match. Its reading: some 20 routines with their own "free squad" predicates take the squads first come first
+   served; nobody plans time (who arrives when, on foot or aboard); the deadline is fixed from the order; the forming-up place is chosen by sight,
+   never by where the side is safe; and in fix and flank the flank is the smaller element. What this section does, each a hook on the old code
+   (which is left as it was: G4.on 0 is the general of before, exactly):
+   - one allocator in two passes (g4Pool, under apPool: the assault's, the seat's and the refill's pool). Pass 1 keeps what defends: in each
+     point the side holds and in its base, the squads that hold it up to its danger (1, and one more for each G4.def.sq of the strength the
+     side knows within G4.def.r m of it), and a post in contact (known enemy within G4.def.ct m). Pass 2 is the plan's: every other squad of
+     the side that fights (G4.jobs: the assault's, the free ones and the posts; not an engineer, a crew, a guard, the seat's garrison) and is
+     whole enough, by its time to the assault's assembly (its ETA: the walk at G4.run m/s, G4.wind times the straight line, a post G4.lend s
+     more for what it leaves), up to G4.eta s, the soonest first, as many as the doctrine's odds need against what the side believes is
+     there (g4Foe) and G4.over more, two at least, G4.max at most (PurpleWave's defend first and attack with the rest; FreeOrion's ladder).
+   - what the side believes is at the objective (g4Foe): the strength it knows within G4.mem.r m now, its memory there (fading to G4.mem.k
+     of itself each minute: FreeOrion's memory of the threat), and for a point an enemy holds that nobody has looked into, the old CMD.guess:
+     never the truth (S.men and S.units are not read here: the honesty test scans this section).
+   - the schedule (g4Sched, after atkAp opened an assault): each squad's ETA to its assembly by its way, a ride (EMB, cf-infantaria-veiculos)
+     asked at once for each one with a walk of G4.ride m or more (EMB gives at most EMB.per a plan, any squad; the assault's first), the
+     expected H of the forming-up = the slowest ETA, and its deadline G4.grace s after it (op.formT, which OPS.atk reads), within G4.dl.
+   - the gates with hysteresis (g4Gate, before OPS.atk's form): it goes when G4.go of its strength is at the assembly (two squads at least;
+     CircuitAI and Petra gather by force, not by the clock); at the deadline with G4.min of it; else while the late ones still close in
+     (G4.prog m in the last G4.pt s) the deadline moves to their new ETA, at most G4.ext times; an assembly under fire (a squad there hit in
+     the last G4.fire.t s, known enemy within G4.fire.r m) falls back G4.fire.back m along its approach, once (BoneCrusher), and a second
+     time the forming-up ends: cancelled under fire.
+   - the last safe point (g4Rally, after apBuild): an approach's assembly where the side's map says the enemy sees (v over G4.safe.v) or
+     stands (f over G4.safe.f), or known enemy within G4.safe.kn m, moves back along its way to the first cell that is none of these, up
+     to G4.safe.max m from the objective (Petra's setRallyPoint); a safe one stays where M2 put it.
+   - the main effort by the flank (g4Div, after prPick): fix and flank keeps the one squad nearest the axis' assembly fixing and gives the
+     manoeuvre the rest; the envelopment one fixing, the rest shared by its two manoeuvres (it was one or two in the manoeuvre and the
+     rest fixing: the flank was the smaller element and its arrivals a minority of any assault's).
+   - a campaign's fronts never share a squad (campAI got the pools of each front from the same list).
+   What it decided: the diary (atk), op.g4 (the ETAs, the H, the deadline, the extensions, the fall-backs, the rides asked) and, in the
+   analytics' ap event, g4 [the expected H (s from the opening), extensions, fall-backs, rides asked, the share there as it went].
+   Only the host's (or solo) AI general: a player's side (genBy 'atk' not 'ai') is never touched */
+const G4 = { on: 1, run: 3.5, wind: 1.35, eta: 900, lend: 90, over: 1.15, n: 3, max: 5, min: .5, go: .65, grace: 90, dl: [150, 1200], ext: 2, prog: 60, pt: 45, ride: 1500,
+  def: { r: 900, sq: 8, ct: 600 }, mem: { r: 500, k: .9 }, fire: { r: 350, t: 20, back: 350 }, safe: { v: .3, f: .3, kn: 450, max: 1700, step: 1 }, div: 1,
+  jobs: { push: 0, held: 0, road: 0, line: 1, wood: 1, garr: 1, fpost: 1, mil: 1, egd: 1 }, cur: null };
+const g4Mine = C => !!G4.on && !!C && !(S.net && !S.host) && genBy(C.t, 'atk') === 'ai';
+const g4Lead = q => q.men.find(m => !m.dead) || null;
+/* pass 1: the squads side C keeps for its defence this plan (a Set), once a plan */
+function g4Keep(C, sq) {
+  if (C.g4K && C.g4K.T === S.t) return C.g4K.s;
+  const t = C.t, keep = new Set(), R = p => (p.r || CQ.r[1]) + 120;
+  for (const p of gPts()) {
+    if (!(p.hold === t || p.base === t)) continue;
+    const hs = [];
+    for (const q of sq) { if (q.team !== t || !(q.live > 0) || q.state) continue; const L = g4Lead(q); if (L && (q.ord.tw === p || hdist(L, p) < R(p))) hs.push([hdist(L, p), q]); }
+    hs.sort((a, b) => a[0] - b[0]);
+    const n = 1 + Math.ceil(cmdKnown(C, p.x, p.z, G4.def.r) / G4.def.sq);
+    for (let i = 0; i < hs.length && i < n; i++) keep.add(hs[i][1]);
+  }
+  for (const q of sq) { if (G4.jobs[q.job] !== 1 || keep.has(q)) continue; const L = g4Lead(q); if (L && cmdKnown(C, L.x, L.z, G4.def.ct) > 0) keep.add(q); }
+  C.g4K = { T: S.t, s: keep };
+  return keep;
+}
+/* may the plan take squad q at all */
+const g4May = q => !q.op && !q.state && !q.net && !q.lift && !q.rd && q.live >= 3 && G4.jobs[q.job] !== undefined && q.ord && q.ord.k !== 'supply' && q.ord.k !== 'build' && !q.ord.b && !q.ord.T;
+/* what side C believes is at o (P its objective): known now, its fading memory there, and the old guess for a held point nobody looked into */
+function g4Foe(C, P, o) {
+  const kn = cmdKnown(C, o.x, o.z, G4.mem.r), M = C.g4M || (C.g4M = new Map()), k = Math.round(o.x) + ',' + Math.round(o.z), m = M.get(k);
+  const was = m ? m.v * Math.pow(G4.mem.k, (S.t - m.T) / 60) : 0, v = Math.max(kn, was);
+  M.set(k, { v, T: S.t });
+  const held = !!(P && P.tw && P.tw.hold >= 0 && P.tw.hold !== C.t);
+  return held ? Math.max(v, CMD.guess) : v;
+}
+/* the time of squad q to the nearest assembly of plan pl (or to o): s */
+function g4Eta(q, pl, o) {
+  const L = g4Lead(q); if (!L) return Infinity;
+  let d = pl ? Math.min(...pl.A.map(a => hdist(L, a.asm))) : Math.max(0, hdist(L, o) - AP.asm.at);
+  return d * G4.wind / G4.run + (G4.jobs[q.job] === 1 ? G4.lend : 0);
+}
+/* pass 2: the pool of an assault on P (place o) from side sd: by ETA, sized to the odds the doctrine asks against the belief */
+function g4Pool(C, sq, P, sd, o, n) {
+  const t = C.t, keep = g4Keep(C, sq), pl = apGet(C, P, sd), mine = sq.filter(q => q.team === t && g4May(q) && !keep.has(q));
+  const c = [];
+  for (const q of mine) { const L = g4Lead(q); if (!L || hdist(L, o) < AP.near) continue; const e = g4Eta(q, pl, o); if (e <= G4.eta) c.push([e, q]); }
+  c.sort((a, b) => a[0] - b[0]);
+  const walk = !!S.cq && !!P.tw && !cmdKnown(C, o.x, o.z, 500) && !P.tw.w.some((v, f) => f !== t && v > 0), foe = walk ? 3 : Math.max(CMD.guess, g4Foe(C, P, o));   // never under the old check's (cmdAttack's foe)
+  const need = (C.doc.atk || 1.2) * foe * G4.over, want = Math.max(2, Math.min(n || 2, G4.n)), out = []; let own = 0;
+  for (const [, q] of c) { if (out.length >= want && own >= need) break; if (out.length >= G4.max) break; out.push(q); own += q.live; }
+  C.g4P = { T: S.t, nm: gName(P), n: c.length, need: Math.round(need), own };
+  return out;
+}
+apPool = (g => (C, sq, P, sd, o, n) => (g4Mine(C) ? g4Pool(C, sq, P, sd, o, n) : g(C, sq, P, sd, o, n)))(apPool);
+/* the last safe point of each approach of plan pl: back along its way from an assembly the enemy sees or holds */
+function g4Rally(C, pl) {
+  const M = C.tm, Z = pl.Z, o = pl.o, F = G4.safe; if (!M) return;
+  const safe = q => { const p = apXZ(Z, q); return M.v[q] <= F.v && M.f[q] <= F.f && cmdKnown(C, p.x, p.z, F.kn) <= 0; };
+  for (const a of pl.A) {
+    const i0 = a.asm.i; if (!(i0 > 0) || safe(a.cells[i0])) continue;
+    let b = -1;
+    for (let i = i0 - 1; i >= 0; i--) { const p = apXZ(Z, a.cells[i]); if (hdist(p, o) > F.max) break; if (safe(a.cells[i])) { b = i; break; } }
+    if (b < 0) continue;
+    const p = apXZ(Z, a.cells[b]); a.asm = { x: p.x, z: p.z, v: M.v[a.cells[b]], i: b, g4: 1 }; pl.g4 = (pl.g4 || 0) + 1;
+  }
+}
+apBuild = (g => function* (C, P, sd) { const pl = yield* g(C, P, sd); if (pl && g4Mine(C)) g4Rally(C, pl); return pl; })(apBuild);
+/* the main effort by the flank: p1 keeps one squad fixing, the manoeuvre gets the rest; p2 one fixing, the rest shared by its two manoeuvres */
+function g4Div(C, r, pool) {
+  if (!G4.div || (r.k !== 'p1' && r.k !== 'p2')) return r;
+  const ax = r.ap[0], idx = pool.map((q, i) => i).filter(i => r.role[i] !== 'sec'), dTo = (i, a) => { const L = g4Lead(pool[i]); return L ? hdist(L, a.asm) : 1e9; };
+  if (idx.length < 3) return r;
+  const fix = idx.slice().sort((a, b) => dTo(a, ax) - dTo(b, ax))[0], man = idx.filter(i => i !== fix);
+  r.el[fix] = 0; r.role[fix] = 'fix';
+  if (r.k === 'p1') for (const i of man) { r.el[i] = 1; r.role[i] = 'man'; }
+  else {
+    const n = [0, 0], near = i => Math.min(dTo(i, r.ap[1]), dTo(i, r.ap[2]));
+    for (const i of man.sort((a, b) => near(a) - near(b))) { const e = n[0] < n[1] ? 1 : n[1] < n[0] ? 2 : dTo(i, r.ap[2]) < dTo(i, r.ap[1]) ? 2 : 1; r.el[i] = e; r.role[i] = 'man'; n[e - 1]++; }
+  }
+  r.g4 = 1;
+  return r;
+}
+prPick = (g => (C, P, sd, pool, own, foe, pl) => { const r = g(C, P, sd, pool, own, foe, pl); return r && g4Mine(C) ? g4Div(C, r, pool) : r; })(prPick);
+/* the schedule of an assault just opened by its approaches: ETAs, rides, the expected H and the deadline */
+function g4Sched(C, op) {
+  const G = (op.g4 = { T: S.t, eta: new Map(), rem: new Map(), remT: S.t, H: S.t, ext: 0, fb: 0, ride: 0, sh: -1 });
+  let H = 0;
+  for (const q of opLive(op)) {
+    const L = g4Lead(q); if (!L || !q.fp) continue;
+    const w = q.ord.wp ? q.ord.wp.len : hdist(L, q.fp) * G4.wind, e = w / G4.run;
+    G.eta.set(q, e); G.rem.set(q, hdist(L, q.fp)); H = Math.max(H, e);
+    if (w >= G4.ride && embOn() && EMB.ride && embFit(q) && !q.rd && !(S.t < (q.embT || 0))) { const W = embWay(q, L); if (W && W.W.len - W.s0 >= EMB.far) { q.embT = S.t + EMB.cd; if (embGo(C, q, W)) G.ride++; } }
+  }
+  G.H = S.t + H;
+  if (!op.walk) op.formT = clamp(H + G4.grace, G4.dl[0], G4.dl[1]);
+  gLog(C.t, 'atk', 'Cronograma do assalto a ' + gName(op.O) + ': reunião esperada em ' + Math.round(H) + ' s, prazo ' + Math.round(op.formT || 0) + ' s' + (G.ride ? ', ' + G.ride + (G.ride > 1 ? ' esquadras pedem carona' : ' esquadra pede carona') : ''), op.pl ? op.pl.o : op.O);
+}
+atkAp = (g => (C, P, sd, pool, walk, own, foe, pl) => { const op = g(C, P, sd, pool, walk, own, foe, pl); if (op && g4Mine(C)) g4Sched(C, op); return op; })(atkAp);
+/* the assembly of op falls back G4.fire.back m along each approach */
+function g4Back(C, op) {
+  const pl = op.pl; if (!pl) return;
+  for (const q of opLive(op)) {
+    if (q.apo !== op || !q.fp) continue;
+    const a = op.ap[q.ape || 0], cs = a.cells; let i = a.asm.i, d = 0;
+    while (i > 0 && d < G4.fire.back) { d += hdist(apXZ(pl.Z, cs[i]), apXZ(pl.Z, cs[i - 1])); i--; }
+    const p = apXZ(pl.Z, cs[i]), L = g4Lead(q), wp = L && apWalk(pl, L.x, L.z, cs[i], p.x, p.z);
+    q.fp = { x: p.x, z: p.z };
+    opTake(op, q, Object.assign({ k: 'hold', ri: op.ri, s: clamp(sOn(op.ri, p.x, p.z), 0, S.T.routes[op.ri].len), x: p.x, z: p.z, R: 12, fast: 1, quiet: 1 }, wp ? { wp } : {}));
+  }
+  op.formT = Math.max(op.formT || 0, S.t - op.T + G4.fire.back / G4.run + G4.grace);
+}
+/* the gates of a forming-up (before OPS.atk's form): go by strength, the deadline with hysteresis, the assembly under fire */
+function g4Gate(C, op) {
+  const G = op.g4, l = opLive(op), age = S.t - op.T, min = op.walk ? 1 : 2, t = C.t;
+  const at = q => { const L = g4Lead(q), p = q.axo === op ? q.fp : q.ord; return !!L && ((q.halt && !q.rd) || (p && p.x !== undefined && hdist(L, p) < INC.op.ready)); };   // a squad halted waiting for its ride is not there
+  const rd = l.filter(at), live = l.reduce((a, q) => a + q.live, 0), sh = live ? rd.reduce((a, q) => a + q.live, 0) / live : 0;
+  G.sh = Math.round(sh * 100) / 100;
+  const hot = rd.some(q => { const L = g4Lead(q); return !!L && q.men.some(m => !m.dead && m.hitT >= 0 && S.t - m.hitT < G4.fire.t) && cmdKnown(C, L.x, L.z, G4.fire.r) > 0; });
+  if (hot && !op.walk) {
+    if (G.fb < 1) { G.fb++; g4Back(C, op); gLog(t, 'atk', 'Reunião para ' + gName(op.O) + ' sob fogo: recua ' + G4.fire.back + ' m pela abordagem', op.O); return; }
+    C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Reunião para ' + gName(op.O) + ' sob fogo de novo: assalto cancelado', op.O); opEnd(C, op); return;
+  }
+  if (rd.length >= min && rd.length < l.length && sh >= G4.go) { if (!(age > op.formT)) { op.formT = Math.max(0, age - .01); gLog(t, 'atk', 'Reunião para ' + gName(op.O) + ': ' + Math.round(sh * 100) + '% da força na reunião, segue', op.O); } return; }
+  if (S.t - G.remT >= G4.pt) {   // who still closes in
+    G.cl = 0; G.late = 0;
+    for (const q of l) { if (at(q)) continue; const L = g4Lead(q); if (!L || !q.fp) continue; const r = hdist(L, q.fp), r0 = G.rem.get(q); if (r0 === undefined || r0 - r >= G4.prog) G.cl++; G.rem.set(q, r); G.late = Math.max(G.late, r * G4.wind / G4.run); }
+    G.remT = S.t;
+  }
+  if (age > op.formT - 2 && !(rd.length >= min && sh >= G4.min) && G.ext < G4.ext && G.cl > 0) {
+    G.ext++; const add = Math.round(clamp(G.late, 30, G4.dl[1] / 2) + G4.grace / 2); op.formT = age + add;
+    gLog(t, 'atk', 'Reunião para ' + gName(op.O) + ': prazo estendido em ' + add + ' s, as esquadras atrasadas ainda se aproximam (' + Math.round(sh * 100) + '% da força na reunião)', op.O);
+  }
+}
+OPS.atk = (g => (C, op) => {
+  if (op.g4 && op.st === 'form' && !op.over && g4Mine(C)) { g4Gate(C, op); if (op.over) return; }
+  g(C, op);
+})(OPS.atk);
+/* a campaign's fronts never share a squad: each front keeps the squads no earlier front took */
+campAI = (g => (C, sq, go) => {
+  if (g4Mine(C)) { const u = new Set(); for (const x of go) { x.pool = x.pool.filter(q => !u.has(q)); for (const q of x.pool) u.add(q); } }
+  return g(C, sq, go);
+})(campAI);
+/* the analytics: the ap event of an assault the G4 scheduled carries g4 [expected H s from the opening, extensions, fall-backs, rides asked, share at the assembly as it went] */
+anaMvEnd = (g => R => { G4.cur = R.op; try { g(R); } finally { G4.cur = null; } })(anaMvEnd);
+anaPush = (g => e => { const op = G4.cur; if (e && e.k === 'ap' && op && op.g4) e.g4 = [Math.round(op.g4.H - op.g4.T), op.g4.ext, op.g4.fb, op.g4.ride, op.g4.sh]; return g(e); })(anaPush);
+/* ---------- end of GENERAL 2: operacao ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

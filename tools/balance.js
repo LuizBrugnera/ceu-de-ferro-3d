@@ -20,7 +20,8 @@
    (<folder>/<era>/<date>-<id>.ndjson.gz and its summary) and then aggregates the tournament's matches.
      node tools/balance.js --torneio N [--era ww2|modern|all] [--docs cautious,balanced,aggressive] [--min minutes] [--len 0|1|2]
        [--eco] [--lg] [--rec] [--nobudget] [--mapv V] [--seed S] [--jobs J] [--save folder] [--json file] [--ref file]
-       [--pers ret,blz,gue,art,log] [--dif normal | facil,dificil] [--lados 2|3]
+       [--pers ret,blz,gue,art,log] [--dif normal | facil,dificil] [--lados 2|3] [--g4 0|1]
+   --g4 0|1 plays every match with the General 2's operation (G4, cf-g2-g4-operacao) off or on (default: the page's G4.on).
    --pers pairs the AI general's personalities (W17) instead of the doctrines; --dif the difficulty of every side, or of side 0, 1 (and 2).
    --lados 3 plays the current front with three sides (USA × Russia × Insurgents; modern only: the 1944 front always has two).
    --lg and --rec turn the physical logistics and the recovery on (with --eco and --mapv 6, the game as it is played); --nobudget stops the AI
@@ -58,6 +59,7 @@ function args(a) {
     else if (k === '--nobudget') o.nobudget = true;
     else if (k === '--ref') o.ref = path.resolve(v());
     else if (k === '--brain' || k === '--cerebro') o.brain = String(v());
+    else if (k === '--g4') o.g4 = +v();
     else if (k === '--mapv') o.mapv = +v();
     else if (k === '--seed') o.seed = +v();
     else if (k === '--jobs') o.jobs = +v();
@@ -99,6 +101,7 @@ function playOne(m) {
   const C = H.load({ seed: m.seed, eco: !!m.eco, lg: !!m.lg, rec: !!m.rec, mapv: m.mapv || 4, ana: true });
   if (m.nobudget) C.$('AIB').now = () => 0;
   if (m.brain === 0 || m.brain === 1) C.$('BRAIN').on = m.brain;
+  if (m.g4 === 0 || m.g4 === 1) C.$('G4').on = m.g4;   // the General 2's operation (G4) on or off: the A×B of cf-g2-g4-operacao
   const S = C.watch(m.era, { doc: m.doc, per: m.per, dif: m.dif, len: m.len || 0, min: m.min, n: m.n > 2 ? m.n : undefined });
   if (m.n > 2 && S.N !== m.n) throw new Error('a página não montou ' + m.n + ' lados (S.N = ' + S.N + '): falta a fundação de N lados ou a era não aceita');
   const lim = S.cq.T0 + 120, t0 = Date.now(), AIB = C.$('AIB'), K = { n: 0, gen: 0, genWorst: 0, avg: 0, worst: 0 };
@@ -108,7 +111,7 @@ function playOne(m) {
     return !S.over;
   });
   const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr'), r2 = v => Math.round(v * 100) / 100;
-  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain },
+  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain }, (m.g4 === 0 || m.g4 === 1) && { g4: m.g4 },
     K.n && { aib: { gen: r2(K.gen / K.n), genWorst: r2(K.genWorst), avg: r2(K.avg / K.n), worst: r2(K.worst), n: K.n } });
   return { file: save(m.save, m.era, ev, 'tourney'), over: S.over, t: Math.round(S.t), wall: Math.round((Date.now() - t0) / 1000) };
 }
@@ -131,6 +134,7 @@ function plan(o) {
   const tour = crypto.randomBytes(4).toString('hex'), out = [];
   for (let i = 0; i < o.n; i++) out.push({ tour, n, era: eras[Math.floor(i / pairs.length) % eras.length], doc: o.pers ? null : pairs[i % pairs.length], per: o.pers ? pairs[i % pairs.length] : null, dif: o.dif || null, seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, lg: o.lg, rec: o.rec, nobudget: o.nobudget, mapv: o.mapv, save: o.save || DIR });
   if (o.brain === '0' || o.brain === '1') for (const m of out) m.brain = +o.brain;
+  if (o.g4 === 0 || o.g4 === 1) for (const m of out) m.g4 = o.g4;
   if (o.brain === 'ab') return [...out.map(m => Object.assign({}, m, { brain: 0 })), ...out.map(m => Object.assign({}, m, { brain: 1 }))];   // the same matches, off then on
   return out;
 }

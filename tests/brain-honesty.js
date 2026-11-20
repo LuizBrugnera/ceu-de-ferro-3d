@@ -1,6 +1,6 @@
 'use strict';
 /* brain-honesty (P7 of the soldier's brain, the research's table 2.6): the AI's mind reads what it perceives, never the world's lists.
-   1. the code: in every /* ---------- CEREBRO: section of the page, S.men, S.units, S.bombs and S.planes appear only inside the perception
+   1. the code: in every /* ---------- CEREBRO: (and GENERAL 2:) section of the page, S.men, S.units, S.bombs and S.planes appear only inside the perception
       functions allowed (PERC_OK: the sound of a shot is the world's own); and the old readings of table 2.6 are behind HON.on.
    2. a drill: with a Proxy on S counting reads of those lists while the mind's honest functions run (honFd, honKz, honBel, honEar,
       honNade), two squads and their vehicles fight for a while: none of them reads a list (a positive control first: the Proxy sees one).
@@ -26,7 +26,7 @@ const PERC_OK = new Map([
 const OBSERVERS = new Map([['medicao', 'the measurement of the brain (P6): the meters, the cb events and the review read the battle as the analytics does']]);
 console.log('-- 1. the code --');
 {
-  const heads = [], re = /\/\* ---------- CEREBRO: ([^\n]*)/g; let m;
+  const heads = [], re = /\/\* ---------- (?:CEREBRO|GENERAL 2): ([^\n]*)/g; let m;   // the General 2's sections (cf-g2-g4-operacao) decide on what the side knows too
   while ((m = re.exec(html))) heads.push({ at: m.index, name: m[1].replace(/-+\s*$/, '').replace(/\*\/.*$/, '').trim() });
   ok(heads.some(h => /^honestidade/.test(h.name)), 'the page has its CEREBRO sections (' + heads.length + ': ' + heads.map(h => h.name).join(', ') + ')');
   const bad = [];

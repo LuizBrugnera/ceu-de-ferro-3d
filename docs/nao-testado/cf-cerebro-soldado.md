@@ -1,8 +1,8 @@
-# Cérebro do soldado, parte 1: corpo e voz (não testado)
+# Cérebro do soldado (P1) e parte 1: corpo e voz (não testado)
 
 Tarefa `cf-cerebro-soldado`. Pedido do capitão: dar ao Céu a profundidade do Defilade no "cérebro" dos NPCs e no jeito dos soldados fazerem as coisas (prisioneiros que dão informação, devolver granada, buscar abrigo, colega ferido), e depois granadas mais reais e soldados que não pareçam um bot andando no meio do nada.
 
-No meio da tarefa o capitão pediu para pesquisar a melhor arquitetura antes de mexer na decisão (scout `cf-cerebro-pesquisa`). Esta parte 1 traz só o que não depende de como o soldado decide: a física da granada, a avaliação de abrigo como dado, os balões de fala e o empurrão e atordoamento da explosão. As decisões (devolver a granada, rastejar, render-se, pegar a arma do caído, avisar contato, corpo a corpo, reagir ao FPV) ficam para a parte 2, sobre a arquitetura que a pesquisa recomendar.
+No meio da tarefa o capitão pediu para pesquisar a melhor arquitetura antes de mexer na decisão (scout `cf-cerebro-pesquisa`). Esta parte 1 traz só o que não depende de como o soldado decide: a física da granada, a avaliação de abrigo como dado, os balões de fala e o empurrão e atordoamento da explosão. As decisões ficaram para a parte 2, que é o pacote **P1 (o soldado)** da arquitetura que a pesquisa recomendou (`/home/luiz/firstmate/data/cf-cerebro-pesquisa/report.md`, seções 2, 3.2, 3.3 e 4): veja "Parte 2: P1, o soldado" abaixo.
 
 ## Referência Defilade
 
@@ -58,3 +58,69 @@ Só o smoke: o script passa no `node --check`, o servidor sobe, o harness carreg
 5. Balões: partida IA × IA no navegador, câmera perto de uma esquadra em contato: devem aparecer "Ao chão!", "Médico!", "Lá vai granada!". Online: um convidado vê as falas dos soldados do anfitrião.
 6. Explosão: um morteiro caindo a 5 m de um soldado em pé: ele se desloca ~1-2 m e o cartão da unidade mostra "1 homem atordoado".
 7. Online: um convidado joga granada; anfitrião e convidado devem ver a mesma granada quicar e explodir no mesmo tempo (o campo `f`).
+
+## Parte 2: P1, o soldado (arquitetura da pesquisa `cf-cerebro-pesquisa`)
+
+Duas seções novas no fim da parte de simulação de `Céu de Ferro 3D.html`, depois das do P0 (contrato), P5 (falas), P2 (posição) e P3 (líder), logo antes da cena 3D. Enquanto eu fazia o P1 entraram no main o P0, o P2, o P3, o P5, o P6 e o P7; o P1 usa os deles e não declara nada do contrato:
+
+- o **contrato do P0** (`BRAIN`, `m.rf`/`m.mo`/`m.tar` criados no `addMan`); `m.rf` segue o formato `{ k, ate }` e volta a `{ k: null, ate: 0 }` (nunca `null`);
+- a **utilidade** roda no gancho do soldado do P0 (`brainHook('sold')`, a 5 Hz em contato perto do jogador, 2 Hz em contato longe, nada fora de contato); os reflexos, por evento, e a execução da ação escolhida ficam no `aiMan`;
+- as **falas** saem pelo `fala`/`brainSay` do P5, cada uma depois de um `flCb` (a decisão de origem, que é também o evento `cb` do P6); duas linhas novas na tabela do P5: `devolvendo` e `abrigo`. O canal de voz do P5 ("Granada!" ouvido faz o colega sair) substitui o aviso que eu tinha;
+- o **reflexo de granada do P5** (quem viu cair foge) vira estímulo do P1, que decide entre devolver, sair do raio ou mergulhar; enquanto o P1 dirige o homem (`A.brk`), a fuga do P5 espera;
+- a **posição** vem do `tps` do P2 por `brTps` (perfis `abrigo`, `recuo`, `fuga` com `zonas`; `blindado` = `contra_blindado`, ficando com o lugar mais perto que de fato tira da visada do canhão, comparado ao `cvPick` duro da parte 1; o P2 reserva o lugar com `tpsHold`; a saída pelo outro lado da casa usa o `tpsBldPass` do P2);
+- a **tarefa do viés** é `m.tar`, senão o papel da equipe do P3 (`q.eq[].papel`), senão o exercício, senão a ordem;
+- o **teste de honestidade do P7** passa: as seções `CEREBRO` do P1 não leem `S.men`/`S.units`/`S.bombs`/`S.planes` (isso fica na seção de estímulos, que é percepção).
+
+- **`the soldier's stimuli (P1)` (`STIM`)**: a única parte do cérebro que olha o mundo, cada coisa pelo que um homem vê ou ouve: tiro passando ou acertando (`drInc`), explosão ouvida, granada vista no cone com linha livre ou ouvida no momento em que cai a até 10 m, colega caindo à vista, veículo vindo em cima, drone de ataque mergulhando (ouvido), blindado inimigo que ele mesmo percebeu (`m.pm`, com classe), corpos do lado com arma à vista, inimigos percebidos, e o que o prisioneiro sabia. Tudo vira estímulo na fila do homem (`m.est`).
+- **`CEREBRO: soldado (P1)` (`SOLB`)**, nos 7 itens da 3.3:
+  1. **Tabela de reflexos** (`REFL`, uma linha por reação: estímulo, prioridade, tempo de reação, ação, fala) e **tabela de utilidade** (`ACTS`, uma linha por ação, considerações em curvas multiplicadas com a compensação do IAUS). Nenhum `if` novo em `sqMan`.
+     - Reflexos, por prioridade: `granada` (≤ 8 m: devolve se alcança com espoleta sobrando, pela distância, calma, moral e veterania; senão sai do raio para trás de abrigo se dá tempo, senão mergulha; grita e os colegas a até 45 m reagem ao grito); `mergulho` (veículo ou drone vindo em cima: salto para o lado e ao chão); `ferido` (atingido: ao chão um instante; caído: rasteja até abrigo a ≤ 10 m e chama "Médico!" a cada 10 s até alguém vir); `blindado` (abaixo); `abaixar` (tiro ou explosão perto no aberto: ao chão na hora, depois abrigo a ≤ 10 m); `colega` (colega caído à vista: "Homem ferido!", moral, relato ao líder em `q.bb.rel`).
+     - Tempo de reação determinístico por homem e momento (`hash2`, nada de `Math.random`).
+  2. **Só estímulo percebido**: a granada precisa ser vista ou ouvida caindo; a de trás, já caída, não dispara nada.
+  3. **Obediência por viés**: `cumprir` (o que a esquadra, o exercício e a ordem mandam: as camadas antigas) ganha `obe` × obediência; supressão alta e moral baixa reduzem a obediência. O `brGo` do reflexo ou da ação escolhida faz o exercício da esquadra esperar (sem `A.drb`) enquanto ele se salva.
+  4. **Abrigo pela API do P2** (`brTps` sobre o `tps` do P2; com `TPS.on = 0`, o `cvPick` da parte 1): perfis `abrigo`, `recuo` (mais longe da ameaça), `fuga` (fora do raio da granada) e `blindado` (só o que para um blindado: parede, casa ou dobra do terreno, nunca mato; e o lugar onde ele de fato para, 1,4 m antes, também escondido, conferido na altura do corpo agachado). A nota de cada lugar é o quanto ele cobre da ameaça (0 a 1), e ele só troca se for 0,3 melhor que onde está. No máximo 3 consultas por passo para todos.
+  5. **Rendição é estado da moral**: em pânico, com inimigo que ele vê a ≤ 70 m, sem líder a ≤ 30 m e sem recuo coberto. Larga a arma, fica de mãos para cima ("Eu me rendo!"), fora da luta (marcado como caído, então ninguém atira nele nem vai buscá-lo). Um inimigo a ≤ 5 m por 2 s o captura ("Mãos ao alto!"): é levado para a base do captor por 25 s e sai da batalha; depois de 8 s conta o que sabia (os colegas da esquadra, as esquadras e veículos do lado a ≤ 400 m, com 35 m de erro, como avistamentos do momento da captura, e a ordem da esquadra no diário). Sem inimigo a 100 m por 40 s, volta às armas. Online, o convidado vê "RENDIDO" ou "PRISIONEIRO" (bits 4 e 8 da linha do soldado). Isto é um P4 mínimo; o P4 completo (5 S, escolta, interrogatório no QG) continua por fazer.
+  6. **Cada reação fala** (`fala`) e deixa um evento `cb` (`granada`, `devolvida`, `mergulho`, `atingido`, `blindado`, `abaixar`, `colega`, `lider`, `rendicao`, `prisioneiro`, `info`, `retoma`, `arma`, `rasteja`, `acao`).
+  7. **Supressão contínua** `m.mo.s` (0..1: +0,14 por tiro passando, +0,4 por acerto, até +0,6 por explosão; meia-vida de 4 s, menor para veteranos); `m.sup` agora é derivado dela (pregado acima de 0,3). Moral `m.mo.m` (cai com colega caindo à vista, líder perdido, ferimento, isolamento, fogo de dois lados, blindado sem anticarro, sem munição; sobe sem fogo, mais com o líder perto e com veterania). Estados `firme`, `abalado`, `pregado`, `panico`, `rendido`.
+- **Ações de utilidade**: `cumprir`, `abrigar`, `abaixar`, `recuar`, `pegar` (a arma do caído: sem munição, ou blindado perto e nenhum anticarro na esquadra e um lançador caído a ≤ 25 m, com o caminho coberto).
+- **Contra blindado** (pedido do capitão, mensagem 006): quem vê um blindado e não tem anticarro **corre** (em pé) para onde parede, casa ou dobra do terreno o esconde dele a ≤ 30 m (a sombra da casa, a parede do outro lado, o vão; nunca mato) e, se o blindado continua vindo (40 m mais perto ou a menos de 120 m), **sai pelo outro lado**, sem ser visto, a ≤ 40 m. Deitar só quando nada o esconde perto. Quem tem anticarro segue caçando o blindado (o exercício `anticarro` e o `stalk` que já existiam).
+- **Cartão da unidade** (`get_unit`): "Moral: 2 abalados, 1 pregado", "Homens por conta própria: abrigar, pegar", e `mo` nos dados.
+
+### Ganchos (só embrulhos, salvo os três últimos)
+
+`aiMan`, `downAI`, `sqRescue`, `drInc`, `damageMan`, `explode`, `nadeStep`, `manDown`, `genCard`, `brainHook('sold')` (P0), `Object.assign(FALAS, …)` (P5), `cvPick` (da parte 1: opções `away`/`min` e `hard`); da parte 1 também `lobbed`, `toss`, `drRun`. Edições diretas: a linha do soldado no `Net.snapshot` (bits 4 e 8 de rendido e preso; o código da fala no último campo já era da parte 1), o `Net.rx.ai` do convidado (`g.sur`) e o `drawHud` (rótulos RENDIDO/PRISIONEIRO).
+
+### Exercícios sem tela (o "Pronto quando" do P1, rodados como medição, com `nice`)
+
+`node tests/brain-soldado.js` (`N=6`, a última rodada):
+
+- (a) tiro passando perto no aberto: ao chão em 0,28–0,48 s (6/6). Nas 6 sementes não havia abrigo a ≤ 10 m, então o "abrigo em ≤ 3 s" não foi exercitado.
+- (b) granada a 5 m vista: saiu do raio (ou ao chão sem tempo) em 6/6, nenhuma devolvida (a 5 m ela está fora do alcance de devolver, 3,5 m); granada atrás dele, já caída, não percebida: nenhuma reação em 6/6.
+- (c) em pânico, sozinho, inimigo à vista em volta no aberto: rendeu-se em 6/6; com o líder a 12 m e moral abalada: nunca (6/6).
+- (d) sem munição, fuzil de colega caído a 15 m: pegou em 6/6.
+- (e) caso do capitão, esquadra no aberto a 15 m de uma casa vê um tanque a 300 m: ninguém deitado à vista do tanque aos 3 s (0 de 20); **fora da visada do tanque aos 3 s: 18 de 20** (o pedido é todos; o exercício mede contra todos e por isso falha). Antes de juntar com o P2 eram 28 de 30 só com o `cvPick`; com o registro do P2, o mais perto que esconde às vezes é um trecho de muro ou uma dobra com caminho pior. Os que passam de 3 s se escondem até ~4 s.
+- Outros testes do cérebro rodados como checagem de colisão (curtos, `nice`): `tests/brain.js` (P0: `BRAIN.on = 0` não muda a batalha; todo soldado com `m.rf`/`m.mo`/`m.tar`) passa; `tests/brain-honesty.js` (P7) passa; `tests/brain-falas.js` (P5) **falha em 1 de 4 lados**: 7 falas por minuto de contato, limite 6. Nenhuma das 7 é do P1 (são de contato, baixa, "Cadê ele?" e da formação); o P1 muda a batalha e com ela quantas dessas caem naquele minuto. No main sem este PR o teste passa.
+- Custo: perfil de 60 s de IA × IA em 1944 no harness: o cérebro (com o que ele chama) fica em ~4,5% do passo, ≈0,6 ms de 13,8 ms; parte disso é a atribuição do V8 aos embrulhos do `aiMan` com a função interna inlinada. Medição bruta com `BRAIN.on` 1 × 0 oscilou demais com a carga da máquina para dizer mais.
+
+### O que NÃO foi testado (parte 2)
+
+Nenhuma suíte (`tests/all.sh`, `drills.js`, `infantry.js`, `squads.js`, `help.js`, `rec.js`, `perception.js` e as online), nenhum torneio A×B (a meta da pesquisa: "tempo exposto sob fogo" −30% sem regressão de vitória), nenhuma partida no navegador nem online. Só os exercícios acima, o `node --check` e partidas curtas de IA × IA no harness sem erro.
+
+### Riscos (parte 2)
+
+- **Limite de falas do P5**: com o P1 ligado, `tests/brain-falas.js` passou do limite num lado (7/min, limite 6). Pode precisar afinar o `FALA` ou o P1 falar menos.
+- **`m.sup` derivado**: antes um único tiro passando pregava o soldado por 3,5 s; agora são precisos ~3 tiros seguidos (ou um acerto, ou uma explosão perto). As suítes que esperam o soldado pregado por um tiro (`infantry.js`, `drills.js`, `inf-drills.js`) podem mudar, e a infantaria pode avançar mais sob fogo leve.
+- **Rendição**: depende da moral cair até pânico; os números (`SOLB.m`) não foram afinados em partida. Pode haver rendição demais ou nenhuma. O rendido conta como caído para todo o código antigo (mira, captura de ponto, força da esquadra).
+- **Prisioneiro**: sai da batalha com `killMan` (conta como baixa para o lado dele e pontos para o captor). A informação vai como avistamento do momento da captura, então dura o `CMD.mem` (40 s) do general captor.
+- **Arma do caído**: o soldado que pega um lançador passa a ser visto como anticarro pela percepção inimiga (`belCls`), o que é coerente; o convidado online continua vendo a arma antiga.
+- **Contra blindado**: corre em pé para a sombra; se o blindado tiver infantaria junto, essa corrida pode custar caro. Em cidade densa a sombra é fácil; no aberto ele deita e fica com o exercício `tanque` (fumaça).
+- **Briga de camadas**: o reflexo e a ação escolhida tiram o homem do exercício da esquadra (`A.brk` sem `A.drb`). Isso é de propósito ("desobedece para sobreviver"), mas pode desmanchar lances e assaltos sob fogo pesado.
+- **Custo**: a utilidade a 4 Hz em contato e 1 Hz parado; o `percArmor` a 10 Hz por soldado. Num anfitrião lento, conferir o `AIB`.
+
+### Como testar depois (parte 2)
+
+1. `N=10 nice node tests/brain-soldado.js` (os 5 exercícios), `node tests/brain.js`, `node tests/brain-honesty.js`, `node tests/brain-falas.js`, `node tests/brain-lider.js`, `node tests/brain-drills.js` e `node tests/drills.js`, `node tests/inf-drills.js`, `node tests/infantry.js`, `node tests/squads.js`, `node tests/help.js`, `node tests/rec.js`, comparando com o main de antes do PR (`PAGE=<página antiga>`).
+2. `BRAIN.on = 0` deve deixar a partida como antes desta parte 2 (a parte 1 continua ligada).
+3. Torneio A×B fora do elrei (bartolomeu, ou aqui com `nice`): `BRAIN.on` 1 × 0 nas mesmas sementes; contar `cb` no `ANA` (rendições, prisioneiros, granadas devolvidas, `blindado`) e comparar vitórias e tíquetes.
+4. No navegador, partida IA × IA em 1944 numa vila: ver soldados correndo para trás das casas quando um tanque aparece, "Eu me rendo!" e "RENDIDO" numa esquadra cercada, "Médico!" e o ferido rastejando.
+5. Online: um convidado deve ver os balões, "RENDIDO" e "PRISIONEIRO" dos soldados do anfitrião.

@@ -16168,6 +16168,7 @@ function ugPoly(p, t) {
     if (fl & 1 && !(wet && fl & 2)) return Infinity;
     let v = c * (1 - K.k * U.d[k] / 255);
     if (V) v *= 1 + K.v * V[m4Cell(M, (gi + .5) * c, -U.HW + (gj + .5) * c)];
+    v *= mvWayK(gi, gj, c, U, M);   // dearer in the open and on a crest (CEREBRO: movimento)
     return v;
   };
   const a = (cj(p[0].z) - j0) * w + ci(p[0].x) - i0, b = (cj(p[p.length - 1].z) - j0) * w + ci(p[p.length - 1].x) - i0;
@@ -31084,6 +31085,146 @@ genCard = (f => (t, id) => {
   if (n) c.see.splice(2, 0, n + (n === 1 ? ' homem atordoado' : ' homens atordoados') + ' por explosão');
   c.stun = n; return c;
 })(genCard);
+/* ---------- CEREBRO: movimento (cf-movimento-lider): a squad on the move by teams, in the technique its leader chose ----------
+   The organic movement (ORG) placed a squad's men round one anchor; here the squad moves as its teams (the contract's q.eq, or the first half
+   of its men team A, the leader's, and the rest team B; one team under 4 men), each team in a formation and the teams placed by the
+   technique (tec) of movement:
+   - desloc (traveling: contact unlikely): the teams one behind the other, each in a staggered column (coluna), in single file (fila) in the
+     woods or at night;
+   - vig (traveling overwatch: contact possible): team B vig m behind team A (at least its length and a man more), each in a wedge (cunha),
+     a column in the woods;
+   - lances (bounding overwatch: contact expected): the teams lat m apart abreast, one bounds while the other holds: along the way each team
+     rushes 2 x bound m while the anchor moves bound m and then holds, the other doing the same half a cycle later (successive bounds, the
+     holding team's line is where the bounding one comes up to), each in a wedge; on an assault in a line (linha), the teams side by side.
+   The technique is q.tec (the squad leader's, cf-lideres P3), else its order's (O.tec, the contract's ORDEM), else ORG's distances as the
+   default with no leader: file (an enemy past ORG.threat m) desloc, wedge vig, line (an assault within ORG.close m) lances.
+   Dispersion: disp [min, max] m between men in the open (each squad its own, by hash), x wood in the woods or the brush (UG), x night in the
+   dark (SKY), never under min m; a bridge or a ford closes to ORG.bridge m of the way (single file), as ORG did.
+   ORG's noise (its own offset, the accordion, the squad's drift) rides on top, smaller as the men close up and across a file.
+   Contact (a man of the squad has a target, or is suppressed): the formation gives way to the place of the soldier's position (P2: MV.pos,
+   (q, i, base, e) -> {x, z} or null, set by cf-p2-posicao), and with none: the noise is kept only where the ground there covers as much as
+   the formation's own place (coverAt), and the place is the best cover within snap m of it (cvPick, P1), held every s while it moves less
+   than 3 m. No one is sent into the open by the noise.
+   The way: a squad given a walk on another axis (setOrd's trip, O.trp) in a technique other than desloc walks it laid again over the
+   ground (ugPoly, map version 10, on a copy: the trip is cached), and every way ugPoly lays costs more where the cell is open (way.o x
+   (1 - the tactical map's o)) and on a crest (way.crest x mvCrest: the cell above the ground crest.r m to both sides along some line by
+   crest.dh m or more, from 0 to 1): it keeps to cover and off the skyline.
+   A change of technique is an ANA event cb (st 'tec', q the squad's id, v the technique); a bound's leader calls "Avançar!", the holding
+   team's "Cobrindo!" (SAY). Everything is from hash2 and the state (no Math.random): replay, tests and the online host stay the same.
+   on: 0 leaves ORG as it was */
+const MV = { on: 1, disp: [5, 10], wood: .55, night: .6, min: 2.5, vig: 45, bound: 30, lat: 14, snap: 7, every: 2,
+  way: { o: .6, crest: 1.5 }, crest: { r: 60, dh: 3 }, tecs: ['desloc', 'vig', 'lances'], pos: null };
+/* the technique squad q moves in, under order O */
+function mvTec(q, O) {
+  O = O || q.ord; const t = q.tec || (O && O.tec);
+  if (t && MV.tecs.includes(t)) return t;
+  const F = orgForm(q, O); return F === 'line' ? 'lances' : F === 'wedge' ? 'vig' : 'desloc';
+}
+/* man i's team: t its index, j his place in it, nt its size, nT how many teams */
+function mvEq(q, i) {
+  const n = Math.max(q.n0, 1), m = q.men[i];
+  if (q.eq && q.eq.length > 1 && m) for (let t = 0; t < q.eq.length; t++) { const j = (q.eq[t].men || []).indexOf(m); if (j >= 0) return { t, j, nt: q.eq[t].men.length, nT: q.eq.length }; }
+  if (n < 4) return { t: 0, j: i, nt: n, nT: 1 };
+  const a = Math.ceil(n / 2); return i < a ? { t: 0, j: i, nt: a, nT: 2 } : { t: 1, j: i - a, nt: n - a, nT: 2 };
+}
+/* the ground at x z for the gap: k its share of the open gap, wood, night */
+function mvEnv(x, z) {
+  const wood = kindAt(x, z) === 1 || (!!S.T.ug && ugAt(x, z) >= UG.thr), night = !!(S.sky && S.sky.L < SKY.dark);
+  return { k: (wood ? MV.wood : 1) * (night ? MV.night : 1), wood, night };
+}
+/* a team's formation in technique tec */
+const mvForm = (tec, env, O) => (tec === 'desloc' ? (env.wood || env.night ? 'fila' : 'coluna') : tec === 'vig' ? (env.wood ? 'coluna' : 'cunha') : O && O.k === 'assault' ? 'linha' : 'cunha');
+/* how far along its way the squad is, growing as it goes, and which team bounds now (lances) */
+const mvAl = q => (q.tp ? q.ts : q.s * (q.ds || 1));
+const mvPh = q => (((Math.floor(mvAl(q) / MV.bound) % 2) + 2) % 2);
+/* whether the squad is in contact, and the enemy it faces (a man's target), once a step */
+function mvCon(q) {
+  if (q.mvCT === S.t) return q.mvC;
+  q.mvCT = S.t; let c = null;
+  for (const m of q.men) if (!m.dead && !m.down && m.ai) { const g = m.ai.tgt; if (g && !g.dead) { c = { e: { x: g.x, z: g.z } }; break; } if (m.sup > S.t) c = c || { e: null }; }
+  return (q.mvC = c);
+}
+const MVC = { c: 0, p: 0, x: 0, z: 0, all: false };
+const mvCov = (x, z) => { coverAt(x, z, MVC); return MVC.c + MVC.p; };
+/* man i's place on the move (orgSlot's, by teams and technique) */
+function mvSlot(q, i) {
+  const O = q.ord, tec = mvTec(q), E = mvEq(q, i), sd = q.team * 37 + (q.id || 0), s0 = q.tp ? q.ts : q.s, sg = q.tp ? 1 : q.ds;
+  const a0 = q.tp ? routeAt(q.tp, s0) : routeAt(S.T.routes[q.ri], s0), env = mvEnv(a0.x, a0.z), F = mvForm(tec, env, O);
+  const d = Math.max(MV.min, (MV.disp[0] + (MV.disp[1] - MV.disp[0]) * hash2(sd, 5, 11)) * env.k), span = Math.ceil(Math.max(q.n0, 1) / E.nT) * d;
+  let b = 0, l = 0;
+  if (tec === 'lances') {
+    const D = MV.bound, u = (((mvAl(q) % (2 * D)) + 2 * D) % (2 * D)), odd = E.t % 2;
+    b = !odd ? (u < D ? -u : u - 2 * D) : (u < D ? u : 2 * D - u);
+    l = (odd ? 1 : -1) * (F === 'linha' ? (E.nt * d) / 2 + d / 2 : MV.lat * env.k / 2);
+    b += (E.t >> 1) * span;
+  } else if (tec === 'vig') { b = E.t * Math.max(span + d, MV.vig * env.k); l = E.t * d * .5; }
+  else b = E.t * (span + d);
+  const j = E.j;
+  if (F === 'linha') l += (j - (E.nt - 1) / 2) * d;
+  else if (F === 'cunha') { const k = (j + 1) >> 1; b += d * .8 * k; l += (j ? (j % 2 ? 1 : -1) : 0) * d * .8 * k; }
+  else { b += d * j; if (F === 'coluna') l += (j % 2 ? 1 : -1) * d * (.35 + .35 * hash2(sd, i, 3)); }
+  const G = ORG, w = Math.min(1, d / G.gap), wl = F === 'fila' ? .3 : 1;
+  const nb = (orgN(i * 7 + 1, s0, sd, G.wl) * G.jit[1] + Math.sin(S.t * G.breathe[1] + i * 1.7 + sd) * G.breathe[0]) * w;
+  const nl = (orgN(i * 7 + 2, s0, sd, G.wl) * G.jit[0] * w + orgN(97, s0, sd, G.drift[1]) * G.drift[0] * (F === 'fila' || F === 'coluna' ? .5 : 1)) * wl;
+  const at = (bb, ll) => {
+    const p = q.tp ? routeAt(q.tp, s0 - bb) : routeAt(S.T.routes[q.ri], s0 - q.ds * bb), fx = p.dx * sg, fz = p.dz * sg;
+    let x = p.x - fz * ll, z = p.z + fx * ll;
+    if (hgt(x, z) < S.T.WL + G.wet) { const c = clamp(ll, -G.bridge, G.bridge); x = p.x - fz * c; z = p.z + fx * c; }   // a bridge or a ford: in single file on the way
+    return { x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW) };
+  };
+  const C = mvCon(q);
+  if (!C) return at(b + nb, l + nl);
+  const base = at(b, l);
+  if (MV.pos) { const p = MV.pos(q, i, base, C.e); if (p) return p; }   // the soldier's position (P2) first
+  const nz = at(b + nb, l + nl), pk = mvCov(nz.x, nz.z) >= mvCov(base.x, base.z) ? nz : base, m = q.men[i];
+  if (!m) return pk;
+  const h = m.mvCv;
+  if (h && S.t < h.t && Math.abs(h.bx - pk.x) < 3 && Math.abs(h.bz - pk.z) < 3) return h.p;
+  const used = []; for (const o of q.men) if (o !== m && o.mvCv && S.t < o.mvCv.t) used.push(o.mvCv.p);
+  const c = cvPick({ x: pk.x, z: pk.z, team: q.team }, C.e, MV.snap, used);
+  m.mvCv = { t: S.t + MV.every, bx: pk.x, bz: pk.z, p: { x: c.x, z: c.z } };
+  return m.mvCv.p;
+}
+orgSlot = (g => (q, i) => (MV.on ? mvSlot(q, i) : g(q, i)))(orgSlot);
+/* the leader of team t of q (its first man up), or null */
+function mvLead(q, t) { for (let i = 0; i < q.men.length; i++) { const m = q.men[i]; if (!m.dead && !m.down && m.ai && mvEq(q, i).t === t) return m; } return null; }
+/* a squad's beat: its technique told to ANA when it changes, the bounds called */
+squadThink = (g => q => {
+  g(q);
+  if (!MV.on || q.net) return;
+  const tec = mvTec(q);
+  if (tec !== q.mvTec) { if (q.mvTec !== undefined && anaLive() && ANA.S === S) anaPush({ k: 'cb', t: anaR(S.t), s: q.team, st: 'tec', q: q.id, v: tec }); q.mvTec = tec; q.mvB = undefined; }
+  if (tec !== 'lances' || q.at || q.halt || q.state || (q.bg && q.bg.length) || q.n0 < 4) return;
+  const ph = mvPh(q); if (ph === q.mvB) return;
+  if (q.mvB !== undefined) { const a = mvLead(q, ph), c = mvLead(q, 1 - ph); if (a) say(a, SAYC.adv); if (c) say(c, SAYC.cover); }
+  q.mvB = ph;
+})(squadThink);
+/* how much a cell of the undergrowth's grid (gi gj, c m) stands on a crest: above the ground crest.r m to both sides along its steepest
+   line, by crest.dh m for 1; once a terrain (U.mvCr) */
+function mvCrest(gi, gj, c, U) {
+  const A = U.mvCr || (U.mvCr = new Float32Array(U.nx * U.nz).fill(-1)), k = gj * U.nx + gi; if (A[k] >= 0) return A[k];
+  const x = (gi + .5) * c, z = -U.HW + (gj + .5) * c, h = hgtT(S.T, x, z), R = MV.crest.r; let best = 0;
+  for (let a = 0; a < 4; a++) { const dx = Math.cos(a * Math.PI / 4) * R, dz = Math.sin(a * Math.PI / 4) * R; best = Math.max(best, Math.min(h - hgtT(S.T, x + dx, z + dz), h - hgtT(S.T, x - dx, z - dz))); }
+  return (A[k] = clamp(best / MV.crest.dh, 0, 1));
+}
+/* the cost factor of a cell of a way laid by ugPoly: dearer in the open (the tactical map's o) and on a crest */
+function mvWayK(gi, gj, c, U, M) {
+  if (!MV.on) return 1;
+  let k = 1 + MV.way.crest * mvCrest(gi, gj, c, U);
+  if (M && M.o) k *= 1 + MV.way.o * (1 - clamp(M.o[m4Cell(M, (gi + .5) * c, -U.HW + (gj + .5) * c)] || 0, 0, 1));
+  return k;
+}
+/* a trip given to a squad that is not on a plain march: laid again over cover and off the crests, on a copy (the trip is cached) */
+function mvWay(q, tp, O) {
+  if (!MV.on || !tp || !S.T.ug || mvTec(q, O) === 'desloc') return tp;
+  const c = polyOf(tp.map(o => ({ x: o.x, z: o.z }))); for (const k of ['ri', 's1']) if (tp[k] !== undefined) c[k] = tp[k];
+  return orgPoly(ugPoly(c, q.team));
+}
+setOrd = (g => (q, O) => {
+  g(q, O);
+  if (!MV.on || q.ord !== O || !q.tp || q.tp !== O.trp || q.tp.mv) return;
+  const w = mvWay(q, q.tp, O); if (w !== q.tp) { w.mv = 1; q.tp = O.trp = w; }
+})(setOrd);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

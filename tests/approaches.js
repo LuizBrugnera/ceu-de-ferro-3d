@@ -8,7 +8,7 @@ const SECS = process.env.SECS === undefined ? 180 : +process.env.SECS;
 const nm = ($, p) => $('gName')(p), ord = q => (q.cnP ? q.cnP.O : q.ord);   // the order a squad has, or the one the radio is bringing it
 /* the 1944 map, side 0 holding Travessia, both maps refreshed: what the side knows is the points the enemy holds */
 function setup(o) {
-  const C = H.load(Object.assign({ seed: 9, eco: 1, mapv: 6 }, o)), $ = C.$; C.$('globalThis').performance = performance;
+  const C = H.load(Object.assign({ seed: 9, eco: 1, mapv: 6 }, o)), $ = C.$; try { $('G4').on = 0; } catch (e) {}   // M2's pool rules under the allocator of before (G4: tests/g4-operacao.js) C.$('globalThis').performance = performance;
   const S = C.watch('ww2', { len: 0 }), find = re => S.cq.p.find(p => re.test(nm($, p)));
   const tg = find(/Moinho/), st = find(/Travessia/); st.hold = 0;
   $('run')(1);
@@ -212,13 +212,14 @@ console.log('-- gask ap --');
   const r1 = A(1, { q: 'ap', x: st.x, z: st.z });
   ok(r1.ok && r1.r.sd === 1 && r1.r.nm === nm($, st), 'side 1 asks about Travessia: its own plan, from its side');
   ok(!A(0, { q: 'ap', x: -500, z: 0 }).ok && A(0, { q: 'ap', x: -500, z: 0 }).why === 'map' && A(0, { q: 'ap' }).why === 'map', 'off the map or no place: refused (map)');
-  const { C: C2 } = { C: H.load({ seed: 9, eco: 1, mapv: 6 }) }, S2 = C2.watch('ww2', { len: 0 }), p2 = S2.cq.p[6], r2 = C2.$('genAnswer')(0, { q: 'ap', x: p2.x, z: p2.z });
+  const { C: C2 } = { C: H.load({ seed: 9, eco: 1, mapv: 6 }) }; try { C2.$('G4').on = 0; } catch (e) {}
+  const S2 = C2.watch('ww2', { len: 0 }), p2 = S2.cq.p[6], r2 = C2.$('genAnswer')(0, { q: 'ap', x: p2.x, z: p2.z });
   ok(r2.ok && r2.r.none === 1, 'before the side\'s first map: answered, none 1');
 }
 
 console.log('-- an AI × AI match with the approaches --');
 if (SECS > 0) {
-  const C = H.load({ seed: 3, eco: 1, mapv: 6 }); C.$('globalThis').performance = performance;
+  const C = H.load({ seed: 3, eco: 1, mapv: 6 }); C.$('globalThis').performance = performance; try { C.$('G4').on = 0; } catch (e) {}
   const S = C.watch('ww2', { len: 0 }), $ = C.$, seen = new Set(), APB = $('APB'), AIB = $('AIB'); let ap = 0, wp = 0, err = null, gen = 0, n = 0;
   try {
     C.run(SECS, () => {

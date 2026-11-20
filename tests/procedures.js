@@ -7,7 +7,8 @@
    the manoeuvre assaults; and one given up when the manoeuvre is late. About a minute */
 const H = require('./harness'), { ok, done } = H, { performance } = require('perf_hooks');
 
-const C0 = H.load({ seed: 2, mapv: 6 }), $ = C0.$, S = C0.watch('ww2', { len: 0 });
+const C0 = H.load({ seed: 2, mapv: 6 }), $ = C0.$; try { $('G4').on = 0; } catch (e) {}   // M2/M3 under the allocator of before (the General 2's G4 has tests/g4-operacao.js)
+const S = C0.watch('ww2', { len: 0 });
 C0.run(20, null, 1 / 20);
 const pre = (() => { try { return $('atkPreH'); } catch (e) { return null; } })();
 
@@ -77,7 +78,7 @@ console.log('-- p1\'s gate (cf-manobra-fix): 45° off the axis, exposure up to .
 
 /* the 1944 map, side 0 holding Travessia, three free squads of another road within AP.pool m of an assembly of Vila do Moinho (as tests/approaches.js) */
 function field() {
-  const C = H.load({ seed: 9, eco: 1, mapv: 6 }), $ = C.$; C.$('globalThis').performance = performance;
+  const C = H.load({ seed: 9, eco: 1, mapv: 6 }), $ = C.$; C.$('globalThis').performance = performance; try { $('G4').on = 0; } catch (e) {}   // M2/M3 under the allocator of before (G4: tests/g4-operacao.js)
   const S = C.watch('ww2', { len: 0 }), nm = p => $('gName')(p), tg = S.cq.p.find(p => /Moinho/.test(nm(p))), st = S.cq.p.find(p => /Travessia/.test(nm(p))); st.hold = 0;
   $('run')(1);
   const Cm = $('cmdOf')(0); $('cmdSense')(Cm, []); $('cmdSense')($('cmdOf')(1), []); $('tmNow')(0); $('tmNow')(1);

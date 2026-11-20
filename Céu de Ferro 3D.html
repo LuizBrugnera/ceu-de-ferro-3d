@@ -6968,19 +6968,11 @@ function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
 }
 /* the nearest road to a point: route ri, distance s along it and the signed offset to its side */
 function railOf(x, z) {
-  const R = S.T.routes, X = rixOf(R), c = RIX.c, cx = Math.floor((x - X.x0) / c), cz = Math.floor((z - X.z0) / c), nx = X.nx, nz = X.nz;
-  if (!(cx >= 0 && cx < nx && cz >= 0 && cz < nz)) return railAll(R, x, z);   // off the grid, or not a number: every segment, as before
-  const Q = RIX.q, K = Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz); Q.d = 1e9; Q.g = -1;
-  for (let k = 0; k <= K; k++) {   // ring k of squares round the point's; every segment whose nearest point lies beyond ring k is k * c m away or more
-    for (let j = Math.max(0, cz - k), jb = Math.min(nz - 1, cz + k); j <= jb; j++) {
-      if (j === cz - k || j === cz + k) { for (let i = Math.max(0, cx - k), ib = Math.min(nx - 1, cx + k); i <= ib; i++) rixScan(X, j * nx + i, x, z); }
-      else { if (cx - k >= 0) rixScan(X, j * nx + cx - k, x, z); if (k && cx + k < nx) rixScan(X, j * nx + cx + k, x, z); }
-    }
-    if (Q.g >= 0 && Q.d < k * c - 1e-3) break;
-  }
-  const g = Q.g; if (g < 0) return { d: 1e9 };
+  const R = S.T.routes, X = rixOf(R);
+  if (!rixNear(X, x, z, false)) return railAll(R, x, z);   // off the grid, or not a number: every segment, as before
+  const g = RIX.q.g; if (g < 0) return { d: 1e9 };
   const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), ox = x - ax - ex * t, oz = z - az - ez * t;
-  return { d: Q.d, ri: X.ri[g], s: X.as[g] + L * t, off: (oz * ex - ox * ez) / L };
+  return { d: RIX.q.d, ri: X.li[g], s: X.as[g] + L * t, off: (oz * ex - ox * ez) / L };
 }
 /* railOf over every segment of every road (the loop before RIX): off the grid, and the reference RIX answers as */
 function railAll(R, x, z) {
@@ -6994,34 +6986,66 @@ function railAll(R, x, z) {
   }
   return bri < 0 ? { d: 1e9 } : { d: bd, ri: bri, s: bs, off: bo };
 }
-/* RIX (cf-lag-2): the main roads' segments in squares of c m, so that railOf reads the few segments round a point instead of every point of
-   every road (a forward base's pick read them all in each cell of the map). Built the first time a routes array is asked for (a terrain is
-   shared by every match on its map and its roads do not move), again if a road is added. Segment g is (ri, i), numbered in that order, with the
-   numbers railOf's loop computed (a the first point, e the step, L its length, as a.s), so railOf gives the same d, ri, s and off, and on a tie the
-   first segment as the loop did. sm: the 50 m samples of a road for sOn (as routeAt gives them) */
+/* RIX (cf-lag-2): the segments of a set of polylines in squares of c m, so that the nearest-road questions read the few segments round a
+   point instead of every point of every road (a forward base's pick read them all in each cell of the map). Two sets: the main roads
+   (S.T.routes, railOf) and the edges of the network (T.net.e, netNear). Built the first time a set is asked for (a terrain is shared by
+   every match on its map and its roads do not move), again when it changes. Segment g is (line li, point i), numbered in that order, with
+   the numbers the old loops computed (a the first point, e the step, L its length: Math.sqrt for railOf, Math.hypot for netNear, as a.s),
+   so the answers are the same numbers, and on a tie the first segment, as the loops gave. sm: the 50 m samples of a road for sOn (as
+   routeAt gives them) */
 const RIX = { c: 200, w: new WeakMap(), sm: new WeakMap(), q: { d: 1e9, g: -1 } };
-function rixOf(R) {
-  let X = RIX.w.get(R), ok = !!X && X.nr === R.length;
-  for (let ri = 0; ok && ri < R.length; ri++) ok = X.rs[ri] === R[ri] && X.np[ri] === R[ri].length;
-  if (ok) return X;
+/* the grid of polylines Ls (arrays of points with s); hyp: lengths by Math.hypot */
+function rixBuild(Ls, hyp) {
   const c = RIX.c; let n = 0, x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
-  for (const r of R) { n += Math.max(0, r.length - 1); for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); } }
-  X = { nr: R.length, np: R.map(r => r.length), rs: R.slice(), x0: x0 - c, z0: z0 - c, nx: n ? Math.ceil((x1 - x0) / c) + 3 : 0, nz: n ? Math.ceil((z1 - z0) / c) + 3 : 0,
-    ax: new Float64Array(n), az: new Float64Array(n), ex: new Float64Array(n), ez: new Float64Array(n), L: new Float64Array(n), as: new Float64Array(n), ri: new Int32Array(n) };
+  for (const r of Ls) { n += Math.max(0, r.length - 1); for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); } }
+  const X = { hyp, x0: x0 - c, z0: z0 - c, nx: n ? Math.ceil((x1 - x0) / c) + 3 : 0, nz: n ? Math.ceil((z1 - z0) / c) + 3 : 0,
+    ax: new Float64Array(n), az: new Float64Array(n), ex: new Float64Array(n), ez: new Float64Array(n), L: new Float64Array(n), as: new Float64Array(n), li: new Int32Array(n) };
   const cells = Array.from({ length: X.nx * X.nz }, () => []); let g = 0;
-  for (let ri = 0; ri < R.length; ri++) {
-    const r = R[ri];
+  for (let li = 0; li < Ls.length; li++) {
+    const r = Ls[li];
     for (let i = 1; i < r.length; i++, g++) {
       const a = r[i - 1], b = r[i], ex = b.x - a.x, ez = b.z - a.z;
-      X.ax[g] = a.x; X.az[g] = a.z; X.ex[g] = ex; X.ez[g] = ez; X.L[g] = Math.sqrt(ex * ex + ez * ez) || 1; X.as[g] = a.s; X.ri[g] = ri;
+      X.ax[g] = a.x; X.az[g] = a.z; X.ex[g] = ex; X.ez[g] = ez; X.L[g] = (hyp ? Math.hypot(ex, ez) : Math.sqrt(ex * ex + ez * ez)) || 1; X.as[g] = a.s; X.li[g] = li;
       const i0 = Math.floor((Math.min(a.x, b.x) - X.x0) / c), i1 = Math.floor((Math.max(a.x, b.x) - X.x0) / c), j0 = Math.floor((Math.min(a.z, b.z) - X.z0) / c), j1 = Math.floor((Math.max(a.z, b.z) - X.z0) / c);
       for (let j = j0; j <= j1; j++) for (let k = i0; k <= i1; k++) cells[j * X.nx + k].push(g);   // every square its box touches: the one of its nearest point to anywhere among them
     }
   }
   X.at = new Int32Array(cells.length + 1); for (let k = 0; k < cells.length; k++) X.at[k + 1] = X.at[k] + cells[k].length;
   X.sg = new Int32Array(X.at[cells.length]); for (let k = 0; k < cells.length; k++) X.sg.set(cells[k], X.at[k]);
+  return X;
+}
+/* the main roads' grid, again if a road is added or one is not the same */
+function rixOf(R) {
+  let X = RIX.w.get(R), ok = !!X && X.nr === R.length;
+  for (let ri = 0; ok && ri < R.length; ri++) ok = X.rs[ri] === R[ri] && X.np[ri] === R[ri].length;
+  if (ok) return X;
+  X = Object.assign(rixBuild(R, false), { nr: R.length, np: R.map(r => r.length), rs: R.slice() });
   RIX.w.set(R, X);
   return X;
+}
+/* the network's grid: its edges up to ne (the bridges' pontoons add edges after the terrain's and take them away again: those after ne are
+   read one by one, after the grid, as the loop read them) */
+function rixNet(N) {
+  const E = N.e; let X = RIX.w.get(N);
+  if (X && X.e === E && E.length >= X.ne && E[X.ne - 1] === X.last) return X;
+  X = Object.assign(rixBuild(E.map(e => e.p), true), { e: E, ne: E.length, last: E[E.length - 1] });
+  RIX.w.set(N, X);
+  return X;
+}
+/* the nearest segment of grid X to x z, in RIX.q (d, g; g -1 none), ring by ring of squares round the point's: every segment whose nearest
+   point lies beyond ring k is k * c m away or more. False when x z is off the grid (or not a number): the caller reads every segment */
+function rixNear(X, x, z, net) {
+  const c = RIX.c, cx = Math.floor((x - X.x0) / c), cz = Math.floor((z - X.z0) / c), nx = X.nx, nz = X.nz;
+  if (!(cx >= 0 && cx < nx && cz >= 0 && cz < nz)) return false;
+  const Q = RIX.q, K = Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz), scan = net ? rixScanN : rixScan; Q.d = 1e9; Q.g = -1;
+  for (let k = 0; k <= K; k++) {
+    for (let j = Math.max(0, cz - k), jb = Math.min(nz - 1, cz + k); j <= jb; j++) {
+      if (j === cz - k || j === cz + k) { for (let i = Math.max(0, cx - k), ib = Math.min(nx - 1, cx + k); i <= ib; i++) scan(X, j * nx + i, x, z); }
+      else { if (cx - k >= 0) scan(X, j * nx + cx - k, x, z); if (k && cx + k < nx) scan(X, j * nx + cx + k, x, z); }
+    }
+    if (Q.g >= 0 && Q.d < k * c - 1e-3) break;
+  }
+  return true;
 }
 /* the segments of square k against the nearest so far (RIX.q: d, g): the arithmetic of railOf's loop, the lower g on a tie */
 function rixScan(X, k, x, z) {
@@ -7031,18 +7055,34 @@ function rixScan(X, k, x, z) {
     if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
   }
 }
+/* the same with netNear's arithmetic (the point on the segment, then Math.hypot to it) */
+function rixScanN(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) {
+    const g = sg[n], ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), d = Math.hypot(x - (ax + ex * t), z - (az + ez * t));
+    if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
+  }
+}
 /* ---------- path-finding on the road network (map version 2; nothing in the game calls it yet) ----------
    netNear: the nearest point of any edge. netPath: the cheapest way between two nodes (Dijkstra, ties by index); cost(e) defaults to the edge's
    length times RN.cls[mode][class]; the default ones are cached in T.pc by a,b,mode. tripOf: a polyline in the shape of a route from a point to a
    point by the network (start, its projection on the nearest edge, the path, the target's projection, the target), with ri and s1 when the end
    lies on a main road (a vehicle or a squad rides it as it rides the route) */
 function netNear(x, z, T) {
-  T = T || S.T; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
-  for (const E of T.net.e) for (let i = 1; i < E.p.length; i++) {
-    const a = E.p[i - 1], ex = E.p[i].x - a.x, ez = E.p[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
-    if (d < b.d) b = { e: E.i, s: a.s + L * t, d, x: px, z: pz };
+  T = T || S.T; const N = T.net, X = rixNet(N);
+  if (!rixNear(X, x, z, true)) return netAll(N.e, 0, x, z, { e: -1, s: 0, d: 1e9, x: 0, z: 0 });   // off the grid, or not a number: every edge, as before
+  const g = RIX.q.g; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
+  if (g >= 0) { const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1); b = { e: N.e[X.li[g]].i, s: X.as[g] + L * t, d: RIX.q.d, x: ax + ex * t, z: az + ez * t }; }
+  return X.ne < N.e.length ? netAll(N.e, X.ne, x, z, b) : b;   // the pontoons' edges after the grid's
+}
+/* netNear's loop over the edges from e0 on, against the nearest so far b (the loop before RIX) */
+function netAll(E, e0, x, z, b) {
+  let bd = b.d, be = -1, bs = 0, bx = 0, bz = 0;
+  for (let k = e0; k < E.length; k++) for (let i = 1, P = E[k].p; i < P.length; i++) {
+    const a = P[i - 1], ex = P[i].x - a.x, ez = P[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
+    if (d < bd) { bd = d; be = E[k].i; bs = a.s + L * t; bx = px; bz = pz; }
   }
-  return b;
+  return be < 0 ? b : { e: be, s: bs, d: bd, x: bx, z: bz };
 }
 function netPath(a, b, cost, mode, T) {
   T = T || S.T; mode = mode || 'veh';

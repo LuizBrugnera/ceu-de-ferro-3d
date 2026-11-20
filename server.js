@@ -86,9 +86,9 @@ const launch = (c, m, o) => { if (mid(m.m) && Math.floor(m.m / 4096) === c.playe
 const armour = c => c.player.cls === 'tank' || c.player.cls === 'art' || c.player.cls === 'trn';
 /* the damage model's fields: d part states (two bits a part for up to 24 parts, bit 48 burning; from a page that takes this server for an
    older one, the first ten parts and bit 20), pt the part a hit struck, k the kind of hit, v the parts behind it on the shot's line, w 1 a high-explosive shell that went in, 2 a
-   shaped charge. dcap, sent after welcome, says the server knows them */
+   shaped charge, s 1 a soldier's small-arms round on a soft vehicle. dcap, sent after welcome, says the server knows them */
 const bits = v => Number.isInteger(v) && v >= 0 && v < 2 ** 49, part = v => Number.isInteger(v) && v >= 0 && v < 24, kind = v => Number.isInteger(v) && v >= 0 && v < 4;
-const via = m => Object.assign({}, Array.isArray(m.v) && m.v.length > 0 && m.v.length <= 3 && m.v.every(part) && { v: m.v }, (m.w === 1 || m.w === 2) && { w: m.w });
+const via = m => Object.assign({}, Array.isArray(m.v) && m.v.length > 0 && m.v.length <= 3 && m.v.every(part) && { v: m.v }, (m.w === 1 || m.w === 2) && { w: m.w }, m.s === 1 && { s: 1 });
 const blow = m => num(m.dmg) && m.dmg > 0 && m.dmg <= 1000 && part(m.pt) && kind(m.k);
 /* world objects: a flat list of pairs, an object's id and its stage (1 damaged, 2 down) or the damage done to it */
 const pairs = (l, ok) => Array.isArray(l) && l.length > 0 && l.length <= 200 && l.length % 2 === 0 && l.every((v, i) => (i % 2 ? ok(v) : Number.isInteger(v) && v >= 0 && v < 65536));

@@ -8344,6 +8344,10 @@ const ARMK = {
     if ((s.wo = ray(m.x, m.y, m.z, s.x, s.y, s.z, 0))) { const k = Math.max(0, RAY.t - OBJS.back / R); s.x = m.x + d.x * R * k; s.y = m.y + d.y * R * k; s.z = m.z + d.z * R * k; s.T *= k; }   // a wall on the way: it bursts on it
     S.shells.push(s); puff(m.x, m.y, m.z, 'spark', 1); return s;
   } },
+  rkt: { fire(u, w, m, d) {   // an unguided rocket from a vehicle's pod: the aircraft's rocket (S.bombs k rocket), which bursts on what it strikes
+    const b = { k: 'rocket', x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, o: w, team: u.team, by: u, life: w.life || 4 };
+    S.bombs.push(b); puff(m.x, m.y, m.z, 'flash', .8); puff(m.x - d.x * 2, m.y, m.z - d.z * 2, 'smoke', 1); fx.launch(u === S.my); return b;
+  } },
   sam: { fire: (u, w) => (u.ctl.lock && !u.ctl.lock.dead && !u.ctl.lock.gone ? launchSam(u, w, u.ctl.lock) : null), relay: (u, i, m) => Net.ord(u, i, m) }
 };
 /* a tank's gun keeps one count of rounds, a.ammo, and says how many of them are high explosive, a.he (set again whenever the magazine is
@@ -8367,7 +8371,7 @@ function arms(u, dt) {
     a.cool -= dt;
     if (a.d.hv) shFix(a);
     if (!c.fire[i] || a.cool > 0 || a.ammo <= 0 || shN(a, a.ld | 0) <= 0 || (u.net && K.relay) || !Q['gun' + i] || (w.k === 'sam' && !Q.lock) || Math.abs(u.sp) > w.halt) return;
-    if (u.ai && (w.k === 'shell' || w.k === 'gun' || w.k === 'flak') && ffHeld(u, i ? u.ai.inf || u.ai.low || u.ai.tgt : u.ai.tgt || u.ai.low, 0, a)) return;   // a friend on the line
+    if (u.ai && (w.k === 'shell' || w.k === 'gun' || w.k === 'rkt' || w.k === 'flak') && ffHeld(u, i ? u.ai.inf || u.ai.low || u.ai.tgt : u.ai.tgt || u.ai.low, 0, a)) return;   // a friend on the line
     const f = (w.free && c.aim2) || u.f, s = w.sp + c.sp[i] + Q.disp * DMG.disp, d = s ? vnorm({ x: f.x + rand(-s, s), y: f.y + rand(-s, s), z: f.z + rand(-s, s) }) : f;
     const r = K.fire(u, w, { x: u.x + f.x * D.bl, y: u.y + D.mh + f.y * D.bl, z: u.z + f.z * D.bl }, d);
     if (!r) return;
@@ -24371,12 +24375,13 @@ Object.assign(ARMS, {
   zu23: { k: 'gun', rate: .035, dmg: 7, spd: 970, ap: .25, ammo: 400, life: 2.6, sp: .0045, sweep: 1 },
   /* the Insurgents' old anti-air (cf-insurg-antiaerea; NOT TESTED, see docs/nao-testado/cf-insurg-antiaerea.md): gunfire and unguided rockets only,
      aimed by eye with lead (the AI's lowPlane/known sight, so weaker at night and in bad weather); no radar, no lock, no missile. kpv: the 14.5 mm
-     KPV of the ZPU; shil: the Shilka's four 23 mm AZP-23, fast but short of ammunition; s5, s8: unguided 57 and 80 mm rocket pods as fast, heavy,
-     loose rounds in salvos (rate short, spread wide, a pod's worth of ammo) */
+     KPV of the ZPU; shil: the Shilka's four 23 mm AZP-23, fast but short of ammunition; s5, s8: unguided 57 and 80 mm rocket pods fired in salvos (rate short, spread wide, a pod's worth of ammo): k rkt, a real
+     rocket (ARMK.rkt, the aircraft's S.bombs rocket) that bursts where it strikes, dmg r its warhead (S-8 as the aircraft's, S-5 smaller), vis
+     [radius, length] of its drawn body (cf-foguete-tecnica; NOT TESTED, see docs/nao-testado/cf-foguete-tecnica.md) */
   kpv: { k: 'gun', rate: .065, dmg: 9, spd: 990, ap: .3, ammo: 480, life: 2.5, sp: .0055, sweep: 1 },
   shil: { k: 'gun', rate: .017, dmg: 6.5, spd: 970, ap: .24, ammo: 900, life: 2.6, sp: .005, sweep: 1 },
-  s5: { k: 'gun', rate: .07, dmg: 15, spd: 560, ap: .1, ammo: 64, life: 3.4, sp: .016, sweep: 1 },
-  s8: { k: 'gun', rate: .11, dmg: 28, spd: 600, ap: .2, ammo: 40, life: 3.6, sp: .013, sweep: 1 }
+  s5: { k: 'rkt', rate: .07, dmg: 55, r: 12, spd: 560, ammo: 64, life: 3.4, sp: .016, vis: [.1, 2.2] },
+  s8: { k: 'rkt', rate: .11, dmg: 95, r: 20, spd: 600, ammo: 40, life: 3.6, sp: .013, vis: [.14, 2.6] }
 });
 Object.assign(SARMS, {
   akm: { name: 'AKM', rate: .1, dmg: 8, spd: 715, mag: 30, mags: 6, sp: .009, rl: 2.6, auto: 1 },
@@ -37733,7 +37738,7 @@ function syncScene(dt) {
   fortScene();
   vegFrame(dt);
   sync(S.debris, gDebris, debrisMesh, (o, m) => { m.position.set(o.x, o.y, o.z); m.quaternion.set(o.q.x, o.q.y, o.q.z, o.q.w); });
-  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
+  sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : b.o && b.o.vis ? cylX(b.o.vis[0], b.o.vis[0], b.o.vis[1], 5) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
   let n = 0; const bp = tracers.geometry.attributes.position.array;
@@ -38877,7 +38882,7 @@ function fpEO(P, u, ink, acc, disp, blink) {
     hx.fillStyle = t.gnd ? '#ffd24a' : G; hx.fillRect(gx - gs, gy + gs + 6 * u, 2 * gs * fr, 3 * u);
     if (blink) { hx.strokeStyle = t.gnd ? '#ffd24a' : FOE; hx.lineWidth = 2; hx.strokeRect(gx - gs - 4 * u, gy - gs - 4 * u, 2 * gs + 8 * u, 2 * gs + 8 * u); }
   }
-  const gun = P.arms.find(k => k.d.k === 'gun'), ld = S.lead;
+  const gun = P.arms.find(k => k.d.k === 'gun' || k.d.k === 'rkt'), ld = S.lead;
   if (ld && gun) { const tl = dist(ld, P) / gun.d.spd, lv = vel(ld), q = proj(ld.x + lv.x * tl, ld.y + lv.y * tl + .5 * GR * tl * tl, ld.z + lv.z * tl); if (q.front) { hx.strokeStyle = G; hx.lineWidth = 1.5; hx.beginPath(); hx.arc(q.x, q.y, 7 * u, 0, TAU); hx.stroke(); } }   // ○ where to lead the gun
   let x = m + 10 * u, y = ch - m - 46 * u;   // missiles: one pip each, and the reload
   for (let i = 0; i < w.ammo; i++) { hx.fillStyle = i < a0.ammo ? G : 'rgba(168,255,186,.2)'; hx.fillRect(x + i * 9 * u, y, 6 * u, 13 * u); }
@@ -39312,7 +39317,7 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
     }
     if (g.front && P.kind === 'tank') { hx.strokeStyle = acc; hx.lineWidth = 2; hx.beginPath(); hx.arc(g.x, g.y, 5, 0, TAU); hx.stroke(); }   // cf-miras-impl: where the round falls, a small circle
     else if (g.front) { hx.strokeStyle = acc; hx.lineWidth = 2; hx.beginPath(); for (const [i, j] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { hx.moveTo(g.x + i * 5, g.y + j * 5); hx.lineTo(g.x + i * 13, g.y + j * 13); } hx.stroke(); }
-    const gun = P.arms.find(k => k.d.k === 'gun'), t = S.lead;
+    const gun = P.arms.find(k => k.d.k === 'gun' || k.d.k === 'rkt'), t = S.lead;
     if (t && gun) {   // lead point for the anti-aircraft gun
       const tl = dist(t, P) / gun.d.spd, tv = vel(t), q = proj(t.x + tv.x * tl, t.y + tv.y * tl + .5 * GR * tl * tl, t.z + tv.z * tl);
       if (q.front) { hx.strokeStyle = acc; hx.lineWidth = 1.5; hx.beginPath(); hx.arc(q.x, q.y, 7, 0, TAU); hx.stroke(); }
@@ -40060,7 +40065,7 @@ const loadOf = id => (RACKS[id] ? LO.ord(LO.mine(id)) : PLANES[id].ord.filter(Bo
 const storeIcon = o => (o.cl ? 'cluster' : o.gd ? 'guided' : o.k === 'bomb' ? 'bomb' : o.k === 'rocket' ? 'rocket' : 'missile');
 const seekOf = o => MSL.SK[MSL.def(o, { gnd: o.k !== 'aam' }).sk], GDTAG = { las: 'guiada a laser', gps: 'guiada por GPS', img: 'guiada por TV' };
 const storeTag = o => (o.cl ? 'cacho' : o.gd ? GDTAG[seekOf(o).k] || 'guiada' : o.k === 'bomb' ? 'queda livre' : o.k === 'rocket' ? 'foguete' : o.k === 'agm' ? 'ar-solo' : o.sk ? 'ar-ar, curto alcance' : 'ar-ar, médio alcance');
-const armIcon = a => (a.k === 'sam' ? 'sam' : a.k === 'shell' || a.k === 'how' || a.k === 'flak' ? 'shell' : a.k === 'heat' || a.k === 'atgm' ? 'rocket' : 'gun');
+const armIcon = a => (a.k === 'sam' ? 'sam' : a.k === 'shell' || a.k === 'how' || a.k === 'flak' ? 'shell' : a.k === 'heat' || a.k === 'atgm' || a.k === 'rkt' ? 'rocket' : 'gun');
 const CARD = {
   plane(id, d) {
     const ord = loadOf(id), add = RACKS[id] ? LO.add(LO.mine(id)) : 0, hit = ord.reduce((n, o) => n + o.n * o.dmg, 0);
@@ -40086,7 +40091,7 @@ function groundCard(kind, d, role, fire) {
   return { mesh: () => buildUnit({ kind, def: d, col: [sd.col, sd.col2], x: 0, y: -4.5, z: 0, h: 0, ty: .5, tp: kind === 'aa' ? .6 : kind === 'art' ? .45 : .08 }), L: 15, role,
     meters: [['Velocidade', d.spd / 19], ['Proteção', d.hp / 150], ['Poder de fogo', a.k === 'shell' ? a.dmg / a.rl / 15 : a.k === 'how' ? (a.dmg + a.hit) / a.rl / 31 : a.k === 'sam' ? .85 : a.dmg / a.rate / 140], ['Torre', d.sl / 1.2]],
     spec: Math.round(d.spd * 3.6) + ' km/h · torre a ' + Math.round(d.sl * 57.3) + '°/s · ' + fire,
-    arms: d.arms.map(a => [armIcon(a), a.name, a.k === 'sam' ? 'guiado' : a.k === 'how' ? 'tiro indireto' : a.k === 'flak' ? 'espoleta de tempo' : a.k === 'shell' ? (a.hv ? 'perfurante e explosiva' : 'perfurante') : '']) };
+    arms: d.arms.map(a => [armIcon(a), a.name, a.k === 'sam' ? 'guiado' : a.k === 'how' ? 'tiro indireto' : a.k === 'flak' ? 'espoleta de tempo' : a.k === 'rkt' ? 'foguetes não guiados, explodem no impacto' : a.k === 'shell' ? (a.hv ? 'perfurante e explosiva' : 'perfurante') : '']) };
 }
 /* a class with no builder of its own still shows: its name, and the model of a plane if it is one */
 const cardOf = (k, id) => (CARD[k] ? CARD[k](id, DEFS[k][id]) : { mesh: () => (PLANES[id] ? buildPlane(id) : new THREE.Group()), L: 20, role: CLS[k] ? CLS[k][0] : k, meters: [], spec: '', arm: '' });

@@ -260,6 +260,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .spawn-list button[aria-checked="true"]{border-color:var(--accent);color:var(--accent)}
 .spawn-list button:disabled{color:var(--mute);cursor:default}
 @media (max-width:520px){.spawn canvas{width:84px}}
+@media (max-height:800px) and (min-width:601px){.pick .fleet{height:clamp(170px,30vh,250px)}.spawn canvas{width:112px}.spawn-list button{padding:4px 8px;font-size:13px}}   /* 1280×720: the picker with the places to enter (after a death) fits, its button too */
 .touch{position:absolute;inset:auto 0 0 0;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;
   padding-left:var(--gut-l);padding-right:var(--gut-r);padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px));pointer-events:none;user-select:none;-webkit-user-select:none}
 .touch div{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:48%}
@@ -6248,6 +6249,8 @@ for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.va
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
 const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, blast() { return false; } };   // blast: the view's look of a burst (XFX), true when it drew one
 let S = null;
+/* a side's name after "de" and "por" with the article its name asks for: 'da Rússia', 'dos EUA', 'pela Luftwaffe', 'pelos Aliados' */
+const SIDEPL = { EUA: 1, Aliados: 1, Insurgentes: 1 }, daDe = n => (SIDEPL[n] ? 'dos ' : 'da ') + n, pelaDe = n => (SIDEPL[n] ? 'pelos ' : 'pela ') + n;
 /* ---- the sides (3 lados, P0). S.N sides (newState sets it): 2 (every match of two) or 3 (the Frente atual with three: 0 EUA, 1 Rússia, 2 Insurgentes).
    SIDES() the side numbers 0 .. S.N - 1 (a frozen array, [0, 1] with no match); bySide(f) an array with f(t) for each side; isSide(t) t is one of them;
    ALL() the bitmask of every side; S.rel[a][b] 'foe' or 'ally' (everyone against everyone by default, D7: no interface yet); foe(a, b) on two side
@@ -10774,7 +10777,7 @@ function supDown(b, by, quiet) {
   explode(b.x, b.y + 1.5, b.z, BLD.boom[0], BLD.boom[1] * (b.prog < 1 ? .3 : 1), by, -1, false, 0);
   for (let i = 0; i < 4 && S.debris.length < 24; i++) S.debris.push({ k: 'chunk', sz: rand(.6, 1.6), x: b.x + rand(-3, 3), y: b.y + rand(1, 3), z: b.z + rand(-3, 3), vx: rand(-9, 9), vy: rand(6, 14), vz: rand(-9, 9), q: yawQ(rand(0, TAU)), w: { x: rand(-4, 4), y: rand(-2, 2), z: rand(-4, 4) }, drag: .2, h: .5, life: 6 });
   if (b.team !== S.me) award(by, 120, b.name, b, false);
-  if (S.net) Net.say('Base de suprimento da ' + S.E.sides[b.team].name + ' destruída'); else if (b.team === S.me && !S.demo) S.floats.push({ x: b.x, y: b.y + 8, z: b.z, text: 'Base de suprimento perdida', life: 3 });
+  if (S.net) Net.say('Base de suprimento ' + daDe(S.E.sides[S.fac[b.team]].name) + ' destruída'); else if (b.team === S.me && !S.demo) S.floats.push({ x: b.x, y: b.y + 8, z: b.z, text: 'Base de suprimento perdida', life: 3 });
 }
 /* a soldier is building b: within reach of its walls, standing still, not hit lately and not pinned */
 const builds = (m, b) => !m.dead && m.team === b.team && Math.abs(m.x - b.x) < 30 && footD(b.o, m.x, m.z) < BLD.reach && m.v.x * m.v.x + m.v.z * m.v.z < BLD.still * BLD.still && S.t - m.hitT > BLD.hurt && !(m.sup > S.t);
@@ -40820,8 +40823,6 @@ const LEGEND = {
   }
 };
 LEGEND.tank = LEGEND.aa = LEGEND.art = LEGEND.ground;
-/* 'pela Rússia', 'pelos EUA': the side's name with the contraction its article asks for, in the briefings */
-const PELA = { EUA: 'pelos', Aliados: 'pelos', Insurgentes: 'pelos' }, pelaDe = n => (PELA[n] || 'pela') + ' ' + n;
 const BRIEF = {
   plane: (d, o) => (o.pvp ? 'Você decola ' + o.pela + ' contra outros jogadores e contra a IA do outro lado, que mantém caças, aviões de ataque, tanques e antiaéreas na batalha. Quem escolhe um avião ou veículo do outro lado é inimigo, e cada época é uma sala. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro.'
     : 'Você decola ' + o.pela + ' contra a IA do outro lado. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro. Curvas fechadas custam velocidade, e abaixo da velocidade de estol o avião cai.') + ' Cada tiro acerta uma peça do avião (asas, cauda, motor, combustível, piloto), e o conserto é só sobre a sua pista: sobrevoe, baixo e perto, para rearmar e reparar.'
@@ -41083,7 +41084,7 @@ function swapNote() {
   if (sw.msg || why) return sw.msg || WHY[why];
   if (!P.dead && P.def.lo && (sw.cls === 'plane' || sw.cls === 'heli') && sw.sel[sw.cls] === S.model && !LO.off(P.id) && LO.key(LO.mine(P.id)) !== LO.key(P.def.lo)) return 'Carga nova escolhida para ' + P.def.name + ': ela entra quando você rearmar, ' + (P.heli ? 'pousado e parado ao lado da sua base' : 'baixo sobre a sua pista') + '. Não é preciso trocar de aeronave.';
   if (cd > 0) return DEFS[k][id].name + ' foi perdido há pouco e volta em ' + Math.ceil(cd) + ' s. ' + (P.dead ? 'Confirme para esperar por ele, ou entre agora com outro.' : 'Escolha outro.') + wait;
-  if (P.dead) return (S.hold ? 'A volta espera a sua escolha. ' : 'Sem mexer aqui, você volta em ' + Math.max(1, Math.ceil(Math.max(S.respawn, cdLeft(S.cls, S.model)))) + ' s com ' + DEFS[S.cls][S.model].name + '. ') + 'Escolha outro da ' + S.E.sides[S.fac[S.me]].name + ' e confirme.' + wait;
+  if (P.dead) return (S.hold ? 'A volta espera a sua escolha. ' : 'Sem mexer aqui, você volta em ' + Math.max(1, Math.ceil(Math.max(S.respawn, cdLeft(S.cls, S.model)))) + ' s com ' + DEFS[S.cls][S.model].name + '. ') + 'Escolha outro ' + daDe(S.E.sides[S.fac[S.me]].name) + ' e confirme.' + wait;
   return (S.net ? 'A batalha continua e você está exposto. ' : 'Jogo pausado. ') + 'Trocar abandona ' + it + (S.eco ? ': conta como uma perda' : ': custa os tíquetes de uma perda') + (S.net ? ', conta como uma queda, e o abate vai para quem acertou você nos últimos ' + DMG.credit + ' s.' : ', e o que foi abandonado entra em contagem.') + wait;
 }
 function drawSwap() {

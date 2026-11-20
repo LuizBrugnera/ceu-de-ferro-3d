@@ -9616,6 +9616,10 @@ function killMan(m, by) {
 function manDir(m) { const cp = Math.cos(m.ap); m.f = { x: Math.cos(m.h) * cp, y: Math.sin(m.ap), z: -Math.sin(m.h) * cp }; }
 /* what a soldier's special does when it goes. relay: how its owner tells the room (a guided one as ord, with its target; the others as toss) */
 const TOSS = ['heat', 'nade', 'smk'];
+/* a hand grenade flies, bounces and rolls until its fuse burns down, fuse s after the throw (a drone's grenade still bursts where it lands).
+   e: the share of its speed across a wall or the ground it keeps off it; f: what a bounce leaves of its speed along the ground; roll: how
+   fast rolling slows it (1/s); slope: the share of the ground's slope that rolls it; r: its radius; step: m at most it moves between looks */
+const GRN = { fuse: 3.6, e: .32, f: .6, roll: 2.4, slope: .6, r: .08, step: 1.2, car: [2.4, 2.6] };
 function lobbed(m, k, o, x, y, z, vx, vy, vz) { const b = { k, x, y, z, vx, vy, vz, o, team: m.team, by: m, life: 8 }; S.bombs.push(b); return b; }
 const MSHOT = {
   heat(m, w, e, d) { fx.launch(m === S.my); puff(e.x - d.x * 2, e.y, e.z - d.z * 2, 'dust', 1.2); return lobbed(m, 'heat', w, e.x + d.x, e.y + d.y, e.z + d.z, d.x * w.spd, d.y * w.spd, d.z * w.spd); },
@@ -9659,6 +9663,7 @@ function toss(m, k) {
   if (k === 1) m.nades--; else m.smk--;
   m.ncool = S.t + MAN.nade.cool;
   const b = lobbed(m, TOSS[k], N, e.x, e.y, e.z, m.v.x + d.x * N.spd, d.y * N.spd, m.v.z + d.z * N.spd);
+  if (k === 1) b.fz = S.t + GRN.fuse;   // a hand grenade: on its fuse (nadeStep)
   if (S.net && (m === S.my || m.aid)) Net.toss(m, k, b);
   return b;
 }
@@ -11167,6 +11172,45 @@ function hopMan(m, ax, ay, az, bx, by, bz) {
   else { let a = (lo - ay) / dy, b = (hi - ay) / dy; if (a > b) { const q = a; a = b; b = q; } t0 = Math.max(t0, a); t1 = Math.min(t1, b); }
   return t0 <= t1 ? t0 : -1;
 }
+/* a hand grenade on its fuse: off walls, floors and hulls it bounces, on the ground it rolls (downhill too) and stops; it bursts where it
+   lies when the fuse has burnt, in the air if it was held too long. The same on every client: no chance in it */
+function nadeStep(b, dt) {
+  const G = GRN, n = Math.min(12, Math.max(1, Math.ceil(Math.hypot(b.vx, b.vy, b.vz) * dt / G.step))), h = dt / n;
+  const floor = (x, z, y) => { const g = hgt(x, z), o = bldAt(x, z, 0); return o && y > o.y - .6 ? Math.max(g, o.y) : g; };
+  for (let i = 0; i < n; i++) {
+    const x0 = b.x, y0 = b.y, z0 = b.z, rest = b.rest;
+    if (!rest) b.vy -= GR * h;
+    let x1 = x0 + b.vx * h, y1 = y0 + b.vy * h, z1 = z0 + b.vz * h;
+    const wo = y1 < hgt(x1, z1) + OBJS.air && (x1 !== x0 || y1 !== y0 || z1 !== z0) ? ray(x0, y0, z0, x1, y1, z1, 0) : null;
+    if (wo) {   // a wall, a slab or anything standing: back off it, and the speed across it turned and cut
+      const t = Math.max(0, RAY.t - .02), an = RAY.ax, sg = RAY.sg, c = wo.c === undefined ? 1 : wo.c, s = wo.s || 0;
+      const nx = an === 0 ? c * sg : an === 2 ? s * sg : 0, ny = an === 1 ? sg : 0, nz = an === 0 ? -s * sg : an === 2 ? c * sg : 0, vn = b.vx * nx + b.vy * ny + b.vz * nz;
+      x1 = x0 + (x1 - x0) * t; y1 = y0 + (y1 - y0) * t; z1 = z0 + (z1 - z0) * t;
+      if (vn < 0) { b.vx -= (1 + G.e) * vn * nx; b.vy -= (1 + G.e) * vn * ny; b.vz -= (1 + G.e) * vn * nz; }
+      if (ny > .5) { b.vx *= G.f; b.vz *= G.f; if (Math.abs(b.vy) < 1) { b.vy = 0; y1 = y0; } }   // on a floor upstairs: it settles there
+    }
+    for (const u of S.units) {   // a hull: off it
+      if (u.dead || Math.abs(u.x - x1) > 8 || Math.abs(u.z - z1) > 8) continue;
+      const t = hopBox(u, x0, y0, z0, x1, y1, z1, G.car[0], G.car[1]); if (t < 0) continue;
+      x1 = x0; y1 = y0; z1 = z0; b.vx *= -G.e; b.vz *= -G.e; break;
+    }
+    const g = floor(x1, z1, y1) + G.r;
+    if (y1 <= g) {   // the ground: a bounce, then a roll that slows and follows the slope
+      y1 = g;
+      if (b.vy < -1.2) { b.vy = -b.vy * G.e; b.vx *= G.f; b.vz *= G.f; b.rest = 0; }
+      else {
+        b.vy = 0; b.rest = 1;
+        const sx = hgt(x1 + .5, z1) - hgt(x1 - .5, z1), sz = hgt(x1, z1 + .5) - hgt(x1, z1 - .5), k = Math.max(0, 1 - G.roll * h);
+        b.vx = (b.vx - GR * G.slope * sx * h) * k; b.vz = (b.vz - GR * G.slope * sz * h) * k;
+        if (b.vx * b.vx + b.vz * b.vz < .01 && Math.abs(sx) + Math.abs(sz) < .12) b.vx = b.vz = 0;
+      }
+    } else if (y1 > g + .05) b.rest = 0;
+    b.x = x1; b.y = y1; b.z = z1;
+  }
+  if (S.t < b.fz && b.life > 0) return;
+  b.gone = true;
+  explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast);
+}
 function stepShots(dt) {
   for (const b of S.bullets) {
     const x0 = b.x, y0 = b.y, z0 = b.z;
@@ -11180,7 +11224,7 @@ function stepShots(dt) {
     }
     if (b.gone) continue;
     if (b.y < 400) {
-      const g = hgt(b.x, b.z), wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null, back = wo ? dt * RAY.t : dt, an = RAY.ax, sg = RAY.sg;
+      const g = hgt(b.x, b.z), wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null, back = wo ? dt * RAY.t : dt, an = RAY.ax, sg = RAY.sg, we = wo && wo.B ? RAY.e : -1;
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // it stops at the wall, unless something stood in front of it
       if (b.y < g + (S.cbup ? OBJS.air : 6) || wo) {
         for (const u of S.units) {
@@ -11197,7 +11241,11 @@ function stepShots(dt) {
           if (d < SUP.r && y < H + SUP.r && m.ai && !m.net) { if (!(m.sq && m.sq.ord && m.sq.ord.k === 'assault' && b.by && hdist(b.by, m) > IAI.fire)) m.sup = S.t + SUP.t; drInc(m, b.by, b.vx, b.vz, 1); }   // an assault is not pinned by fire from beyond a rifle's reach; its squad still hears it (its drill wants more of it)
         }
         if (!b.gone && S.civs && civBullet(b, back)) b.gone = true;
-        if (!b.gone && wo) { RAY.ax = an; RAY.sg = sg; shotObj(wo, b, b.dmg * (b.sa ? OBJD.sa : OBJD.gun[0] + OBJD.gun[1] * Math.min(1, b.ap || 0)) * wo.K.take[0], b.x, b.y, b.z, b.vx, b.vy, b.vz); b.gone = true; if (Math.random() < .5) puff(OUT.x, OUT.y, OUT.z, 'dust', .8); }
+        if (!b.gone && wo) {   // a wall: struck, and gone through when the round has the power for it (bThru)
+          RAY.o = wo; RAY.e = we; RAY.ax = an; RAY.sg = sg; shotObj(wo, b, b.dmg * (b.sa ? OBJD.sa : OBJD.gun[0] + OBJD.gun[1] * Math.min(1, b.ap || 0)) * wo.K.take[0], b.x, b.y, b.z, b.vx, b.vy, b.vz);
+          if (Math.random() < .5) puff(OUT.x, OUT.y, OUT.z, 'dust', .8);
+          if (!(we >= 0 && S.os[wo.id] < 2 && bThru(b, wo, we, an))) b.gone = true;
+        }
         if (!b.gone && b.y <= g) { b.gone = true; if (Math.random() < .5) puff(b.x, g + .5, b.z, 'dust', .8); }
         if (b.gone) { if (b.fr) explode(b.x, Math.max(b.y, g + .3), b.z, b.fr[0], b.fr[1], b.by, b.team); continue; }   // a fragmenting round bursts where it stops
       }
@@ -11210,6 +11258,7 @@ function stepShots(dt) {
   }
   for (const b of S.bombs) {   // a shell is fast enough to skip a vehicle in one step, so it moves in short hops
     b.life -= dt;
+    if (b.fz !== undefined) { nadeStep(b, dt); continue; }   // a hand grenade on its fuse
     const he = b.k === 'he', heat = b.k === 'heat', hv = b.k === 'shell' && b.o.he, sh = he || b.k === 'shell', n = sh ? Math.ceil(Math.hypot(b.vx, b.vy, b.vz) * dt / 5) : 1, h = dt / n, top = sh || heat ? 6.5 : 4;
     if (he) incoming(b, dt);
     for (let i = 0; i < n && !b.gone; i++) {
@@ -11218,6 +11267,7 @@ function stepShots(dt) {
       b.x += b.vx * h; b.y += b.vy * h; b.z += b.vz * h;
       let g = hgt(b.x, b.z); const D = OBJD[hv ? 'he' : b.k];
       let wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null;
+      const we = wo && wo.B ? RAY.e : -1, wan = RAY.ax;
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // the hop ends at the wall; what stood right before it is still struck first
       let du = null, dc = null, bt = 2;
       if (Math.min(y0, b.y) < g + 10) {   // swept: the first vehicle, soldier or civilian anywhere on the hop, before the wall or the ground that ends it
@@ -11232,7 +11282,12 @@ function stepShots(dt) {
       if (!hit && b.k !== 'bomb') for (const p of S.planes) if (!p.dead && !safe(p, b) && dist(p, b) < 9) { impact(p, HK.missile, b.o.dmg, b.by, b.x, b.y, b.z, b.vx - p.v.x, b.vy - p.v.y, b.vz - p.v.z); hit = true; break; }
       if (hit) wo = null; else if (!wo) continue;
       b.gone = true;
-      if (wo) { const P = shotObj(wo, b, b.smk ? 0 : (he || hv ? b.o.hit : b.o.dmg) * D.hit, b.x, b.y, b.z, b.vx, b.vy, b.vz); b.x = P.x; b.y = P.y; b.z = P.z; }
+      if (wo) {
+        const hx = b.x, hy = b.y, hz = b.z; RAY.o = wo; RAY.e = we; RAY.ax = wan;
+        const P = shotObj(wo, b, b.smk ? 0 : (he || hv ? b.o.hit : b.o.dmg) * D.hit, b.x, b.y, b.z, b.vx, b.vy, b.vz);
+        if (we >= 0 && b.k === 'shell' && !hv && (b.np | 0) < CITY.pen.shell) { b.np = (b.np | 0) + 1; b.x = hx; b.y = hy; b.z = hz; b.gone = false; bOut(b, wo, we, wan); continue; }   // solid shot: a house wall does not stop it
+        b.x = P.x; b.y = P.y; b.z = P.z;
+      }
       if (dc && (sh || heat)) { const h = manHit(dc, HK.shell, he || hv ? b.o.hit : b.o.dmg, b.x, b.y, b.z, b.vx, b.vz); if (h) civHurt(dc, h.dmg, b.by); }   // a civilian in the way, struck as a soldier would be
       if (b.k === 'smk') addSmoke(b.x, wo ? hgt(b.x, b.z) : g, b.z, b.o.r, b.o.h);
       else if (b.smk) { addSmoke(b.x, hgt(b.x, b.z), b.z, b.smk.r, b.smk.h, b.smk.life); if (b.by === S.my) S.falls.push({ x: b.x, z: b.z, life: HOW.mark }); }
@@ -12224,7 +12279,7 @@ const Net = {
   smoke(o) { const r = n => +n.toFixed(1); Net.mine(o, 'smoke', { p: [r(o.x), r(o.y), r(o.z)] }); },
   flare(o) { Net.mine(o, 'flare'); },
   shot(o, p, v, smk, he) { const r = n => +n.toFixed(1); Net.mine(o, 'shot', Object.assign({ p: p.map(r), v: v.map(r) }, smk && { s: 1 }, he && { h: 1 })); },
-  toss(o, k, b) { const r = n => +n.toFixed(1); Net.mine(o, 'toss', { k, p: [r(b.x), r(b.y), r(b.z)], v: [r(b.vx), r(b.vy), r(b.vz)] }); },
+  toss(o, k, b) { const r = n => +n.toFixed(1); Net.mine(o, 'toss', Object.assign({ k, p: [r(b.x), r(b.y), r(b.z)], v: [r(b.vx), r(b.vy), r(b.vz)] }, b.fz !== undefined ? { f: 1 } : {})); },   // f: on a fuse (GRN); an old client's grenade bursts where it lands
   ohit(id, dmg) { Net.oh.set(id, Math.min(999, (Net.oh.get(id) || 0) + dmg)); },
   build(B) { const r = n => +n.toFixed(1); Net.send('build', { p: [r(B.x), r(B.z)], a: +B.a.toFixed(2) }); },
   /* every supply base there is, a row each: [id, side, x, z, heading, percent built, hp, stage (2: destroyed, for as long as its wreck lies)], and with lg the crates in it */
@@ -12427,7 +12482,7 @@ const Net = {
       g = g || Net.ghosts.get(m.from);
       const w = g && g.net && g.man && !g.dead && (m.k === 1 ? MAN.nade : m.k === 2 ? MAN.smk : g.arms[1] && g.arms[1].d.k === (m.k ? 'mort' : 'heat') && g.arms[1].d);
       if (w && m.k > 2 && Array.isArray(m.p) && Array.isArray(m.v)) mortRound(g, w, m.k === 4, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]);
-      else if (w && Array.isArray(m.p) && Array.isArray(m.v)) { lobbed(g, TOSS[m.k], w, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]); if (!m.k) fx.launch(false); }
+      else if (w && Array.isArray(m.p) && Array.isArray(m.v)) { const b = lobbed(g, TOSS[m.k], w, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]); if (m.f && m.k === 1) b.fz = S.t + GRN.fuse; if (!m.k) fx.launch(false); }
     },
     aitoss(m) { Net.rx.toss(m, Net.ai.get(m.id)); },
     ord(m) { Net.fireAs(Net.ghosts.get(m.from), m.i, m.target, m.m, m.tm); },
@@ -16486,7 +16541,15 @@ Object.assign(Net, { ft: false, fq: false, facc: 0,
    worth to a battery, and the m it costs a tank as a target */
 const CITY = { bay: 5, sh: 4.4, body: 2,
   gap: { 2: [.28, .72, .34, .8], 3: [.26, .74, 0, .77], 4: [.1, .9, 0, .85], 6: [.26, .74, 0, .77], hole: [.17, .83, 0, .7] },
-  mat: { plaster: { hp: 14 }, brick: { hp: 18 }, concrete: { hp: 24 }, stone: { hp: 28 }, metal: { hp: 10 } }, hp: { slab: 1.5, part: .5 },
+  /* mat: each material's hp, th the m of an outer wall's body (its outer face on the plan's line, the inner face th within: a round from
+     inside stops there, a soldier inside keeps off it) and pen what a round needs to go through it (bPow against bRes) */
+  mat: { plaster: { hp: 14, th: .3, pen: 1.3 }, brick: { hp: 18, th: .38, pen: 2.2 }, concrete: { hp: 24, th: .3, pen: 2.6 }, stone: { hp: 28, th: .55, pen: 3.2 }, metal: { hp: 10, th: .08, pen: .7 },
+    wood: { hp: 9, th: .12, pen: .6 } }, hp: { slab: 1.5, part: .5 },
+  /* going through: a round's power (bPow) is sa for a soldier's rifle or a light gun with no armour piercing, else gun[0] + gun[1] x its ap +
+     gun[2] x its damage over 5 (a .50 about 2 to 2.5, a 20 mm 4 or more, a 30 mm far more); a wall takes pen of it whole, crack of that cracked, a
+     slab slab times and a partition part times, and what is left goes on (its damage and speed by the share left), max walls at most.
+     shell: walls a tank's solid shot goes through; th: m of a slab; puff: the dust where it comes out */
+  pen: { sa: 1, gun: [1, 15, .25], crack: .6, slab: 1.4, part: .4, max: 3, shell: 2, th: .3 },
   dmg: { gun: 2, k: .34, r: .42, crack: .6, gone: .6, crash: [9, 160] },
   sup: { posts: 4, T: 1.5, step: .4, fall: .34 }, rub: [0, .9, 1.7, 2.6], fall: { on: 9, under: 34, near: 12, r: 3.5 },
   types: {
@@ -16494,7 +16557,7 @@ const CITY = { bay: 5, sh: 4.4, body: 2,
     row: { nx: [2, 3], nz: [2, 3], nl: [2, 3], bay: 4.8, roof: 'gable', mat: 'brick', win: .9 },
     block: { nx: [3, 6], nz: [2, 3], nl: [2, 4], roof: 'flat', mat: 'brick', win: .9 },
     hall: { nx: [5, 9], nz: [3, 4], nl: [1, 1], bay: 6, sh: 7.5, roof: 'gable', mat: 'metal', open: 1, gate: 1, win: .4 },
-    barn: { nx: [3, 4], nz: [2, 2], nl: [1, 1], bay: 5.5, sh: 6, roof: 'gable', mat: 'plaster', open: 1, gate: 1, ram: 1, shed: 1, win: .2 },
+    barn: { nx: [3, 4], nz: [2, 2], nl: [1, 1], bay: 5.5, sh: 6, roof: 'gable', mat: 'wood', open: 1, gate: 1, ram: 1, shed: 1, win: .2 },
     church: { nx: [4, 5], nz: [2, 2], nl: [1, 1], bay: 6, sh: 10, roof: 'gable', mat: 'stone', open: 1, win: .8 },
     tower: { nx: [2, 2], nz: [2, 2], nl: [7, 7], bay: 4.5, sh: 5, roof: 'spire', mat: 'stone', win: .5 },
     apart: { nx: [4, 7], nz: [3, 3], nl: [6, 10], roof: 'flat', mat: 'concrete', win: 1 },
@@ -16513,7 +16576,11 @@ const CITY = { bay: 5, sh: 4.4, body: 2,
     seat: { d: [1850, 3000], step: 50, clear: 150, base: 1300, cap: 100, nm: 'Sede',
       lots: [['fab', -2, 1, 0], ['pow', 2, -1, 0], ['fab', 3, 1, 0], ['pow', -3, -1, 0], ['pow', -1, -1, 1], ['aa', 0, -1, 0], ['dep', -2, -1, 1], ['aa', 1, -1, 1, 1]] } },
   stair: [.8, .6, 1.65, .5],
-  ai: { post: 60, near: 35, ring: 15, men: 6, stay: 25, shy: 8, clear: 45, nade: 6, enter: 2.2, art: 2, tank: 400, flee: 4 } };
+  ai: { post: 60, near: 35, ring: 15, men: 6, stay: 25, shy: 8, clear: 45, nade: 6, enter: 4.3, art: 2, tank: 400, flee: 4 },   // enter: after the grenade's fuse (GRN.fuse) has burnt
+  /* cover (bldCover): the places a building gives, for the soldier's own thinking to pick from. back: m behind an opening the place
+     inside is (its sill, CITY.gap, is what a crouched man is under and a standing one fires over); out: m before a wall the place outside
+     is; corner: m from a corner along the wall, where one leans out */
+  cov: { back: 1.1, out: .9, corner: 1.2 } };
 OBJ.bld = { hp: [100, 0], sight: 1, take: [1, 1, 1], ruin: { h: 2.2, slow: .5 }, fall: { r: 5, dmg: 26 }, veh: bldBump };
 GAI.art.val.bld = CITY.ai.art;
 
@@ -16746,6 +16813,7 @@ function bRay(o, ax, ay, az, dx, dy, dz, air) {
   }
   if (an >= 0 && ly + dy * t0 < -1e-6) return bHitAt(o, t0, an, an === 0 ? (vx > 0 ? -1 : 1) : an === 2 ? (vz > 0 ? -1 : 1) : -1, -1);   // the footing under its floor
   let t = t0, i = clamp(Math.floor((lx + vx * t) / bw), 0, nx - 1), j = clamp(Math.floor((lz + vz * t) / bd), 0, nz - 1), L = clamp(Math.floor((ly + dy * t) / sh), 0, nl - 1);
+  const th = B.mat.th, tin = (t, v) => Math.max(0, t - th / Math.abs(v));   // an outer wall met from inside: on its inner face, th short of the plan's line
   if (an === 0) { const e = (L * nz + j) * (nx + 1) + (vx > 0 ? 0 : nx); if (bStop(kd[e], st[off + e], (lz + vz * t) / bd - j, (ly + dy * t) / sh - L, air)) return bHitAt(o, t, 0, vx > 0 ? -1 : 1, e); }
   else if (an === 2) { const e = B.oZ + (L * (nz + 1) + (vz > 0 ? 0 : nz)) * nx + i; if (bStop(kd[e], st[off + e], (lx + vx * t) / bw - i, (ly + dy * t) / sh - L, air)) return bHitAt(o, t, 2, vz > 0 ? -1 : 1, e); }
   else if (an === 1) { const e = B.oS + ((nl - 1) * nz + j) * nx + i; if (kd[e] && st[off + e] < 2) return bHitAt(o, t, 1, 1, e); }
@@ -16756,11 +16824,11 @@ function bRay(o, ax, ay, az, dx, dy, dz, air) {
     t = tn;
     if (tx <= ty && tx <= tz) {
       const e = (L * nz + j) * (nx + 1) + (vx > 0 ? i + 1 : i);
-      if (bStop(kd[e], st[off + e], (lz + vz * t) / bd - j, (ly + dy * t) / sh - L, air)) return bHitAt(o, t, 0, vx > 0 ? -1 : 1, e);
+      if (bStop(kd[e], st[off + e], (lz + vz * t) / bd - j, (ly + dy * t) / sh - L, air)) return bHitAt(o, (vx > 0 ? i + 1 === nx : !i) ? tin(t, vx) : t, 0, vx > 0 ? -1 : 1, e);
       i += vx > 0 ? 1 : -1; if (i < 0 || i >= nx) return;
     } else if (tz <= ty) {
       const e = B.oZ + (L * (nz + 1) + (vz > 0 ? j + 1 : j)) * nx + i;
-      if (bStop(kd[e], st[off + e], (lx + vx * t) / bw - i, (ly + dy * t) / sh - L, air)) return bHitAt(o, t, 2, vz > 0 ? -1 : 1, e);
+      if (bStop(kd[e], st[off + e], (lx + vx * t) / bw - i, (ly + dy * t) / sh - L, air)) return bHitAt(o, (vz > 0 ? j + 1 === nz : !j) ? tin(t, vz) : t, 2, vz > 0 ? -1 : 1, e);
       j += vz > 0 ? 1 : -1; if (j < 0 || j >= nz) return;
     } else if (dy > 0) {
       const e = B.oS + (L * nz + j) * nx + i;
@@ -16782,6 +16850,25 @@ function bShot(o, b, dmg, x, y, z, vx, vy, vz) {
   OUT.x = x - vx / v * K; OUT.y = y - vy / v * K; OUT.z = z - vz / v * K;
   if (e >= 0 && (dmg > 0 || b.sa)) bDmg(o, e, dmg * (b.k || b.d ? 1 : CITY.dmg.gun), b.by, !!b.sa);
   return OUT;
+}
+/* what a round has to go through a wall with (CITY.pen), kept on it as it loses some at each wall */
+const bPow = b => b.pw !== undefined ? b.pw : (b.pw = b.sa ? CITY.pen.sa : CITY.pen.gun[0] + CITY.pen.gun[1] * (b.ap || 0) + CITY.pen.gun[2] * Math.max(0, (b.dmg || 0) - 5));
+/* what element e of a building takes of a round's power to be gone through: its material, what it is and its state */
+function bRes(o, e) { const B = o.B, P = CITY.pen, s = S.cbs[B.off + e]; return B.mat.pen * (e >= B.oS ? P.slab : B.kd[e] > 4 ? P.part : 1) * (s === 1 ? P.crack : s === 2 ? P.crack * .5 : 1); }
+/* a round that struck element e (on axis an, RAY.ax) comes out on its far side: past the wall's body, however slant it went in */
+function bOut(b, o, e, an) {
+  const v = Math.hypot(b.vx, b.vy, b.vz) || 1, nx = an === 0 ? o.c : an === 2 ? o.s : 0, ny = an === 1 ? 1 : 0, nz = an === 0 ? -o.s : an === 2 ? o.c : 0;
+  const cs = Math.max(.3, Math.abs(b.vx * nx + b.vy * ny + b.vz * nz) / v), d = ((e >= o.B.oS ? CITY.pen.th : o.B.mat.th) + .1) / cs;
+  b.x += b.vx / v * d; b.y += b.vy / v * d; b.z += b.vz / v * d; puff(b.x, b.y, b.z, 'dust', .7);
+}
+/* a bullet goes through the wall it struck when it has more power than the wall takes: what is left of it goes on, weaker and slower.
+   A rifle stops on masonry and goes through wood and sheet metal; a .50 through plaster and brick; a cannon through nearly anything */
+function bThru(b, o, e, an) {
+  const P = CITY.pen, p = bPow(b), r = bRes(o, e);
+  if (!(p > r) || (b.np | 0) >= P.max) return false;
+  const k = (p - r) / p, sl = .55 + .45 * k;
+  b.pw = p - r; b.np = (b.np | 0) + 1; b.dmg *= k; b.vx *= sl; b.vy *= sl; b.vz *= sl;
+  bOut(b, o, e, an); return true;
 }
 /* damage with no place of its own (an aircraft flying in): a burst where it struck */
 function bHit(o, dmg, by) {
@@ -16965,11 +17052,11 @@ function bldGhost(m, o, dt) {
   if (m.cbin) { m.y = m.cby += clamp(o.y + m.cbh - m.cby, -9 * dt, 9 * dt); if (m.cbh > 1) S.cbup++; } else m.cby = m.y;
 }
 function bldWalk(m, o, dt) {
-  const B = o.B, nx = B.nx, nz = B.nz, nl = B.nl, bw = B.bw, bd = B.bd, sh = B.sh, st = S.cbs, off = B.off, kd = B.kd, r = MAN.r * MAN.sc, SC = CITY.stair, W = 2 * o.hw, D = 2 * o.hd, F = CITY.fall;
+  const B = o.B, nx = B.nx, nz = B.nz, nl = B.nl, bw = B.bw, bd = B.bd, sh = B.sh, st = S.cbs, off = B.off, kd = B.kd, r = MAN.r * MAN.sc, SC = CITY.stair, W = 2 * o.hw, D = 2 * o.hd, F = CITY.fall, th = B.mat.th;
   const loc = (x, z) => { const px = x - o.x, pz = z - o.z; return [px * o.c - pz * o.s + o.hw, px * o.s + pz * o.c + o.hd]; };
   let [lx, lz] = loc(m.x, m.z), L = m.cbl | 0;
   const [qx, qz] = loc(m.cbpx, m.cbpz), x0 = lx, z0 = lz, flight = U => B.oS + ((U - 1) * nz + B.sz) * nx + B.sx;
-  if (L > 0) { lx = clamp(lx, r, W - r); lz = clamp(lz, r, D - r); }
+  if (L > 0) { lx = clamp(lx, r + th, W - r - th); lz = clamp(lz, r + th, D - r - th); }
   let ci = clamp(Math.floor(lx / bw), 0, nx - 1), cj = clamp(Math.floor(lz / bd), 0, nz - 1), inside = lx > 0 && lx < W && lz > 0 && lz < D;
   const well = B.st && inside && ci === B.sx && cj === B.sz;
   if (m.cbz && !well) {   // off the flight only where it meets a floor
@@ -17001,6 +17088,7 @@ function bldWalk(m, o, dt) {
     const hit = (e, ax, c0, w, a, ext) => {   // wall e on the line a of axis ax, from c0 on for w m
       const p = bPass(B, e, L, ext); if (p === 2) return;
       const g = p ? (st[off + e] === 2 ? CITY.gap.hole : CITY.gap[kd[e] === 2 ? 2 : kd[e]]) : null, u = ax ? lx : lz, v = ax ? lz : lx;
+      if (ext && (a < 1 ? v > 0 : v < a)) a = a < 1 ? th : a - th;   // an outer wall, from inside: its inner face
       for (let n = 0; n < (g ? 2 : 1); n++) {
         const s0 = c0 + (g && n ? g[1] * w : 0), s1 = c0 + (g && !n ? g[0] * w : w), cu = clamp(u, s0, s1), du = u - cu, dv = v - a, d = Math.hypot(du, dv);
         if (d >= r) continue;
@@ -17045,6 +17133,62 @@ function bldPts(t, x, z, n, R, k) {
   if (!out.length) return null;
   const pts = []; for (let i = 0; i < n; i++) pts.push(out[i % out.length]);
   return pts;
+}
+/* ---------- buildings: the cover they give ----------
+   For the soldier's own thinking (its perception and its choice of place): nothing here moves anybody. bldCover(o): every place a standing
+   building gives, kept on it until it changes (B.rev). Each place: x z where to stand, y its floor, l its storey, nx nz the outward normal
+   of its wall, in: inside the wall (the danger is to be outside, before it) or outside it (the danger beyond the building), k what it is,
+   h the m of cover over its floor, p what the wall stops (bRes over a rifle's power: 1 or more stops a rifle; .50s and cannon go through
+   more, CITY.pen), b the building, e the wall element (S.cbs[b.B.off + e]: its state; 3 gone). k:
+     'win'   inside a window or a hole: crouched under the sill (h) it is covered, standing it fires out (a hole to the floor has h 0);
+     'door'  inside a door or gate on the ground: fires out, no cover;
+     'blind' inside a wall with no opening: covered, fires at nothing;
+     'wall'  outside a stretch of wall on the ground: covered from beyond the building; with lx lz, at a corner, the way to lean out round it.
+   covBld(x, z, r, ex, ez, team): the places within r m of x z that cover from a danger at ex ez (a known enemy, the way he will come),
+   the best first: the wall between, a firing port before a blind wall, the stronger wall, the nearer; not a building team's enemies are in */
+function bldCover(o) {
+  const B = o.B;
+  if (B.cov && B.cov.rev === B.rev) return B.cov;
+  const out = (B.cov = []), nx = B.nx, nz = B.nz, C = CITY.cov, th = B.mat.th, W = nx * B.bw, D = nz * B.bd, ps = CITY.pen.sa; out.rev = B.rev;
+  if (S.os[o.id] > 1) return out;
+  const add = (e, L, j, i, ax, side, u) => {   // wall e of storey L, bay j i, on axis ax (0: x = side ? W : 0; 1: z = side ? D : 0), u m along it
+    const k = B.kd[e], s = S.cbs[B.off + e]; if (!k || s === 3) return;
+    const ln = side ? 1 : -1, wx = ax ? u : side ? W : 0, wz = ax ? (side ? D : 0) : u, n = ax ? { x: o.s * ln, z: o.c * ln } : { x: o.c * ln, z: -o.s * ln }, y = o.y + L * B.sh;
+    const at = d => bWorld(o, ax ? wx : wx - ln * d, 0, ax ? wz - ln * d : wz, {}), p = bRes(o, e) / ps;
+    const win = k === 2 || s === 2, door = !win && (k === 3 || k === 4);
+    if (bFloor(B, L, j, i) && !(B.st && i === B.sx && j === B.sz) && (!door || !L)) {   // inside it
+      const P = at(th + C.back), g = s === 2 ? CITY.gap.hole : CITY.gap[2];
+      out.push({ x: P.x, z: P.z, y, l: L, nx: n.x, nz: n.z, in: true, k: win ? 'win' : door ? 'door' : 'blind', h: win ? g[2] * B.sh : door ? 0 : B.sh, p, b: o, e });
+    }
+    if (!L && !door) {   // outside it, on the ground
+      const P = at(-C.out); if (bldAt(P.x, P.z, .3)) return;
+      out.push({ x: P.x, z: P.z, y: hgt(P.x, P.z), l: 0, nx: n.x, nz: n.z, in: false, k: 'wall', h: win ? CITY.gap[2][2] * B.sh : B.sh, p, b: o, e });
+    }
+  };
+  for (let L = 0; L < B.nl; L++) {
+    for (let j = 0; j < nz; j++) for (const sd of [0, 1]) add((L * nz + j) * (nx + 1) + sd * nx, L, j, sd * (nx - 1), 0, sd, (j + .5) * B.bd);
+    for (let i = 0; i < nx; i++) for (const sd of [0, 1]) add(B.oZ + (L * (nz + 1) + sd * nz) * nx + i, L, sd * (nz - 1), i, 1, sd, (i + .5) * B.bw);
+  }
+  for (const [ax, sd, a, b] of [[0, 0, 0, D], [0, 1, 0, D], [1, 0, 0, W], [1, 1, 0, W]]) for (const [u, dir] of [[a + C.corner, -1], [b - C.corner, 1]]) {   // the corners: lean out round them
+    const ln = sd ? 1 : -1, lx = ax ? u : sd ? W : 0, lz = ax ? (sd ? D : 0) : u, P = bWorld(o, ax ? lx : lx + ln * C.out, 0, ax ? lz + ln * C.out : lz, {}), e = ax ? B.oZ + sd * nz * nx + clamp(Math.floor(u / B.bw), 0, nx - 1) : clamp(Math.floor(u / B.bd), 0, nz - 1) * (nx + 1) + sd * nx;
+    if (!B.kd[e] || S.cbs[B.off + e] === 3 || bldAt(P.x, P.z, .3)) continue;
+    const n = ax ? { x: o.s * ln, z: o.c * ln } : { x: o.c * ln, z: -o.s * ln }, l = ax ? { x: o.c * dir, z: -o.s * dir } : { x: o.s * dir, z: o.c * dir };
+    out.push({ x: P.x, z: P.z, y: hgt(P.x, P.z), l: 0, nx: n.x, nz: n.z, in: false, k: 'wall', h: B.sh, p: bRes(o, e) / ps, b: o, e, lx: l.x, lz: l.z });
+  }
+  return out;
+}
+function covBld(x, z, r, ex, ez, team) {
+  const out = [];
+  for (const o of near(x, z, r + 30)) {
+    if (!o.B || S.os[o.id] > 1 || (team !== undefined && o.B.in.some((n, t) => n > 0 && t !== team))) continue;
+    for (const c of bldCover(o)) {
+      const d = Math.hypot(c.x - x, c.z - z); if (d > r) continue;
+      const fx = ex - c.x, fz = ez - c.z, f = (fx * c.nx + fz * c.nz) / (Math.hypot(fx, fz) || 1);
+      if (c.in ? f < .2 : f > -.2) continue;   // the danger must be before the wall (inside it) or beyond the building (outside it)
+      out.push({ c, s: Math.abs(f) * Math.min(1.5, c.p) * (c.k === 'win' ? 1.25 : c.k === 'door' ? .5 : 1) - d / r * .5 });
+    }
+  }
+  return out.sort((a, b) => b.s - a.s).map(q => q.c);
 }
 /* the ways into a building from the street: every opening of its ground storey, with the point before it and the one behind it */
 function bldEnts(o) {
@@ -32210,9 +32354,27 @@ function fortCam(p) {
    wall, roof, floor, part, foot, rub: colours; rise: how high a gable or a spire stands for its depth; near: the eye's near plane
    indoors; cam: how far short of a wall the eye behind a soldier stops */
 const CLOOK = { tile: 128, lod: 650, chunk: 380, back: .74, rise: [.34, 6.5, 1.3], near: .25, cam: .35,
-  wall: { plaster: [0xd9cfb8, 0xc9b79a, 0xe2d8c8, 0xbfae95], brick: [0xb06a50, 0x9a5f4b, 0xb98466], concrete: [0xb9b6ad, 0xa3a39c, 0xc7c2b5], stone: [0xb0a792, 0xa39a86], metal: [0x7f8a8c, 0x8c8572, 0x6f7a6a] },
-  roof: { ww2: [0x8a4b3a, 0x7a4636, 0x5d4a40], modern: [0x6f6a64, 0x5c5f66, 0x7a4b3d] }, flat: 0x5f5f5c, floor: 0x9a8b74, part: 0xbdb6a6, foot: 0x55524c, rub: .62, step: 0x8a8378 };
-const CMAT = ['plaster', 'brick', 'concrete', 'stone', 'metal'];
+  wall: { plaster: [0xd9cfb8, 0xc9b79a, 0xe2d8c8, 0xbfae95], brick: [0xb06a50, 0x9a5f4b, 0xb98466], concrete: [0xb9b6ad, 0xa3a39c, 0xc7c2b5], stone: [0xb0a792, 0xa39a86], metal: [0x7f8a8c, 0x8c8572, 0x6f7a6a],
+    wood: [0x8a6a4a, 0x7a5d40, 0x94744f, 0x6f6352] },
+  roof: { ww2: [0x8a4b3a, 0x7a4636, 0x5d4a40], modern: [0x6f6a64, 0x5c5f66, 0x7a4b3d] }, flat: 0x5f5f5c, floor: 0x9a8b74, part: 0xbdb6a6, foot: 0x55524c, rub: .62, step: 0x8a8378,
+  /* the look of a place, the same for every house of it (picked by the place, T.burgs): the colours of its plastered and brick walls, of
+     its roofs and of its shutters, by era. A material a region does not name keeps wall's */
+  reg: { ww2: [
+      { wall: { plaster: [0xece6d8, 0xe6dfcd, 0xf0ebe0, 0xe0d6c2] }, roof: [0xa0583d, 0x96503a, 0x8c4a35], shut: [0x4f6b52, 0x5a4636, 0x46607a] },   // whitewash and terracotta
+      { wall: { plaster: [0xd6b37d, 0xccaa74, 0xdcc193, 0xc9a77f], stone: [0xb8a888, 0xa89878] }, roof: [0x8a4b3a, 0x7a4636, 0x93503b], shut: [0x6b4a32, 0x4d5d6b, 0x5b6a3e] },   // ochre and stone
+      { wall: { plaster: [0xc8c2b4, 0xbdb5a5, 0xd2cab8], brick: [0x92503c, 0x83483a, 0x9d5c45] }, roof: [0x4e4c4e, 0x58524f, 0x5f5248], shut: [0x3f4a3e, 0x5d3b2e, 0x3c4654] } ],   // the north: brick and slate
+    modern: [
+      { wall: { plaster: [0xf1ede4, 0xe9e4d6, 0xdfe6e4, 0xeee2cc] }, roof: [0xa4603f, 0x8f5a44, 0x9b5a3e], shut: [0x5f7e8e, 0x4f6b52, 0x8a8f94] },
+      { wall: { plaster: [0xe2c99a, 0xd9b9a0, 0xc9d6c6, 0xe6d3b8, 0xd8c2c9] }, roof: [0x6f6a64, 0x7a4b3d, 0x8a4f3a], shut: [0x5a5f66, 0x7b5a3c, 0xe6e2da] },
+      { wall: { plaster: [0xcfcac0, 0xbdbab2, 0xd6d0c4], brick: [0xa65e47, 0x95553f, 0xb36a4f] }, roof: [0x4a4d52, 0x5c5f66, 0x55504c], shut: [0x3b3f45, 0x6a6e73, 0xdcdcd6] } ] },
+  /* what makes a house more than a box: the inner face of its walls (in: colours, the reveal of an opening darker by rev), the sill under a
+     window (sill: colour, m out, m thick), shutters beside it on a house or a row (shut: the share of them that have them), a plinth along the
+     ground storey (plinth: m high, m out, how much darker), the eaves (eave: m the roof runs past the walls; fascia: m deep), a chimney on a
+     house or a row (chim: m square, m over the ridge), a cornice round a flat roof (corn: m out, m deep). The details from det on (the
+     hangar's graphics: GFXQ), the inner faces and reveals always, drawn with the inside (lod m) */
+  in: [0xe8e2d4, 0xd9d4c6, 0xe3d6c0, 0xcfd6d2], rev: .82, sill: [0xd8d2c4, .14, .1], shut: .55, plinth: [.55, .06, .72], eave: .55, fascia: .2,
+  chim: [.62, .9], corn: [.3, .28], det: 1 };
+const CMAT = ['plaster', 'brick', 'concrete', 'stone', 'metal', '', 'wood'];   // a material's row of the atlas (5: the flat tiles)
 let gCity = null;
 function cityTex() {
   const P = CLOOK.tile, cv = document.createElement('canvas'), g = cv.getContext('2d'); let sd = 7;
@@ -32220,19 +32382,21 @@ function cityTex() {
   cv.width = cv.height = P * 8;
   const box = (c, r, u0, u1, v0, v1) => [c * P + u0 * P, r * P + (1 - v1) * P, (u1 - u0) * P, (v1 - v0) * P];
   const base = (c, r) => {
-    const x = c * P, y = r * P; g.fillStyle = ['#ece8de', '#e9e2da', '#e6e6e2', '#e4e0d6', '#dfe2e2'][r] || '#e8e8e8'; g.fillRect(x, y, P, P);
+    const x = c * P, y = r * P; g.fillStyle = ['#ece8de', '#e9e2da', '#e6e6e2', '#e4e0d6', '#dfe2e2', '', '#e6dccb'][r] || '#e8e8e8'; g.fillRect(x, y, P, P);
     g.strokeStyle = 'rgba(40,30,20,.28)'; g.lineWidth = 1; g.beginPath();
     if (r === 1) for (let k = 0; k < 12; k++) { g.moveTo(x, y + k * P / 12 + .5); g.lineTo(x + P, y + k * P / 12 + .5); for (let q = 0; q < 5; q++) { const bx = x + (q + (k % 2 ? .5 : 0)) * P / 5; g.moveTo(bx, y + k * P / 12); g.lineTo(bx, y + (k + 1) * P / 12); } }
     else if (r === 2) { for (const k of [.02, .5, .98]) { g.moveTo(x, y + k * P); g.lineTo(x + P, y + k * P); } g.moveTo(x + 1, y); g.lineTo(x + 1, y + P); }
     else if (r === 3) for (let k = 0; k < 5; k++) { g.moveTo(x, y + k * P / 5 + .5); g.lineTo(x + P, y + k * P / 5 + .5); for (let q = 0; q < 3; q++) { const bx = x + (q + (k % 2 ? .5 : .1)) * P / 3; g.moveTo(bx, y + k * P / 5); g.lineTo(bx, y + (k + 1) * P / 5); } }
     else if (r === 4) for (let k = 0; k < 16; k++) { g.moveTo(x + k * P / 16 + .5, y); g.lineTo(x + k * P / 16 + .5, y + P); }
+    else if (r === 6) for (let k = 0; k < 9; k++) { const bx = x + k * P / 9 + .5; g.moveTo(bx, y); g.lineTo(bx, y + P); g.moveTo(bx + 1.5, y); g.lineTo(bx + 1.5, y + P); }   // boards
     g.stroke();
+    if (r === 6) for (let k = 0; k < 7; k++) { g.fillStyle = 'rgba(70,48,28,.35)'; g.beginPath(); g.ellipse(x + rnd() * P, y + rnd() * P, 1.5 + rnd() * 2, 2.5 + rnd() * 3, 0, 0, TAU); g.fill(); }   // knots
     for (let k = 0; k < 26; k++) { g.fillStyle = 'rgba(60,50,40,' + (.03 + rnd() * .05) + ')'; g.fillRect(x + rnd() * P, y + rnd() * P, 3 + rnd() * 14, 2 + rnd() * 6); }
     g.fillStyle = 'rgba(40,34,28,.16)'; g.fillRect(x, y + P - 7, P, 7);
   };
   const cut = (c, r, q, frame) => { const b = box(c, r, q[0], q[1], q[2], q[3]); g.fillStyle = frame; g.fillRect(b[0] - 4, b[1] - 4, b[2] + 8, b[3] + (q[2] ? 8 : 4)); g.clearRect(b[0], b[1], b[2], b[3]); return b; };
   const crack = (c, r, n) => { g.strokeStyle = 'rgba(25,20,16,.8)'; g.lineWidth = 1.6; for (let k = 0; k < n; k++) { let x = c * P + P * (.15 + rnd() * .7), y = r * P + P * (.1 + rnd() * .3); g.beginPath(); g.moveTo(x, y); for (let q = 0; q < 6; q++) { x += (rnd() - .5) * 22; y += 6 + rnd() * 12; g.lineTo(x, y); } g.stroke(); } };
-  for (let r = 0; r < 5; r++) {
+  for (const r of [0, 1, 2, 3, 4, 6]) {
     for (let c = 0; c < 7; c++) base(c, r);
     crack(1, r, 4);
     {   // a hole: scorched round its edge, then cut ragged
@@ -32254,10 +32418,14 @@ function cityTex() {
   { const x = 4 * P, y = 5 * P; g.fillStyle = '#d6d2ca'; g.fillRect(x, y, P, P); for (let k = 0; k < 70; k++) { const s = 6 + rnd() * 18; g.fillStyle = 'rgba(' + [60, 110, 150, 200][k % 4] + ',' + [56, 104, 144, 194][k % 4] + ',' + [50, 96, 136, 186][k % 4] + ',.8)'; g.save(); g.translate(x + rnd() * P, y + rnd() * P); g.rotate(rnd() * 3); g.fillRect(-s / 2, -s / 3, s, s * .66); g.restore(); } }
   const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return t;
 }
-/* the tile an element shows: [column, row] of the atlas; 6 5 is nothing */
+/* the tile an element shows: [column, row] of the atlas; 6 5 is nothing. Codes: 0 a wall, 11 the inner face of an outer one (plastered
+   inside masonry), 1 a floor, 2 a roof, 3 rubble, 4 a step, 5 a plain wall, 6 a flat roof, 7 a pillar, 12 a detail in its colour while the
+   element is not holed, 13 while it stands */
 function cityTile(B, e, code) {
-  const s = S.cbs[B.off + e], k = B.kd[e], r = CMAT.indexOf(B.K.mat);
-  if (code === 0) return s === 3 ? [6, 5] : s === 2 ? [2, k > 4 ? 0 : r] : k === 2 ? [s ? 4 : 3, r] : k === 3 || k === 6 ? [5, k > 4 ? 0 : r] : k === 4 ? [6, r] : [s ? 1 : 0, k > 4 ? 0 : r];
+  const s = S.cbs[B.off + e], k = B.kd[e], r0 = CMAT.indexOf(B.K.mat), r = code === 11 && r0 < 4 ? 0 : r0;
+  if (code === 12) return s < 2 ? [7, 5] : [6, 5];
+  if (code === 13) return s < 3 ? [7, 5] : [6, 5];
+  if (code === 0 || code === 11) return s === 3 ? [6, 5] : s === 2 ? [2, k > 4 ? 0 : r] : k === 2 ? [s ? 4 : 3, r] : k === 3 || k === 6 ? [5, k > 4 ? 0 : r] : k === 4 ? [6, r] : [s ? 1 : 0, k > 4 ? 0 : r];
   if (code === 1) return s === 3 ? [6, 5] : [s ? 1 : 0, 5];
   if (code === 2) return s === 3 ? [6, 5] : [2, 5];
   if (code === 3) return s ? [4, 5] : [6, 5];
@@ -32285,36 +32453,89 @@ function cityScene() {
     M.uv.push(...cityUV(e < 0 ? code : cityTile(B, e, code))); M.n += 4;
     if (e >= 0) (fa[B.off + e] || (fa[B.off + e] = [])).push(cur.i * 2 + q, v, code);
   };
-  const tintOf = (hex, k) => new THREE.Color(hex).multiplyScalar(k);
+  const tintOf = (hex, k) => new THREE.Color(hex).multiplyScalar(k), det = gfxLevel() >= C.det;
+  /* a quad of points A B C D (the building's own frame) facing n: its corners are turned round when they face the other way */
+  const fq = (q, e, code, tint, A, Bq, Cq, Dq, n) => {
+    const ux = Bq[0] - A[0], uy = Bq[1] - A[1], uz = Bq[2] - A[2], vx = Cq[0] - A[0], vy = Cq[1] - A[1], vz = Cq[2] - A[2];
+    if ((uy * vz - uz * vy) * n[0] + (uz * vx - ux * vz) * n[1] + (ux * vy - uy * vx) * n[2] < 0) quad(q, e, code, tint, ...Bq, ...A, ...Dq, ...Cq);
+    else quad(q, e, code, tint, ...A, ...Bq, ...Cq, ...Dq);
+  };
+  const regOf = o => { const R = C.reg[S.era] || C.reg.ww2, b = (T.burgs || []).find(b => Math.hypot(o.x - b.x, o.z - b.z) < (b.ru || 60) + 80), h = b ? hash2(Math.round(b.x), Math.round(b.z), 11) : hash2(Math.round(o.x / 300), Math.round(o.z / 300), 11); return R[(h * R.length) | 0]; };
   for (o of H) {
     B = o.B; K = B.K; sh = B.sh; c = o.c; s = o.s;
-    const key = Math.floor(o.x / C.chunk) * 4096 + Math.floor(o.z / C.chunk), nx = B.nx, nz = B.nz, nl = B.nl, bw = B.bw, bd = B.bd, W = nx * bw, D = nz * bd, Ht = nl * sh, pal = C.wall[K.mat];
+    const key = Math.floor(o.x / C.chunk) * 4096 + Math.floor(o.z / C.chunk), nx = B.nx, nz = B.nz, nl = B.nl, bw = B.bw, bd = B.bd, W = nx * bw, D = nz * bd, Ht = nl * sh, rg = regOf(o), pal = rg.wall[K.mat] || C.wall[K.mat], th = B.mat.th;
     cur = chunks.get(key); if (!cur) { cur = [part(), part()]; cur.i = gCity.list.length; gCity.list.push(cur); chunks.set(key, cur); }
     wc = tintOf(pal[(B.tint * pal.length) | 0], .92 + .16 * ((B.tint * 7) % 1));
-    const pc = tintOf(C.part, 1), fc = tintOf(C.floor, K.mat === 'concrete' || K.mat === 'metal' ? .85 : 1), rc = tintOf(K.roof === 'gable' || K.roof === 'spire' ? C.roof[S.era][(B.tint * 3) | 0] : C.flat, 1), ft = tintOf(C.foot, 1), ru = wc.clone().multiplyScalar(C.rub), sc = tintOf(C.step, 1);
+    const tiled = K.roof === 'gable' || K.roof === 'spire', masonry = K.mat !== 'metal' && K.mat !== 'wood', rpal = tiled && masonry ? rg.roof : C.roof[S.era];
+    const pc = tintOf(C.part, 1), fc = tintOf(C.floor, K.mat === 'concrete' || K.mat === 'metal' ? .85 : 1), rc = tintOf(tiled ? rpal[(B.tint * rpal.length) | 0] : C.flat, 1), ft = tintOf(C.foot, 1), ru = wc.clone().multiplyScalar(C.rub), sc = tintOf(C.step, 1);
+    const ic = masonry ? tintOf(C.in[((B.tint * 13) % 1 * C.in.length) | 0], .95) : wc.clone().multiplyScalar(.85), rv = (masonry ? wc : ic).clone().multiplyScalar(C.rev), slc = tintOf(C.sill[0], .95), plc = wc.clone().multiplyScalar(C.plinth[2]);
+    const shut = det && (K === CITY.types.house || K === CITY.types.row) && masonry && (B.tint * 17) % 1 < C.shut, shc = tintOf(rg.shut[((B.tint * 29) % 1 * rg.shut.length) | 0], 1);
+    /* the body of outer wall e of storey Lv, on axis ax (0: the wall x = W or 0, along z; 1: z = D or 0, along x), from u0 to u1 along it:
+       its inner face th within, the reveal of its opening, and from det on the sill and shutters of a window and the plinth */
+    const P = (ax, hi, u, y, d) => ax ? [u, y, hi ? D - d : d] : [hi ? W - d : d, y, u], N = (ax, hi, k) => { const v = (hi ? 1 : -1) * k; return ax ? [0, 0, v] : [v, 0, 0]; }, U = (ax, k) => ax ? [k, 0, 0] : [0, 0, k];
+    const body = (e, ax, hi, u0, u1, y0, y1, Lv) => {
+      const k = B.kd[e], out = N(ax, hi, 1), inn = N(ax, hi, -1);
+      fq(1, e, 11, ic, P(ax, hi, u0, y0, th), P(ax, hi, u1, y0, th), P(ax, hi, u1, y1, th), P(ax, hi, u0, y1, th), inn);
+      const g = k >= 2 && k <= 4 ? CITY.gap[k] : null;
+      if (g) {   // the opening goes through the wall: its jambs, its head and its sill, th deep
+        const a = u0 + g[0] * (u1 - u0), b = u0 + g[1] * (u1 - u0), lo = y0 + g[2] * (y1 - y0), up = y0 + g[3] * (y1 - y0);
+        fq(1, e, 12, rv, P(ax, hi, a, lo, 0), P(ax, hi, a, lo, th), P(ax, hi, a, up, th), P(ax, hi, a, up, 0), U(ax, 1));
+        fq(1, e, 12, rv, P(ax, hi, b, lo, 0), P(ax, hi, b, lo, th), P(ax, hi, b, up, th), P(ax, hi, b, up, 0), U(ax, -1));
+        fq(1, e, 12, rv, P(ax, hi, a, up, 0), P(ax, hi, b, up, 0), P(ax, hi, b, up, th), P(ax, hi, a, up, th), [0, -1, 0]);
+        if (g[2] > 0) fq(1, e, 12, rv, P(ax, hi, a, lo, 0), P(ax, hi, b, lo, 0), P(ax, hi, b, lo, th), P(ax, hi, a, lo, th), [0, 1, 0]);
+        if (det && k === 2) {   // a sill that stands out, and shutters
+          const S0 = C.sill, o1 = -S0[1], w = (b - a) / 2;
+          fq(0, e, 12, slc, P(ax, hi, a - .08, lo, 0), P(ax, hi, b + .08, lo, 0), P(ax, hi, b + .08, lo, o1), P(ax, hi, a - .08, lo, o1), [0, 1, 0]);
+          fq(0, e, 12, slc, P(ax, hi, a - .08, lo - S0[2], o1), P(ax, hi, b + .08, lo - S0[2], o1), P(ax, hi, b + .08, lo, o1), P(ax, hi, a - .08, lo, o1), out);
+          if (shut) for (const [p, q] of [[a - w, a], [b, b + w]]) fq(0, e, 12, shc, P(ax, hi, p, lo, -.04), P(ax, hi, q, lo, -.04), P(ax, hi, q, up, -.04), P(ax, hi, p, up, -.04), out);
+        }
+      }
+      if (det && !Lv && k !== 3 && k !== 4 && masonry) {   // the plinth
+        const ph = C.plinth[0], po = -C.plinth[1];
+        fq(0, e, 12, plc, P(ax, hi, u0, y0, po), P(ax, hi, u1, y0, po), P(ax, hi, u1, y0 + ph, po), P(ax, hi, u0, y0 + ph, po), out);
+        fq(0, e, 12, plc, P(ax, hi, u0, y0 + ph, 0), P(ax, hi, u1, y0 + ph, 0), P(ax, hi, u1, y0 + ph, po), P(ax, hi, u0, y0 + ph, po), [0, 1, 0]);
+      }
+      if (det && Lv === nl - 1 && K.roof === 'flat') {   // the cornice round a flat roof
+        const co = -C.corn[0], cd = C.corn[1];
+        fq(0, e, 13, wc, P(ax, hi, u0, y1, 0), P(ax, hi, u1, y1, 0), P(ax, hi, u1, y1, co), P(ax, hi, u0, y1, co), [0, 1, 0]);
+        fq(0, e, 13, plc, P(ax, hi, u0, y1 - cd, co), P(ax, hi, u1, y1 - cd, co), P(ax, hi, u1, y1, co), P(ax, hi, u0, y1, co), out);
+        fq(0, e, 13, plc, P(ax, hi, u0, y1 - cd, 0), P(ax, hi, u1, y1 - cd, 0), P(ax, hi, u1, y1 - cd, co), P(ax, hi, u0, y1 - cd, co), [0, -1, 0]);
+      }
+    };
     for (let Lv = 0; Lv < nl; Lv++) {
       const y0 = Lv * sh, y1 = y0 + sh;
       for (let j = 0; j < nz; j++) for (let i = 0; i <= nx; i++) {
         const e = (Lv * nz + j) * (nx + 1) + i, x = i * bw, ext = i === 0 || i === nx; if (!B.kd[e]) continue;
         if (i === nx) quad(0, e, 0, wc, x, y0, (j + 1) * bd, x, y0, j * bd, x, y1, j * bd, x, y1, (j + 1) * bd);
         else quad(ext ? 0 : 1, e, 0, ext ? wc : pc, x, y0, j * bd, x, y0, (j + 1) * bd, x, y1, (j + 1) * bd, x, y1, j * bd);
+        if (ext) body(e, 0, i === nx, j * bd, (j + 1) * bd, y0, y1, Lv);
       }
       for (let j = 0; j <= nz; j++) for (let i = 0; i < nx; i++) {
         const e = B.oZ + (Lv * (nz + 1) + j) * nx + i, z = j * bd, ext = j === 0 || j === nz; if (!B.kd[e]) continue;
         if (j === nz) quad(0, e, 0, wc, i * bw, y0, z, (i + 1) * bw, y0, z, (i + 1) * bw, y1, z, i * bw, y1, z);
         else quad(ext ? 0 : 1, e, 0, ext ? wc : pc, (i + 1) * bw, y0, z, i * bw, y0, z, i * bw, y1, z, (i + 1) * bw, y1, z);
+        if (ext) body(e, 1, j === nz, i * bw, (i + 1) * bw, y0, y1, Lv);
       }
     }
-    const rise = K.roof === 'gable' ? Math.min(D * C.rise[0], C.rise[1]) : 0, rh = z => rise * (1 - Math.abs(z - D / 2) / (D / 2));
+    const rise = K.roof === 'gable' ? Math.min(D * C.rise[0], C.rise[1]) : 0, rh = z => rise * (1 - Math.abs(z - D / 2) / (D / 2)), ov = C.eave, fd = C.fascia, fsc = rc.clone().multiplyScalar(.7);
     for (let Lv = 1; Lv <= nl; Lv++) for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
       const e = B.oS + ((Lv - 1) * nz + j) * nx + i, y = Lv * sh, x0 = i * bw, x1 = x0 + bw, z0 = j * bd, z1 = z0 + bd, top = Lv === nl;
       if (B.kd[e]) quad(top && K.roof === 'flat' ? 0 : 1, e, top && K.roof === 'flat' ? 6 : 1, top && K.roof === 'flat' ? rc : fc, x0, y, z0, x0, y, z1, x1, y, z1, x1, y, z0);
       if (!top || !rise) continue;
+      const ex0 = i === 0 ? x0 - ov : x0, ex1 = i === nx - 1 ? x1 + ov : x1;   // the eaves: the roof runs on past the walls
       for (const [a, b] of z0 < D / 2 && z1 > D / 2 ? [[z0, D / 2], [D / 2, z1]] : [[z0, z1]]) {
-        quad(0, e, 2, rc, x0, y + rh(a), a, x0, y + rh(b), b, x1, y + rh(b), b, x1, y + rh(a), a);
+        const ea = a === 0 ? -ov : a, eb = b === D ? D + ov : b;
+        quad(0, e, 2, rc, ex0, y + rh(ea), ea, ex0, y + rh(eb), eb, ex1, y + rh(eb), eb, ex1, y + rh(ea), ea);
         if (i === 0) quad(0, e, 5, wc, 0, y, b, 0, y, a, 0, y + rh(a), a, 0, y + rh(b), b);
         if (i === nx - 1) quad(0, e, 5, wc, W, y, a, W, y, b, W, y + rh(b), b, W, y + rh(a), a);
+        if (det) for (const [z, n] of [[-ov, -1], [D + ov, 1]]) if (z === ea || z === eb) fq(0, e, 13, fsc, [ex0, y + rh(z) - fd, z], [ex1, y + rh(z) - fd, z], [ex1, y + rh(z), z], [ex0, y + rh(z), z], [0, 0, n]);   // the fascia along the eave
       }
+    }
+    if (det && rise && masonry && (K === CITY.types.house || K === CITY.types.row)) {   // a chimney, on the roof of one bay, near the ridge
+      const ci = ((B.tint * 37) % 1 * nx) | 0, zc = D / 2 + (B.tint > .5 ? 1 : -1) * Math.min(1.1, D / 5), jc = clamp(Math.floor(zc / bd), 0, nz - 1), e = B.oS + ((nl - 1) * nz + jc) * nx + ci, h = C.chim[0] / 2, xc = (ci + .5) * bw;
+      const yb = Ht + rh(zc) - .5, yt = Ht + rise + C.chim[1], cc = wc.clone().multiplyScalar(.9);
+      for (const [a, b, p, q, n] of [[-h, -h, h, -h, [0, 0, -1]], [h, -h, h, h, [1, 0, 0]], [h, h, -h, h, [0, 0, 1]], [-h, h, -h, -h, [-1, 0, 0]]]) fq(0, e, 5, cc, [xc + a, yb, zc + b], [xc + p, yb, zc + q], [xc + p, yt, zc + q], [xc + a, yt, zc + b], n);
+      fq(0, e, 13, tintOf(0x3a3632, 1), [xc - h - .05, yt, zc - h - .05], [xc + h + .05, yt, zc - h - .05], [xc + h + .05, yt, zc + h + .05], [xc - h - .05, yt, zc + h + .05], [0, 1, 0]);
     }
     if (K.roof === 'spire') { const e = B.oS + (nl - 1) * nz * nx, ap = W * C.rise[2]; for (const [a, b, p, q] of [[0, 0, W, 0], [W, 0, W, D], [W, D, 0, D], [0, D, 0, 0]]) quad(0, e, 2, rc, p, Ht, q, a, Ht, b, W / 2, Ht + ap, D / 2, W / 2, Ht + ap, D / 2); }
     quad(1, -1, [0, 5], fc, 0, .04, 0, 0, .04, D, W, .04, D, W, .04, 0);

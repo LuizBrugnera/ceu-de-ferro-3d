@@ -35524,7 +35524,14 @@ function updateCamera(dt) {
     const a = S.aim.d, e = eye(p, a), d = seat && !seat.free ? f : a;
     camera.up.set(0, 1, 0);
     if (p.dead) camera.lookAt(p.x, p.y + 3, p.z);
-    else { cp.set(e.x, e.y, e.z); camera.lookAt(cp.x + d.x * 100, cp.y + d.y * 100, cp.z + d.z * 100); camera.fov = seat ? seat.fov[zoomOf(seat)] : 58 + Math.min(14, Math.abs(p.sp || 0) * .5); }
+    else {
+      cp.set(e.x, e.y, e.z); camera.lookAt(cp.x + d.x * 100, cp.y + d.y * 100, cp.z + d.z * 100);
+      const tf = seat ? seat.fov[zoomOf(seat)] : 58 + Math.min(14, Math.abs(p.sp || 0) * .5);
+      if (seat && seat.zs) {   // a car's seat eases its zoom in and out, from the view it was in
+        camSt.fz = camSt.fz ? camSt.fz + (tf - camSt.fz) * (1 - Math.exp(-dt * 9)) : tf; camera.fov = camSt.fz; camSt.sens = camera.fov / 58;
+        if (camSt.zc === 2 && tf - camSt.fz < 3) { camSt.mode = 0; camSt.zc = 0; }
+      } else { camera.fov = tf; camSt.fz = camera.fov; }
+    }
     if (seat) {   // the gun's recoil kicks the sight up; automatic fire and hits rattle it
       const a0 = p.arms[0], a1 = p.arms[1], ts = S.t - a0.t, big = a0.d.k === 'shell' || a0.d.k === 'how', fr = camera.fov / 57.3;
       const j = (S.shake * .012 + (big ? (ts < .3 ? .012 * (1 - ts / .3) : 0) : ts < .1 ? .0035 : 0) + (a1 && S.t - a1.t < .1 ? .003 : 0) + hit * .02) * fr * calm;
@@ -36620,10 +36627,14 @@ const seatsOf = P => (P.man ? (P.def.mort ? ['inf', 'fcm'] : ['inf']) : P.kind =
 function mapKey() { const P = S.my, i = P ? seatsOf(P).indexOf('fcm') + 1 : 0; if (i) camSt.mode = camSt.mode === i ? camSt.back || 0 : ((camSt.back = camSt.mode), i); }
 function curSeat() { const P = S.my; if (!P || S.demo || !camSt.mode) return null; const l = seatsOf(P); return SEAT[l[Math.min(camSt.mode, l.length) - 1]]; }
 const zoomOf = s => Math.min(camSt.zoom, s.fov.length - 1);
-function nextCam() { if (S.my) camSt.mode = (Math.min(camSt.mode, seatsOf(S.my).length) + 1) % (seatsOf(S.my).length + 1); }
+function nextCam() { camSt.zc = 0; if (S.my) camSt.mode = (Math.min(camSt.mode, seatsOf(S.my).length) + 1) % (seatsOf(S.my).length + 1); }
 const HZ = [0, 24, 9, 3.5];   // helicopter sight: field of view per zoom step, 0 = the ordinary view
 const PZ = [0, 30, 14];   // planes: field of view per zoom step, 0 = the ordinary view
-function zoomBy(n) { if (scopeZoom(n)) return; if (S.my && S.my.q && !S.my.heli) { const z = camSt.pz || 0; camSt.pz = n ? clamp(z + n, 0, PZ.length - 1) : (z + 1) % PZ.length; return; } if (S.my && S.my.heli) { const z = camSt.hz || 0; camSt.hz = n ? clamp(z + n, 0, HZ.length - 1) : (z + 1) % HZ.length; return; } const s = curSeat(); if (s && s.fov.length > 1) camSt.zoom = n ? clamp(zoomOf(s) + n, 0, s.fov.length - 1) : (zoomOf(s) + 1) % s.fov.length; }
+function zoomBy(n) { if (scopeZoom(n)) return; if (S.my && S.my.q && !S.my.heli) { const z = camSt.pz || 0; camSt.pz = n ? clamp(z + n, 0, PZ.length - 1) : (z + 1) % PZ.length; return; } if (S.my && S.my.heli) { const z = camSt.hz || 0; camSt.hz = n ? clamp(z + n, 0, HZ.length - 1) : (z + 1) % HZ.length; return; } const P = S.my, l = P && !P.dead && !P.man && P.kind && !S.demo ? seatsOf(P) : null;
+  if (l && l.length === 1 && SEAT[l[0]] && SEAT[l[0]].zs && !camSt.mode) { if (n < 0) return; camSt.mode = 1; camSt.zoom = 1; camSt.zc = 1; return; }   // a car's chase view: into its sight at the first step
+  const s = curSeat(); if (s && s.fov.length > 1) camSt.zoom = n ? clamp(zoomOf(s) + n, 0, s.fov.length - 1) : (zoomOf(s) + 1) % s.fov.length;
+  if (s && s.zs && camSt.zc) camSt.zc = zoomOf(s) ? 1 : 2;   // back out to the plain seat: it eases out, then the chase view (updateCamera)
+}
 
 /* the player's own instruments, by what they are in: sights first, then the panel on the left and the warnings.
    In a seat the sight and the flight path are the seat's own, and its instruments stand in for the panel when they are big enough to read */
@@ -37284,9 +37295,9 @@ function trnUi() {
       spec: a.mag + ' tiros por pente · ' + Math.round(60 / a.rate) + ' tiros/min · luneta de ' + a.zoom.map(z => Math.round(62 / z) + '×').join(' e '),
       arm: a.name + ' · ' + d.arms[1].name + '. ' + (a.am ? 'Calibre .50: fura veículos leves, peça por peça, e os lados e a traseira dos blindados sobre rodas; nada contra tanque.' : 'Mortal contra infantaria; não faz nada em veículo.') };
   };
-  for (const id in TRNS) {   // the first-person seat of each: the gunner's sight of a turret, the eye behind a car's gun, or the driver's
-    const d = TRNS[id], p = d.lay[0]; if (d.seat) continue;
-    SEAT[(d.seat = 'drv_' + id)] = { fov: [72], eye: { t: d.arms[0].dmg ? [d.tx - 1.6, .8, 0] : [p[0] * GS - .2, (p[1] + 1) * GS + 1.5 - d.mh, p[2] * GS] }, body: 1, free: 1, draw() {} };
+  for (const id of Object.getOwnPropertyNames(TRNS)) {   // the first-person seat of each: the gunner's sight of a turret, the eye behind a car's gun, or the driver's
+    const d = TRNS[id], p = d.lay[0], arm = !!d.arms[0].dmg; if (d.seat) continue;
+    SEAT[(d.seat = 'drv_' + id)] = { fov: arm ? DZ.arm : DZ.look, zs: 1, eye: { t: arm ? [d.tx - 1.6, .8, 0] : [p[0] * GS - .2, (p[1] + 1) * GS + 1.5 - d.mh, p[2] * GS] }, body: 1, free: 1, draw: (P, u, ink) => drvZoomTxt(arm, u, ink) };
   }
 }
 function trnRows(k, d, pvp, swapRow) {
@@ -37310,9 +37321,15 @@ function trnRows(k, d, pvp, swapRow) {
   if (SMOKE.n[d.kind]) rows.push(['G', 'Granadas de fumaça, ' + SMOKE.n[d.kind] + ' salvas']);
   rows.push(['T', 'Segure com o veículo parado: a tripulação apaga o fogo e conserta uma peça por vez'], ['I', 'Prioridade do conserto: motor e rodagem primeiro, ou armamento primeiro'], ['C', 'Trocar a visão: externa e ' + (d.t ? 'luneta do atirador' : a0.dmg ? 'atrás da metralhadora' : 'banco do motorista')]);
   if (d.t) rows.push(['Roda do mouse ou R', 'Aproximar e afastar a luneta']);
+  else rows.push(['Roda do mouse ou R', a0.dmg ? 'Zoom da mira da arma, 2× e 4×. Da visão externa entra direto na mira; afastar de volta sai dela' : 'Binóculo do motorista, 6×. Da visão externa entra direto; afastar de volta sai dele']);
   rows.push(swapRow, esc);
   return rows;
 }
+/* the zoom of a car's, a truck's or a technical's seat (drv_): field of view per step, the first the plain seat. arm: behind its gun, the
+   weapon's sight at 2x and 4x (58 / fov, as the tank sights count); look: no gun, the driver's binoculars at 6x. R or the wheel from the
+   chase view goes straight into the seat at the first step, and zooming back out of it returns to the chase view (camSt.zc) */
+const DZ = { arm: [72, 29, 14.5], look: [72, 9.7] };
+function drvZoomTxt(arm, u, ink) { if (camera.fov < 50) txt((arm ? 'MIRA ×' : 'BINÓCULO ×') + Math.round(58 / camera.fov), cw / 2, ch / 2 + 46 * u, 12 * u, ink, 'center'); }
 /* the scope: both zooms are the camera's field of view, and the view wanders with the muzzle (sw), so the centre is where the round goes */
 const scoped = P => !!P && !!P.man && !P.dead && !P.in && !!P.arms[P.w].d.snp && P.ctl.ads;
 function scopeZoom(n) { if (!scoped(S.my)) return false; camSt.sz = n ? clamp((camSt.sz || 0) + n, 0, 1) : 1 - (camSt.sz || 0); return true; }
@@ -38000,7 +38017,7 @@ function launch(again) {
 let seated = null;
 fx.enter = P => {
   const d = P.def.base || P.def;
-  if (d !== seated) { if (P.kind || (seated && seated.arms)) camSt.mode = 0; camSt.zoom = camSt.back = camSt.hy = camSt.hp = 0; seated = d; }
+  if (d !== seated) { if (P.kind || (seated && seated.arms)) camSt.mode = 0; camSt.zoom = camSt.back = camSt.hy = camSt.hp = camSt.zc = 0; seated = d; }
   closeSwap();
   if (S.net) Net.ui.roster(); else $('#tag').textContent = ERAS[S.era].label + ' · ' + d.name;
   if (!S.aim && document.pointerLockElement) document.exitPointerLock();

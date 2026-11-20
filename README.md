@@ -303,7 +303,7 @@ Homem-bomba e carro-bomba: armam 2 s depois de entrar em campo e explodem perto 
 | O | Veículo-rádio: levantar e recolher a antena |
 | E / Q | Transporte: descer, e trocar de assento parado |
 | F | Transporte, ao volante: chamar o pelotão a bordo ou mandar descer |
-| R ou roda do mouse | Zoom da luneta, do rastreador ou do mapa de tiro |
+| R ou roda do mouse | Zoom da luneta, do rastreador ou do mapa de tiro. Carro, caminhão, técnica e antiaérea rebocada: com arma, zoom da mira da arma (2× e 4×); sem arma, binóculo do motorista (6×). Da visão externa entra direto na mira, e afastar de volta sai dela |
 
 **Infantaria.**
 

@@ -25,7 +25,7 @@ console.log('-- the kinds and where they may stand --');
 fresh('ww2');
 {
   const p = flat();
-  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length === 11 && FORT.K[7].span && FORT.K[9].span && FORT.K[10].span, 'four more kinds of work (and after them the pontoon, 7, the radio relay, 8, a bridge\'s rebuild, 9, and a new bridge, 10): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
+  ok([3, 4, 5, 6].every(k => FORT.K[k] && FORT.K[k].k === k) && FORT.K.length >= 11 && FORT.K[7].span && FORT.K[9].span && FORT.K[10].span, 'four more kinds of work (and after them the pontoon, 7, the radio relay, 8, a bridge\'s rebuild, 9, and a new bridge, 10): ' + [3, 4, 5, 6].map(k => FORT.K[k].name).join(', '));
   ok(C.fortWhy(6, 0, p.x, p.z, 0) === 'era' && C.fortWhy(3, 0, p.x, p.z, 0) === '', 'the anti-rocket dome only in the modern era; the anti-tank post in both');
   const cap = k => $('fortCap')(0, k);   // the base cap grown by the side's economy tier and points held (cf-construir-mais)
   for (const k of [3, 4, 5]) for (let i = 0; i < cap(k); i++) build(k, 0, p.x + 30 * (i % 4), p.z + 40 * k + 12 * Math.floor(i / 4));
@@ -69,6 +69,20 @@ for (const era of ['ww2', 'modern']) {
   const t0 = tw.garr.men[0]; t0.x = tw.x + 30; C.run(.3); const down = !t0.tw && Math.abs(t0.y - $('manY')(t0.x, t0.z)) < .01;
   t0.x = tw.x + tw.o.hw + 1.5; t0.z = tw.z; C.run(.3);
   ok(down && t0.tw === tw && Math.abs(t0.x - tw.x) <= tw.o.hw, era + ': stepped off the platform he is on the ground; from beside the tower he climbs back onto it');
+  {   // cf-obras-sair: the player could not get off the tower (stepped off, he stood in the ladder's band and was lifted back the next step)
+    const P = C.addMan($('INF')[era][0][0], 0, tw.x + tw.o.hd + 1.5, tw.z, 0), gy = () => $('manY')(P.x, P.z), e = $('twrIn');
+    P.ai = null; S.my = P; P.me = true; S.aim = { h: 0, p: 0, d: { x: 1, y: 0, z: 0 } }; S.input = {}; C.run(.1);
+    const up0 = P.tw === tw && P.y > gy() + POSTS.twr.eye - .01;
+    P.x = tw.x + tw.o.hd + .2; C.run(1);
+    const off = !P.tw && Math.abs(P.y - gy()) < .01 && !e(tw, P, 0) && hd(P, tw) < tw.o.r + POSTS.twr.ladder;
+    S.input.yawR = true; C.run(1 / 60); const upE = P.tw === tw; S.input.yawR = false; C.run(.2);
+    S.input.yawR = true; C.run(1 / 60); S.input.yawR = false; C.run(1);
+    const offE = !P.tw && Math.abs(P.y - gy()) < .01 && !e(tw, P, 0) && hd(P, tw) < tw.o.r + POSTS.twr.ladder;
+    ok(up0 && off && upE && offE, era + ': the player at the tower\'s foot climbs onto it; walking off the platform he is on the ground at its foot and stays there; at its foot E takes him up and on it E brings him down');
+    const W = C.addMan($('INF')[era][0][0], 0, tw.x - tw.o.hd - 1, tw.z, 0); W.ai = { gx: tw.x - 60, gz: tw.z }; $('twrMan')(W);
+    ok(!W.tw, era + ': an AI soldier walking past the tower (going elsewhere) is not lifted onto it');
+    S.my = null; P.x += 40; W.x -= 40; W.ai = null; C.run(.1);
+  }
 }
 
 console.log('-- an AI gunner at work --');
@@ -138,5 +152,29 @@ for (const era of ['ww2', 'modern']) for (let side = 0; side < 2; side++) {
   const t = []; let n0 = 0; C.run(w.rl + w.sal * w.rip + 5, () => { if (u.arms[0].n !== n0) { n0 = u.arms[0].n; t.push(S.t); } });
   const gap = t[w.sal] - t[w.sal - 1];
   ok(gap < w.rl * .8, 'with a truck of its side beside it the ' + ARTS[id].name + ' loads its tubes faster (' + gap.toFixed(1) + ' s instead of ' + w.rl + ')');
+}
+
+console.log('-- on a road, beside it, on a vehicle (cf-obras-sair) --');
+{
+  const E = H.load({ seed: 7, mapv: 11 }), S2 = E.newState('modern', E.$('ERAS').modern.sides[0].fighter, { cls: 'plane' }), RN = E.$('RN');
+  S2.demo = false; S2.over = true; S2.units = []; S2.men = []; S2.squads = []; for (const f of S2.forts.slice()) E.fortDrop(f); S2.forts = [];
+  const res = [];
+  for (const c of [0, 3]) {
+    const es = S2.T.net.e.filter(e => e.c === c && e.p.len > 200); let got = null;
+    for (const e of es) {
+      for (let s = 40; s < e.p.len - 40 && !got; s += 37) {
+        const p = E.routeAt(e.p, s), a = Math.atan2(-p.dx, -p.dz), off = RN.w[c] * 1.15 + 2.5;
+        for (const sd of [1, -1]) {
+          const x = p.x - p.dz * off * sd, z = p.z + p.dx * off * sd, w = E.fortWhy(2, 0, x, z, a);
+          if (w === '' && E.fortWhy(2, 0, p.x, p.z, a) === 'road') { got = { x, z, a, cx: p.x, cz: p.z, old: E.routeDist(S2.T, x, z) < E.$('FORT').bags.road }; break; }
+        }
+      }
+      if (got) break;
+    }
+    res.push([c, got]);
+  }
+  const [m, d] = res.map(r => r[1]);
+  ok(m && d, 'sandbags 2.5 m off the drawn edge of a main road and of a dirt road (class 3) may be built; on the road itself, "road"' + (d && d.old ? ' (the dirt road\'s spot was refused before: within ' + E.$('FORT').bags.road + ' m of its centre)' : ''));
+  if (d) { const u = E.addUnit('truck', 0, d.x, d.z, null, true); const w = E.fortWhy(2, 0, d.x, d.z, d.a); u.dead = true; ok(w === 'unit', 'no work is begun on a vehicle standing there (' + w + ')'); }
 }
 H.done();

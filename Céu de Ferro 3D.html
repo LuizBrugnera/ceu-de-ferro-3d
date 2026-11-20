@@ -36411,37 +36411,44 @@ function azInd(x, y, r, P, ink, acc) {
   hx.beginPath(); hx.moveTo(-r * .2, -r * .8); hx.lineTo(0, -r * 1.02); hx.lineTo(r * .2, -r * .8); hx.stroke(); hx.restore();
   hx.strokeStyle = acc; hx.lineWidth = 2; hx.beginPath(); hx.arc(x, y, r * .3, 0, TAU); hx.moveTo(x, y - r * .3); hx.lineTo(x, y - r * 1.15); hx.stroke();
 }
-function fpGunner(P, u, ink, acc) {
-  const cx = cw / 2, cy = ch / 2, R = opticR(), a0 = P.arms[0], w = ldW(a0), ts = S.t - a0.t, F = ch / (2 * Math.tan(camera.fov * Math.PI / 360)), col = S.modern ? '#ff6a3d' : 'rgba(8,9,9,.92)';
+/* ---------- the reticles' look (cf-miras-impl) ----------
+   retLit(): how much the sight's own lamp is needed, 0 by day to 1 at night or in a thick fog (S.sky.L, S.wx.f). The real optics had it: a
+   dark engraved reticle that a lamp lights amber (1944) or red (today). retCol(a, k): the reticle's colour at that light; retStroke(col, w, k)
+   strokes the current path over a halo, pale by day and the lamp's glow at night, so a black line still reads on dark ground */
+const retLit = () => { const K = S.sky, W = S.wx; if (!K) return 0; return clamp(Math.max((.55 - K.L) / .4, W ? (W.f - .3) / .5 : 0), 0, 1); };
+const RETD = [8, 9, 9], RETL = { ww2: [255, 176, 72], modern: [255, 70, 50] };
+function retCol(a, k) { k = k === undefined ? retLit() : k; const L = RETL[S.modern ? 'modern' : 'ww2']; return 'rgba(' + RETD.map((v, i) => Math.round(v + (L[i] - v) * k)).join(',') + ',' + (a === undefined ? .92 : a) + ')'; }
+function retStroke(col, w, k) {
+  const lw = w || 1.5; k = k === undefined ? retLit() : k;
+  hx.save(); hx.strokeStyle = k > .5 ? (S.modern ? 'rgba(255,60,40,' : 'rgba(255,150,40,') + (.32 * k).toFixed(2) + ')' : 'rgba(228,224,206,' + (.45 * (1 - k)).toFixed(2) + ')'; hx.lineWidth = lw + 2.6; hx.stroke(); hx.restore();
+  hx.strokeStyle = col; hx.lineWidth = lw; hx.stroke();
+}
+function fpGunner(P, u, ink, acc) {   // cf-miras-impl: the optic's own reticle and no words in it; the round's state is the ring round the glass
+  const cx = cw / 2, cy = ch / 2, R = opticR(), a0 = P.arms[0], w = ldW(a0), ts = S.t - a0.t, F = ch / (2 * Math.tan(camera.fov * Math.PI / 360)), lit = retLit(), col = S.modern ? '#ff6a3d' : retCol(.92, lit);
   const mil = F * .5 * GR / (w.spd * w.spd), k = clamp(1 - a0.cool / w.rl, 0, 1); let st = 500; while (mil * st < 7 * u) st *= 2;
   if (ts < 1.2) { hx.globalAlpha = .85 * (1 - ts / 1.2) * (1 - ts / 1.2); hx.fillStyle = '#b9b09a'; hx.beginPath(); hx.arc(cx, cy, R, 0, TAU); hx.fill(); hx.globalAlpha = 1; }   // muzzle smoke
   hx.strokeStyle = hx.fillStyle = col; hx.lineWidth = 1.5; hx.beginPath();
-  if (S.modern) {   // crosshair on the bore, with the fall of the round marked every st metres
+  if (S.modern) {   // the thermal sight's cross with an open centre, the fall of the round marked every st metres, and where it falls at the laser's range: a small circle
     for (const [i, j] of DIR4) { hx.moveTo(cx + i * R * .06, cy + j * R * .06); hx.lineTo(cx + i * R * .3, cy + j * R * .3); }
     for (let r = st; r <= 4000 && mil * r < R * .8; r += st) { const y = cy + mil * r, l = (r / st) % 2 ? 7 * u : 14 * u; hx.moveTo(cx - l, y); hx.lineTo(cx + l, y); }
     hx.stroke(); hx.lineWidth = 3.5; hx.beginPath();
     for (const [i, j] of DIR4) { hx.moveTo(cx + i * R * .34, cy + j * R * .34); hx.lineTo(cx + i * R * .94, cy + j * R * .94); }
     hx.stroke();
-    for (let r = st * 2; r <= 4000 && mil * r < R * .8; r += st * 2) txt(String(r / 100), cx + 18 * u, cy + mil * r - 5 * u, 10 * u, col);
-  } else {   // triangle on the bore, stadia triangles 4 mils apart, and a range scale beside them
+    if (S.aimR && mil * S.aimR < R * .8) { const y = cy + mil * S.aimR, r = 4.5 * u; hx.lineWidth = 1.6; hx.beginPath(); hx.arc(cx, y, r, 0, TAU); hx.stroke(); }
+  } else {   // TZF: the aiming triangle on the bore, the stadia triangles 4 mils apart, and the range scale beside them (engraved, no figures)
     const s = Math.max(F * .004, 9 * u);
     hx.moveTo(cx, cy); hx.lineTo(cx - s * .55, cy + s); hx.lineTo(cx + s * .55, cy + s); hx.closePath();
     for (let i = 1; i <= 3; i++) for (const sg of LRS) { const x = cx + sg * i * s * 1.6; hx.moveTo(x, cy); hx.lineTo(x - s * .28, cy + s * .5); hx.lineTo(x + s * .28, cy + s * .5); hx.closePath(); }
-    hx.fill(); hx.beginPath();
+    retStroke(col, 1, lit); hx.fill(); hx.beginPath();
     for (const sg of LRS) { hx.moveTo(cx + sg * s * 6.2, cy); hx.lineTo(cx + sg * R * .9, cy); }
     hx.moveTo(cx - s * 6.2, cy); hx.lineTo(cx - s * 6.2, cy + Math.min(R * .8, mil * 3000));
     for (let r = st; r <= 3000 && mil * r < R * .8; r += st) { const y = cy + mil * r; hx.moveTo(cx - s * 6.2, y); hx.lineTo(cx - s * 6.2 - ((r / st) % 2 ? 6 : 12) * u, y); }
-    hx.stroke();
-    for (let r = st * 2; r <= 3000 && mil * r < R * .8; r += st * 2) txt(String(r / 100), cx - s * 6.2 - 16 * u, cy + mil * r - 5 * u, 10 * u, col, 'right');
+    retStroke(col, 1.5, lit);
   }
   hx.fillStyle = '#040505'; hx.beginPath(); hx.rect(0, 0, cw, ch); hx.arc(cx, cy, R, 0, TAU, true); hx.fill();
   hx.strokeStyle = 'rgba(0,0,0,.5)'; hx.lineWidth = R * .05; hx.beginPath(); hx.arc(cx, cy, R * .975, 0, TAU); hx.stroke();
   hx.strokeStyle = 'rgba(0,0,0,.22)'; hx.beginPath(); hx.arc(cx, cy, R * .93, 0, TAU); hx.stroke();
-  hx.strokeStyle = k < 1 ? ink : acc; hx.lineWidth = 3 * u; hx.beginPath(); hx.arc(cx, cy, R + 5 * u, -Math.PI / 2, -Math.PI / 2 + TAU * k); hx.stroke();
-  txt(a0.ammo <= 0 ? 'SEM MUNIÇÃO' : k < 1 ? 'CARREGANDO' : 'PRONTO', cx, cy + R * .7, 12 * u, k < 1 ? ink : acc, 'center');
-  if (a0.d.hv) txt(shTxt(a0), cx, cy + R * .7 + (S.modern ? 30 : 15) * u, 12 * u, shN(a0, a0.ld | 0) > 0 ? acc : FOE, 'center');
-  if (S.modern) txt(S.aimR ? 'DIST ' + Math.round(S.aimR) + ' m' : 'DIST ----', cx, cy + R * .7 + 15 * u, 12 * u, col, 'center');
-  txt('×' + Math.round(58 / camera.fov), cx + R * .52, cy - R * .72, 12 * u, S.modern ? col : ink, 'center');
+  hx.strokeStyle = a0.ammo <= 0 ? FOE : k < 1 ? ink : acc; hx.lineWidth = 3 * u; hx.beginPath(); hx.arc(cx, cy, R + 5 * u, -Math.PI / 2, -Math.PI / 2 + TAU * (a0.ammo <= 0 ? 1 : k)); hx.stroke();   // loading, ready, or red when empty
   azInd(18 + 30 * u, ch - 22 - 34 * u, 28 * u, P, ink, acc);
 }
 function fpCmd(P, u, ink, acc) {
@@ -36462,11 +36469,11 @@ function fpRing(P, u, ink) {
   for (let v = 200; v <= 600; v += 200) { const r = k * Math.tan(v / 3.6 / w.spd); hx.moveTo(cx + r, cy); hx.arc(cx, cy, r, 0, TAU); }
   for (const [a, b] of CORN) { hx.moveTo(cx + a * r0 * .707, cy + b * r0 * .707); hx.lineTo(cx + a * r2 * .707, cy + b * r2 * .707); }
   hx.moveTo(cx, cy + r2); hx.lineTo(cx, ch + 20);
-  hx.strokeStyle = '#141616'; hx.lineWidth = 4 * u; hx.stroke(); hx.strokeStyle = 'rgba(205,210,198,.4)'; hx.lineWidth = 1; hx.stroke();
-  for (let v = 200; v <= 600; v += 200) txt(String(v), cx + k * Math.tan(v / 3.6 / w.spd) * .707 + 5 * u, cy - k * Math.tan(v / 3.6 / w.spd) * .707 - 13 * u, 10 * u, ink);
+  const lit = retLit();   // cf-miras-impl: the rings' rim catches the light (luminous paint at night) and carries no figures
+  hx.strokeStyle = '#141616'; hx.lineWidth = 4 * u; hx.stroke(); hx.strokeStyle = lit > .3 ? 'rgba(255,186,90,' + (.45 + .4 * lit).toFixed(2) + ')' : 'rgba(214,218,204,.75)'; hx.lineWidth = 1.2; hx.stroke();
   if (fpPt(1.7, 0, 0)) {
     const bx = sx, by = sy;
-    hx.fillStyle = '#141616'; hx.beginPath(); hx.arc(bx, by, 3.2 * u, 0, TAU); hx.fill();
+    hx.fillStyle = '#141616'; hx.beginPath(); hx.arc(bx, by, 3.2 * u, 0, TAU); hx.fill(); hx.strokeStyle = lit > .3 ? 'rgba(255,186,90,.8)' : 'rgba(214,218,204,.6)'; hx.lineWidth = 1; hx.stroke();
     if (fpPt(1.7, -.3, 0)) { hx.strokeStyle = '#141616'; hx.lineWidth = 2.4 * u; hx.beginPath(); hx.moveTo(bx, by); hx.lineTo(sx, sy); hx.stroke(); }
   }
 }
@@ -37362,24 +37369,27 @@ function trnSight(P, u, ink, acc, disp, blink) {
     txt('E DESEMBARCAR' + (S.net ? '' : ' · Q TROCAR DE ASSENTO (PARADO)'), x, ch - 46 * u, 11 * u, ink, 'center');
   } else if (S.near) txt('E EMBARCAR: ' + S.near.name, x, ch * .7, 12 * u, acc, 'center');
   if (!scoped(P) || !(camSt.ak > .5) || !w.zoom) return;
-  const R = Math.min(cw, ch) * .46, F = ch / (2 * Math.tan(camera.fov * Math.PI / 360)), W = P.sw, col = S.modern ? 'rgba(10,12,12,.95)' : 'rgba(6,7,7,.95)', H = SNIPE.hold;
+  const R = Math.min(cw, ch) * .46, F = ch / (2 * Math.tan(camera.fov * Math.PI / 360)), W = P.sw, H = SNIPE.hold;
   hx.clearRect(0, 0, cw, ch);
   hx.fillStyle = '#030404'; hx.beginPath(); hx.rect(0, 0, cw, ch); hx.arc(x, y, R, 0, TAU, true); hx.fill('evenodd');
   const gr = hx.createRadialGradient(x, y, R * .72, x, y, R); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.75)'); hx.fillStyle = gr; hx.beginPath(); hx.arc(x, y, R, 0, TAU); hx.fill();
-  hx.strokeStyle = hx.fillStyle = col; hx.lineCap = 'butt'; hx.lineWidth = 1.2; hx.beginPath();
-  if (S.modern) { hx.moveTo(x - R, y); hx.lineTo(x - 6, y); hx.moveTo(x + 6, y); hx.lineTo(x + R, y); hx.moveTo(x, y - R); hx.lineTo(x, y - 6); hx.moveTo(x, y + 6); hx.lineTo(x, y + R); }
-  else { hx.moveTo(x - R, y); hx.lineTo(x - R * .12, y); hx.moveTo(x + R * .12, y); hx.lineTo(x + R, y); hx.moveTo(x, y + R); hx.lineTo(x, y + 2); hx.lineTo(x - 5, y + 16); hx.moveTo(x, y + 2); hx.lineTo(x + 5, y + 16); }
-  hx.stroke();
-  if (!S.modern) { hx.lineWidth = 5; hx.beginPath(); hx.moveTo(x - R, y); hx.lineTo(x - R * .3, y); hx.moveTo(x + R * .3, y); hx.lineTo(x + R, y); hx.moveTo(x, y + R); hx.lineTo(x, y + R * .3); hx.stroke(); }
-  hx.lineWidth = 1.2;
-  for (let r = 200; r <= 1000; r += 200) {   // where a round aimed at the centre is at r metres: aim that mark at a target that far
-    const dy = F * Math.tan(.5 * GR * r / (w.spd * w.spd)); if (dy > R * .92) break;
-    hx.beginPath(); hx.moveTo(x - (r % 400 ? 5 : 9), y + dy); hx.lineTo(x + (r % 400 ? 5 : 9), y + dy); hx.stroke();
-    txt(String(r / 100), x + 13, y + dy - 5 * u, 10 * u, col);
+  /* cf-miras-impl, rifles B: a fine cross with the fall of the round marked under the centre every 200 m and no figures (1944, lit amber at
+     night); a duplex today, thick posts outside and a fine cross inside, the holds as dots, and a red centre lit at night */
+  const lit = retLit(), rc = retCol(.95, lit);
+  hx.lineCap = 'butt'; hx.beginPath();
+  hx.moveTo(x - R, y); hx.lineTo(x + R, y); hx.moveTo(x, y - R); hx.lineTo(x, y + R);
+  retStroke(rc, S.modern ? 1 : .9, lit);
+  if (S.modern) { hx.beginPath(); for (const [i, j] of DIR4) { hx.moveTo(x + i * R, y + j * R); hx.lineTo(x + i * R * .32, y + j * R * .32); } retStroke(rc, 4.5, lit); }
+  const drop = [];
+  for (let r = 200; r <= 1000; r += 200) { const dy = F * Math.tan(.5 * GR * r / (w.spd * w.spd)); if (dy > R * (S.modern ? .3 : .92)) break; drop.push([r, dy]); }
+  hx.beginPath();
+  for (const [r, dy] of drop) {
+    if (S.modern) { hx.moveTo(x + 2.2, y + dy); hx.arc(x, y + dy, 2.2, 0, TAU); }
+    else { const l = r % 400 ? 5 : 9; hx.moveTo(x - l, y + dy); hx.lineTo(x + l, y + dy); }
   }
-  const a = S.aim.d, e = manEye(P), rng = S.modern ? rayAim(e, a, 2500) : 0, k = W ? W.br / H.t : 1, out = W && S.t < W.out;
-  txt(Math.round(62 / camera.fov) + '×', x - R * .68, y + R * .6, 12 * u, ink, 'center');
-  if (rng) txt(Math.round(rng) + ' m', x + R * .68, y + R * .6, 12 * u, ink, 'center');
+  retStroke(rc, 1.2, lit);
+  if (S.modern && lit > .2) { hx.fillStyle = 'rgba(255,50,35,' + (.5 + .5 * lit).toFixed(2) + ')'; hx.beginPath(); hx.arc(x, y, 1.8, 0, TAU); hx.fill(); }
+  const k = W ? W.br / H.t : 1, out = W && S.t < W.out;
   bar(x - 60 * u, y + R * .8, 120 * u, 5 * u, k, out ? FOE : W && W.hb ? acc : ink);
   txt(out ? 'SEM FÔLEGO' : W && W.hb ? 'FÔLEGO PRESO' : 'SHIFT: PRENDER O FÔLEGO', x, y + R * .8 - 14 * u, 10 * u, out ? FOE : ink, 'center');
 }

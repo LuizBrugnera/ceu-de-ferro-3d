@@ -15,7 +15,7 @@ O P0 (contrato) e o P3 (líder) ainda não estão no main. Por isso uso os nomes
 Ganchos no código antigo:
 
 - `orgSlot` é embrulhado: com `MV.on`, o lugar do homem em movimento vem de `mvSlot`.
-- `squadThink` é embrulhado: avisa o ANA quando a técnica muda e faz o líder de cada equipe falar nos lances.
+- `squadThink` é embrulhado (por fora do embrulho dos túneis, #128; esquadra no subsolo, `q.tn`, fica de fora): avisa o ANA quando a técnica muda e faz o líder de cada equipe falar nos lances.
 - `setOrd` é embrulhado: a viagem para outro eixo (`O.trp`) é refeita pela ocultação.
 - Uma linha dentro do custo de célula do `ugPoly`: `v *= mvWayK(...)`.
 
@@ -79,6 +79,7 @@ Pelo harness (`load({ mapv: 10, seed: 7 })`, `watch`, 60 s com dt de 0,1 s). Os 
   - o custo extra da crista e do aberto deixa os caminhos do comandante (`O.wp`) e os escondidos longos demais. O `ugPoly` ainda corta em 1,5× o caminho dado;
   - as equipes do `q.eq` (P0) casam com o índice `A.i` do `slot` quando o P0 chegar;
   - `MV.pos` (P2) é o nome que o cf-p2-posicao vai usar. Ele precisa registrar a função ali.
+  - o abrigo das trincheiras (#128, `ABRT` no formato do P2 e `shelters(m, r, o)`): o `cvPick` já lê trincheiras e sacos pelo `fortSlots`. Ainda não lê os pontos do registro `ABRT` direto. Quando o P2 chegar, o `MV.pos` deve passar por esse registro.
 
 ## Riscos
 

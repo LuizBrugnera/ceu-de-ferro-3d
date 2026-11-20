@@ -8750,13 +8750,13 @@ function notice(a, t) {
     if ((a.ai.tgt || a.tgt) === t) off = Math.min(off, PERC.focus);   // what it is fighting it keeps its eyes on
     const oi = oc === 'man' && !(a.arms && a.arms[1] && a.arms[1].d.k === 'sam') ? -1 : LADDER.opt[oc];   // the optic, for the model
     const dark = S.sky && S.sky.on, lt = dark ? skyLit(t) : 1;   // the night and the weather take their share of each sensor (SKY), for every rung of the ladder
-    VIEW[oc].forEach((v, i) => {
-      const R = air ? v[1] : v[0]; if (!R) return;
+    for (let i = 0, VV = VIEW[oc]; i < VV.length; i++) {   // a loop, not forEach: no closure a call (cf-lag-2)
+      const v = VV[i], R = air ? v[1] : v[0]; if (!R) continue;
       const sk = dark ? skySee(a, t, oc, i, d, lt) : 1, fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw) * sk, q = v[4] * fa * R / d * sk;
       if (r > best) best = r;
       if (q > qa) qa = q;
       if (i === oi && q > qo) qo = q;
-    });
+    }
     if (best > .01 && !hid(a, t)) {
       const cv = t.man ? cover(t) : null, look = (t.man ? STANCE[t.st].vis * (1 - (cv.all || t.st ? cv.c : 0)) : !air && kindAt(t.x, t.z) === 1 ? PERC.woods : 1)
         * (!air && (oc === 'plane' || oc === 'heli') && -dy / hd > PERC.low[0] ? PERC.low[1] : 1);
@@ -8782,14 +8782,16 @@ function notice(a, t) {
   else if (e.kn && e.v < PERC.lose) e.kn = e.told = false;
   if (!e.kn) e.rc = e.ic = 0;
   else {   // the ladder: the class, then the model, while it is in sight
-    const L = LADDER, vk = vetK(a, 'id'), f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * vk * dt;   // a veteran makes out faster (VET)
+    const L = LADDER, vk = vetK(a, 'id');   // a veteran makes out faster (VET)
     if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]) * vetK(a, 'react'); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); e.mis = qr(0, 1) < L.mis; }
-    if (sr > 0) { e.rc = Math.min(1, e.rc + f(qa * L.rec)); e.ic = Math.min(1, e.ic + f(Math.max(qa, qo * L.optF) * L.id)); if (e.ic >= 1) e.rc = 1; }
+    if (sr > 0) { e.rc = Math.min(1, e.rc + ladK(qa * L.rec, vk, dt)); e.ic = Math.min(1, e.ic + ladK(Math.max(qa, qo * L.optF) * L.id, vk, dt)); if (e.ic >= 1) e.rc = 1; }
     if (e.rc < 1 && !(a.ai.tgt || a.tgt) && (!a.ln || S.t - a.ln.t > HEAR.ln * .5)) a.ln = { x: t.x + e.ex, z: t.z + e.ez, t: S.t, of: t };   // something there: it looks
   }
   if (e.kn && !e.told && sr > .15) claim(a, t);
   return e.kn;
 }
+/* the ladder's step for a sighting of strength x (notice; a function of its own, not a closure a call: cf-lag-2) */
+const ladK = (x, vk, dt) => Math.min(LADDER.cap, Math.pow(x, LADDER.pw)) * LADDER.rate * vk * dt;
 /* how far up the ladder the AI a has t: 0 not known, 1 detected (or not yet reacted to), 2 recognized (its class), 3 identified (model and side).
    A player, a drone, or what is not a soldier, vehicle or aircraft is always 3 */
 function grade(a, t) {

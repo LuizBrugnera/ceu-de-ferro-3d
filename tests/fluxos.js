@@ -7,9 +7,9 @@ const html = fs.readFileSync(H.PAGE, 'utf8');
 
 console.log('-- the page carries its icon: no /favicon.ico asked of the server --');
 {
-  const head = html.slice(0, html.indexOf('<style>', html.indexOf('<title>')));
+  const head = html.slice(html.indexOf('<head>'), html.indexOf('</head>'));
   const m = head.match(/<link rel="icon" href="([^"]+)">/);
-  ok(!!m, 'a <link rel="icon"> before the page\'s styles');
+  ok(!!m, 'a <link rel="icon"> inside <head> (Chrome reads the icon only there: one in the body still asked for /favicon.ico)');
   ok(!!m && m[1].startsWith('data:image/svg+xml,') && /%3Csvg[^"]*%3C\/svg%3E$/.test(m[1]), 'the icon is an inline SVG (data: URI), not a file the server would have to serve');
 }
 done();

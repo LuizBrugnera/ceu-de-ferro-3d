@@ -7892,7 +7892,7 @@ function fireGun(p) {
   const g = p.def.gun, f = p.f, s = p.ai ? .012 : .004, L = p.def.len * .5;
   const dx = f.x + rand(-s, s), dy = f.y + rand(-s, s), dz = f.z + rand(-s, s);
   p.gcool = g.rate; p.ammo--; p.shotT = S.t;
-  S.bullets.push({ x: p.x + f.x * L, y: p.y + f.y * L, z: p.z + f.z * L, vx: p.v.x + dx * g.spd, vy: p.v.y + dy * g.spd, vz: p.v.z + dz * g.spd, life: g.life || 1.5, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: p.def.prop ? 0 : 1, fr: g.fr });
+  S.bullets.push({ x: p.x + f.x * L, y: p.y + f.y * L, z: p.z + f.z * L, vx: p.v.x + dx * g.spd, vy: p.v.y + dy * g.spd, vz: p.v.z + dz * g.spd, life: g.life || 1.5, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: p.def.prop ? 0 : 1, fr: g.fr, cal: calOf(g) });
   fx.shot(p === S.my, p);
 }
 /* see: the lock needs the seeker's line (seekLine, smoke included); see 2: a radar's, the ground and what hides only. LOCK.blk: see above */
@@ -8221,11 +8221,52 @@ function lockMsl(p, u, w, own) {
   }
   return best;
 }
-/* a missile is stopped, by whoever owns the interceptor: gone here, and for everyone through its id */
-function intercept(m, by) {
-  m.gone = true; blastFx(m.x, m.y, m.z, 16);
-  if (by.me) S.floats.push({ x: m.x, y: m.y + 6, z: m.z, text: 'míssil interceptado', life: 2 });
-  if (S.net && m.mid) Net.mkill(m);
+/* shooting a missile down by gunfire (cf-intercepta-missil; NOT TESTED, see docs/nao-testado/cf-intercepta-missil.md). Only a round of cal mm
+   or more counts (the .50 up: Kord, DShK, KPV, 20-30 mm cannon, ZU-23, CIWS); a rifle's does nothing. A round that passes within r m of a
+   missile of the other side in flight (am m for a gun made for it, the CIWS) strikes it for dmg of its hp ([from cal mm, so much], am rounds
+   amk times that) and is spent. hp by what the missile is: at an anti-tank one (Javelin, TOW, Kornet, Hellfire, Ataka, any from the ground or
+   a helicopter), agm a plane's air-to-ground one, bomb a guided bomb, air a missile for aircraft (AAM, SAM). At 0 it bursts where it is, its
+   warhead's dmg times boom over its r. Online the host decides (a guest's copy of the round only sparks) and tells everyone (Net.mkill).
+   ai: an AI crew with such a gun turns it on a missile it sees (sees: in its line, not hidden) coming at it within see m, cone the cosine
+   of its heading on the crew, an AA gun also on one coming at a friend within guard m; after react s, between gun[0] and gun[1] m, with its
+   spread sp rad over the gun's and a lead off by up to err rad, firing only on aim (tol rad). So it is a chance, not a sure kill */
+const MINT = { cal: 12.7, r: 1, hp: { at: 8, agm: 12, bomb: 20, air: 6 }, dmg: [[12.7, 1], [14.5, 1.5], [20, 3], [23, 3.5], [30, 5]], amk: 1.6, boom: .6,
+  ai: { see: 1500, cone: .94, guard: 400, react: [.4, 1.1], gun: [120, 1100], sp: .006, err: .004, tol: .03 } };
+/* the calibre of a gun, mm, from its name (0: a rifle's, or one that does not say), kept on the arm */
+function calOf(w) {
+  if (!w) return 0;
+  if (w.cal !== undefined) return w.cal;
+  const n = w.name || '', num = r => parseFloat(r[1].replace(',', '.'));
+  let c = 0, r;
+  if (/foguete|casulo/i.test(n)) c = 0;   // a pod of unguided rockets is no gun
+  else if (/\.50|12[,.]7/.test(n)) c = 12.7;
+  else if (/14[,.]5|KPV/.test(n)) c = 14.5;
+  else if ((r = /(\d+(?:[,.]\d+)?)\s*cm\b/.exec(n))) c = num(r) * 10;
+  else if ((r = /(\d+(?:[,.]\d+)?)\s*mm\b/.exec(n))) c = num(r);
+  else if (/GAU-8|GSh-30|2A42|2A38|Mk ?44|M230/.test(n)) c = 30;
+  else if (/ZU-23|AZP-23|GSh-23/.test(n)) c = 23;
+  else if (/M61|Vulcan|MG ?151|Hispano|Flakvierling/.test(n)) c = 20;
+  else if ((r = /\b(\d{1,2}[,.]\d{1,2})\b/.exec(n))) c = num(r);
+  else if (w.am) c = 30;
+  return (w.cal = c);
+}
+const mintHp = m => MINT.hp[m.bomb ? 'bomb' : !m.gnd ? 'air' : m.by && m.by.q && !m.by.heli ? 'agm' : 'at'];
+function mintDmg(b) { let k = 0; for (const q of MINT.dmg) if (b.cal >= q[0]) k = q[1]; return b.am ? k * MINT.amk : k; }
+/* the round b strikes missile m: here it only sparks unless this copy decides (solo, or the host); at no hp left it is shot down */
+function mintHit(m, b) {
+  puff(m.x, m.y, m.z, 'spark', 1);
+  if (S.net && !S.host) return;
+  if (m.hp === undefined) m.hp = mintHp(m);
+  if ((m.hp -= mintDmg(b)) <= 0) intercept(m, b.by, true);
+}
+/* where a missile shot down bursts: its warhead, cut to MINT.boom, over its own radius; one with none (an AAM) only flashes */
+function mslBoom(m) { const o = m.o || {}; if (o.r && o.dmg) explode(m.x, m.y, m.z, o.r, o.dmg * MINT.boom, m.by, m.team); else blastFx(m.x, m.y, m.z, 16); }
+/* a missile is stopped, by whoever owns the interceptor: gone here, and for everyone through its id. boom: shot down by gunfire, it bursts
+   where it is (mslBoom), here and on every copy */
+function intercept(m, by, boom) {
+  m.gone = true; if (boom) mslBoom(m); else blastFx(m.x, m.y, m.z, 16);
+  if (by && by.me) S.floats.push({ x: m.x, y: m.y + 6, z: m.z, text: boom ? 'míssil abatido' : 'míssil interceptado', life: 2 });
+  if (S.net && m.mid) Net.mkill(m, boom);
 }
 const pivot = u => ({ x: u.x, y: u.y + u.def.mh, z: u.z });
 function gunDir(u) { const yw = u.h + u.ty, cp = Math.cos(u.tp); u.f = { x: Math.cos(yw) * cp, y: Math.sin(u.tp), z: -Math.sin(yw) * cp }; }
@@ -8290,7 +8331,7 @@ const ARMK = {
     return b;
   }, relay: (u, i, b) => Net.shot(u, [b.x, b.y, b.z], [b.vx, b.vy, b.vz], b.smk) },
   gun: { fire(u, w, m, d) {
-    const b = { x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, life: w.life, team: u.team, dmg: w.dmg, ap: w.ap, by: u, tr: 2, am: w.am };
+    const b = { x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, life: w.life, team: u.team, dmg: w.dmg, ap: w.ap, by: u, tr: 2, am: w.am, cal: calOf(w) };
     S.bullets.push(b); fx.shot(u === S.my, u); return b;
   } },
   flak: { fire(u, w, m, d) {   // the fuse is set for where the nearest plane on the gun line will be when the round gets there
@@ -9533,12 +9574,47 @@ function aiArt(u, dt) {
   if (!shift(u)) c.drive = A.fd < G.hold || A.blocked || atLimit(u) ? 0 : GAI.march / u.def.spd;
 }
 const AI = { tank: aiTank, aa: aiAA, truck: aiTruck, art: aiArt };
+/* the missile an AI crew sees coming (MINT.ai): heading at it, or for an AA gun at a friend close by; its own first */
+function mintSee(u, aa) {
+  const G = MINT.ai, on = (m, o, d) => d > 1 && ((o.x - m.x) * m.d.x + (bodyY(o) - m.y) * m.d.y + (o.z - m.z) * m.d.z) / d > G.cone;
+  let best = null, bd = 1e9;
+  for (const m of S.missiles) {
+    if (m.gone || !m.gnd || m.team === u.team) continue;
+    const d = dist(m, u); if (d > G.see) continue;
+    const t = m.target || m.tg0, mine = on(m, u, d), fr = !mine && aa && t && t !== u && t.kind && t.team === u.team && hdist(t, u) < G.guard && on(m, t, dist(m, t));
+    if (!mine && !fr) continue;
+    const sc = d + (mine ? 0 : G.see);
+    if (sc < bd && sees(u, m)) { bd = sc; best = m; }
+  }
+  return best;
+}
+/* an AI crew with a heavy gun (calOf, MINT.cal or more) turns it on a missile it sees coming, over whatever it was doing: a chance, never a
+   sure thing (MINT.ai). A launcher with its own answer (aiAA with a sam) is left to it */
+function aiMint(u, dt) {
+  const A = u.ai, c = u.ctl, G = MINT.ai;
+  if (u.dead || (u.kind === 'aa' && u.arms[0] && u.arms[0].d.k === 'sam')) return;
+  if (A.mgi === undefined) A.mgi = u.arms.findIndex(a => a && a.d.k === 'gun' && a.d.dmg > 0 && calOf(a.d) >= MINT.cal);
+  const i = A.mgi; if (i < 0) return;
+  if ((A.mgT = (A.mgT || 0) - dt) <= 0) {
+    A.mgT = GAI.think;
+    const m = mintSee(u, u.kind === 'aa' || !!u.def.aaGun);
+    if (m && m !== A.mm) { A.mmT = S.t + rand(G.react[0], G.react[1]); A.me = { x: rand(-G.err, G.err), y: rand(-G.err, G.err), z: rand(-G.err, G.err) }; }
+    A.mm = m;
+  }
+  const m = A.mm, a = u.arms[i]; if (!m || m.gone || S.t < A.mmT || !a || !(a.ammo > 0)) return;
+  const w = a.d, r = dist(m, u); if (r < G.gun[0] || r > G.gun[1]) return;
+  const s = lead(u, m, w.spd, true), e = A.me || ZERO, d = vnorm({ x: s.d.x + e.x, y: s.d.y + e.y, z: s.d.z + e.z });
+  if (!i || !w.free) c.aim = d;
+  if (w.free) c.aim2 = d;
+  c.sp[i] = G.sp; c.fire[i] = (!!w.free && !!c.aim2) || onAim(u, d, G.tol);
+  if (i) c.fire[0] = false;
+}
 const aiFix = u => (u.burn > 0 || u.mod.fixable) && S.t - u.hitT > GAI.fix.calm && !(u.ai.tgt && !u.ai.tgt.dead);
 function stepUnit(u, dt) {
   u.inv -= dt;
   if (u.net) ghostUnit(u, dt);
   else {
-    if (u.ai) { if (!(u.trip && tripAI(u, dt))) AI[u.kind](u, dt); u.ctl.fix = aiFix(u); }
+    if (u.ai) { if (!(u.trip && tripAI(u, dt))) AI[u.kind](u, dt); if (!u.gp) aiMint(u, dt); u.ctl.fix = aiFix(u); }
     fieldFix(u, dt); moveUnit(u, dt); turret(u, dt);
     if (u.burn) burn(u, dt);
     if (u.dead) return;
@@ -9662,7 +9738,7 @@ function manFire(m, a) {
   if (w.snp) return snipe(m, a);
   const s = (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) + c.sp) * (m.sup > S.t ? SUP.sp : 1);
   a.mag--; a.cool = w.rate; a.t = m.shotT = S.t;
-  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: 0 });
+  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
   fx.shot(m === S.my, m);
 }
 /* a hand grenade (k 1) or a smoke grenade (2), thrown along the aim and a little up */
@@ -11231,11 +11307,13 @@ function stepShots(dt) {
     const x0 = b.x, y0 = b.y, z0 = b.z;
     b.life -= dt; b.vy -= GR * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
     if (b.life <= 0) { b.gone = true; continue; }
-    if (b.am) for (const m of S.missiles) {   // a gun that can stop a missile: the nearest the round came to it in this step
-      if (!m.gnd || m.gone || m.team === b.team) continue;
-      const rx = m.x - b.x, ry = m.y - b.y, rz = m.z - b.z, vx = b.vx - m.d.x * m.v, vy = b.vy - m.d.y * m.v, vz = b.vz - m.d.z * m.v, t = clamp((rx * vx + ry * vy + rz * vz) / (vx * vx + vy * vy + vz * vz), -dt, dt);
-      if (Math.hypot(rx - vx * t, ry - vy * t, rz - vz * t) > b.am) continue;
-      b.gone = true; if (b.by.net) puff(m.x, m.y, m.z, 'spark', 1); else intercept(m, b.by); break;
+    if (b.cal >= MINT.cal) for (const m of S.missiles) {   // a heavy round and a missile in flight: the nearest the round came to it in this step (MINT)
+      if (m.gone || m.team === b.team) continue;
+      const rx = m.x - b.x, ry = m.y - b.y, rz = m.z - b.z, vx = b.vx - m.d.x * m.v, vy = b.vy - m.d.y * m.v, vz = b.vz - m.d.z * m.v, R = Math.max(MINT.r, b.am || 0), far = (Math.abs(vx) + Math.abs(vy) + Math.abs(vz)) * dt + R;
+      if (Math.abs(rx) > far || Math.abs(ry) > far || Math.abs(rz) > far) continue;
+      const t = clamp((rx * vx + ry * vy + rz * vz) / (vx * vx + vy * vy + vz * vz || 1), -dt, dt);
+      if (Math.hypot(rx - vx * t, ry - vy * t, rz - vz * t) > R) continue;
+      b.gone = true; mintHit(m, b); break;
     }
     if (b.gone) continue;
     if (b.y < 400) {
@@ -12235,7 +12313,7 @@ const trnRx = {
    to its own parts. down and aidown: det 1 when the ammunition went up.
    ord: a plane's ordnance i, or a vehicle's sam, with the target's id. shot: a tank or howitzer round, p origin and v velocity.
    A guided missile has an id of its own, minted by the client that launches it (mint): ord carries it as m, and tm names the missile a sam is
-   sent at. mkill: the owner of an interceptor says the missile with this id is stopped, and every copy of it goes. smoke: a screen at p.
+   sent at. mkill: the owner of an interceptor says the missile with this id is stopped, and every copy of it goes (b 1: shot down by gunfire, it bursts there). smoke: a screen at p.
    Ids: players are positive, AI entities negative (aid), given out by the host; a target or killer is either, or null.
    The AI battle belongs to the host (Net.host). It sends ai snapshots, planes (k 0) ten times a second and vehicles (k 1) five: one row per
    entity, [aid, model, team, hp, f, x, y, z, then q and v for a plane or hull heading, turret yaw, gun pitch, vx, vz for a vehicle, then d], with the
@@ -12292,7 +12370,7 @@ const Net = {
   reg(id, m) { if (Net.msl.size > 48) for (const [k, v] of Net.msl) if (v.gone) Net.msl.delete(k); m.mid = id; Net.msl.set(id, m); },
   mint(m) { Net.reg(Net.id * 4096 + (Net.mseq = Net.mseq % 4095 + 1), m); },
   ord(o, i, m) { const t = m && m.target; if (m) Net.mint(m); Net.mine(o, 'ord', Object.assign({ i: LO.wire(o, i), target: Net.ref(t) }, m && { m: m.mid }, t && t.mid && { tm: t.mid })); },
-  mkill(m) { Net.send('mkill', { id: m.mid }); },
+  mkill(m, boom) { Net.send('mkill', boom ? { id: m.mid, b: 1 } : { id: m.mid }); },
   smoke(o) { const r = n => +n.toFixed(1); Net.mine(o, 'smoke', { p: [r(o.x), r(o.y), r(o.z)] }); },
   flare(o) { Net.mine(o, 'flare'); },
   shot(o, p, v, smk, he) { const r = n => +n.toFixed(1); Net.mine(o, 'shot', Object.assign({ p: p.map(r), v: v.map(r) }, smk && { s: 1 }, he && { h: 1 })); },
@@ -12504,7 +12582,7 @@ const Net = {
     aitoss(m) { Net.rx.toss(m, Net.ai.get(m.id)); },
     ord(m) { Net.fireAs(Net.ghosts.get(m.from), m.i, m.target, m.m, m.tm); },
     load(m) { const p = Net.players.get(m.id), g = Net.ghosts.get(m.id); if (!p || !S.net) return; p.lo = m.lo || null; if (g && !g.dead && !g.kind && !g.man) LO.refit(g, p.lo); },
-    mkill(m) { const o = Net.msl.get(m.id); if (o && !o.gone) { o.gone = true; blastFx(o.x, o.y, o.z, 16); } },
+    mkill(m) { const o = Net.msl.get(m.id); if (o && !o.gone) { o.gone = true; if (m.b === 1) mslBoom(o); else blastFx(o.x, o.y, o.z, 16); } },   // b: shot down by gunfire (MINT), it bursts
     smoke(m) { if (S.net && Array.isArray(m.p)) addSmoke(m.p[0], m.p[1], m.p[2]); },
     aismoke(m) { Net.rx.smoke(m); },
     shot(m, g) { g = g || Net.ghosts.get(m.from); const w = g && g.net && !g.dead && g.kind && g.arms[0] && g.arms[0].d; if (w && (w.k === 'shell' || w.k === 'how')) { const b = (w.k === 'how' ? lob : shell)(g, m.h === 1 && w.hv || w, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]); if (m.s === 1 && w.k === 'how') b.smk = CMD.smk.art; } },
@@ -13725,7 +13803,7 @@ function heliMuzzle(p) {
 function heliGun(p) {
   const g = p.def.gun, a = p.gf, m = heliMuzzle(p), s = g.sp + (p.ai ? HAI.sp : 0) + p.mod.disp * DMG.disp;
   p.gc = g.rate; p.ammo--; p.shotT = S.t;
-  S.bullets.push({ x: m.x, y: m.y, z: m.z, vx: p.v.x + (a.x + rand(-s, s)) * g.spd, vy: p.v.y + (a.y + rand(-s, s)) * g.spd, vz: p.v.z + (a.z + rand(-s, s)) * g.spd, life: g.life, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: 1, fr: g.fr });
+  S.bullets.push({ x: m.x, y: m.y, z: m.z, vx: p.v.x + (a.x + rand(-s, s)) * g.spd, vy: p.v.y + (a.y + rand(-s, s)) * g.spd, vz: p.v.z + (a.z + rand(-s, s)) * g.spd, life: g.life, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: 1, fr: g.fr, cal: calOf(g) });
   fx.shot(p === S.my, p);
 }
 /* a door gunner by himself: the nearest enemy soldier or soft vehicle one of the two guns bears on */

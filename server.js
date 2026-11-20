@@ -212,7 +212,7 @@ const RX = {
   },
   /* a smoke screen where a tank or a gun fired its launchers; an interception: the missile with this id is gone, for everyone */
   smoke(c, m) { if (armour(c) && vec(m.p, 3)) cast(c, { t: 'smoke', from: c.player.id, p: m.p }); },
-  mkill(c, m) { if (mid(m.id)) cast(c, { t: 'mkill', from: c.player.id, id: m.id }); },
+  mkill(c, m) { if (mid(m.id)) cast(c, m.b === 1 ? { t: 'mkill', from: c.player.id, id: m.id, b: 1 } : { t: 'mkill', from: c.player.id, id: m.id }); },   // b: shot down by gunfire, it bursts (cf-intercepta-missil)
   flare(c) { cast(c, { t: 'flare', from: c.player.id }); },
   /* what a missile's seeker did, from the client that owns it (ms: 1 in welcome): k 0 lost, 1 decoyed at p, 2 back, 3 where it is, 4 burst */
   msl(c, m) {

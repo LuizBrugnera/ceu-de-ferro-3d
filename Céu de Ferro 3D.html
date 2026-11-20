@@ -26145,8 +26145,9 @@ function anaMvEnd(R) {
   if (op.man) anaPush({ k: 'mv', t: anaR(S.t), s: t, id: op.id, m: op.k, end: 1, dur, ok: R.P ? (R.P.hold === t ? 1 : 0) : null });
   if (op.k === 'atk') {
     const O = op.O, P = O.tw;
-    anaPush({ k: 'ap', t: anaR(S.t), s: t, id: op.id, L: P ? P.L : '', nm: gName(O), ri: op.ri, by: op.by || 'ai', pr: op.pr0 || '', walk: R.walk0 ? 1 : 0, n: R.n,
-      a2: op.a2 ? 1 : 0, st: MVA.st[R.st], bk: R.bk, ok: P ? (P.hold === t ? 1 : 0) : null, a: R.a, off: R.off, mv: [...R.mv], dur });
+    anaPush(Object.assign({ k: 'ap', t: anaR(S.t), s: t, id: op.id, L: P ? P.L : '', nm: gName(O), ri: op.ri, by: op.by || 'ai', pr: op.pr0 || '', walk: R.walk0 ? 1 : 0, n: R.n,
+      a2: op.a2 ? 1 : 0, st: MVA.st[R.st], bk: R.bk, ok: P ? (P.hold === t ? 1 : 0) : null, a: R.a, off: R.off, mv: [...R.mv], dur },
+      op.jn && { dj: op.jn.map(j => j.d), ta: op.jn.map(j => j.ta), fT: Math.round(op.formT || 0), fr: op.fr === undefined ? -1 : op.fr }));   // cf-manobra-reuniao: each squad's walk as it joined and when it got there, the deadline, how many were there
   }
   if (R.f) {
     let kv = 0, lm = 0, sq = 0;
@@ -26184,12 +26185,12 @@ function anaMvLook() {
       if (u.team !== t || u.dead || u.gone || !u.ai || u.fixed || u.net) continue;
       const k = S.t - u.moveT > MVA.park ? 3 : u.trip ? 1 : u.rail ? 0 : 2; v[k]++;   // standing for MVA.park s is parked, whatever its rail or trip
       if (k === 3) continue;
-      const j = anaEdge(u.x, u.z); if (j >= 0) e[j]++; else o[t]++;
+      const j = anaEdge(u.x, u.z); if (j >= 0) e[j] = (e[j] || 0) + 1; else o[t]++;   // an edge newer than this minute's list (a bridge built): a count, not NaN
     }
     for (const q of S.squads) {
       if (q.team !== t || q.net || !(q.live > 0) || (q.ord && q.ord.k === 'hold' && q.at)) continue;
       const L = anaLead(q); if (!L || L.in) continue;
-      const j = anaEdge(L.x, L.z); if (j >= 0) e[j]++; else o[t]++;
+      const j = anaEdge(L.x, L.z); if (j >= 0) e[j] = (e[j] || 0) + 1; else o[t]++;
     }
   }
   for (const [op, R] of MVA.live) if (!seen.has(op)) anaMvEnd(R);
@@ -26248,9 +26249,11 @@ function anaMano(ev, s) {
   let H2 = 0; for (const k in cnt) { const p = cnt[k] / dom.length; H2 -= p * Math.log2(p); }
   const prev = {}; let again = 0, rep = 0; for (const d of dom) { const p = prev[d.L]; if (p) { again++; if (p.ri === d.ri && p.b === d.b) rep++; } prev[d.L] = d; }
   const arm = ab.filter(e => e.e === 'arm'), fire = ab.filter(e => e.e === 'fire'), end = ab.filter(e => e.e === 'end');
-  const net = H.net || null, E = net ? net.map(() => 0) : null; let o = 0; const v = [0, 0, 0, 0];
-  for (const e of tr) { o += e.o[s] || 0; if (e.v[s]) e.v[s].forEach((x, i) => { v[i] += x; }); if (E && e.e && e.e[s]) e.e[s].forEach((x, i) => { E[i] += x; }); }
-  const road = E ? sum(E) : 0, axis = E ? sum(E.filter((x, i) => net[i][1])) : 0, mov = v[0] + v[1] + v[2], mins = tr.reduce((a, e) => a + e.d, 0) / 60 || 1;
+  /* cf-manobra-reuniao: an edge the network gained during the match (a bridge built or rebuilt) is past the header's list (hdr.net, taken at the start):
+     its samples count as road off the axis (nw), never as an index into net (the review fell over at the match's end) */
+  const net = H.net || null, E = net ? net.map(() => 0) : null; let o = 0, nw = 0; const v = [0, 0, 0, 0];
+  for (const e of tr) { o += e.o[s] || 0; if (e.v[s]) e.v[s].forEach((x, i) => { v[i] += x; }); if (E && e.e && e.e[s]) e.e[s].forEach((x, i) => { if (i < E.length) E[i] += x || 0; else nw += x || 0; }); }
+  const road = E ? sum(E) + nw : 0, axis = E ? sum(E.filter((x, i) => net[i][1])) : 0, mov = v[0] + v[1] + v[2], mins = tr.reduce((a, e) => a + e.d, 0) / 60 || 1;
   const top = E ? E.map((x, i) => ({ e: net[i][3] + '–' + net[i][4], axis: net[i][1], n: anaR(x * MVA.dt / 60 / mins) })).sort((a, b) => b.n - a.n).slice(0, 3) : [];
   return {
     atk: atk.length, occ: occ.length, go: atk.filter(e => MVA.st.indexOf(e.st) >= 3).length, took: atk.filter(e => e.ok).length, occTook: occ.filter(e => e.ok).length, back: atk.filter(e => e.bk).length,
@@ -26262,7 +26265,7 @@ function anaMano(ev, s) {
     veh: { rail: sh(v[0], mov), trip: sh(v[1], mov), off: sh(v[2], mov), parked: sh(v[3], mov + v[3]) },
     want: ev.filter(e => e.k === 'lg' && e.s === s && e.c === 'rf' && /^Sem força para atacar/.test(e.x)).length,
     ent: Math.round(H2 * 1000) / 1000, rep, again, repShare: sh(rep, again),
-    raw: { a: A, aAtk: Aa, off, road, axis, o, v, dom: dom.length }   // the counts behind the shares, for tools/balance.js to pool many matches
+    raw: { a: A, aAtk: Aa, off, road, axis, o, v, nw, dom: dom.length }   // the counts behind the shares, for tools/balance.js to pool many matches
   };
 }
 anaReport = (f => (ev, me) => {
@@ -28431,10 +28434,15 @@ genManOp = (g => (C, op) => {
    cf-manobra-fix (the assaults died forming up): a squad joins only within AP.pool m of an assembly of the plan (before the plan, AP.asm.max + AP.pool m of the
    objective), the forming up waits AP.form s at most (then goes with the squads there, OPS.atk), a squad lost on the way (dead, broken, taken by other work)
    is replaced by a free one, AP.refill at most an assault (apRefill), and the posts that may lend are any quiet low-value one: line, wood, a fortification's
-   garrison (fpost), militia (mil), a town's garrison (garr, another squad staying in the point) and an economy site's guard (egd) */
+   garrison (fpost), militia (mil), a town's garrison (garr, another squad staying in the point) and an economy site's guard (egd).
+   cf-manobra-reuniao (58% of the assaults still died forming up, cut at exactly 400 s with fewer than two squads there: the pool took squads 3 km off
+   and the deadline fit ~850 m): the pool and the deadline are one number. The deadline is the farthest squad's walk (op.formT, at AP.pace m/s and
+   AP.slack s more) up to AP.form s (CMD.formMax's 900), and the pool is what fits in it: AP.pool = (AP.form - AP.slack) x AP.pace / AP.wind m in
+   a straight line, AP.wind the way's length over the straight line. The ap event carries each squad's walk as it joined (dj, m) and when it got
+   there (ta, s from the opening, -1 never), the deadline (fT) and how many were there when the forming up ended (fr) */
 const AP = { on: 1, kV: 4, kF: 2, fK: 3, wood: .25, road: .85, wet: .1, r: [300, 500], rTw: [500, 700], sec: 8, apart: 60, n: 3, ttl: 20, per: 2, pops: 600,
   exp: .3, axD: 150, long: 1.8, near: 200, pace: 2.5, slack: 60, start: [600, 2500], back: 1500, asm: { min: 600, max: 1200, kV: 10, at: 700 }, spread: [30, 26], pts: 24,
-  lend: { r: 1200, calm: 180, n: 2, keep: 1, hit: 30, jobs: { line: 1, wood: 1, fpost: 1, mil: 1, garr: 1, egd: 1 } }, ask: 800, pool: 3000, form: 400, refill: 2 };
+  lend: { r: 1200, calm: 180, n: 2, keep: 1, hit: 30, jobs: { line: 1, wood: 1, fpost: 1, mil: 1, garr: 1, egd: 1 } }, ask: 800, form: 900, wind: 1.35, refill: 2, get pool() { return Math.round((this.form - this.slack) * this.pace / this.wind); } };
 const APB = { n: 0, ms: 0, worst: 0, piece: 0, stat() { const r = v => Math.round(v * 100) / 100; return { searches: APB.n, avg: APB.n ? r(APB.ms / APB.n) : 0, worst: r(APB.worst), piece: r(APB.piece) }; } };
 const apOn = () => !!AP.on && !!S.T.net && S.T.mv >= 4;
 const apCell = (Z, x, z) => clamp((z + Z.HW) / Z.c | 0, 0, Z.nz - 1) * Z.nx + clamp(x / Z.c | 0, 0, Z.nx - 1);
@@ -28620,7 +28628,7 @@ function atkAp(C, P, sd, pool, walk, own, foe, pl) {
   op.slot = pool.map((q, i) => ({ e: pr ? pr.el[i] : a1 && i % 2 ? 1 : 0, r: pr ? pr.role[i] : null, q }));   // each squad's place in the assault, for one that replaces it (apRefill)
   for (const x of op.slot) apSend(op, x.q, x.e, x.r);
   const far = pool.reduce((m, q) => Math.max(m, q.ord.wp ? q.ord.wp.len : q.cnP && q.cnP.O.wp ? q.cnP.O.wp.len : 0), 0);
-  op.formT = clamp(far / AP.pace + AP.slack, Math.min(AP.form, S.cq ? CQ.form : CMD.formMax), AP.form);   // the time to form up: the farthest walk at AP.pace m/s and AP.slack s more, from the usual to AP.form (then it goes with the squads there)
+  op.formT = clamp(far / AP.pace + AP.slack, Math.min(AP.form, S.cq ? CQ.form : CMD.formMax), AP.form);   // the time to form up: the farthest walk at AP.pace m/s and AP.slack s more, from the usual to AP.form (then it goes with the squads there); the pool (AP.pool) only takes squads whose walk fits in AP.form
   const lent = pool.filter(q => !FREE[q.job]).length, deg = a => a.ang + '°';
   if (pr) prAfterOpen(C, op, pool);
   gLog(t, 'atk', (walk ? 'Ocupação de ' : 'Assalto planejado contra ') + gName(P) + ': ' + pool.length + (pool.length > 1 ? ' esquadras' : ' esquadra') + (pr ? ', ' + prSay(op) : a1 ? ' por duas abordagens (' + deg(a0) + ' e ' + deg(a1) + ' do eixo)' : ' pela abordagem a ' + deg(a0) + ' do eixo') +
@@ -28635,6 +28643,7 @@ function apSend(op, q, el, r) {
   if (op.walk && hdist(L, o) < hdist(m, o)) { q.fp = { x: L.x, z: L.z }; q.apw = null; op.fp.push(q.fp); return opTake(op, q, { k: 'hold', ri, s: q.s, x: L.x, z: L.z, R: 12 }); }   // a walk: nearer than its assembly, it waits where it is
   q.fp = p; op.fp.push(p); q.apw = apWay(pl, a, o.x, o.z); q.apv = apWay(pl, a);
   const wp = apWalk(pl, L.x, L.z, a.cells[m.i], p.x, p.z);
+  (op.jn || (op.jn = [])).push({ q, d: Math.round(wp ? wp.len : hdist(L, p)), ta: -1 });   // cf-manobra-reuniao: its walk as it joined, for the ap event (dj, ta)
   opTake(op, q, Object.assign({ k: 'hold', ri, s: clamp(sOn(ri, p.x, p.z), 0, rt.len), x: p.x, z: p.z, R: 12, fast: 1, quiet: 1 }, wp ? { wp } : {}));
 }
 /* an AP assault forming up that lost squads on the way (dead, broken, taken by other work): free ones within reach of its assemblies take their
@@ -28648,7 +28657,12 @@ function apRefill(C, op) {
   add.forEach((q, i) => { const x = lost[i], e = x.r === 'rec' || x.r === 'sec' ? 0 : x.e, r = x.r === 'rec' || x.r === 'sec' ? 'fix' : x.r; x.q = q; op.rf = (op.rf || 0) + 1; apSend(op, q, e, r); });
   if (add.length) gLog(C.t, 'atk', 'Assalto a ' + gName(op.O) + ': ' + (add.length > 1 ? add.length + ' esquadras livres substituem as perdidas' : 'uma esquadra livre substitui a perdida') + ' na reunião', op.pl.o);
 }
-OPS.atk = (g => (C, op) => { if (op.st === 'form' && op.pl) apRefill(C, op); g(C, op); })(OPS.atk);
+OPS.atk = (g => (C, op) => {
+  const f = op.st === 'form' && op.pl; if (f) apRefill(C, op);
+  if (f && op.jn) for (const j of op.jn) if (j.ta < 0 && j.q.apo === op && j.q.fp) { const L = j.q.men.find(m => !m.dead); if (L && (j.q.halt || hdist(L, j.q.fp) < INC.op.ready)) j.ta = Math.round(S.t - op.T0); }   // cf-manobra-reuniao: when each got to its assembly
+  g(C, op);
+  if (f && op.jn && op.st !== 'form' && op.fr === undefined) op.fr = op.jn.filter(j => j.ta >= 0).length;   // how many were there as the forming up ended
+})(OPS.atk);
 /* the order an AP squad gets at H-hour and after: along its approach through the assault position (assault), to the assault position (overwatch), or
    straight in from where it is (a squad that waited, or an overwatch called in) */
 function apOrd(op, q, O) {

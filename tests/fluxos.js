@@ -15,7 +15,10 @@
    - The HUD wrote over itself: the weapon camera's inset (a bomb, a missile) lay over the vehicle's readout in the upper left; the radio lines
      ran over the title of a vehicle's damage panel; and the warnings under the scoreboard (missile, radar, impact, artillery, base under fire,
      protection) each had a fixed place, crossing each other and the feed. Here: the inset in the free band on the left, the warnings in one
-     column with the feed after them, and the radio lines ending above the panel the HUD drew. */
+     column with the feed after them, and the radio lines ending above the panel the HUD drew.
+   - Partidas anteriores: a match picked from the list opened its review, the item that was clicked went away with the list and the focus fell
+     on the page; the review heard Esc only with the focus inside it, so "Fechar (Esc)" did nothing and the review stayed over the hangar.
+     Here: Esc closes it from anywhere, and only it; the focus stays in the dialog when a match opens. */
 const H = require('./harness'), fs = require('fs'), path = require('path'), vm = require('vm'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8');
 
@@ -87,5 +90,17 @@ console.log('-- the HUD does not write over itself --');
   ok(/S\.feed\.forEach\([^\n]*wy \+ i \* 19 \* u/.test(dh) && !/ty \+ (36|58|76|94) \* u/.test(dh), 'the impact, artillery, base and protection lines take the next free line, and the feed comes after them');
   const hh = html.slice(html.indexOf('function helpHud('), html.indexOf('\n}\n', html.indexOf('function helpHud(')));
   ok(/const low = hudLow; hudLow = 0;/.test(hh) && /low - 16 \* u - \(n - 1\) \* 16 \* u/.test(hh) && /hudLow = y0;/.test(html) && /if \(y0 > ch \/ 2\) hudLow = y0;/.test(html), 'the radio lines end above the panel the soldier\'s and the vehicle\'s HUD drew this frame');
+}
+console.log('-- the review (Partidas anteriores) closes with Esc wherever the focus is --');
+{
+  const i = html.indexOf("addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#aar').hidden)"), j = html.indexOf('\n', i), L = [], closed = [];
+  const aar = { hidden: false }, ctx = vm.createContext({ $: s => (s === '#aar' ? aar : null), aarClose: () => { closed.push(1); aar.hidden = true; }, addEventListener: (type, f, cap) => L.push({ type, f, cap }) });
+  if (i > 0) vm.runInContext(html.slice(i, j), ctx);
+  const key = k => { const e = { key: k, stopped: false, stopPropagation() { this.stopped = true; }, preventDefault() {} }; for (const l of L) if (l.type === 'keydown') l.f(e); return e; };
+  ok(L.length === 1 && L[0].cap === true, 'one keydown listener on the window, in the capture phase (before the general\'s view and the game hear the key)');
+  const e1 = key('Escape'), e2 = key('Escape'), e3 = (aar.hidden = false, key('a'));
+  ok(closed.length === 1 && e1.stopped && !e2.stopped && !e3.stopped, 'Esc with the review open closes it and stops there; with it closed, or another key, it does nothing');
+  const it = html.slice(html.indexOf('async function aarPast('), html.indexOf('function aarOpen('));
+  ok(/await go\(\); \(\$\('#aarBack'\)\.hidden \? \$\('#aarClose'\) : \$\('#aarBack'\)\)\.focus\(\)/.test(it), 'a match picked from the list: the focus goes to the review\'s own buttons');
 }
 done();

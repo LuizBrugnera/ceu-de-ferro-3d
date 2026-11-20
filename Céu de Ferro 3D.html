@@ -6238,7 +6238,7 @@ Object.assign(TRUCK, { parts: Object.assign([], { ix: {}, pos: [] }), tx: 0, env
 for (const d of [...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS), TRUCK]) { d.hitR = 8; d.crewI = -1; }
 for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS)]) d.hot = d.parts.find(p => p.burn).box;   // where fire and engine smoke come out
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
-const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {} };
+const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, blast() { return false; } };   // blast: the view's look of a burst (XFX), true when it drew one
 let S = null;
 /* ---- the sides (3 lados, P0). S.N sides (newState sets it): 2 (every match of two) or 3 (the Frente atual with three: 0 EUA, 1 Rússia, 2 Insurgentes).
    SIDES() the side numbers 0 .. S.N - 1 (a frozen array, [0, 1] with no match); bySide(f) an array with f(t) for each side; isSide(t) t is one of them;
@@ -7422,9 +7422,11 @@ function puff(x, y, z, k, s, vx, vy, vz) {
   S.parts.push({ k, x, y, z, vx: (vx || 0) + rand(-3, 3) * s, vy: (vy || 0) + rand(-1, 4) * s, vz: (vz || 0) + rand(-3, 3) * s, life, max: life, r: rand(2.5, 4.5) * s });
 }
 function blastFx(x, y, z, r) {
-  puff(x, y, z, 'flash', r / 5);
-  const n = Math.min(12, 4 + r / 8);
-  for (let i = 0; i < n; i++) { puff(x, y, z, 'fire', r / 14, rand(-12, 12), rand(0, 18), rand(-12, 12)); puff(x, y, z, 'smoke', r / 11, rand(-7, 7), rand(2, 12), rand(-7, 7)); }
+  if (!fx.blast(x, y, z, r)) {   // the view draws the burst by its size (XFX); without one (the harness, the headless tools) these few puffs
+    puff(x, y, z, 'flash', r / 5);
+    const n = Math.min(12, 4 + r / 8);
+    for (let i = 0; i < n; i++) { puff(x, y, z, 'fire', r / 14, rand(-12, 12), rand(0, 18), rand(-12, 12)); puff(x, y, z, 'smoke', r / 11, rand(-7, 7), rand(2, 12), rand(-7, 7)); }
+  }
   const d = Math.hypot(x - S.ear.x, y - S.ear.y, z - S.ear.z);
   if (d < 3500) { S.shake = Math.max(S.shake, r / 60 * (1 - d / 3500)); fx.boom(r, d); }
 }
@@ -42169,6 +42171,281 @@ function stkScene() {
   for (const m of STK.g.children.slice()) if (!(S.craters || []).some(c => c.m === m)) kill(m);   // a crater the battle let go (more than STK's keep)
 }
 syncScene = (g => dt => { g(dt); try { stkScene(); } catch (e) { /* a crater that would not draw: the battle goes on */ } })(syncScene);
+/* ---------- explosions (XFX): the look of a burst by its size, the mark it leaves, the smoke and fire of what was hit (cf-explosoes) ----------
+   Only the view: nothing here touches damage, physics, the AI's cover (S.craters stays STK's) or the smoke screens that cut sight (SMOKE).
+   blastFx calls fx.blast for every burst, solo, host and guest alike (a guest's bursts come from the rounds and events it already gets), and
+   this draws it. cls(r) by the burst's radius (cut): 0 a grenade, 1 a rocket, a mortar, a light round, 2 a howitzer, an MRL rocket, a light
+   bomb, 3 a heavy bomb, a shahed, 4 a 2000 lb bomb, a truck bomb. Each class sets: a flash (a sprite, and a point light on Média and Alta,
+   lights[]), a fireball (fire), embers, dirt thrown up that falls back (dirt, up: how high), a plume of earth (plume), a dust ring that runs
+   over the ground (ring), a shock shell (a fresnel sphere, shell x r, class 2 and up), a smoke column that rises and drifts with the wind
+   (smoke, smL s; S.wx), a mark on the ground (a scorch with a pit, mark x r, markL s, for every size), a fire that lingers in the crater
+   (burn s) and, class 3 and up, a mushroom cloud mH x r high that rises and stays mL s, drawn from its age each frame (no particles).
+   On water a column of spray and no mark; in the air no dirt, ring or mark. What was hit smokes by its damage: a vehicle under hurt[0] of
+   its hull grey smoke, under hurt[1] black smoke and flames (unless it already burns: the simulation's fire); a wreck burns for wreck s of its
+   life; a damaged building burns bld s after its last hit. Fixed pools made with the scene, sized by the hangar's quality (n, marks, mush,
+   lights; q thins every count, and the distance thins it more): a salvo or a carpet of bombs overwrites the oldest particles instead of
+   making more, marks reuse the slot with the least time left, a burst on a fresh mark of its size renews it, and the mushrooms of a stick of
+   bombs merge (merge s, x Rc). far: m from the eye past which a burst under class 3 draws no particles (its mark still, within mfar).
+   Time is the battle's (S.t): a pause freezes it, the watch's speed hurries it. on: 0 leaves the old puffs of blastFx */
+const XFX = {
+  on: 1, n: [900, 1700, 2600], marks: [40, 90, 160], mush: [2, 4, 6], lights: [0, 1, 2], shells: 4, q: [.5, .8, 1],
+  cut: [12, 26, 55, 100], far: 6000, mfar: 4500,
+  fire: [5, 9, 14, 20, 28], smoke: [3, 7, 12, 18, 24], smL: [4, 7, 12, 20, 28], dirt: [6, 12, 20, 26, 32], ember: [5, 9, 14, 20, 24],
+  ring: [0, 10, 16, 24, 34], plume: [0, 3, 6, 9, 12], up: [.6, .8, 1, 1.15, 1.3],
+  mark: [.3, .4, .45, .5, .55], markL: [30, 60, 150, 420, 900], markO: [.7, .82, .9, .95, 1],
+  light: [.8, 1.6, 2.6, 3.6, 4.5], lightL: [.12, .18, .28, .45, .6], shell: [0, 0, 1.6, 2.4, 3.2],
+  burn: [0, 0, 0, 25, 50], mH: [0, 0, 0, 2.2, 2.8], mL: [0, 0, 0, 70, 130], merge: 10,
+  hurt: [.5, .25], wreck: 22, bld: 45, near: 2500,
+  sc: null, S: null, lv: -1, t: 0, i: 0, p: null, err: 0
+};
+const XST = 16;   // a particle's floats: x y z, vx vy vz, t, L, s0 s1 (its size from and to), k (its kind), g (gravity; < 0 rises), dr (drag), w (wind), gy (it dies under), sd
+const XNR = 4, XNS = 20, XNV = 1 + XNR * XNS;   // a mark's disc: rings and sectors
+const xCls = r => { const c = XFX.cut; return r < c[0] ? 0 : r < c[1] ? 1 : r < c[2] ? 2 : r < c[3] ? 3 : 4; };
+const XV = 'attribute float size; attribute float sd; attribute vec4 pc; varying vec4 vc; varying float vs; varying float vf; uniform float scale; uniform float fN; uniform float fF;' +
+  'void main(){ vc = pc; vs = sd; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(size * scale / max(-mv.z, 0.1), 1.5, 640.0); vf = smoothstep(fN, fF, -mv.z); gl_Position = projectionMatrix * mv; }';
+const XF = add => 'varying vec4 vc; varying float vs; varying float vf; uniform vec3 fC; uniform float amb;' +
+  'float xh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }' +
+  'float xn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(xh(i), xh(i + vec2(1.0, 0.0)), f.x), mix(xh(i + vec2(0.0, 1.0)), xh(i + vec2(1.0, 1.0)), f.x), f.y); }' +
+  'void main(){ vec2 p = gl_PointCoord - 0.5; float d = length(p) * 2.0; if (d > 1.0) discard;' +
+  ' float n = 0.62 * xn(p * 4.0 + vs * 17.0) + 0.38 * xn(p * 9.0 - vs * 11.0);' +
+  (add ? ' float a = vc.a * (1.0 - smoothstep(0.0, 1.0, d)) * (0.7 + 0.6 * n); gl_FragColor = vec4(vc.rgb * (1.0 - vf * 0.85), a); }'
+    : ' float a = vc.a * (1.0 - smoothstep(0.25 + 0.35 * n, 1.0, d)) * (0.55 + 0.75 * n); vec3 c = vc.rgb * amb * (1.12 - 0.4 * gl_PointCoord.y); gl_FragColor = vec4(mix(c, fC, vf), min(a, 1.0)); }');
+/* the scorch: a dark pit, a lighter lip of thrown earth, rays of soot past it; one texture for every mark, made once */
+function xTex() {
+  if (XFX.tex) return XFX.tex;
+  const N = 128, cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const g = cv.getContext('2d'), im = g.createImageData(N, N), D = im.data;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const dx = (x + .5) / N * 2 - 1, dy = (y + .5) / N * 2 - 1, d = Math.hypot(dx, dy), an = Math.atan2(dy, dx), nz = hash2(x, y, 7);
+    const st = .5 + .5 * Math.sin(an * 9 + Math.sin(an * 5) * 2.2) * Math.sin(an * 23 + 1.3), rim = .58 + .12 * Math.sin(an * 6 + 1) * Math.sin(an * 11);
+    let a, c;
+    if (d < .3) { a = .92; c = 16 + 10 * nz; }
+    else if (d < rim) { const k = (d - .3) / (rim - .3); a = .85 - .25 * k * (1 - st); c = 30 + 30 * Math.sin(k * Math.PI) * (.5 + .5 * st) + 12 * nz; }
+    else { const k = (d - rim) / (1 - rim); a = d < 1 ? Math.max(0, (1 - k) * (.25 + .5 * st) - .1 * nz) : 0; c = 34 + 14 * nz; }
+    const i = (y * N + x) * 4; D[i] = c * 1.05; D[i + 1] = c * .92; D[i + 2] = c * .78; D[i + 3] = Math.round(255 * clamp(a, 0, 1));
+  }
+  g.putImageData(im, 0, 0);
+  return (XFX.tex = new THREE.CanvasTexture(cv));
+}
+function xPts(n, add, u) {
+  const ge = new THREE.BufferGeometry(), T = { pos: new Float32Array(n * 3), pc: new Float32Array(n * 4), sz: new Float32Array(n), sd: new Float32Array(n), n: 0, max: n };
+  ge.setAttribute('position', new THREE.BufferAttribute(T.pos, 3)); ge.setAttribute('pc', new THREE.BufferAttribute(T.pc, 4));
+  ge.setAttribute('size', new THREE.BufferAttribute(T.sz, 1)); ge.setAttribute('sd', new THREE.BufferAttribute(T.sd, 1));
+  for (const k of ['position', 'pc', 'size', 'sd']) ge.attributes[k].setUsage(THREE.DynamicDrawUsage);
+  const m = new THREE.Points(ge, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending,
+    uniforms: { scale: sparks.material.uniforms.scale, fN: u.fN, fF: u.fF, fC: u.fC, amb: u.amb }, vertexShader: XV, fragmentShader: XF(add) }));
+  m.frustumCulled = false; m.renderOrder = add ? 3 : 2; T.m = m; return T;
+}
+/* the pools of this scene, by the hangar's quality */
+function xInit() {
+  if (XFX.g) kill(XFX.g);
+  const lv = clamp(GFX.lv | 0, 0, 2), N = XFX.n[lv], nm = XFX.mush[lv], g = new THREE.Group();
+  Object.assign(XFX, { g, lv, N, sc: scene, S, t: S.t, i: 0, p: new Float32Array(N * XST) });
+  const u = XFX.u = { fN: { value: 1e9 }, fF: { value: 2e9 }, fC: { value: new THREE.Color() }, amb: { value: 1 } };
+  XFX.B = xPts(N + nm * 100, false, u); XFX.A = xPts(N + nm * 12, true, u); g.add(XFX.B.m, XFX.A.m);
+  XFX.M = []; for (let i = 0; i < nm; i++) XFX.M.push({ on: false, x: 0, y: 0, z: 0, r: 0, H: 0, H0: 0, Rc: 0, Rc0: 0, t: 0, L: 0, sd: 0 });
+  XFX.L = []; for (let i = 0; i < XFX.lights[lv]; i++) { const l = new THREE.PointLight(0xffa050, 0, 100, 2); l.userData.i0 = 0; l.userData.t = 1; l.userData.L = 1; g.add(l); XFX.L.push(l); }
+  XFX.H = []; const sg = new THREE.SphereGeometry(1, 24, 12);
+  for (let i = 0; i < XFX.shells; i++) {
+    const m = new THREE.Mesh(sg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, uniforms: { a: { value: 0 } },
+      vertexShader: 'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+      fragmentShader: 'varying vec3 vN; varying vec3 vV; uniform float a; void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.5); gl_FragColor = vec4(vec3(1.0, 0.96, 0.88), f * a); }' }));
+    m.visible = false; m.renderOrder = 4; m.userData = { t: 1, T: 1, r: 0, k: 0 }; g.add(m); XFX.H.push(m);
+  }
+  XFX.K = []; const tex = xTex(), idx = [];
+  for (let s = 0; s < XNS; s++) idx.push(0, 1 + (s + 1) % XNS, 1 + s);
+  for (let j = 1; j < XNR; j++) for (let s = 0; s < XNS; s++) { const a = 1 + (j - 1) * XNS + s, b = 1 + (j - 1) * XNS + (s + 1) % XNS, c = a + XNS, d = b + XNS; idx.push(a, b, c, b, d, c); }
+  const ia = new THREE.BufferAttribute(new Uint16Array(idx), 1);
+  for (let i = 0; i < XFX.marks[lv]; i++) {
+    const ge = new THREE.BufferGeometry(); ge.setIndex(ia);
+    ge.setAttribute('position', new THREE.BufferAttribute(new Float32Array(XNV * 3), 3)); ge.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(XNV * 2), 2));
+    ge.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1);
+    const m = new THREE.Mesh(ge, new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 }));
+    m.visible = false; m.renderOrder = 1; m.userData = { t: 0, L: 0, R: 0, o: 0 }; g.add(m); XFX.K.push(m);
+  }
+  XFX.E = []; for (let i = 0; i < 24; i++) XFX.E.push({ on: false, x: 0, y: 0, z: 0, r: 0, t: 0, L: 0 });
+  scene.add(g);
+}
+const XD = [0, 0, 0];
+const xDir = up => { const a = Math.random() * TAU, s = up ? rand(.12, 1) : rand(-1, 1), h = Math.sqrt(1 - s * s); XD[0] = Math.cos(a) * h; XD[1] = s; XD[2] = Math.sin(a) * h; return XD; };
+/* a particle, over the oldest */
+function xp(k, x, y, z, vx, vy, vz, L, s0, s1, g, dr, w, t0, gy) {
+  const P = XFX.p, j = XFX.i * XST; XFX.i = (XFX.i + 1) % XFX.N;
+  P[j] = x; P[j + 1] = y; P[j + 2] = z; P[j + 3] = vx; P[j + 4] = vy; P[j + 5] = vz; P[j + 6] = t0 || 0; P[j + 7] = L; P[j + 8] = s0; P[j + 9] = s1;
+  P[j + 10] = k; P[j + 11] = g; P[j + 12] = dr; P[j + 13] = w; P[j + 14] = gy === undefined ? -1e9 : gy; P[j + 15] = Math.random();
+}
+function xBlast(x, y, z, r) {
+  if (!XFX.on || !scene || !camera || !S || typeof sparks === 'undefined' || !sparks) return false;
+  if (XFX.sc !== scene || XFX.S !== S || XFX.lv !== clamp(GFX.lv | 0, 0, 2) || !XFX.p) xInit();
+  const c = xCls(r), cp = camera.position, d = Math.hypot(x - cp.x, y - cp.y, z - cp.z), gy = hgt(x, z), gnd = y - gy < Math.max(3, r * .35), wet = gnd && S.T && gy <= S.T.WL + .3, F = XFX;
+  if (gnd && !wet && (c >= 3 || d < F.mfar)) xMark(x, z, r, c);
+  if (c >= 3 && gnd) xMush(x, wet ? S.T.WL : gy, z, r, c);
+  if (c < 3 && d > F.far) return true;
+  const q = F.q[F.lv] * (d < 1500 ? 1 : d < 3500 ? .6 : .35), n = a => Math.max(a[c] ? 1 : 0, Math.round(a[c] * q)), hm = Math.min(70, r * F.up[c] * .65), vu = Math.sqrt(2 * GR * hm);
+  xp(0, x, y + r * .1, z, 0, 0, 0, F.lightL[c] + .06, r * .9, r * 2.2, 0, 0, 0);   // the flash
+  for (let i = 0, m = n(F.fire); i < m; i++) { const D = xDir(gnd), v = r * rand(.5, 1.1) * 1.2; xp(1, x + rand(-.1, .1) * r, y + r * .05, z + rand(-.1, .1) * r, D[0] * v, D[1] * v, D[2] * v, (.35 + .25 * c) * rand(.7, 1.25), r * .22, r * rand(.45, .65), -2 - c, 3.5, .3); }
+  for (let i = 0, m = n(F.ember); i < m; i++) { const D = xDir(gnd), v = r * rand(.8, 2.2) * .9 + 8; xp(2, x, y + .5, z, D[0] * v, D[1] * v, D[2] * v, rand(.6, 1.6) + c * .15, .35 + r * .012, 0, GR, .5, 0, 0, gnd ? gy - .5 : -1e9); }
+  if (gnd && !wet) {
+    for (let i = 0, m = n(F.dirt); i < m; i++) { const D = xDir(true), vy = vu * rand(.5, 1), vh = vu * rand(.15, .55); xp(5, x + D[0] * r * .1, y + .3, z + D[2] * r * .1, D[0] * vh, vy, D[2] * vh, Math.min(8, 2 * vy / GR + .6), rand(.25, .6) + r * .015, 0, GR, .15, 0, 0, gy - .5); }
+    for (let i = 0, m = c ? n(F.plume) : 0; i < m; i++) { const D = xDir(true); xp(4, x + D[0] * r * .1, y + 1, z + D[2] * r * .1, D[0] * vu * .15, vu * rand(.35, .6), D[2] * vu * .15, rand(2.5, 4.5) + c, r * .25, r * rand(.8, 1.1), 2, 1.2, .6); }
+  }
+  if (gnd) for (let i = 0, m = n(F.ring); i < m; i++) {
+    const a = (i + Math.random() * .5) / m * TAU, v = r * rand(2.6, 3.4);
+    xp(wet ? 6 : 4, x + Math.cos(a) * r * .15, (wet ? S.T.WL : gy) + 1.2, z + Math.sin(a) * r * .15, Math.cos(a) * v, rand(.3, 1.5), Math.sin(a) * v, rand(1.4, 2.4) + c * .5, r * .18, r * rand(.6, .85), 0, 2.6, .5);
+  }
+  if (wet) for (let i = 0, m = n(F.dirt); i < m; i++) { const D = xDir(true), vy = vu * rand(.6, 1.1), vh = vu * rand(.05, .25); xp(6, x, S.T.WL + .5, z, D[0] * vh, vy, D[2] * vh, 2 * vy / GR + .4, r * .06 + .5, r * .2, GR, .4, 0); }
+  for (let i = 0, m = n(F.smoke); i < m; i++) {   // the column: staggered so that it keeps rising a while after the burst
+    xp(3, x + rand(-.2, .2) * r, y + r * .15, z + rand(-.2, .2) * r, rand(-1, 1) * r * .05, gnd ? rand(2, 5) + r * .08 : rand(-1, 2), rand(-1, 1) * r * .05,
+      F.smL[c] * rand(.75, 1.25), r * .3, r * rand(1, 1.5) * (c >= 3 ? .8 : 1), gnd ? -(1.2 + .5 * c) : -.5, .7, 1, -rand(0, .25 + .35 * c));
+  }
+  if (F.L.length && d < 3000) {   // the light of the flash: the free one, or the faintest
+    let l = F.L[0]; for (const o of F.L) if (o.userData.i0 * Math.max(0, 1 - o.userData.t / o.userData.L) < l.userData.i0 * Math.max(0, 1 - l.userData.t / l.userData.L)) l = o;
+    l.position.set(x, y + r * .3 + 2, z); l.distance = r * 7 + 30; Object.assign(l.userData, { i0: F.light[c], t: 0, L: F.lightL[c] });
+  }
+  if (F.shell[c] && d < 5000) { let h = F.H[0]; for (const o of F.H) if (o.userData.t / o.userData.T > h.userData.t / h.userData.T) h = o; h.position.set(x, gnd ? gy : y, z); Object.assign(h.userData, { t: 0, T: .5 + .1 * c, r, k: F.shell[c] }); }
+  if (F.burn[c] && gnd && !wet) { let e = F.E[0]; for (const o of F.E) if (!o.on || o.t / o.L > e.t / e.L) { e = o; if (!o.on) break; } Object.assign(e, { on: true, x, y: gy, z, r, t: 0, L: F.burn[c] * rand(.8, 1.2) }); }
+  return true;
+}
+/* a mark on the ground: a fresh one of its size near renews; else the slot with the least time left */
+function xMark(x, z, r, c) {
+  const F = XFX, R = Math.max(1.2, r * F.mark[c]);
+  let s = null, best = 1e9;
+  for (const m of F.K) {
+    const u = m.userData, left = m.visible ? u.L - u.t : -1;
+    if (m.visible && u.R >= R * .8 && Math.abs(m.position.x - x) < u.R * .4 && Math.abs(m.position.z - z) < u.R * .4) { u.t = Math.min(u.t, u.L * .1); u.o = Math.min(1, u.o + .1); return; }
+    if (left < best) { best = left; s = m; }
+  }
+  if (!s) return;
+  const ge = s.geometry, P = ge.attributes.position.array, U = ge.attributes.uv.array, y0 = hgt(x, z), rot = Math.random() * TAU, lift = .12 + R * .006, flat = R < 8;
+  let gx = 0, gz = 0; if (flat) { gx = (hgt(x + R, z) - hgt(x - R, z)) / (2 * R); gz = (hgt(x, z + R) - hgt(x, z - R)) / (2 * R); }
+  P[0] = 0; P[1] = lift; P[2] = 0; U[0] = .5; U[1] = .5;
+  for (let j = 1; j <= XNR; j++) for (let k = 0; k < XNS; k++) {
+    const v = 1 + (j - 1) * XNS + k, f = j / XNR, a = k / XNS * TAU, w = R * f * (1 + .08 * Math.sin(a * 3 + rot)), px = Math.cos(a) * w, pz = Math.sin(a) * w;
+    P[v * 3] = px; P[v * 3 + 2] = pz; P[v * 3 + 1] = (flat ? gx * px + gz * pz : hgt(x + px, z + pz) - y0) + lift;
+    U[v * 2] = .5 + .5 * f * Math.cos(a + rot); U[v * 2 + 1] = .5 + .5 * f * Math.sin(a + rot);
+  }
+  ge.attributes.position.needsUpdate = ge.attributes.uv.needsUpdate = true; ge.boundingSphere.radius = R * 1.15 + 4;
+  s.position.set(x, y0, z); s.visible = true; Object.assign(s.userData, { t: 0, L: F.markL[c] * rand(.85, 1.15), R, o: F.markO[c] });
+}
+/* a mushroom: a stick of bombs feeds the young one it falls in instead of making another */
+function xMush(x, y, z, r, c) {
+  const F = XFX, H = r * F.mH[c];
+  for (const m of F.M) if (m.on && m.t < F.merge && Math.hypot(m.x - x, m.z - z) < m.Rc * 1.5) { m.H = Math.min(m.H0 * 1.45, m.H * 1.06); m.Rc = Math.min(m.Rc0 * 1.4, m.Rc * 1.05); m.L = Math.max(m.L, m.t + F.mL[c] * .8); return; }
+  let s = F.M[0]; for (const m of F.M) if (!m.on || m.t / m.L > s.t / s.L) { s = m; if (!m.on) break; }
+  if (!s) return;
+  Object.assign(s, { on: true, x, y, z, r, H, H0: H, Rc: H * .32, Rc0: H * .32, t: 0, L: F.mL[c] * rand(.9, 1.1), sd: Math.random() * 100 });
+}
+function xPut(T, x, y, z, r, g, b, a, s, sd) {
+  if (T.n >= T.max) return; const i = T.n++;
+  T.pos[i * 3] = x; T.pos[i * 3 + 1] = y; T.pos[i * 3 + 2] = z; T.pc[i * 4] = r; T.pc[i * 4 + 1] = g; T.pc[i * 4 + 2] = b; T.pc[i * 4 + 3] = a; T.sz[i] = s; T.sd[i] = sd;
+}
+const xMix = (a, b, k) => a + (b - a) * k;
+/* each frame: the particles, the mushrooms, the marks, the lights, the shells, the lingering fires and what burns by its damage */
+function xFrame() {
+  if (!XFX.on || !scene || !camera || !S || typeof sparks === 'undefined' || !sparks) return;
+  if (XFX.sc !== scene || XFX.S !== S || XFX.lv !== clamp(GFX.lv | 0, 0, 2) || !XFX.p) xInit();
+  const F = XFX, A = F.A, B = F.B, P = F.p, N = F.N, u = F.u, Wd = S.wx || {}, wx = Wd.wx || 0, wz = Wd.wz || 0;
+  let dt = S.t - F.t; F.t = S.t; dt = dt > 0 ? Math.min(dt, .25) : 0;
+  if (scene.fog) { u.fN.value = scene.fog.near; u.fF.value = scene.fog.far; u.fC.value.copy(scene.fog.color); } else { u.fN.value = 1e9; u.fF.value = 2e9; }
+  u.amb.value = .16 + .84 * clamp(S.sky ? S.sky.L : 1, 0, 1);
+  A.n = B.n = 0;
+  for (let i = 0, j = 0; i < N; i++, j += XST) {
+    const L = P[j + 7]; if (L <= 0) continue;
+    const t = P[j + 6] + dt; P[j + 6] = t;
+    if (t >= L) { P[j + 7] = 0; continue; }
+    if (t < 0) continue;
+    const dr = Math.max(0, 1 - P[j + 12] * dt), w = P[j + 13];
+    P[j + 3] *= dr; P[j + 5] *= dr; P[j + 4] = (P[j + 4] - P[j + 11] * dt) * dr;
+    P[j] += (P[j + 3] + wx * w) * dt; P[j + 1] += P[j + 4] * dt; P[j + 2] += (P[j + 5] + wz * w) * dt;
+    if (P[j + 1] < P[j + 14]) { P[j + 7] = 0; continue; }   // a clod or an ember back on the ground
+    const k = P[j + 10], v = t / L, s0 = P[j + 8], s1 = P[j + 9], x = P[j], y = P[j + 1], z = P[j + 2], sd = P[j + 15];
+    if (k === 0) xPut(A, x, y, z, 1, .93, .75, (1 - v) * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
+    else if (k === 1) { const e = v < .35 ? v / .35 : (v - .35) / .65; xPut(A, x, y, z, v < .35 ? 1 : xMix(1, .6, e), v < .35 ? xMix(.95, .55, e) : xMix(.55, .15, e), v < .35 ? xMix(.7, .15, e) : xMix(.15, .05, e), .95 * Math.pow(1 - v, 1.5), s0 + (s1 - s0) * (1 - (1 - v) * (1 - v)), sd); }
+    else if (k === 2) xPut(A, x, y, z, 1, xMix(.85, .3, v), xMix(.5, .05, v), 1 - v * v, s0, sd);
+    else if (k === 3) { const e = Math.min(1, v * 2.2); xPut(B, x, y, z, xMix(.09, .4, e), xMix(.085, .38, e), xMix(.08, .36, e), .8 * sstep(0, .06, v) * Math.pow(1 - v, 1.3), s0 + (s1 - s0) * Math.sqrt(v), sd); }
+    else if (k === 4) xPut(B, x, y, z, .55, .47, .35, .6 * sstep(0, .05, v) * Math.pow(1 - v, 1.2), s0 + (s1 - s0) * Math.sqrt(v), sd);
+    else if (k === 5) xPut(B, x, y, z, .19, .15, .1, v > .85 ? .95 * (1 - v) / .15 : .95, s0, sd);
+    else if (k === 6) xPut(B, x, y, z, .86, .9, .93, .75 * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
+    else xPut(B, x, y, z, xMix(.42, .62, v), xMix(.41, .62, v), xMix(.4, .6, v), .5 * sstep(0, .1, v) * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
+  }
+  const q = F.q[F.lv];
+  for (const m of F.M) {   // the mushroom: the cap rolls up as it rises and spreads, the stem of dust under it, the surge round its foot, all drifting with the wind
+    if (!m.on) continue;
+    const t = (m.t += dt); if (t >= m.L) { m.on = false; continue; }
+    const H = m.H, tau = 2.2 + H / 90, hc = H * (1 - Math.exp(-t / tau)), grow = 1 - Math.exp(-t / (tau * 1.2)), Rc = m.Rc * (.35 + .65 * grow) * (1 + t * .004), rr = Rc * .5;
+    const fade = 1 - sstep(m.L * .5, m.L, t), born = sstep(0, .5, t), heat = Math.exp(-t / 2.2), age = sstep(0, m.L * .6, t), sd = m.sd;
+    const dx = k => wx * t * (.2 + .8 * clamp(k, 0, 1)), dz = k => wz * t * (.2 + .8 * clamp(k, 0, 1));
+    const cr = xMix(.3, .55, age), cg = xMix(.27, .52, age), cb = xMix(.24, .49, age), nC = Math.round(46 * q), nD = Math.round(10 * q), nS = Math.round(22 * q), nB = Math.round(18 * q), nG = Math.round(10 * q);
+    for (let i = 0; i < nC; i++) {
+      const a = i / nC * TAU + hash2(i, 1, sd) * .3, ph = hash2(i, 2, sd) * TAU + t * .25, R2 = Rc + rr * Math.cos(ph) * .9, py = hc + rr * .75 * Math.sin(ph) + rr * .25, hh = heat * (Math.sin(ph) < 0 ? 1 : .6) * .9;
+      xPut(B, m.x + Math.cos(a) * R2 + dx(py / H), m.y + py, m.z + Math.sin(a) * R2 + dz(py / H), xMix(cr, 1, hh), xMix(cg, .55, hh), xMix(cb, .2, hh), .85 * born * fade, rr * (1.5 + .6 * hash2(i, 3, sd)), hash2(i, 4, sd));
+    }
+    for (let i = 0; i < nD; i++) {
+      const a = hash2(i, 5, sd) * TAU, rd = Rc * .6 * Math.sqrt(hash2(i, 6, sd)), py = hc + rr * (.6 + .4 * hash2(i, 7, sd));
+      xPut(B, m.x + Math.cos(a) * rd + dx(1), m.y + py, m.z + Math.sin(a) * rd + dz(1), xMix(cr, 1, heat * .7), xMix(cg, .6, heat * .7), xMix(cb, .25, heat * .7), .85 * born * fade, rr * 1.9, hash2(i, 8, sd));
+    }
+    const sf = born * (1 - sstep(m.L * .25, m.L * .6, t));
+    for (let i = 0; i < nS && sf > 0; i++) {
+      const k = (i + .5) / nS, py = k * Math.max(0, hc - rr * .4), rad = Rc * (.18 + .12 * (1 - k) + .1 * k * k), a = hash2(i, 9, sd) * TAU + t * .1, ro = rad * hash2(i, 10, sd), hh = heat * k * .8;
+      xPut(B, m.x + Math.cos(a) * ro + dx(py / H), m.y + py, m.z + Math.sin(a) * ro + dz(py / H), xMix(.42, 1, hh), xMix(.35, .5, hh), xMix(.27, .18, hh), .8 * sf, Rc * (.45 + .25 * (1 - k)), hash2(i, 11, sd));
+    }
+    const bf = born * (1 - sstep(m.L * .2, m.L * .5, t)), rb = m.r * (.4 + 1.6 * (1 - Math.exp(-t / 3)));
+    for (let i = 0; i < nB && bf > 0; i++) {
+      const a = i / nB * TAU + hash2(i, 12, sd) * .4;
+      xPut(B, m.x + Math.cos(a) * rb + dx(0), m.y + m.r * (.12 + .15 * hash2(i, 13, sd)), m.z + Math.sin(a) * rb + dz(0), .55, .48, .37, .6 * bf, m.r * .55 * (1 + t * .02), hash2(i, 14, sd));
+    }
+    for (let i = 0; i < nG && heat > .03; i++) {   // the fire inside, while it is hot
+      const a = i / nG * TAU, R2 = Rc * .8, py = Math.max(0, hc - rr * .3);
+      xPut(A, m.x + Math.cos(a) * R2 * hash2(i, 15, sd) + dx(1), m.y + py, m.z + Math.sin(a) * R2 * hash2(i, 15, sd) + dz(1), 1, .5, .15, heat * .8, rr * 1.6, hash2(i, 16, sd));
+    }
+  }
+  for (const m of F.K) {
+    if (!m.visible) continue;
+    const U = m.userData; U.t += dt;
+    if (U.t >= U.L) { m.visible = false; continue; }
+    m.material.opacity = U.o * (1 - sstep(U.L * .65, U.L, U.t));
+  }
+  for (const l of F.L) { const U = l.userData; U.t += dt; const k = Math.max(0, 1 - U.t / U.L); l.intensity = U.i0 * k * k; }
+  for (const h of F.H) {
+    const U = h.userData; if (U.t >= U.T) { h.visible = false; continue; }
+    U.t += dt; const v = Math.min(1, U.t / U.T), s = U.r * (.15 + U.k * (1 - Math.pow(1 - v, 3)));
+    h.visible = true; h.scale.setScalar(s); h.material.uniforms.a.value = .55 * Math.pow(1 - v, 1.5);
+  }
+  if (dt > 0) xBurn(dt);
+  for (const T of [A, B]) { const ge = T.m.geometry; ge.setDrawRange(0, T.n); for (const k of ['position', 'pc', 'size', 'sd']) ge.attributes[k].needsUpdate = true; }
+}
+/* the fires: one that lingers in a big crater, a vehicle by its damage, a wreck for its first seconds, a building after its last hit */
+function xBurn(dt) {
+  const F = XFX, cp = camera.position, nr = F.near, far = o => Math.abs(o.x - cp.x) > nr || Math.abs(o.z - cp.z) > nr;
+  const fire = (x, y, z, s, n) => { for (let i = 0; i < n; i++) xp(1, x + rand(-1, 1) * s * .5, y, z + rand(-1, 1) * s * .5, rand(-1, 1), rand(2, 5), rand(-1, 1), rand(.5, 1), s * .5, s * rand(.8, 1.1), -3, 1.5, .5); };
+  const smoke = (k, x, y, z, s) => xp(k, x + rand(-1, 1) * s * .3, y, z + rand(-1, 1) * s * .3, rand(-.5, .5), rand(2, 4), rand(-.5, .5), rand(5, 9), s * .6, s * rand(2.4, 3.2), -1, .6, 1);
+  const p = (rate) => Math.random() < rate * dt;
+  for (const e of F.E) {
+    if (!e.on) continue; if ((e.t += dt) >= e.L) { e.on = false; continue; }
+    if (far(e)) continue;
+    const k = 1 - e.t / e.L, s = Math.max(1.5, e.r * .06);
+    if (p(8 * k)) fire(e.x + rand(-1, 1) * e.r * .2, e.y + .5, e.z + rand(-1, 1) * e.r * .2, s, 1);
+    if (p(3 * k)) smoke(3, e.x + rand(-1, 1) * e.r * .2, e.y + s, e.z + rand(-1, 1) * e.r * .2, s);
+  }
+  for (const u of S.units) {
+    if (u.dead || u.gone || !u.def || !(u.def.hp > 0) || u.burn || far(u)) continue;
+    const f = u.hp / u.def.hp; if (!(f < F.hurt[0])) continue;
+    const y = u.y + (u.def.mh || 2);
+    if (p(f < F.hurt[1] ? 7 : 3)) smoke(f < F.hurt[1] ? 3 : 7, u.x, y, u.z, 1.4);
+    if (f < F.hurt[1] && p(5)) fire(u.x, y - .5, u.z, 1.6, 1);
+  }
+  for (const w of S.wrecks) {
+    const o = w.u; if (!o || far(o)) continue;
+    if (w.life > F.wreck) { if (p(8)) fire(o.x, o.y + 1.5, o.z, 2.6, 1); if (p(2)) xp(2, o.x, o.y + 2, o.z, rand(-3, 3), rand(4, 9), rand(-3, 3), rand(.8, 1.6), .4, 0, GR, .5, 0, 0, o.y); }
+    else if (w.life > 8 && p(2)) smoke(3, o.x, o.y + 2.5, o.z, 1.6);
+  }
+  if (S.osm && S.ot) for (const o of S.osm) {
+    if (far(o) || !(S.t - S.ot[o.id] < F.bld) || !p(3)) continue;
+    fire(o.x + rand(-1, 1) * (o.hw || 2) * .5, o.y + (o.h || 4), o.z + rand(-1, 1) * (o.hd || 2) * .5, Math.max(1.5, (o.hw || 3) * .35), 1);
+  }
+}
+fx.blast = (x, y, z, r) => { try { return xBlast(x, y, z, r); } catch (e) { if (!XFX.err++) console.warn('XFX', e); return false; } };
+syncScene = (g => dt => { g(dt); try { xFrame(); } catch (e) { if (!XFX.err++) console.warn('XFX', e); } })(syncScene);
 /* ---- the General's view: Campanha, the strike button (a click on the map) and the list of the side's strikes ---- */
 GORW.bomb = 1;
 Object.defineProperty(GORT, 'bomb', { enumerable: true, get: () => 'Bombardeio estratégico (' + (stkKinds(S.me).map(k => ECO.tx.u[k].toLowerCase() + ' ' + stkRes(S.me, k) + ' na reserva').join(', ') || 'nenhuma arma') + '): clique no alvo' });

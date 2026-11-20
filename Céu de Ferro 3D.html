@@ -6263,8 +6263,9 @@ const foeBase = (t, x, z) => {
    forest tracks), 9 the three-sided modern map (RN.tri: the insurgent base B2, the roads R_EI and R_RI, the seat at HS2, the points of
    three sides). A room's version is its first player's, told in welcome (Net.mv). Version 9 changes nothing on a two-sided map: the third
    side's map is built only for genTerrain(era, mv >= 9, n 3) on the modern front; 10 the undergrowth (UG: brush in and around the woods,
-   along the river, the field edges and in lanes between the woods and the towns, a field and not objects) */
-let MAPV = 10;
+   along the river, the field edges and in lanes between the woods and the towns, a field and not objects); 11 more of it where a soldier
+   wants cover (UG.v11: road verges, gardens and hedges round the villages, thickets, more lanes between the woods) */
+let MAPV = 11;
 const TERRAIN = {};
 function hash2(i, j, s) { const n = Math.sin(i * 127.1 + j * 311.7 + s * 74.7) * 43758.5453; return n - Math.floor(n); }
 function vnoise(x, z, s) {
@@ -16124,13 +16125,19 @@ function coverV7(T, era, sd) {
      cell x (1 - way.k x density) x (1 + way.v x the enemy's watch on the side's map), water only where the way already crossed it (a bridge);
      kept only if no longer than way.stretch x the way given.
    The scene draws it near the eye (ugTiles): tiles of draw.tile m within draw.see m, up to draw.per low bushes a cell by its density, made
-   draw.make tiles a frame, the far ones dropped. UG.on 0 leaves the field out of a new terrain (a measurement's control) */
+   draw.make tiles a frame, the far ones dropped, times q of the graphics quality (Baixa, Média, Alta). UG.on 0 leaves the field out of a new terrain (a measurement's control).
+   Map version 11 (v11, cf-trincheiras-tuneis, NOT TESTED) grows more where a soldier wants cover: up to lanes lanes a wood or town (was lane.n);
+   the verges of every road (verge.w m from its middle, past its own 9 m, on stretches of verge.run m the dice give verge.p); round each
+   village, from its edge out vil.w m, in patches (none where the noise is under vil.gap); and thickets on open grass: in thk.p of the cells
+   of thk.n m one round blob thk.r m across. A field still: no ids */
 const UG = { on: 1, cell: 25, thr: .3, road: 9, base: 1500, border: 120, nz: 170,
   wood: [.5, .95], edge: { w: 95, d: .85 }, bank: { w: 330, up: 9, d: .75 }, row: { w: 9, d: .75, p: { ww2: .6, modern: .45 } },
   lane: { w: 36, d: .8, max: 2600, n: 3, wob: 40 },
   cov: { c: .6, wood: .64 }, slow: .15, fp: .5, tm: .4,
   way: { r: 170, min: 120, max: 9000, cells: 200000, k: .7, v: 3, stretch: 1.5 },
-  draw: { see: 850, tile: 400, per: 3, make: 2, keep: 1.4, r: [1.1, 2.5], h: [.8, 1.7] } };
+  draw: { see: 850, tile: 400, per: 3, make: 2, keep: 1.4, r: [1.1, 2.5], h: [.8, 1.7] },
+  v11: { lanes: 5, verge: { w: 30, run: 140, p: .55, d: .72 }, vil: { w: 220, d: .78, gap: .38 }, thk: { n: 230, p: .22, r: [22, 55], d: .7 } },
+  q: [.6, 1, 1.25] };
 function ugGen(T, era, sd) {
   if (!UG.on) return;
   const K = UG, c = K.cell, W = T.W, HW = T.HW, nx = Math.ceil(W / c), nz = Math.ceil(2 * HW / c), n = nx * nz, N = T.N, M = N + 1;
@@ -16184,7 +16191,7 @@ function ugGen(T, era, sd) {
   const cnt = new Int32Array(nc), way = (u, v) => { const A = []; for (let k = u; k >= 0; k = par[k]) A.push(k); A.reverse(); for (let k = v; k >= 0; k = par[k]) A.push(k); return A; };
   let nl = 0;
   for (const P of [...pairs.values()].sort((p, q) => p.l - q.l || p.key - q.key)) {
-    if (cnt[P.a] >= L.n && cnt[P.b] >= L.n) continue;
+    if (cnt[P.a] >= (T.mv >= 11 ? UG.v11.lanes : L.n) && cnt[P.b] >= (T.mv >= 11 ? UG.v11.lanes : L.n)) continue;   // map version 11: more lanes between the woods
     cnt[P.a]++; cnt[P.b]++; nl++;
     const A = way(P.u, P.v);
     let pts = A.map((k, i) => { const x = nX(k), z = nZ(k); if (!i || i === A.length - 1) return { x, z }; const o = (hash2(k, nl, sd + 141) - .5) * 2 * L.wob; return { x: x + o * .7, z: z - o * .7 }; });
@@ -16197,6 +16204,20 @@ function ugGen(T, era, sd) {
       }
     }
   }
+  /* map version 11: the cells near a road's middle (verge.w m) and those round a village (vil.w m out of its edge: 255 at it, half at the far side), drawn once */
+  let M11 = null;
+  if (T.mv >= 11) {
+    const Q = UG.v11, vg = new Uint8Array(n), vl = new Uint8Array(n), cell = (x, z) => { const i = Math.floor(x / c), j = Math.floor((z + HW) / c); return i < 0 || j < 0 || i >= nx || j >= nz ? -1 : j * nx + i; };
+    for (const r of (T.net ? T.net.e.map(e => e.p) : T.routes)) for (let a = 1; a < r.length; a++) {
+      const A = r[a - 1], B = r[a], l = Math.hypot(B.x - A.x, B.z - A.z), m = Math.max(1, Math.ceil(l / (c / 2))), rr = Math.ceil(Q.verge.w / c);
+      for (let s = 0; s <= m; s++) { const x = A.x + (B.x - A.x) * s / m, z = A.z + (B.z - A.z) * s / m, k0 = cell(x, z); if (k0 < 0) continue; const i0 = k0 % nx, j0 = (k0 / nx) | 0; for (let j = Math.max(0, j0 - rr); j <= Math.min(nz - 1, j0 + rr); j++) for (let i = Math.max(0, i0 - rr); i <= Math.min(nx - 1, i0 + rr); i++) if (Math.hypot((i + .5) * c - x, -HW + (j + .5) * c - z) <= Q.verge.w) vg[j * nx + i] = 1; }
+    }
+    for (const b of T.burgs || []) {
+      const R0 = b.ru + 90, R1 = R0 + Q.vil.w, i0 = Math.max(0, Math.floor((b.x - R1) / c)), i1 = Math.min(nx - 1, Math.floor((b.x + R1) / c)), j0 = Math.max(0, Math.floor((b.z + HW - R1) / c)), j1 = Math.min(nz - 1, Math.floor((b.z + HW + R1) / c));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const e = Math.hypot((i + .5) * c - b.x, -HW + (j + .5) * c - b.z) - R0; if (e >= 0 && e < Q.vil.w) vl[j * nx + i] = Math.max(vl[j * nx + i], Math.round(255 * (1 - .5 * e / Q.vil.w))); }
+    }
+    M11 = { vg, vl };
+  }
   /* the density */
   const rx = T.rx || (() => -1e9), R = K.row;
   let nb = 0;
@@ -16206,7 +16227,17 @@ function ugGen(T, era, sd) {
     const bank = rv < K.bank.w && hgtT(T, x, z) < T.WL + K.bank.up;
     const rowX = Math.abs(x - ax * 330) < R.w / 2 && hash2(ax, Math.floor(z / 260), sd + 143) < R.p[era] && (field(x - 25, z) || field(x + 25, z));
     const rowZ = Math.abs(z - az * 260) < R.w / 2 && hash2(Math.floor(x / 330) + 500, az, sd + 143) < R.p[era] && (field(x, z - 25) || field(x, z + 25));
-    if (dw[k] >= K.edge.w && !bank && !rowX && !rowZ && !lane[k]) continue;   // nothing grows here: no noise to draw
+    let x11 = 0, vil = false;   // map version 11 (UG.v11): the verges of the roads, the gardens and hedges round the villages, thickets on open ground
+    if (M11) {
+      const Q = UG.v11;
+      if (M11.vg[k] && hash2(Math.floor(x / Q.verge.run), Math.floor(z / Q.verge.run), sd + 160) < Q.verge.p) x11 = Q.verge.d;
+      else if (M11.vl[k]) { x11 = Q.vil.d * M11.vl[k] / 255; vil = true; }
+      else if (T.kind[nodeAt(T, x, z)] === 0) {   // a thicket: one blob in some of the cells of thk.n m, thk.r m across
+        const bi = Math.floor(x / Q.thk.n), bj = Math.floor(z / Q.thk.n), h = s => hash2(bi, bj, sd + s);
+        if (h(161) < Q.thk.p && Math.hypot(x - (bi + .2 + .6 * h(162)) * Q.thk.n, z - (bj + .2 + .6 * h(163)) * Q.thk.n) < Q.thk.r[0] + (Q.thk.r[1] - Q.thk.r[0]) * h(164)) x11 = Q.thk.d;
+      }
+    }
+    if (dw[k] >= K.edge.w && !bank && !rowX && !rowZ && !lane[k] && !x11) continue;   // nothing grows here: no noise to draw
     const nn = fbm(x / K.nz, z / K.nz, sd + 140);
     let v = 0;
     if (dw[k] === 0) v = K.wood[0] + (K.wood[1] - K.wood[0]) * clamp((nn - .25) * 2, 0, 1);
@@ -16214,6 +16245,7 @@ function ugGen(T, era, sd) {
     if (bank) v = Math.max(v, K.bank.d * (.45 + .8 * nn) * (1 - .5 * rv / K.bank.w));
     if (rowX || rowZ) v = Math.max(v, R.d * (.7 + .4 * nn));
     if (lane[k]) v = Math.max(v, L.d * (.75 + .4 * nn));
+    if (x11 && !(vil && nn < UG.v11.vil.gap)) v = Math.max(v, x11 * (.65 + .5 * nn));   // a village's ring in patches (gardens, hedges), not all round
     d[k] = Math.round(clamp(v, 0, 1) * 255);
     if (v >= K.thr) nb++;
   }
@@ -16247,6 +16279,7 @@ function ugPoly(p, t) {
     if (fl & 1 && !(wet && fl & 2)) return Infinity;
     let v = c * (1 - K.k * U.d[k] / 255);
     if (V) v *= 1 + K.v * V[m4Cell(M, (gi + .5) * c, -U.HW + (gj + .5) * c)];
+    v *= mvWayK(gi, gj, c, U, M);   // dearer in the open and on a crest (CEREBRO: movimento)
     return v;
   };
   const a = (cj(p[0].z) - j0) * w + ci(p[0].x) - i0, b = (cj(p[p.length - 1].z) - j0) * w + ci(p[p.length - 1].x) - i0;
@@ -16546,6 +16579,7 @@ function fortBuild(P, I, key, trig) {
   const F = FORT.K[B.k], D = clamp(F.put[0] + (a.p + .5) * (F.put[1] - F.put[0]) / .5, F.put[0], F.put[1]);
   if (S.bh) { if (I.fire) P.ctl.fire = false; else S.bh = false; }
   B.x = P.x + Math.cos(a.h) * D; B.z = P.z - Math.sin(a.h) * D; B.a = a.h; B.y = hgt(B.x, B.z);
+  if (B.k === 1 && TRN.on) { const p = trSnap(P.team, B.x, B.z, B.a); if (p && !fortWhy(1, P.team, p.x, p.z, p.a)) { B.x = p.x; B.z = p.z; B.a = p.a; B.y = hgt(p.x, p.z); } }   // beside a trench of ours: it lengthens the corridor (TRN)
   B.why = S.net && !Net.ft ? 'server' : S.fw ? 'wait' : fortWhy(B.k, P.team, B.x, B.z, B.a);
   P.ctl.fire = P.ctl.ads = false;
   if (I.ordA) { S.fm = null; return true; }
@@ -30480,7 +30514,8 @@ DRILLS.push({ id: 'escolta-ca', cls: 'inf', s: 'anticarro inimigo perto do carro
      and a few rules of its own: the disguise kept with less calm (mis), the false uniform (fal: grade, as the disguise is), the booby-trapped
      abandoned vehicles (arm: S.grlBT), the propaganda that wears the enemy's tickets down (psi), the roadblocks' toll (blq), the squads that
      scatter and meet again after a blow (dsp) and the prepared ways out of the villages (tun).
-   Tunnels (tactic 23) are not made: the ground has no underground and the soldiers no way through it; the prepared escape routes are.
+   Tunnels (tactic 23) are dug and used since cf-trincheiras-tuneis (TUN: grlTun digs one from each village held to its way out and sends worn
+   squads through it); the prepared route on foot stays for a village without one.
    No random number but the taste, drawn once a match. GRL.on 0 leaves all of it out. */
 const GRL = { on: 1, tick: 5, every: 15, top: 5, min: .35, swap: 1.3, act: 12, fail: 25, taste: [.85, 1.15], cap: [.3, 3],
   nm: { evt: 'Evitar a batalha campal', emc: 'Emboscada complexa', ass: 'Assédio (atirar e sair)', not: 'Incursão noturna', slg: 'Sabotagem da logística',
@@ -30592,7 +30627,7 @@ function grlScore(C, X, k) {
     case 'fal': return [X.infOps ? 1 : .4, X.infOps ? X.infOps + ' grupo(s) atrás da linha inimiga: chegar perto sem ser reconhecido' : 'sem grupo atrás da linha agora'];
     case 'cmd': return [X.radT ? .7 + .3 * Math.min(3, X.radT) : .1, X.radT + ' rádio(s) ou QG inimigo(s) conhecido(s)'];
     case 'arm': return [.35 + (X.aband ? .3 : 0) + (X.sap && X.br ? .2 : 0) + (X.hab ? .1 : 0), X.aband + ' veículo(s) abandonado(s) e ' + X.br + ' ponte(s) para armadilhar'];
-    case 'tun': return [tw ? .4 + (R < 1 ? .5 : 0) + .2 * Math.min(2, X.twThr) : .05, tw + ' vila(s) nossa(s): rotas de fuga preparadas (túneis não existem no terreno)'];
+    case 'tun': return [tw ? .4 + (R < 1 ? .5 : 0) + .2 * Math.min(2, X.twThr) : .05, tw + ' vila(s) nossa(s): túneis e rotas de fuga preparadas'];
   }
   return [0, ''];
 }
@@ -30898,7 +30933,7 @@ function grlTun(C) {
       gLog(t, 'grl', GRL.nm.tun + ': esquadra desgastada sai de ' + gName(p) + ' pela rota preparada até ' + grlNear(w), w, null);
     }
   }
-  if (made) gLog(t, 'grl', GRL.nm.tun + ': rotas de fuga preparadas nas vilas nossas (túneis não: o terreno não tem subsolo)', null, 'grltun');
+  if (made) gLog(t, 'grl', GRL.nm.tun + ': rotas de fuga preparadas nas vilas nossas', null, 'grltun');
 }
 /* the booby-trapped vehicles: an enemy soldier at one (to get in, to look) sets it off */
 function grlTrapStep(dt) {
@@ -31005,6 +31040,573 @@ anaReport = (g => (ev, me) => {
   return R;
 })(anaReport);
 /* ===== end of the guerrilla mind ===== */
+/* ---------- CEREBRO: trincheiras-tuneis (TRN, TUN, ABRT; cf-trincheiras-tuneis, NOT TESTED: docs/nao-testado/cf-trincheiras-tuneis.md) ----------
+   A producer for the soldier's mind (the research cf-cerebro-pesquisa, 3.3 "cf-trincheiras-tuneis"): it publishes the shelter points of the
+   works into P2's registry (ABRT), the corridors and the tunnels as route edges (trRota: exposure about 0; a tunnel's edge out of sight and
+   out of hearing), the hooks of the procedures "take the foot of a trench" and "clear a trench" (trPe, trLimpar) and, until a leader (P3)
+   walks its men by them, a default way along the corridors for any AI soldier. Where to dig is not decided here (P3, with P2's profile
+   cavar). Old code only through hooks (the list is in the PR and in the doc): aiMan and wayTo (the corridor's way), fortStart (a trench laid
+   on from the end of one of the side's own), fortAt and fortDrop (the registry), squadThink (a squad underground), explode (a mouth blown
+   in), step (the tunnels), genState, grlTun, GC.fort, Net.rx and Net.tick.
+   TRN: trenches that touch are one corridor. trNet() joins every trench dug past FORT.trench.min whose end lies within join m of another's
+   middle line (end to end, a corner, a T), or whose lines cross; a node at each end and at each joint, edges along each trench and across
+   each joint. It is built again only when a work comes, goes or is dug past min (its key). An AI soldier (aiMan, trGo) whose goal is in a
+   corridor, or who is in one, walks by its floor when that is cheaper: a metre inside costs 1, a metre over open ground calm (hot when an
+   enemy is within hotR m of its squad or it is pinned); it enters and leaves by the nodes (the ends and joints), looked at again every
+   `every` s or when the goal moves. A trench begun within snap m of the end of one of its side's own (trSnap, in fortStart and in the
+   player's outline) is laid on from that end: straight on when its aim is within turn rad of the old line, else turned from the end, so
+   building beside a trench lengthens the corridor. Tracks still cross slowly and wheels only at the planks (trenchBump).
+   TUN: tunnels (the ground still has no underground: a tunnel is two mouths and a time). A side digs one from mouth a to mouth b (min to
+   max m: ins, the Insurgents' longer, reg the regular sides'), at rate m/s a man of the side within dig m of mouth a (up to six), up to cap
+   tunnels a side at once. Squads of the side sent through it (genCmd tun use) walk to the nearer mouth; there they go under (their men out
+   of the world, as a truck boxes its squad) and come out at the other mouth len / crawl + pad s later, with the hurt they had, to hold there
+   or go on to x2 z2. A mouth is hidden: the enemy finds it only by perception (tunSee every look s): one of its soldiers within see m,
+   seeSap for a sapper or an engineer, seeRec for a scout or a squad on a recon order, and, when a squad goes in or comes out, any enemy
+   within peek m that has the mouth in sight. Found, the mouth is drawn and named for that side (and its AI general sends a squad to blow it:
+   genCmd tun blow); blow.sap s of a sapper's or blow.man s of another soldier's work at it (with none of the owner's within guard m), or a
+   burst of blast dmg within blast m, collapses the tunnel: squads inside come out where they went in with half their men. The general
+   orders it all through the one funnel (genCmd tun: dig {x z, x2? z2?, ids?}, use {id? | x z, ids? | n?, x2? z2?}, blow {x z, ids?}, fill
+   {id}); fortify with k tun is dig. The Insurgents' guerrilla tactic tun digs one from each village it holds to its way out and sends
+   worn squads through it. Online the host sends each side its own tunnels and the mouths it found (tun, the server's tcap).
+   For the soldier's mind, without any behaviour of its own: ABRT (below) the shelter points in P2's format; trRota() the route edges;
+   trPe and trLimpar the clearing hooks; shelters(m, r, o) the shelters within r m (the registry's points, bushes and brush) with
+   concealment c and protection p; trCorr(x, z) the corridor a point is in; trPath(x0, z0, x1, z1, k) the way through the corridors (null
+   when the open is as cheap); tunMouths(t) the mouths side t may use or knows. No random number in any of it but the squads' places on
+   coming out (addSquad) */
+const TRN = { on: 1, join: 3.2, snap: 8, turn: .7, every: 2, calm: 1.35, hot: 2.4, hotR: 300, max: 400 };
+const TUN = { on: 1, max: { ins: 450, reg: 260 }, min: 40, cap: { ins: 6, reg: 2 }, rate: .12, dig: 14, crawl: 1.1, pad: 4, look: 1, see: 16, seeSap: 34, seeRec: 26,
+  peek: 220, blow: { sap: 6, man: 14, near: 3.5, guard: 25 }, blast: { r: 4, dmg: 120 }, reach: 5, wait: 600, net: 2, near: 300, auto: [90, 180, 300], foe: 150,
+  hear: { dig: 1, go: 0, keep: 3 }, close: 6 };
+/* ----- the corridors ----- */
+function trNet() {
+  const L = S.forts.filter(f => f.k === 1 && !f.gone && f.prog >= f.F.min), key = S.fn + ':' + L.length;
+  if (S.trn && S.trn.key === key) return S.trn;
+  const N = [], P = new Map(), node = (x, z) => (N.push({ x, z, e: [], c: -1 }), N.length - 1), link = (a, b, w) => { N[a].e.push([b, w]); N[b].e.push([a, w]); };
+  for (const f of L) { const h = f.o.hw, ux = -Math.sin(f.a), uz = -Math.cos(f.a); f.tu = [ux, uz]; f.tl = [null, null]; f.cid = -1; P.set(f, [{ s: -h, n: node(f.x - ux * h, f.z - uz * h) }, { s: h, n: node(f.x + ux * h, f.z + uz * h) }]); }
+  const on = (g, s) => { const l = P.get(g); for (const p of l) if (Math.abs(p.s - s) < 1) return p.n; const n = node(g.x + g.tu[0] * s, g.z + g.tu[1] * s); l.push({ s, n }); return n; };
+  for (let i = 0; i < L.length; i++) for (let j = 0; j < L.length; j++) {
+    const f = L[i], g = L[j]; if (i === j || Math.abs(f.x - g.x) > 40 || Math.abs(f.z - g.z) > 40) continue;
+    [-1, 1].forEach((e, ei) => {   // each end of f against g's middle line
+      const ex = f.x + f.tu[0] * f.o.hw * e, ez = f.z + f.tu[1] * f.o.hw * e, s = clamp((ex - g.x) * g.tu[0] + (ez - g.z) * g.tu[1], -g.o.hw, g.o.hw), qx = g.x + g.tu[0] * s, qz = g.z + g.tu[1] * s, d = Math.hypot(ex - qx, ez - qz);
+      if (d > TRN.join) return;
+      link(P.get(f)[ei].n, on(g, s), d); f.tl[ei] = { g, dot: Math.abs(f.tu[0] * g.tu[0] + f.tu[1] * g.tu[1]) };
+    });
+    if (i < j) {   // two lines that cross
+      const dx = g.x - f.x, dz = g.z - f.z, cr = f.tu[0] * g.tu[1] - f.tu[1] * g.tu[0]; if (Math.abs(cr) < .2) continue;
+      const s = (dx * g.tu[1] - dz * g.tu[0]) / cr, r = (dx * f.tu[1] - dz * f.tu[0]) / cr;
+      if (Math.abs(s) < f.o.hw - 1 && Math.abs(r) < g.o.hw - 1) link(on(f, s), on(g, r), 0);
+    }
+  }
+  for (const f of L) { const l = P.get(f).sort((a, b) => a.s - b.s); f.tn = l; for (let k = 1; k < l.length; k++) link(l[k - 1].n, l[k].n, l[k].s - l[k - 1].s); }
+  let c = 0;
+  for (let i = 0; i < N.length; i++) { if (N[i].c >= 0) continue; const st = [i]; N[i].c = c; while (st.length) for (const [j] of N[st.pop()].e) if (N[j].c < 0) { N[j].c = c; st.push(j); } c++; }
+  for (const f of L) f.cid = N[f.tn[0].n].c;
+  const cn = Array.from({ length: c }, () => []); N.forEach((o, i) => cn[o.c].push(i));
+  return (S.trn = { key, N, L, n: c, cn });
+}
+/* the corridor (trench) a point is in, and how far along its line */
+function trCorr(x, z) {
+  const f = typeof trenchAt === 'function' ? trenchAt(x, z, .3) : null; if (!f) return null;
+  trNet(); if (!(f.cid >= 0) || !f.tn) return null;
+  return { f, cid: f.cid, s: clamp((x - f.x) * f.tu[0] + (z - f.z) * f.tu[1], -f.o.hw, f.o.hw) };
+}
+/* the way from x0 z0 to x1 z1 through the corridors: [{ x, z }...] ending at x1 z1, or null when going straight over the open is as cheap.
+   k: the cost of a metre in the open (TRN.calm, or TRN.hot under fire) */
+function trPath(x0, z0, x1, z1, k) {
+  const R = trNet(); if (!R.L.length) return null;
+  k = k || TRN.calm;
+  const a = trCorr(x0, z0), b = trCorr(x1, z1), N = R.N, straight = Math.hypot(x1 - x0, z1 - z0) * k;
+  if (!a && !b) return null;
+  if (a && b && a.f === b.f) return null;   // one trench: straight along it
+  const cid = a ? a.cid : b.cid; if (a && b && a.cid !== b.cid) return null;
+  const I = R.cn[cid] || [], g = new Map(), via = new Map(), done = new Set(), G = i => (g.has(i) ? g.get(i) : Infinity);
+  const seed = (n, w) => { if (w < G(n)) { g.set(n, w); via.set(n, -2); } };
+  if (a) { for (const p of a.f.tn) seed(p.n, Math.abs(p.s - a.s)); }
+  else for (const i of I) seed(i, Math.hypot(N[i].x - x0, N[i].z - z0) * k);
+  for (;;) {   // a plain Dijkstra over the corridor's own nodes (a few dozen at most)
+    let u = -1, bu = Infinity; for (const i of I) if (!done.has(i) && G(i) < bu) { bu = G(i); u = i; }
+    if (u < 0) break; done.add(u);
+    for (const [v, w] of N[u].e) if (bu + w < G(v)) { g.set(v, bu + w); via.set(v, u); }
+  }
+  let best = straight, end = -1;
+  for (const i of I) {
+    if (G(i) === Infinity) continue;
+    let w;
+    if (b) { const on = b.f.tn.find(p => p.n === i); w = on ? G(i) + Math.abs(on.s - b.s) : Infinity; }
+    else w = G(i) + Math.hypot(N[i].x - x1, N[i].z - z1) * k;
+    if (w < best - 1) { best = w; end = i; }
+  }
+  if (end < 0) return null;
+  const pts = [{ x: x1, z: z1 }];
+  for (let n = end; n >= 0; n = via.get(n)) pts.push({ x: N[n].x, z: N[n].z });
+  pts.reverse();
+  return pts.length > TRN.max ? null : pts;
+}
+/* where an AI soldier heads instead of its goal when a corridor is the better way (A.trw, looked at every TRN.every s); wayTo goes round no
+   trench whose circle holds the point it heads for, so a corridor's points lead it along the cut */
+function trGo(m, A) {
+  if (!TRN.on || !S.forts || !S.forts.length) { A.trw = null; return null; }
+  let W = A.trw;
+  if (!W || W.gx !== A.gx || W.gz !== A.gz || S.t >= W.T) {
+    const hot = (m.sup > S.t) || (m.sq && m.sq.fd < TRN.hotR), P = trPath(m.x, m.z, A.gx, A.gz, hot ? TRN.hot : TRN.calm);
+    W = A.trw = { gx: A.gx, gz: A.gz, T: S.t + TRN.every + (m.ai ? (m.ai.i || 0) * .05 : 0), pts: P, i: 0 };
+  }
+  if (!W.pts) return null;
+  while (W.i < W.pts.length - 1 && Math.hypot(W.pts[W.i].x - m.x, W.pts[W.i].z - m.z) < 1.3) W.i++;
+  return W.pts[W.i];
+}
+/* the hooks: aiMan says whose way wayTo is asked (TRN.cur), and wayTo heads for the corridor's point instead of the soldier's own goal */
+TRN.cur = null;
+aiMan = (g => (m, dt) => { const o = TRN.cur; TRN.cur = m; try { return g(m, dt); } finally { TRN.cur = o; } })(aiMan);
+wayTo = (g => (M, x, z, gx, gz, r, heavy) => {
+  const m = TRN.cur;
+  if (m && !heavy && M === m.ai && gx === M.gx && gz === M.gz) { const G = trGo(m, M); if (G) { gx = G.x; gz = G.z; } }
+  return g(M, x, z, gx, gz, r, heavy);
+})(wayTo);
+/* a trench begun near the end of one of side t's own is laid on from that end: { x, z, a } or null */
+function trSnap(t, x, z, a) {
+  if (!TRN.on || !S.forts) return null;
+  const h = FORT.trench.size[0] / 2, ux = -Math.sin(a), uz = -Math.cos(a); let b = null, bd = TRN.snap;
+  for (const f of S.forts) {
+    if (f.k !== 1 || f.team !== t || f.gone || Math.abs(f.x - x) > 3 * h || Math.abs(f.z - z) > 3 * h) continue;
+    const fx = -Math.sin(f.a), fz = -Math.cos(f.a);
+    for (const e of [-1, 1]) {
+      const ex = f.x + fx * h * e, ez = f.z + fz * h * e;
+      for (const s of [-1, 1]) { const d = Math.hypot(x + ux * h * s - ex, z + uz * h * s - ez); if (d < bd) { bd = d; b = { ex, ez, ox: fx * e, oz: fz * e, s }; } }
+    }
+  }
+  if (!b) return null;
+  let dx = -ux * b.s, dz = -uz * b.s;   // from the new trench's end at the joint toward its other end
+  const c = dx * b.ox + dz * b.oz;
+  if (c > Math.cos(TRN.turn)) { dx = b.ox; dz = b.oz; } else if (c < -.2) { dx = -dx; dz = -dz; }
+  const a1 = Math.atan2(-dx, -dz), a2 = a1 + Math.PI, f0 = Math.cos(a) * Math.cos(a1) + Math.sin(a) * Math.sin(a1);   // the facing nearer the one aimed (the higher bank toward the enemy)
+  return { x: b.ex + dx * h, z: b.ez + dz * h, a: wrap(f0 >= 0 ? a1 : a2) };
+}
+fortStart = (g => (k, t, x, z, a) => {
+  if (k === 1 && TRN.on) { const p = trSnap(t, x, z, a); if (p && !fortWhy(k, t, p.x, p.z, p.a)) { const f = g(k, t, p.x, p.z, p.a); if (f) return f; } }
+  return g(k, t, x, z, a);
+})(fortStart);
+/* ----- the tunnels ----- */
+const tunL = () => S.tun || (S.tun = []);
+const tunK = t => (insT(t) ? 'ins' : 'reg');
+const tunLive = tn => tn.st === 0;
+const tunEnd = (tn, w) => (w === 'b' ? tn.b : tn.a);
+const tunMine = (tn, t) => tn.team === t;
+const tunSeen = (tn, t, w) => tn.team === t || !!((tn.fd && tn.fd[t]) & (w === 'b' ? 2 : 1));
+/* the mouths side t may use (its own, done) or knows (an enemy's it found): { tn, w, x, z, own } */
+function tunMouths(t) {
+  const out = [];
+  for (const tn of tunL()) {
+    if (!tunLive(tn)) continue;
+    for (const w of ['a', 'b']) { if (w === 'b' && tn.prog < 1 && tn.team === t) continue; if (!tunSeen(tn, t, w)) continue; const p = tunEnd(tn, w); out.push({ tn, w, x: p.x, z: p.z, own: tn.team === t }); }
+  }
+  return out;
+}
+/* why a tunnel of side t may not run from a to b: '' or map, water, road, obj, short, long, cap */
+function tunSpot(x, z) {
+  if (!gMapOk(x, z)) return 'map';
+  if (hgt(x, z) < S.T.WL + 1) return 'water';
+  if (routeDist(S.T, x, z) < 8) return 'road';
+  if (near(x, z, 4).some(o => S.os[o.id] < 2 && !o.K.veil && o.k !== 'tree' && !(o.ft && o.ft.k === 1) && footD(o, x, z) < 1.2)) return 'obj';   // a mouth may open in a trench
+  return '';
+}
+function tunWhy(t, ax, az, bx, bz) {
+  for (const [x, z] of [[ax, az], [bx, bz]]) { const w = tunSpot(x, z); if (w) return w; }
+  const L = Math.hypot(bx - ax, bz - az), K = tunK(t);
+  if (L < TUN.min) return 'short';
+  if (L > TUN.max[K]) return 'long';
+  if (tunL().filter(tn => tn.team === t && tunLive(tn)).length >= TUN.cap[K]) return 'tcap';
+  return '';
+}
+/* where mouth b goes when the order names none: cover (a wood, brush, a town) away from the enemy, TUN.auto m out, the first that fits */
+function tunAuto(t, x, z) {
+  const e = lsFoeBase(t, x, z), ex = x - e.x, ez = z - e.z, el = Math.hypot(ex, ez) || 1; let b = null, bs = -1;
+  for (const r of TUN.auto) for (let i = 0; i < 16; i++) {
+    const an = i * Math.PI / 8, px = x + Math.cos(an) * r, pz = z + Math.sin(an) * r;
+    if (tunWhy(t, x, z, px, pz)) continue;
+    const back = (Math.cos(an) * ex + Math.sin(an) * ez) / el, cov = (kindAt(px, pz) === 1 ? .8 : 0) + ugAt(px, pz) + (typeof insVil === 'function' && S.era === 'modern' && insVil(px, pz, 60) ? .6 : 0);
+    const sc = cov + .5 * back - r / 2000; if (sc > bs) { bs = sc; b = { x: px, z: pz }; }
+  }
+  return b;
+}
+function tunNew(t, ax, az, bx, bz) {
+  const id = (S.tunN = (S.tunN || 0) + 1), tn = { id, team: t, a: { x: ax, z: az, y: hgt(ax, az) }, b: { x: bx, z: bz, y: hgt(bx, bz) }, len: Math.hypot(bx - ax, bz - az), prog: 0, st: 0, fd: bySide(() => 0), T: S.t, n: 0 };
+  tunL().push(tn); S.tunV = (S.tunV || 0) + 1; return tn;   // its mouths go into the registry once it is open (abrTun)
+}
+/* the squads of a side able to go through (no player, no vehicle, not routed, not aboard) */
+const tunOk = q => !!q && q.job !== 'sap' && !q.net && q.live > 0 && !q.state && !q.lift && !q.rd && !q.tn && !q.men.some(m => m === S.my || m.net || m.in);
+/* a squad at its mouth goes under */
+function tunEnter(q, tn, w) {
+  const men = q.men.filter(m => !m.dead && !m.gone && !m.down); if (!men.length || !tunLive(tn) || tn.prog < 1) return false;
+  const E = INF[S.era][S.fac[q.team]], o = w === 'b' ? 'a' : 'b';
+  q.tn = { id: tn.id, tn, from: w, to: o, T: S.t + tn.len / TUN.crawl + TUN.pad, T0: S.t, kits: men.map(m => Math.max(0, E.indexOf(m.id))), hp: men.map(m => m.hp / (m.def && m.def.hp || MAN.hp)), then: q.tnGo ? q.tnGo.then : null };
+  for (const m of men) m.gone = true;
+  q.live = men.length; q.at = false; q.tnGo = null; tn.n++; S.tunV = (S.tunV || 0) + 1;
+  tunPeek(tn, w);
+  gLog(q.team, 'eng', 'Esquadra entra no túnel ' + gNear(tunEnd(tn, w).x, tunEnd(tn, w).z) + ' (sai em ' + Math.round(q.tn.T - S.t) + ' s)', tunEnd(tn, w), null);
+  return true;
+}
+/* it comes out (at the far mouth, or where it went in when the tunnel fell: lose of its men lost) */
+function tunExit(q, w, lose) {
+  const R = q.tn, tn = R.tn, p = tunEnd(tn, w), rp = railOf(p.x, p.z);
+  let kits = R.kits.slice(), hp = R.hp.slice();
+  if (lose) { const k = Math.max(0, Math.round(kits.length * (1 - lose))); kits = kits.slice(0, k); hp = hp.slice(0, k); }
+  q.tn = null; tn.n = Math.max(0, tn.n - 1); S.tunV = (S.tunV || 0) + 1;
+  if (!kits.length) { q.live = 0; q.men = []; return null; }
+  const n = addSquad(q.team, p.x, p.z, rp.ri, rp.s, kits), i = S.squads.indexOf(n);
+  if (i >= 0) S.squads.splice(i, 1);
+  q.men = n.men; q.men.forEach((m, j) => { m.sq = q; if (hp[j] > 0 && hp[j] < 1) m.hp = Math.max(1, m.hp * hp[j]); });
+  q.live = q.n0 = q.men.length; q.ri = rp.ri; q.s = q.s0 = rp.s; q.state = 0; q.at = false; q.pts = null; q.fd = 1e9; q.hf = false; q.tp = null; q.ts = 0;
+  if (!q.live) return null;
+  const T = R.then && !lose ? R.then : null, O = T ? { k: 'move', ri: railOf(T.x, T.z).ri, s: railOf(T.x, T.z).s, x: T.x, z: T.z, R: 12 } : { k: 'hold', ri: rp.ri, s: rp.s, x: p.x, z: p.z, R: 10 };
+  if (q.op && !q.op.over) gTake(q.op, q, O); else setOrd(q, O);
+  if (!lose) tunPeek(tn, w);
+  gLog(q.team, 'eng', (lose ? 'O túnel desabou: ' + q.live + ' homem(ns) saem pela boca de entrada ' : 'Esquadra sai do túnel ') + gNear(p.x, p.z), p, null);
+  return q;
+}
+/* the squad underground: its men, out of the world, ride the tunnel (for its own general's view) */
+function tunThink(q) {
+  const R = q.tn, tn = R.tn, a = tunEnd(tn, R.from), b = tunEnd(tn, R.to), k = clamp((S.t - R.T0) / Math.max(1, R.T - R.T0), 0, 1);
+  for (const m of q.men) if (!m.dead) { m.x = a.x + (b.x - a.x) * k; m.z = a.z + (b.z - a.z) * k; m.y = hgt(m.x, m.z) - 4; }
+  q.live = R.kits.length; q.at = false; q.fd = 1e9; q.halt = true;
+}
+squadThink = (g => q => (q.tn ? tunThink(q) : g(q)))(squadThink);
+/* a tunnel falls in */
+function tunFall(tn, by, why) {
+  if (!tunLive(tn)) return;
+  tn.st = 1; S.tunV = (S.tunV || 0) + 1; abrTun(tn);
+  for (const q of S.squads) if (q.tn && q.tn.tn === tn) tunExit(q, q.tn.from, .5);
+  for (const q of S.squads) if (q.tnGo && q.tnGo.tn === tn) q.tnGo = null;
+  const p = tn.prog >= 1 ? tn.b : tn.a;
+  gLog(tn.team, 'eng', 'Túnel perdido ' + gNear(tn.a.x, tn.a.z) + (why ? ': ' + why : ''), tn.a, null);
+  if (isSide(by) && by !== tn.team) gLog(by, 'eng', 'Túnel inimigo destruído ' + gNear(p.x, p.z), p, null);
+}
+/* found: side e now knows mouth w of tn */
+function tunFound(tn, e, w, how) {
+  if (!isSide(e) || e === tn.team || !tunLive(tn) || tunSeen(tn, e, w)) return;
+  if (w === 'b' && tn.prog < 1) return;
+  tn.fd[e] |= w === 'b' ? 2 : 1; S.tunV = (S.tunV || 0) + 1; abrTun(tn);
+  const p = tunEnd(tn, w);
+  gLog(e, 'eng', 'Boca de túnel inimiga encontrada ' + gNear(p.x, p.z) + (how ? ' (' + how + ')' : ''), p, 'tunf' + tn.id + w);
+  if ((!S.net || S.host) && S.cmd && S.cmd[e] && genBy(e, 'def') === 'ai') { try { genCmd(e, { c: 'tun', k: 'blow', x: Math.round(p.x), z: Math.round(p.z), why: 'destruir a boca de túnel encontrada' }, 'ai'); } catch (er) { console.warn('túnel (blow):', er); } }
+}
+/* the enemy's perception of a mouth (HEAR, PERC): an enemy soldier sees it within see m (seeSap a sapper or an engineer, seeRec a scout or a
+   squad on recon), with the mouth in sight beyond close m; he hears it while it is dug (HEAR.mv.man running times hear.dig, cut by
+   HEAR.wall with no line between them, the dig heard for hear.keep s after the last stroke) and when a squad goes in or comes out
+   (HEAR.mv.man walking, the same cut); and anyone of the enemy within peek m who has the mouth in sight sees men go in or come out. A man in
+   the tunnel is out of the world: nobody sees or hears him (hear.go: what of his crawl carries, nothing) */
+function tunHeard(m, p, R) {
+  const d = hdist(m, p); if (d >= R) return false;
+  return d < R * HEAR.wall || los(m, eyeY(m), p, hgt(p.x, p.z) + .4);
+}
+function tunPeek(tn, w) {
+  const p = tunEnd(tn, w), y = hgt(p.x, p.z) + 1, R = HEAR.mv.man[0];
+  for (const e of foes(tn.team)) {
+    if (tunSeen(tn, e, w)) continue;
+    const o = S.men.find(m => !m.dead && !m.in && m.team === e && Math.abs(m.x - p.x) < TUN.peek && Math.abs(m.z - p.z) < TUN.peek && (tunHeard(m, p, R) || (hdist(m, p) < TUN.peek && los(m, eyeY(m), p, y))))
+      || S.units.find(u => !u.dead && u.team === e && hdist(u, p) < TUN.peek && los(u, eyeY(u), p, y));
+    if (o) tunFound(tn, e, w, 'viu ou ouviu soldados entrando ou saindo');
+  }
+}
+/* each look: the enemy near a mouth finds it */
+function tunSee() {
+  const Rd = HEAR.mv.man[1] * TUN.hear.dig, far = Math.max(TUN.seeSap, Rd);
+  for (const tn of tunL()) {
+    if (!tunLive(tn)) continue;
+    const dig = tn.prog < 1 && S.t - (tn.digT || -1e9) < TUN.hear.keep;
+    for (const w of ['a', 'b']) {
+      if (w === 'b' && tn.prog < 1) continue;
+      const p = tunEnd(tn, w), py = hgt(p.x, p.z) + .3;
+      for (const m of S.men) {
+        if (m.dead || m.in || m.team === tn.team || !foeSide(tn.team, m.team) || tunSeen(tn, m.team, w)) continue;
+        if (Math.abs(m.x - p.x) > far || Math.abs(m.z - p.z) > far) continue;
+        const q = m.sq, sap = !!(m.def && m.def.sap) || (q && q.job === 'eng'), rec = !!(q && (q.job === 'rec' || (q.ord && (q.ord.mk === 'recon' || q.ord.k === 'recon')))), d = hdist(m, p);
+        if (d < (sap ? TUN.seeSap : rec ? TUN.seeRec : TUN.see) && (d < TUN.close || los(m, eyeY(m), p, py))) tunFound(tn, m.team, w, sap ? 'sapadores procurando' : rec ? 'reconhecimento' : 'soldados por perto');
+        else if (dig && w === 'a' && tunHeard(m, p, Rd)) tunFound(tn, m.team, w, 'ouviram cavar');
+      }
+    }
+  }
+}
+/* each step on the host: digging, squads going in and coming out, the enemy finding and blowing the mouths */
+function tunStep(dt) {
+  if (!TUN.on || !S.tun || !S.tun.length || (S.net && !S.host)) return;
+  const L = S.tun;
+  for (const tn of L) {
+    if (!tunLive(tn) || tn.prog >= 1) continue;
+    let n = 0; for (const m of S.men) if (!m.dead && !m.in && m.team === tn.team && Math.abs(m.x - tn.a.x) < TUN.dig && Math.abs(m.z - tn.a.z) < TUN.dig && hdist(m, tn.a) < TUN.dig && ++n >= 6) break;
+    if (!n) continue;
+    const was = tn.prog; tn.prog = Math.min(1, tn.prog + n * TUN.rate / tn.len * dt); tn.digT = S.t;
+    if (Math.floor(was * 10) !== Math.floor(tn.prog * 10)) S.tunV = (S.tunV || 0) + 1;
+    if (tn.prog >= 1) abrTun(tn);
+    if (tn.prog >= 1) gLog(tn.team, 'eng', 'Túnel pronto: ' + Math.round(tn.len) + ' m ' + gNear(tn.a.x, tn.a.z) + ' até ' + gNear(tn.b.x, tn.b.z).replace(/^junto a /, ''), tn.b, null);
+  }
+  for (const q of S.squads) {
+    if (q.tn) { if (S.t >= q.tn.T) tunExit(q, q.tn.to, 0); continue; }
+    const G = q.tnGo, B = q.tnBlow;
+    if (G) {
+      const tn = G.tn, p = tunEnd(tn, G.w), L0 = q.men.find(m => !m.dead && !m.gone);
+      if (!tunLive(tn) || !L0 || S.t > G.T) { q.tnGo = null; continue; }
+      if (hdist(L0, p) < TUN.reach && q.men.filter(m => !m.dead && !m.gone).every(m => hdist(m, p) < TUN.reach * 3)) tunEnter(q, tn, G.w);
+    } else if (B) {
+      const tn = B.tn, p = tunEnd(tn, B.w);
+      if (!tunLive(tn) || S.t > B.T) { q.tnBlow = null; continue; }
+      const at = q.men.filter(m => !m.dead && !m.gone && hdist(m, p) < TUN.blow.near); if (!at.length) continue;
+      if (S.men.some(m => !m.dead && m.team === tn.team && hdist(m, p) < TUN.blow.guard)) continue;
+      B.w8 = (B.w8 || 0) + dt * at.length / (at.some(m => m.def && m.def.sap) ? TUN.blow.man / TUN.blow.sap : 1);
+      if (B.w8 >= TUN.blow.man) { q.tnBlow = null; tunFall(tn, q.team, 'a boca foi explodida pelo inimigo'); }
+    }
+  }
+  if ((S.tunT = (S.tunT || 0) - dt) <= 0) { S.tunT = TUN.look; tunSee(); }
+  if (L.some(tn => tn.st && !tn.n && S.t - tn.T > 60)) S.tun = L.filter(tn => !tn.st || tn.n || S.t - tn.T <= 60);
+}
+step = (g => dt => { g(dt); try { tunStep(dt); } catch (er) { if (!S.tunE) { S.tunE = 1; console.warn('túneis:', er); } } })(step);
+/* a big burst at a mouth collapses it (where the match is simulated) */
+explode = (g => (x, y, z, r, dmg, by, team, he, ob) => {
+  const R = g(x, y, z, r, dmg, by, team, he, ob);
+  if (TUN.on && S && S.tun && S.tun.length && (!S.net || S.host) && dmg >= TUN.blast.dmg) for (const tn of S.tun) {
+    if (!tunLive(tn)) continue;
+    for (const w of ['a', 'b']) { const p = tunEnd(tn, w); if ((w === 'a' || tn.prog >= 1) && Math.hypot(p.x - x, p.z - z) < Math.max(TUN.blast.r, r * .25) && Math.abs(y - hgt(p.x, p.z)) < 6) { tunFall(tn, team, 'uma explosão fechou a boca'); break; } }
+  }
+  return R;
+})(explode);
+/* ----- the general's order: tun {k: dig | use | blow | fill} ----- */
+Object.assign(GEN.no, { tcap: 'Limite de túneis do lado', short: 'Túnel curto demais (mínimo ' + TUN.min + ' m)', long: 'Túnel longo demais para o lado', tun: 'Nenhum túnel nosso pronto ali', tunf: 'Nenhuma boca de túnel inimiga conhecida ali', tunb: 'Nenhum lugar para a outra boca do túnel', road: 'Em cima da estrada', obj: 'Em cima de um obstáculo', water: 'Na água' });
+Object.assign(GEN.cn, { tun: 'túnel' });
+W21.fort.tun = 'túnel';
+GC.tun = { d: 'def', f(t, c, by) {
+  const k = c.k; if (!TUN.on || !(S.T.mv >= 4)) return gBad('mv');
+  if (k === 'dig') {
+    const wa = tunSpot(c.x, c.z); if (wa) return gBad(wa);
+    const B = Number.isFinite(c.x2) && Number.isFinite(c.z2) ? { x: c.x2, z: c.z2 } : tunAuto(t, c.x, c.z); if (!B) return gBad('tunb');
+    const w = tunWhy(t, c.x, c.z, B.x, B.z); if (w) return gBad(w);
+    let qs = gPick(t, c, c.x, c.z, 1, insT(t) ? null : { eng: 1 }).filter(tunOk);
+    if (!insT(t)) qs = qs.filter(q => q.job === 'eng' || (W21.jobs[q.job] && q.men.some(m => !m.dead && m.def && m.def.sap)));   // a regular side's tunnel is the engineers' or the sappers' work (not the sapper squads' own job: they keep to it and never walk to a work)
+    if (!qs.length) return gBad('sq');
+    const p = railOf(c.x, c.z), r = gSend(t, 'work', c.x, c.z, qs, 1, [], () => ({ x: c.x, z: c.z, O: { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 6, mk: 'build', fast: 1 } }));
+    if (!r) return gBad('way');
+    r.op.ride = 0; r.op.v = 'fort';
+    const tn = tunNew(t, c.x, c.z, B.x, B.z); r.op.tun = tn.id;
+    const s = 'Cavar túnel ' + gNear(c.x, c.z) + ' até ' + Math.round(tn.len) + ' m dali (' + gSqTxt(r.qs.length) + ')'; gWhy(r.qs, c.why || s); gLog(t, 'def', s, { x: c.x, z: c.z }, null);
+    return gYes(tn.id);
+  }
+  if (k === 'use') {
+    let tn = Number.isInteger(c.id) ? tunL().find(o => o.id === c.id && o.team === t && tunLive(o) && o.prog >= 1) : null;
+    if (!tn && Number.isFinite(c.x) && Number.isFinite(c.z)) { let bd = TUN.near; for (const o of tunL()) if (o.team === t && tunLive(o) && o.prog >= 1) for (const w of ['a', 'b']) { const d = hdist(tunEnd(o, w), c); if (d < bd) { bd = d; tn = o; } } }
+    if (!tn) return gBad('tun');
+    const then = Number.isFinite(c.x2) && Number.isFinite(c.z2) && gMapOk(c.x2, c.z2) ? { x: c.x2, z: c.z2 } : null;
+    const at = Number.isFinite(c.x) ? c : tn.a, n = clamp(Number.isInteger(c.n) ? c.n : 1, 1, W21.nmax);
+    const qs = gPick(t, c, at.x, at.z, Array.isArray(c.ids) && c.ids.length ? GENC.ids : n).filter(tunOk).slice(0, Array.isArray(c.ids) && c.ids.length ? GENC.ids : n); if (!qs.length) return gBad('sq');
+    const C = cmdOf(t), op = gUsr(C, 'move', tn.a.x, tn.a.z); op.tun = tn.id; op.v = 'tun';
+    for (const q of qs) {
+      const L0 = gLead(q), w = L0 && hdist(L0, tn.b) < hdist(L0, tn.a) ? 'b' : 'a', p = tunEnd(tn, w), rp = railOf(p.x, p.z), way = L0 ? footPath(C, L0.x, L0.z, p.x, p.z) : null;
+      gTake(op, q, Object.assign({ k: 'move', ri: rp.ri, s: rp.s, x: p.x, z: p.z, R: 3, fast: 1, quiet: 1 }, way && way.length > 1 ? { wp: polyOf(way) } : {}));
+      q.tnGo = { tn, w, then, T: S.t + TUN.wait };
+    }
+    const s = 'Pelo túnel: ' + gSqTxt(qs.length) + ' ' + gNear(tn.a.x, tn.a.z) + (then ? ', depois ' + gNear(then.x, then.z) : ''); gWhy(qs, c.why || s); gLog(t, 'def', s, tn.a, null);
+    return gYes(op.id);
+  }
+  if (k === 'blow') {
+    if (!gMapOk(c.x, c.z)) return gBad('map');
+    let M = null, bd = 200; for (const o of tunMouths(t)) if (!o.own) { const d = hdist(o, c); if (d < bd) { bd = d; M = o; } }
+    if (!M) return gBad('tunf');
+    if (S.squads.some(q => q.team === t && q.tnBlow && q.tnBlow.tn === M.tn && q.live > 0)) return gYes(0);
+    const qs = gPick(t, c, M.x, M.z, 1, { eng: 1 }).filter(tunOk); if (!qs.length) return gBad('sq');
+    const p = railOf(M.x, M.z), r = gSend(t, 'work', M.x, M.z, qs, 1, [], () => ({ x: M.x, z: M.z, O: { k: 'hold', ri: p.ri, s: p.s, x: M.x, z: M.z, R: 2, fast: 1 } }));
+    if (!r) return gBad('way');
+    r.op.ride = 0; r.op.v = 'tun';
+    for (const q of r.qs) q.tnBlow = { tn: M.tn, w: M.w, T: S.t + TUN.wait };
+    const s = 'Destruir boca de túnel inimiga ' + gNear(M.x, M.z); gWhy(r.qs, c.why || s); gLog(t, 'def', s, M, null);
+    return gYes(r.op.id);
+  }
+  if (k === 'fill') {
+    const tn = tunL().find(o => o.id === c.id && o.team === t && tunLive(o)); if (!tn) return gBad('tun');
+    tunFall(tn, t, 'fechado por ordem'); return gYes(tn.id);
+  }
+  return gBad('kind');
+} };
+GC.fort = (G => ({ d: G.d, r: G.r, f(t, c, by, R) { return c && c.k === 'tun' ? GC.tun.f(t, Object.assign({}, c, { c: 'tun', k: 'dig' }), by) : G.f(t, c, by, R); } }))(GC.fort);
+/* the state for the general and the MCP: the side's tunnels and the enemy mouths it found */
+function tunView(t) {
+  const own = [], foe = [];
+  for (const tn of tunL()) {
+    if (!tunLive(tn)) continue;
+    if (tn.team === t) own.push({ id: tn.id, ax: tn.a.x, az: tn.a.z, bx: tn.b.x, bz: tn.b.z, len: tn.len, prog: tn.prog, inside: tn.n, found: foes(t).some(e => tn.fd[e]) ? 1 : 0 });
+    else for (const w of ['a', 'b']) if (tunSeen(tn, t, w)) { const p = tunEnd(tn, w); foe.push({ x: p.x, z: p.z }); }
+  }
+  return { own, foe, cap: TUN.cap[tunK(t)], max: TUN.max[tunK(t)] };
+}
+genState = (g => t => { const o = g(t); if (o && TUN.on && S.tun) o.tun = JSON.parse(JSON.stringify(tunView(t), (k, v) => (typeof v === 'number' ? Math.round(v * 10) / 10 : v))); return o; })(genState);
+/* the guerrilla's ways out (GRL tun) through real tunnels: each village of ours gets one to its way out where the side may dig, and a worn
+   squad there goes through it; the prepared route on foot stays for the villages without one */
+grlTun = (g => C => {
+  const t = C.t, K = GRL.tun, E = C.grlEsc || (C.grlEsc = {}), P = gPts(); let dug = 0;
+  if (TUN.on && S.T.mv >= 4) for (const p of P) {
+    if (p.hold !== t || !p.tw) continue;
+    const pi = P.indexOf(p), w = E[pi], tn = tunL().find(o => o.team === t && tunLive(o) && hdist(o.a, p) < K.r);
+    if (!tn && w && Number.isFinite(w.x) && !dug && !(C.grlTunT > S.t)) {
+      const B = hdist(w, p) <= TUN.max.ins ? w : { x: p.x + (w.x - p.x) / hdist(w, p) * TUN.max.ins * .9, z: p.z + (w.z - p.z) / hdist(w, p) * TUN.max.ins * .9 };
+      const r = genCmd(t, { c: 'tun', k: 'dig', x: Math.round(p.x), z: Math.round(p.z), x2: Math.round(B.x), z2: Math.round(B.z), why: 'túnel de fuga da vila' }, 'ai');
+      C.grlTunT = S.t + K.every; if (grlOk(r)) { dug++; gLog(t, 'grl', GRL.nm.tun + ': túnel cavado de ' + gName(p) + ' até ' + grlNear(B), B, null); }
+    }
+    if (tn && tn.prog >= 1) for (const q of S.squads) {
+      if (q.team !== t || !tunOk(q) || q.tnGo || (q.op && !q.op.over) || q.fd > K.fd) continue;
+      const L0 = mbLead(q); if (!L0 || hdist(L0, p) > K.r || manLive(q) >= Math.max(2, (q.n0 || q.live) * K.lo)) continue;
+      if (grlOk(genCmd(t, { c: 'tun', k: 'use', id: tn.id, ids: [q.id], why: 'fuga pelo túnel' }, 'ai'))) gLog(t, 'grl', GRL.nm.tun + ': esquadra desgastada sai de ' + gName(p) + ' pelo túnel', tn.b, null);
+    }
+  }
+  g(C);
+})(grlTun);
+GRL.nm.tun = 'Túneis e rotas de fuga';
+/* online: the host sends each side its tunnels and the mouths it found ([id, side, ax, az, bx, bz, percent, found (1 a, 2 b), state]); an enemy mouth not found goes as 0 0 */
+Object.assign(Net, { tn: false, tnV: -1, tnAcc: 0,
+  tuns() {
+    const r = n => Math.round(n * 10) / 10; Net.tnV = S.tunV || 0; Net.tnAcc = 0;
+    for (const s of lsN()) {
+      const e = [];
+      for (const tn of tunL()) {
+        if (tn.team === s) e.push([tn.id, tn.team, r(tn.a.x), r(tn.a.z), r(tn.b.x), r(tn.b.z), Math.round(tn.prog * 100), 3, tn.st]);
+        else if (tn.fd[s] && tunLive(tn)) { const f = tn.fd[s]; e.push([tn.id, tn.team, f & 1 ? r(tn.a.x) : 0, f & 1 ? r(tn.a.z) : 0, f & 2 ? r(tn.b.x) : 0, f & 2 ? r(tn.b.z) : 0, Math.round(tn.prog * 100), f, 0]); }
+      }
+      Net.send('tun', { s, e: e.slice(0, 30) });   // the relay's message size (MAXLEN)
+    }
+  } });
+{
+  const R = Net.rx, welcome = R.welcome, tick = Net.tick;   // after the works' own wrappers (FORT)
+  R.welcome = m => { Net.tn = false; Net.tnV = -1; welcome(m); };
+  R.tcap = m => { Net.tn = m.v === 1; };
+  Net.tick = dt => { tick(dt); if (S && S.net && S.host && Net.tn) { Net.tnAcc += dt; if (Net.tnAcc >= TUN.net && ((S.tunV || 0) !== Net.tnV || Net.tnAcc >= 10)) Net.tuns(); } };
+  const joined = R.joined; R.joined = m => { joined(m); Net.tnV = -1; };
+  R.tun = m => {
+    if (!S || !S.net || S.host || !Array.isArray(m.e)) return;
+    const me = S.my ? S.my.team : S.me;
+    if (isSide(m.s) && isSide(me) && m.s !== me) return;
+    const L = [];
+    for (const e of m.e) {
+      if (!Array.isArray(e) || e.length !== 9 || !e.every(Number.isFinite)) continue;
+      const [id, team, ax, az, bx, bz, pg, fd, st] = e; if (!isSide(team)) continue;
+      const tn = { id, team, a: { x: ax, z: az, y: hgt(ax, az) }, b: { x: bx, z: bz, y: hgt(bx, bz) }, len: Math.hypot(bx - ax, bz - az), prog: pg / 100, st, fd: bySide(() => 0), n: 0, net: 1 };
+      if (team !== m.s) tn.fd[m.s] = fd;
+      L.push(tn);
+    }
+    S.tun = L; S.tunV = (S.tunV || 0) + 1;
+  };
+}
+/* ----- ABRT: the shelter points of the works, in P2's registry (report 3.2, P2) -----
+   P2's service (another package) is not on main yet: the points are published here in its format, by source, and P2 reads them (abrAll,
+   abrNear, or S.abr itself) and the dirty cells (S.abrD: cells of cell m whose points changed since P2 last took them, abrTake). A point:
+   { x, z, k: 'trincheira' | 'saco' | 'tunel', p: 16 sectors, each [standing, crouched, prone] protection 0..3 against direct fire coming
+   from that sector (sector i: the threat's bearing atan2(-dz, dx) from the point, i = round(bearing / (2 pi / 16)) mod 16), incl: null (no
+   corner to lean out of), cap: men it takes, dono: the side whose work it is, set: { a0, a1 } the sector of fire of a firing step (rad, the
+   game's headings), ind: protection 0..1 from indirect fire falling in (a trench none: a round inside bursts with everyone; a wall a little),
+   y: the floor, src: its source ('f' + work id, 't' + tunnel id), f / tn: the work or the tunnel, ve: the sides that know it (a tunnel mouth
+   only: its side and those that found it; P2 must not show it to the others) }.
+   A trench: every place along it (fortSlots) protects all round by how much of a man of each stance its cut hides (depth dug + parapet over
+   his height: 3 from hide[0] of him, 2 from hide[1], 1 from hide[2]); its sector of fire the half circle toward the enemy (facing f.a).
+   Sandbags: the places behind the wall, protected from the sectors within wall rad of its facing by how much of each stance its height hides.
+   A tunnel's mouth (done, live): all 3 (one goes under). Published when a work is begun, dug past min, its protection changes, or it goes
+   (the hooks on fortAt and fortDrop), and when a tunnel opens, is found or falls */
+const ABRT = { sec: 16, cell: 32, hide: [.95, .7, .4], wall: 1.2, ind: { trincheira: 0, saco: .25, tunel: 1 } };
+const abrMap = () => S.abr || (S.abr = new Map());
+const abrCell = (x, z) => Math.floor(x / ABRT.cell) * 65536 + Math.floor(z / ABRT.cell);
+const abrLvl = k => (k >= ABRT.hide[0] ? 3 : k >= ABRT.hide[1] ? 2 : k >= ABRT.hide[2] ? 1 : 0);
+const abrSec = a => ((Math.round(wrap(a) / (TAU / ABRT.sec)) % ABRT.sec) + ABRT.sec) % ABRT.sec;
+function abrPub(src, pts) {
+  const M = abrMap(), D = S.abrD || (S.abrD = new Set()), old = M.get(src);
+  if (old) for (const o of old) D.add(abrCell(o.x, o.z));
+  if (pts && pts.length) { M.set(src, pts); for (const o of pts) D.add(abrCell(o.x, o.z)); } else M.delete(src);
+  S.abrV = (S.abrV || 0) + 1;
+}
+/* every point published; those within r m of x z; the dirty cells since the last take (P2 rebuilds those) */
+const abrAll = () => [].concat(...abrMap().values());
+function abrNear(x, z, r, t) {
+  const out = [];
+  for (const L of abrMap().values()) for (const o of L) if (Math.abs(o.x - x) <= r && Math.abs(o.z - z) <= r && Math.hypot(o.x - x, o.z - z) <= r && (!o.ve || !isSide(t) || o.ve.includes(t))) out.push(o);
+  return out;
+}
+function abrTake() { const D = S.abrD || new Set(); S.abrD = new Set(); return D; }
+/* the points of work f now */
+function abrFort(f) {
+  const src = 'f' + f.id;
+  if (f.gone || f.dead || (f.k !== 1 && f.k !== 2) || f.prog < f.F.min) return abrPub(src, null);
+  const TR = FORT.trench, BG = FORT.bags, k = f.k === 1 ? 'trincheira' : 'saco', H = STANCE.map(s => s.h * MAN.sc), out = [];
+  const lv = f.k === 1 ? H.map(h => abrLvl((TR.depth * f.prog + TR.par) / h)) : H.map(h => abrLvl(BG.size[2] * f.prog / h));
+  const fa = wrap(f.a), set = f.k === 1 ? { a0: wrap(fa - Math.PI / 2), a1: wrap(fa + Math.PI / 2) } : { a0: wrap(fa - ABRT.wall), a1: wrap(fa + ABRT.wall) };
+  const p = Array.from({ length: ABRT.sec }, (_, i) => (f.k === 1 || Math.abs(wrap(i * TAU / ABRT.sec - fa)) <= ABRT.wall ? lv.slice() : [0, 0, 0]));
+  const y = f.k === 1 ? hgt(f.x, f.z) - TR.depth * f.prog : hgt(f.x, f.z);
+  for (const s of fortSlots(f)) out.push({ x: s.x, z: s.z, k, p, incl: null, cap: 1, dono: f.team, set, ind: ABRT.ind[k], y, src, f, slot: s });
+  f.abrK = lv.join();
+  abrPub(src, out);
+}
+fortAt = (g => (f, prog) => { const was = f.abrK; g(f, prog); if ((f.k === 1 || f.k === 2) && (f.prog >= f.F.min || was !== undefined)) { const H = STANCE.map(s => s.h * MAN.sc), lv = (f.k === 1 ? H.map(h => abrLvl((FORT.trench.depth * f.prog + FORT.trench.par) / h)) : H.map(h => abrLvl(FORT.bags.size[2] * f.prog / h))).join(); if (lv !== was || f.prog < f.F.min) abrFort(f); } })(fortAt);
+fortDrop = (g => f => { g(f); abrPub('f' + f.id, null); })(fortDrop);
+/* a tunnel's mouths, for its side and those that found them */
+function abrTun(tn) {
+  const src = 't' + tn.id;
+  if (!tunLive(tn) || tn.prog < 1) return abrPub(src, null);
+  const p = Array.from({ length: ABRT.sec }, () => [3, 3, 3]), out = [];
+  for (const w of ['a', 'b']) { const P = tunEnd(tn, w); out.push({ x: P.x, z: P.z, k: 'tunel', p, incl: null, cap: 6, dono: tn.team, set: null, ind: ABRT.ind.tunel, y: hgt(P.x, P.z), src, tn, w, ve: SIDES().filter(t => tunSeen(tn, t, w)) }); }
+  abrPub(src, out);
+}
+/* ----- the route edges (trRota): the corridors with exposure about 0, the tunnels out of sight and of hearing ----- */
+function trRota() {
+  const R = trNet(), out = [];
+  R.N.forEach((n, i) => { for (const [j, w] of n.e) if (i < j) out.push({ k: 'trincheira', a: { x: n.x, z: n.z }, b: { x: R.N[j].x, z: R.N[j].z }, len: w, exp: 0, vis: 1, som: 1, cid: n.c, i, j }); });
+  for (const tn of tunL()) if (tunLive(tn) && tn.prog >= 1) out.push({ k: 'tunel', a: { x: tn.a.x, z: tn.a.z }, b: { x: tn.b.x, z: tn.b.z }, len: tn.len, exp: 0, vis: 0, som: TUN.hear.go, t: tn.len / TUN.crawl + TUN.pad, dono: tn.team, tn, ve: SIDES().filter(t => tunSeen(tn, t, 'a') || tunSeen(tn, t, 'b')) });
+  return out;
+}
+/* ----- the hooks of "take the foot of a trench" and "clear a trench" (P3's procedures) -----
+   trPe(cid, from): the foot to take in corridor cid coming from `from` (a point): its node nearest from (an end or a joint), with the trench
+   it opens on. trLimpar(cid, from): the corridor bay by bay from that foot, nearest along the floor first: each step { x, z, f, s (m along
+   the floor from the foot), nade: the point of the next bay for the grenade (on the floor: nadeFloor), cobre: the next node past it (the
+   turn the man in front covers), foe: enemy soldiers of side t in that trench (f.in) when t is given }. trFoe(cid, t): how many of t's
+   enemies are in the corridor */
+function trPe(cid, from) {
+  const R = trNet(), I = R.cn[cid]; if (!I || !I.length) return null;
+  let b = -1, bd = Infinity; for (const i of I) { const d = Math.hypot(R.N[i].x - from.x, R.N[i].z - from.z); if (d < bd) { bd = d; b = i; } }
+  const n = R.N[b], f = R.L.find(f => f.tn.some(p => p.n === b));
+  return { x: n.x, z: n.z, n: b, f, d: bd };
+}
+function trLimpar(cid, from, t) {
+  const P = trPe(cid, from); if (!P) return [];
+  const R = trNet(), N = R.N, g = new Map([[P.n, 0]]), done = new Set();
+  for (;;) { let u = -1, bu = Infinity; for (const i of R.cn[cid]) if (!done.has(i) && g.has(i) && g.get(i) < bu) { bu = g.get(i); u = i; } if (u < 0) break; done.add(u); for (const [v, w] of N[u].e) if (!g.has(v) || bu + w < g.get(v)) g.set(v, bu + w); }
+  const bays = [];
+  for (const f of R.L) {
+    if (f.cid !== cid) continue;
+    for (const s of fortSlots(f)) {   // a bay's distance along the floor: through the nearer of its trench's nodes
+      const sl = (s.x - f.x) * f.tu[0] + (s.z - f.z) * f.tu[1]; let best = Infinity, via = null;
+      for (const q of f.tn) if (g.has(q.n)) { const d = g.get(q.n) + Math.abs(q.s - sl); if (d < best) { best = d; via = q; } }
+      if (best < Infinity) bays.push({ x: s.x, z: s.z, f, s: best, via, sl });
+    }
+  }
+  bays.sort((a, b) => a.s - b.s);
+  return bays.map((b, i) => {
+    const nx = bays[i + 1], tn = b.f.tn.filter(q => (q.s - b.sl) * (b.via ? Math.sign(b.sl - b.via.s) || 1 : 1) > 0).sort((p, q) => Math.abs(p.s - b.sl) - Math.abs(q.s - b.sl))[0];
+    return { x: b.x, z: b.z, f: b.f, s: b.s, nade: nx ? { x: nx.x, y: (typeof nadeFloor === 'function' ? nadeFloor(nx.x, nx.z) : hgt(nx.x, nx.z)) + .1, z: nx.z } : null, cobre: tn ? { x: N[tn.n].x, z: N[tn.n].z } : null, foe: isSide(t) && b.f.in ? SIDES().reduce((a, e) => a + (e !== t && foeSide(t, e) ? b.f.in[e] || 0 : 0), 0) : 0 };
+  });
+}
+const trFoe = (cid, t) => trNet().L.reduce((a, f) => a + (f.cid === cid && f.in ? SIDES().reduce((b, e) => b + (e !== t && foeSide(t, e) ? f.in[e] || 0 : 0), 0) : 0), 0);
+/* ----- the shelters near a soldier (for its mind until P2 serves them): the registry's points, the bushes and the brush ----- */
+/* shelters(o, r, opt): [{ k: trincheira | saco | tunel | moita | mato, x, z, c (concealment), p (protection 0..1 from the threat at opt.e, or the
+   best sector's without one), d, pt (the registry's point), o / dens }], best first ((c + 2 p) over 1 + d / r). opt.free: only places
+   nobody holds (default); opt.max (12); opt.e: the threat { x, z } */
+const SHL2 = { max: 12, c: { trincheira: FORT.trench.conceal, saco: FORT.bags.conceal, tunel: 1, moita: .6 } };
+function shelters(o, r, opt) {
+  opt = opt || {}; r = r || 60;
+  const out = [], t = o.team, x = o.x, z = o.z, st = o.man ? clamp(o.st | 0, 0, 2) : 1, add = (k, px, pz, c, p, extra) => { const d = Math.hypot(px - x, pz - z); if (d <= r) out.push(Object.assign({ k, x: px, z: pz, c, p, d }, extra)); };
+  for (const P of abrNear(x, z, r, t)) {
+    if (P.k === 'tunel' ? P.dono !== t : (P.f && isSide(t) && P.f.in && SIDES().some(e => e !== t && foeSide(t, e) && P.f.in[e]))) continue;   // not a mouth of the enemy's, not a work the enemy is in
+    if (P.slot && opt.free !== false && P.slot.by && P.slot.by !== o && !P.slot.by.dead && S.t <= P.slot.T) continue;
+    const pr = opt.e ? P.p[abrSec(Math.atan2(-(opt.e.z - P.z), opt.e.x - P.x))][st] / 3 : Math.max(...P.p.map(q => q[st])) / 3;
+    add(P.k, P.x, P.z, SHL2.c[P.k] || 0, pr, { pt: P });
+  }
+  for (const b of near(x, z, r)) if (b.K && b.K.veil && S.os[b.id] < 2) add('moita', b.x, b.z, SHL2.c.moita, 0, { o: b });
+  const U = S.T && S.T.ug;
+  if (U) { const c = U.c, n = Math.ceil(r / c); for (let j = -n; j <= n; j++) for (let i = -n; i <= n; i++) { const px = (Math.floor(x / c) + i + .5) * c, pz = (Math.floor((z + U.HW) / c) + j + .5) * c - U.HW, d = ugAt(px, pz); if (d >= UG.thr) add('mato', px, pz, UG.cov.c * d, 0, { dens: d }); } }
+  out.sort((a, b) => (b.c + 2 * b.p) / (1 + b.d / r) - (a.c + 2 * a.p) / (1 + a.d / r));
+  return out.slice(0, opt.max || SHL2.max);
+}
+/* ===== end of CEREBRO: trincheiras-tuneis ===== */
 /* ---------- the soldier's body and voice (cf-cerebro-soldado, part 1: what does not depend on how the soldier decides) ----------
    Seen in Defilade (docs/nao-testado/cf-cerebro-soldado.md) and asked by the captain: grenades that behave as grenades, cover read from
    the ground itself, a blast that throws a man and leaves him reeling, and soldiers that talk (balloons over their heads). How a soldier
@@ -31163,6 +31765,473 @@ genCard = (f => (t, id) => {
   if (n) c.see.splice(2, 0, n + (n === 1 ? ' homem atordoado' : ' homens atordoados') + ' por explosão');
   c.stun = n; return c;
 })(genCard);
+/* ---------- CEREBRO: contrato (P0) ----------
+   The contract between the layers of the soldiers' mind, copied as it stands from the research (cf-cerebro-pesquisa, 2.5) because the P0
+   PR (cf-lideres) is not in main yet. When P0 lands ONE copy stays, P0's, and its fala keeps calling brainSay (P5, the section below).
+   The shapes the packs fill (P0 links them in addSquad and addMan; until then the speech makes the board on first use, flBB):
+   q.bb = { ord: null, cont: Map id→{x,z,c,g,t,de}, est: {by man: ferido, municao, moral}, plano: null {proc, passo, tarefas}, conf: 0 (−2..2), fl: null (linha de frente) }
+   q.lid = m;  q.eq = [{ id:'A', men:[...], tar:null, papel:'seguir' }, { id:'B', ... }]
+   m.rf = { k: null, ate: 0 } (reflexo ativo);  m.mo = { s: 0, m: 1, est: 'firme' } (supressão, moral, estado);  m.tar = null (tarefa da equipe) */
+const BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3 };   // alcance da voz (m), do sinal de mão (m), atraso de sucessão (s)
+// ORDEM: desce (general → pelotão → líder → equipe). Uma por destinatário; a nova substitui, salvo sequência.
+// k: 'mover'|'manter'|'assalto'|'base'|'lance'|'vigiar'|'recuar'|'limpar'|'evacuar'|'seguir'|'cavar'; por: propósito (o "para quê" da intenção)
+const ord = (k, de, a = {}) => ({ id: (S.ordN = (S.ordN || 0) + 1), k, de, t: S.t, por: a.por, area: a.area /*{x,z,r}*/, alvo: a.alvo /*{x,z}*/,
+  setor: a.setor /*{a0,a1} rad*/, apos: a.apos /*id de tarefa que precisa terminar*/, sinal: a.sinal /*'fogo'|'fumaca'|t*/,
+  roe: a.roe, lat: a.lat, tec: a.tec /*técnica de movimento*/ });
+// RELATO: sobe (soldado → líder → pelotão/general). Chega pela voz (≤ BRAIN.voz), sinal (com visada) ou rádio (CN existente).
+// k: 'contato'|'feito'|'nao-da'|'ferido'|'baixa'|'municao'|'moral'|'prisioneiro'|'pos' (cheguei)
+const rel = (k, de, a = {}) => ({ k, de, t: S.t, x: a.x, z: a.z, c: a.c /*classe*/, n: a.n, g: a.g /*degrau*/, conf: a.conf });
+// FALA: cada ordem, relato e reflexo pode falar. A fala é balão + som + canal de informação: quem a ouve (distância, barulho) recebe o
+// relato/aviso: "Granada!" faz o colega reagir sem ter visto a granada.
+const fala = (m, k, dados) => brainSay(m, k, dados);
+/* ---------- CEREBRO: falas (P5) ----------
+   What the soldiers say, out of the same data as what they decide (research 2.1, rule 6: a line never lies and always explains), so a line
+   never comes without a decision. A decision that may speak records a cb event first (flCb: the man, its kind, the second); brainSay(m, k, d)
+   speaks only for a man with a decision of his own within FALA.orig s, and records the line as a cb event too ('fala'), so that each line
+   can be matched to its decision (tests/brain-falas.js).
+   FALAS: the lines by kind, in pt-BR, a few ways of saying each: c the old call code (SAYC) a guest online sees in its place (none: 'brain',
+   nothing), p the priority (3 a reflex cuts in, 2 an order, 1 a report, 0 talk), cat the cb kind of the decision, ask: a mate answers.
+   The fire command is the manual's: alert, direction (clock hour from the caller's facing), distance (in words), description (what the
+   caller makes of it, at the rung he reached, and where: a window, a trench, the woods, behind a house or a wall), command (the leader's).
+   Limits (FALA): one line every gap s by squad (a reflex and an answer cut in), min lines a minute by squad (a bucket of cap; a reflex
+   takes from it too, and only a reflex speaks while it is empty), no line the
+   squad said within rep s, SAY.gap s between one man's lines; a squad in contact that has been quiet quiet s talks (the leader asks
+   "Estado?" or "Alguém vê ele?" and a mate who heard answers, resp s later: a two-line exchange, F.E.A.R.'s). An order towards where mates
+   died (death: within [0] m, in the last [1] s) gets "Nem pensar!".
+   The balloon (SAY's, drawn by the HUD) shows the whole line, within r m of the camera's man, for as long as it takes to read (cps s a
+   letter, life s at most); online the host's soldier carries the old call code with the line's slot (code + 32 * (hour + 13 * slot)): the
+   host shows the line, a guest the call. som: the line spoken aloud by the browser within somR m of the player (off by default).
+   The voice is a channel (HEAR.voz): a call is heard within r m in the quiet, less under fire (each man or vehicle that fired within din m
+   in the last 1.5 s cuts it by k, min m at least), a wall takes HEAR.wall of it. A mate who hears it gets what it says: "Granada!" gets him
+   away from where the grenade was called (after his reaction time, react s) if he is within nade m of it, a contact called makes it known
+   to him as one told (AIM.told), and looked at, and the squad leader who hears a report writes it on his board (q.bb). An enemy who hears
+   it turns to the voice (ln), as to any sound */
+HEAR.voz = { r: BRAIN.voz, min: 15, din: 60, k: .35 };
+const FALA = { gap: 1.5, min: 5, cap: 2, rep: 10, orig: 1, tick: 1, quiet: 22, ask: 30, call: 30, moved: 40, again: 15, resp: [.7, 1.6], ack: .35, death: [30, 120],
+  nade: 12, see: [3, 15, 1.2], react: [.2, .6], r: 300, cps: .07, life: 6, som: 0, somR: 60, enemy: 1, ana: .6,
+  tx: [], txN: 0, id: 0, log: [], logN: 400, H: [], st: { ditas: 0, semOrigem: 0, cortadas: 0, repetidas: 0, ouvidas: 0, nade: 0, contato: 0, perguntas: 0, respostas: 0 } };
+/* the words: numbers (a distance), clock hours */
+const FLN = { u: ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze', 'catorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'],
+  d: ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'],
+  c: ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'],
+  h: ['', 'uma hora', 'duas horas', 'três horas', 'quatro horas', 'cinco horas', 'seis horas', 'sete horas', 'oito horas', 'nove horas', 'dez horas', 'onze horas', 'doze horas'] };
+function flNum(n) {
+  n = Math.max(0, Math.round(n));
+  if (n < 20) return FLN.u[n];
+  if (n < 100) return FLN.d[(n / 10) | 0] + (n % 10 ? ' e ' + FLN.u[n % 10] : '');
+  if (n === 100) return 'cem';
+  if (n < 1000) return FLN.c[(n / 100) | 0] + (n % 100 ? ' e ' + flNum(n % 100) : '');
+  const k = (n / 1000) | 0, r = n % 1000;
+  return (k > 1 ? flNum(k) + ' mil' : 'mil') + (r ? (r < 100 || r % 100 === 0 ? ' e ' : ' ') + flNum(r) : '');
+}
+const flDist = d => flNum(d < 100 ? Math.max(10, Math.round(d / 10) * 10) : d < 1000 ? Math.round(d / 50) * 50 : Math.round(d / 100) * 100);
+const flUp = s => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const flHora = h => flUp(FLN.h[h] || '');   // "Duas horas"
+const flAs = h => (!h ? '' : h === 1 ? 'à uma hora' : 'às ' + FLN.h[h]);   // "às duas horas"
+/* what a caller makes of a contact: the class at the rung he has it (FLC), soldiers counted among those he knows near it, and where it is */
+const FLC = { snp: 'atirador', at: 'anticarro', mg: 'metralhadora', man: 'soldado', tank: 'blindado', lav: 'blindado leve', truck: 'caminhão', car: 'viatura', art: 'canhão', aa: 'antiaérea', aag: 'antiaérea',
+  rad: 'radar', heli: 'helicóptero', plane: 'avião', '?': 'movimento' };
+const FLCV = {};
+function flWhere(t) {
+  if (!t || !t.man) return '';
+  if (t.cbin) return 'na janela';
+  if (t.fc) return 'na trincheira';
+  if (kindAt(t.x, t.z) === 1) return 'na mata';
+  for (const o of near(t.x, t.z, 8)) if (o.B && S.os[o.id] < 2) return 'atrás da casa';
+  coverAt(t.x, t.z, FLCV); return FLCV.p > 0 ? 'atrás do muro' : '';
+}
+function flWhat(m, t, g) {
+  if (g < 2) return 'movimento';
+  const c = belCls(t); let w = FLC[c] || 'inimigo';
+  if (c === 'man' && m.pm) { let n = 0; for (const [o, e] of m.pm) if (e.kn && !o.dead && o.man && o.team === t.team && Math.abs(o.x - t.x) < 25 && Math.abs(o.z - t.z) < 25) n++; w = n > 2 ? 'grupo de infantaria' : n === 2 ? 'dois soldados' : 'soldado'; }
+  const p = flWhere(t); return p ? w + ' ' + p : w;
+}
+/* the data of a contact as m has it (his own meter e: where he puts it, at what rung), for the lines that call it */
+function flCont(m, t, e) {
+  const g = S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1, x = g < 2 ? t.x + e.ex : t.x, z = g < 2 ? t.z + e.ez : t.z, h = sayClock(m, x, z);
+  return { t, x, z, h, g, c: g >= 2 ? belCls(t) : '?', H: flHora(h), A: flAs(h), D: flDist(Math.hypot(x - m.x, z - m.z)), W: flWhat(m, t, g), P: g >= 2 ? flUp(flWhere(t)) : '' };
+}
+const flTiro = (a, d) => (d.W ? a + ' ' + d.H + ', ' + d.D + ', ' + d.W + '!' : a);
+const FALAS = {
+  granada: { c: 'nade', p: 3, cat: 'reflexo', v: [() => 'Granada!', () => 'Granada! Sai daí!', () => 'Granada, abaixa!'] },
+  'ao-chao': { c: 'down', p: 3, cat: 'reflexo', v: [() => 'Ao chão!', () => 'Abaixa, abaixa!', () => 'Todo mundo no chão!'] },
+  medico: { c: 'med', p: 3, cat: 'reflexo', v: [() => 'Médico!', () => 'Fui atingido! Médico!', () => 'Tô ferido! Médico!'] },
+  drone: { c: 'drone', p: 3, cat: 'reflexo', v: [() => 'Drone!', () => 'Drone em cima!', () => 'Drone! Se esconde!'] },
+  rendo: { c: 'sur', p: 3, cat: 'reflexo', v: [() => 'Não atira! Eu me rendo!', () => 'Eu me rendo!', () => 'Não atira!'] },
+  'lanca-granada': { c: 'frag', p: 2, cat: 'ordem', v: [() => 'Lá vai granada!', () => 'Granada saindo!', () => 'Granada! Cobre!'] },
+  fumaca: { c: 'smk', p: 2, cat: 'ordem', v: [() => 'Fumaça!', () => 'Soltando fumaça!', () => 'Fumaça saindo!'] },
+  maos: { c: 'hands', p: 2, cat: 'ordem', v: [() => 'Mãos ao alto!', () => 'Larga a arma!'] },
+  tiro: { c: 'con', p: 2, cat: 'ordem', v: [d => flTiro('Contato!', d) + ' Fogo!', d => flTiro('Atenção!', d) + ' Fogo à vontade!', d => flTiro('Esquadra!', d) + ' Abrir fogo!'] },
+  blindado: { c: 'armor', p: 2, cat: 'ordem', v: [d => (d.A ? 'Blindado ' + d.A + '!' : 'Blindado!'), () => 'Tanque! Abriga!', d => (d.A ? 'Tanque ' + d.A + '!' : 'Blindado! Fumaça e sai da vista!')] },
+  avancar: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Avança!', () => 'Vamos, pra frente!', () => 'Avançar!'] },
+  mover: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Vamos andando!', () => 'Em frente, comigo!', () => 'Movendo!'] },
+  assalto: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Assalto! Vai, vai!', () => 'Pra cima deles!', () => 'Assaltar!'] },
+  recuar: { c: 'back', p: 2, cat: 'ordem', v: [() => 'Recuar!', () => 'Pra trás, recuar!', () => 'Rompe o contato! Pra trás!'] },
+  manter: { c: 0, p: 2, cat: 'ordem', v: [() => 'Segura aqui!', () => 'Ninguém sai daqui!', () => 'Mantém a posição!'] },
+  base: { c: 'cover', p: 2, cat: 'ordem', v: [() => 'Base de fogo aqui!', () => 'Fogo de cobertura!', () => 'Prende eles no fogo!'] },
+  cobrindo: { c: 'cover', p: 2, cat: 'ordem', v: [() => 'Cobrindo!', () => 'Te cubro!', () => 'Fogo de cobertura!'] },
+  lance: { c: 'bound', p: 2, cat: 'ordem', ask: 1, v: [() => 'Por lances!', () => 'Lances! Um cobre, outro anda!', () => 'Por lances, vai!'] },
+  vigiar: { c: 0, p: 2, cat: 'ordem', v: [() => 'Fica de olho!', () => 'Vigia o setor!', () => 'Olho aberto!'] },
+  seguir: { c: 0, p: 2, cat: 'ordem', v: [() => 'Comigo!', () => 'Me segue!', () => 'Atrás de mim!'] },
+  cavar: { c: 0, p: 2, cat: 'ordem', v: [() => 'Cava aqui!', () => 'Abre trincheira!', () => 'Pá na mão, cava!'] },
+  evacuar: { c: 'fetch', p: 2, cat: 'ordem', v: [() => 'Tira ele daqui!', () => 'Evacua o ferido!', () => 'Leva ele pra trás!'] },
+  limpar: { c: 'bld', p: 2, cat: 'ordem', ask: 1, v: [() => 'Limpa o prédio!', () => 'Entra e limpa!', () => 'Cômodo por cômodo!'] },
+  'fogo-longe': { c: 'far', p: 2, cat: 'ordem', v: [() => 'Fogo de longe!', () => 'Atirando de longe, abriga!'] },
+  artilharia: { c: 'arty', p: 2, cat: 'ordem', v: [() => 'Artilharia!', () => 'Chegando! Abriga!', () => 'Artilharia! Se espalha!'] },
+  aeronave: { c: 'air', p: 2, cat: 'ordem', v: [() => 'Aeronave!', () => 'Avião! Se esconde!'] },
+  mina: { c: 'mine', p: 2, cat: 'ordem', v: [() => 'Mina!', () => 'Campo minado! Para!'] },
+  atirador: { c: 'snp', p: 2, cat: 'ordem', v: [() => 'Atirador!', () => 'Sniper! Abaixa!'] },
+  emboscada: { c: 'amb', p: 2, cat: 'ordem', v: [() => 'Emboscada!', () => 'Emboscada! Reage!'] },
+  'cessar-fogo': { c: 'ff', p: 2, cat: 'ordem', v: [() => 'Cessar fogo, são amigos!', () => 'Cessar fogo! Amigos!'] },
+  'predio-cai': { c: 'bld', p: 2, cat: 'ordem', v: [() => 'O prédio vai cair, saiam!', () => 'Sai do prédio, vai cair!'] },
+  perimetro: { c: 'per', p: 2, cat: 'ordem', v: [() => 'Perímetro!', () => 'Faz o perímetro!'] },
+  fixar: { c: 'fix', p: 2, cat: 'ordem', v: [() => 'Fixar e flanquear!', () => 'Segura eles aí que a gente flanqueia!'] },
+  assumo: { c: 0, p: 2, cat: 'ordem', v: [() => 'O sargento caiu! Eu assumo!', () => 'Caiu o líder! Comigo!', () => 'Eu assumo! Comigo!'] },
+  contato: { c: 'con', p: 1, cat: 'relato', v: [d => flTiro('Contato!', d), d => flTiro('Inimigo!', d), d => (d.W ? flUp(d.W) + ', ' + d.A + '!' : 'Inimigo!')] },
+  baixa: { c: 0, p: 1, cat: 'relato', v: [() => 'Homem abatido!', () => 'Perdemos um!', () => 'Caiu um dos nossos!'] },
+  'homem-ferido': { c: 'hurt', p: 1, cat: 'relato', v: [() => 'Homem ferido!', () => 'Ferido aqui!'] },
+  ferido: { c: 'hurt', p: 1, cat: 'relato', v: [() => 'Tô ferido!', () => 'Me acertaram!'] },
+  socorro: { c: 'fetch', p: 1, cat: 'relato', v: [() => 'Vou buscá-lo!', () => 'Me cobre que eu vou!', () => 'Deixa comigo, vou lá!'] },
+  municao: { c: 'ammo', p: 1, cat: 'relato', v: [() => 'Sem munição!', () => 'Munição!', () => 'Tô no fim da munição!'] },
+  'pegou-arma': { c: 'pick', p: 1, cat: 'relato', v: [() => 'Peguei a arma dele!', () => 'Tô com a arma dele!'] },
+  pos: { c: 0, p: 1, cat: 'relato', v: [() => 'Em posição!', () => 'Posição!', () => 'Pronto!'] },
+  feito: { c: 0, p: 1, cat: 'relato', v: [() => 'Feito!', () => 'Limpo!', () => 'Pronto, feito!'] },
+  'nao-da': { c: 0, p: 1, cat: 'relato', v: [() => 'Não dá!', () => 'Não tem como!'] },
+  moral: { c: 0, p: 1, cat: 'relato', v: [() => 'Não aguento mais!', () => 'A gente vai morrer aqui!'] },
+  prisioneiro: { c: 'hands', p: 1, cat: 'relato', v: [() => 'Peguei um prisioneiro!', () => 'Tenho um preso!'] },
+  'estado?': { c: 0, p: 0, cat: 'pergunta', ask: 1, v: [() => 'Estado?', () => 'Todo mundo bem?', () => 'Situação?'] },
+  've?': { c: 0, p: 0, cat: 'pergunta', ask: 1, v: [() => 'Alguém vê ele?', () => 'Cadê ele?', () => 'Onde ele tá?'] },
+  ok: { c: 0, p: 0, cat: 'resposta', v: [() => 'Tudo certo!', () => 'Na escuta!', () => 'Inteiro!'] },
+  'ferido-eu': { c: 'hurt', p: 1, cat: 'resposta', v: [() => 'Tô ferido!', () => 'Tô sangrando, mas dá!'] },
+  'municao-eu': { c: 'ammo', p: 1, cat: 'resposta', v: [() => 'Tô sem munição!', () => 'Munição acabando!'] },
+  've-sim': { c: 0, p: 1, cat: 'resposta', v: [d => (d.P ? d.P + ', ' + d.A + '!' : flUp(d.A) + ', ' + d.D + '!'), d => 'Ali, ' + (d.P ? d.P.toLowerCase() + ', ' : '') + d.A + '!'] },
+  've-nao': { c: 0, p: 0, cat: 'resposta', v: [() => 'Não vejo nada!', () => 'Perdi ele!', () => 'Sumiu!'] },
+  recusa: { c: 0, p: 1, cat: 'resposta', v: [() => 'Nem pensar!', () => 'Lá não, sargento!', () => 'Tá louco? Lá morreu gente!'] },
+  entendido: { c: 0, p: 0, cat: 'resposta', v: [() => 'Entendido!', () => 'Indo!', () => 'Copiado!'] } };
+/* the old calls (SAY, cf-cerebro-soldado part 1) are lines of the same table: say() from the AI goes through brainSay, the call site being
+   where the old code decided (a drill taken, a man down, a mate fetched, a grenade or smoke thrown) */
+const FLSAY = { 1: 'contato', 2: 'granada', 3: 'lanca-granada', 4: 'medico', 5: 'homem-ferido', 6: 'socorro', 7: 'rendo', 8: 'maos', 9: 'drone', 10: 'pegou-arma', 11: 'fumaca', 12: 'ao-chao', 13: 'blindado',
+  14: 'avancar', 15: 'recuar', 16: 'cobrindo', 17: 'fogo-longe', 18: 'artilharia', 19: 'aeronave', 20: 'mina', 21: 'atirador', 22: 'emboscada', 23: 'municao', 24: 'cessar-fogo', 25: 'predio-cai', 26: 'perimetro', 27: 'lance', 28: 'fixar' };
+SAYC.brain = 29; SAY.l[29] = () => '';   // a line with no old call: a guest shows nothing
+for (let i = 1; i < SAY.l.length; i++) SAY.l[i] = (f => a => (a >= 13 && FALA.tx[(a / 13) | 0]) || f(a % 13))(SAY.l[i]);   // the host's whole line, from its slot; a guest's the call
+SAY.r = FALA.r;
+const flId = o => o.flI || (o.flI = ++FALA.id);
+const flQ = o => o.fala || (o.fala = { n: 0, b: 1, bt: S.t, said: new Map(), k: 0, last: -99, cont: -99, ask: -99, tk: 0, cham: new Map(), mortes: [] });
+const flBB = q => q.bb || (q.bb = { ord: null, cont: new Map(), est: {}, plano: null, conf: 0, fl: null });
+const flLid = q => (q.lid && !q.lid.dead && !q.lid.down ? q.lid : q.men.find(m => !m.dead && !m.down && m.ai) || null);
+/* a decision: the cb event (ANA, while it has room: ana of its max) and the man's last decision, which a line needs as its origin */
+function flCb(m, st, d) {
+  if (!BRAIN.on || !m) return;
+  if (st !== 'fala') { m.cbT = S.t; m.cbK = st; }
+  const e = Object.assign({ k: 'cb', t: anaR(S.t), s: m.team, st, m: flId(m) }, d);
+  FALA.log.push(e); if (FALA.log.length > FALA.logN) FALA.log.splice(0, FALA.log.length - FALA.logN);
+  if (anaLive() && ANA.ev.length < ANA.max * FALA.ana) anaPush(e);
+}
+function brainSay(m, k, d) {
+  const F = FALAS[k], st = FALA.st; d = d || {};
+  if (!BRAIN.on || !F || !m || m.dead || m.gone || m.net || !m.ai) return null;
+  if (!(S.t - (m.cbT === undefined ? -99 : m.cbT) <= FALA.orig)) { st.semOrigem++; return null; }   // no line without a decision
+  const p = d.p === undefined ? F.p : d.p, Q = flQ(m.sq || m);
+  Q.b = Math.min(FALA.cap, Q.b + (S.t - Q.bt) * FALA.min / 60); Q.bt = S.t;
+  if (p < 3 && (S.t < (m.sayN || 0) || (!d.resp && S.t < Q.n) || Q.b < 1)) { st.cortadas++; return null; }
+  const V = F.v, n = V.length, i0 = Math.floor(hash2(flId(m), Math.floor(S.t * 4), Q.k++) * n) % n;
+  let txt = null;
+  for (let j = 0; j < n && !txt; j++) { const s = V[(i0 + j) % n](d); if (s && !(Q.said.has(s) && S.t - Q.said.get(s) < FALA.rep)) txt = s; }
+  if (!txt) { if (p < 3) { st.repetidas++; return null; } txt = V[i0](d); }
+  const slot = (FALA.txN = (FALA.txN % 1023) + 1); FALA.tx[slot] = txt;
+  m.sayK = (SAYC[F.c] || SAYC.brain) + 32 * (clamp(d.h | 0, 0, 12) + 13 * slot); m.sayT = S.t + clamp(txt.length * FALA.cps, SAY.life, FALA.life); m.sayN = S.t + SAY.gap;
+  if (!d.resp) Q.n = S.t + FALA.gap;
+  Q.b -= 1; Q.last = S.t; Q.said.set(txt, S.t);
+  if (Q.said.size > 24) for (const [s, t] of Q.said) if (S.t - t >= FALA.rep) Q.said.delete(s);
+  st.ditas++;
+  flCb(m, 'fala', { f: k, x: txt });
+  const H = flOuvir(m, k, d);
+  if (F.ask && m.sq) flResp(m, k, d, H);
+  flSom(m, txt);
+  return txt;
+}
+/* perception (the voice reaching each ear, as listen() does for shots): the din round the caller cuts its reach; each AI soldier within it
+   hears it, a mate gets what it says (flOuve), an enemy turns to the voice. Returns the mates who heard it (FALA.H, reused) */
+function flOuvir(m, k, d) {
+  const V = HEAR.voz, H = FALA.H; H.length = 0;
+  let n = 0;
+  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && Math.abs(o.x - m.x) < V.din && Math.abs(o.z - m.z) < V.din && S.t - shotAt(o) < 1.5) n += o.man ? 1 : 3;
+  const R = Math.max(V.min, V.r / (1 + V.k * n)), my = m.y + 1.5;
+  for (const o of S.men) {
+    if (o === m || o.dead || o.net || !o.ai || Math.abs(o.x - m.x) > R || Math.abs(o.z - m.z) > R) continue;
+    const dd = Math.hypot(o.x - m.x, o.z - m.z); if (dd > R) continue;
+    if (dd > R * HEAR.wall && walled(m.x, my, m.z, o.x, o.y + 1.5, o.z)) continue;   // through a wall it carries wall of the way
+    if (o.team === m.team) { FALA.st.ouvidas++; flOuve(o, m, k, d); if (o.sq && o.sq === m.sq) H.push(o); }
+    else if (FALA.enemy && !o.down && (!o.ln || S.t - o.ln.t > .5)) { const e = dd * HEAR.err; o.ln = { x: m.x + (hash2(flId(o), S.t * 10 | 0, 1) * 2 - 1) * e, z: m.z + (hash2(flId(o), S.t * 10 | 0, 2) * 2 - 1) * e, t: S.t, of: m }; }
+  }
+  return H;
+}
+const flReact = (o, s) => FALA.react[0] + hash2(flId(o), s, 3) * (FALA.react[1] - FALA.react[0]);
+/* what a mate who heard m's line k takes from it */
+function flOuve(o, m, k, d) {
+  if (k === 'granada' && d.b && Math.hypot(o.x - d.x, o.z - d.z) < FALA.nade && !(o.rf && o.rf.k === 'granada' && o.rf.b === d.b)) {   // away from where it was called, after his reaction time
+    o.rf = { k: 'granada', x: d.x, z: d.z, b: d.b, de: m, t0: S.t + flReact(o, flId(d.b)), ate: Math.max(S.t + 2, (d.fz || S.t) + .3), ouviu: 1 }; FALA.st.nade++;
+  }
+  if (d.t && !d.t.dead && (k === 'contato' || k === 'tiro' || k === 've-sim')) {   // a contact called: known to him as one told, and looked at
+    const e = meter(o, d.t);
+    if (!e.kn) { e.kn = true; e.told = true; e.kt = S.t; e.v = Math.max(e.v, 1); FALA.st.contato++; }
+    if (!(o.ai && (o.ai.tgt === d.t)) && (!o.ln || S.t - o.ln.t > .5)) o.ln = { x: d.x, z: d.z, t: S.t, of: d.t };
+  }
+  const q = o.sq; if (!q || q !== m.sq || flLid(q) !== o) return;
+  const B = flBB(q), E = B.est[flId(m)] || (B.est[flId(m)] = {});   // the leader's board: what was reported to him
+  E.t = S.t;
+  if (d.t && (k === 'contato' || k === 'tiro' || k === 've-sim')) B.cont.set(flId(d.t), { x: d.x, z: d.z, c: d.c, g: d.g, t: S.t, de: m });
+  else if (k === 'medico' || k === 'ferido' || k === 'ferido-eu') E.ferido = 1;
+  else if (k === 'municao' || k === 'municao-eu') E.municao = 0;
+  else if (k === 'ok') { E.ferido = 0; E.municao = 1; }
+  else if (k === 'recusa' || k === 'nao-da') E.nao = S.t;
+  else if (k === 'moral') E.moral = 0;
+  else if (k === 'pos' || k === 'feito') E.pos = S.t;
+}
+/* the second line of an exchange: the mate who heard m's question or order and has the most to say answers, resp s later (flD, said in aiMan) */
+const flNoAmmo = o => { const a = o.arms && o.arms[0]; return !!a && a.d.mag > 1 && !(a.res > 0) && a.mag < a.d.mag * .3; };
+function flSees(o) {
+  let best = null, bd = 1e9;
+  if (o.pm) for (const [t, e] of o.pm) if (e.kn && !t.dead && t.team !== o.team && tclass(t) && S.t - e.t < 1.5 && S.t - e.kt >= e.rt) { const dd = Math.hypot(t.x - o.x, t.z - o.z); if (dd < bd) { bd = dd; best = { t, e }; } }
+  return best;
+}
+function flResp(m, k, d, H) {
+  let o = null, r = null, rd = {};
+  const mates = H.filter(o => !o.flD);
+  if (!mates.length) return;
+  if (k === 'estado?') {
+    if ((o = mates.find(o => o.down || o.hp < o.max * .5))) r = 'ferido-eu';
+    else if ((o = mates.find(flNoAmmo))) r = 'municao-eu';
+    else { o = mates[0]; r = 'ok'; }
+  } else if (k === 've?') {
+    for (const x of mates) { const c = !x.down && flSees(x); if (c) { o = x; r = 've-sim'; rd = flCont(x, c.t, c.e); break; } }
+    if (!o) { o = mates[0]; r = 've-nao'; }
+  } else {
+    const A = d.alvo || m, Q = flQ(m.sq), dead = Q.mortes.some(p => S.t - p.t < FALA.death[1] && Math.hypot(p.x - A.x, p.z - A.z) < FALA.death[0]);
+    o = mates.find(o => !o.down) || null; if (!o) return;
+    r = dead ? 'recusa' : hash2(flId(o), S.t * 10 | 0, 5) < FALA.ack ? 'entendido' : null;
+  }
+  if (!o || !r) return;
+  FALA.st.perguntas++;
+  o.flD = { k: r, d: Object.assign(rd, { resp: 1 }), T: S.t + FALA.resp[0] + hash2(flId(o), S.t * 10 | 0, 7) * (FALA.resp[1] - FALA.resp[0]) };
+}
+/* the line spoken aloud by the browser near the player (FALA.som, off by default) */
+function flSom(m, txt) {
+  if (!FALA.som || typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined' || !S.my || S.my.dead) return;
+  const dd = Math.hypot(m.x - S.my.x, m.z - S.my.z); if (dd > FALA.somR || speechSynthesis.speaking) return;
+  try { const u = new SpeechSynthesisUtterance(txt); u.lang = 'pt-BR'; u.rate = 1.15; u.volume = clamp(1 - dd / FALA.somR, .2, 1); speechSynthesis.speak(u); } catch (e) {}
+}
+/* the squad's talk, at tick s: a mate fallen (the nearest who saw it calls it, and the place is kept: "lá morreu gente"), a contact made out
+   that the squad has not called (or that has moved moved m since, again s on), the leader as a fire command, anyone else as a report; a
+   quiet squad in contact: the leader asks. Each reads only its men's own perception (pm) */
+function flSq(q) {
+  const Q = flQ(q); if (S.t < Q.tk) return; Q.tk = S.t + FALA.tick;
+  const live = q.men.filter(m => !m.dead && !m.down && m.ai && !m.net); if (!live.length) return;
+  const L = flLid(q);
+  for (const d of q.men) if (d.dead && !d.flM) {
+    d.flM = 1; Q.mortes.push({ x: d.x, z: d.z, t: S.t });
+    let w = null, wd = 40; for (const o of live) { const dd = Math.hypot(o.x - d.x, o.z - d.z); if (dd < wd && los(o, eyeY(o), d, bodyY(d))) { wd = dd; w = o; } }
+    if (w) { flCb(w, 'relato', { f: 'baixa' }); brainSay(w, 'baixa', {}); }
+  }
+  if (Q.mortes.length && S.t - Q.mortes[0].t > FALA.death[1]) Q.mortes = Q.mortes.filter(p => S.t - p.t < FALA.death[1]);
+  let best = null, bd = 1e9;
+  for (const m of live) if (m.pm) for (const [t, e] of m.pm) {
+    if (!e.kn || t.dead || t.team === m.team || !tclass(t) || S.t - e.t > 1.5 || S.t - e.kt < e.rt) continue;
+    Q.cont = S.t;
+    const c = Q.cham.get(t), dd = Math.hypot(t.x - m.x, t.z - m.z) - (m === L ? 30 : 0);   // the leader calls what he sees himself
+    if (c && (S.t - c.t < FALA.again || Math.hypot(t.x - c.x, t.z - c.z) < FALA.moved) && S.t - c.t < 120) continue;
+    if (dd < bd) { bd = dd; best = { m, t, e }; }
+  }
+  if (best) {
+    const { m, t, e } = best, lead = m === L, D = flCont(m, t, e);
+    flCb(m, lead ? 'ordem' : 'relato', { f: lead ? 'tiro' : 'contato', c: D.c, g: D.g });
+    if (brainSay(m, lead ? 'tiro' : 'contato', D)) Q.cham.set(t, { t: S.t, x: t.x, z: t.z });
+    if (Q.cham.size > 32) for (const [o, c] of Q.cham) if (o.dead || S.t - c.t > 120) Q.cham.delete(o);
+  }
+  if (L && S.t - Q.cont < FALA.call && S.t - Q.last > FALA.quiet && S.t - Q.ask > FALA.ask) {
+    const k = flSees(L) ? 'estado?' : 've?'; Q.ask = S.t;
+    flCb(L, 'pergunta', { f: k }); brainSay(L, k, {});
+  }
+}
+/* the grenade made out where it lands (perception: who has it at his feet, or in sight in front of him): each who does gets the reflex
+   (m.rf), the nearest of a squad calls "Granada!", and the call carries to those who did not see it */
+function flNade(b) {
+  const by = new Map();
+  for (const o of S.men) {
+    if (o.dead || o.down || o.net || !o.ai || Math.abs(o.x - b.x) > FALA.see[1] || Math.abs(o.z - b.z) > FALA.see[1]) continue;
+    const dd = Math.hypot(o.x - b.x, o.z - b.z); if (dd > FALA.see[1]) continue;
+    const off = Math.abs(wrap(Math.atan2(-(b.z - o.z), b.x - o.x) - gaze(o, 'man')));
+    if (!(dd < FALA.see[0] || (off < FALA.see[2] && los(o, eyeY(o), b, b.y + .1)))) continue;
+    o.rf = { k: 'granada', x: b.x, z: b.z, b, t0: S.t + flReact(o, flId(b)), ate: (b.fz || S.t) + .3, viu: 1 };
+    const k = o.sq || o, w = by.get(k); if ((!b.by || b.by.team !== o.team || dd < 5) && (!w || dd < w.d)) by.set(k, { o, d: dd });
+  }
+  for (const { o } of by.values()) { flCb(o, 'reflexo', { f: 'granada' }); brainSay(o, 'granada', { b, x: b.x, z: b.z, fz: b.fz }); }
+}
+/* hooks into the old code */
+say = (f => (m, k, a, force) => {
+  const K = BRAIN.on && m && m.ai && !m.net && FLSAY[k];
+  if (!K) return f(m, k, a, force);
+  flCb(m, FALAS[K].cat, { f: K, de: 'say' });
+  brainSay(m, K, a ? { h: a, H: flHora(a), A: flAs(a) } : {});
+})(say);
+squadThink = (f => q => { const r = f(q); if (BRAIN.on && !q.net) flSq(q); return r; })(squadThink);
+nadeStep = (f => (b, dt) => { const r = f(b, dt); if (BRAIN.on && !b.flP && b.k === 'nade' && !b.gone && b.y - nadeFloor(b.x, b.z) < .5) { b.flP = 1; flNade(b); } return r; })(nadeStep);
+/* a man with the grenade reflex who is not getting away already (the old flight from a grenade by him) gets away from where it is, once
+   his reaction time is over, until it has gone off; the answer he owes (flD) he says when it is due */
+sqMan = (f => (m, A, q, best) => {
+  f(m, A, q, best);
+  const R = m.rf; if (!BRAIN.on || !R || R.k !== 'granada') return;
+  if (S.t > R.ate) { m.rf = null; return; }
+  if (S.t < R.t0 || A.brk > S.t || m.down) return;
+  const dx = m.x - R.x, dz = m.z - R.z, d = Math.hypot(dx, dz) || 1, p = clearOf(R.x + dx / d * (FALA.nade + 3), R.z + dz / d * (FALA.nade + 3), 1, {});
+  A.bx = A.gx = p.x; A.bz = A.gz = p.z; A.brk = R.ate; A.run = true; A.st = 0; R.go = S.t;
+})(sqMan);
+aiMan = (f => (m, dt) => {
+  f(m, dt);
+  const D = m.flD; if (!D || S.t < D.T) return;
+  m.flD = null; if (!BRAIN.on || m.dead) return;
+  FALA.st.respostas++; flCb(m, 'resposta', { f: D.k }); brainSay(m, D.k, D.d);
+})(aiMan);
+/* ---------- CEREBRO: movimento (cf-movimento-lider): a squad on the move by teams, in the technique its leader chose ----------
+   The organic movement (ORG) placed a squad's men round one anchor; here the squad moves as its teams (the contract's q.eq, or the first half
+   of its men team A, the leader's, and the rest team B; one team under 4 men), each team in a formation and the teams placed by the
+   technique (tec) of movement:
+   - desloc (traveling: contact unlikely): the teams one behind the other, each in a staggered column (coluna), in single file (fila) in the
+     woods or at night;
+   - vig (traveling overwatch: contact possible): team B vig m behind team A (at least its length and a man more), each in a wedge (cunha),
+     a column in the woods;
+   - lances (bounding overwatch: contact expected): the teams lat m apart abreast, one bounds while the other holds: along the way each team
+     rushes 2 x bound m while the anchor moves bound m and then holds, the other doing the same half a cycle later (successive bounds, the
+     holding team's line is where the bounding one comes up to), each in a wedge; on an assault in a line (linha), the teams side by side.
+   The technique is q.tec (the squad leader's, cf-lideres P3), else its order's (O.tec, the contract's ORDEM), else ORG's distances as the
+   default with no leader: file (an enemy past ORG.threat m) desloc, wedge vig, line (an assault within ORG.close m) lances.
+   Dispersion: disp [min, max] m between men in the open (each squad its own, by hash), x wood in the woods or the brush (UG), x night in the
+   dark (SKY), never under min m; a bridge or a ford closes to ORG.bridge m of the way (single file), as ORG did.
+   ORG's noise (its own offset, the accordion, the squad's drift) rides on top, smaller as the men close up and across a file.
+   Contact (a man of the squad has a target, or is suppressed): the formation gives way to the place of the soldier's position (P2: MV.pos,
+   (q, i, base, e) -> {x, z} or null, set by cf-p2-posicao), and with none: the noise is kept only where the ground there covers as much as
+   the formation's own place (coverAt), and the place is the best cover within snap m of it (cvPick, P1), held every s while it moves less
+   than 3 m. No one is sent into the open by the noise.
+   The way: a squad given a walk on another axis (setOrd's trip, O.trp) in a technique other than desloc walks it laid again over the
+   ground (ugPoly, map version 10, on a copy: the trip is cached), and every way ugPoly lays costs more where the cell is open (way.o x
+   (1 - the tactical map's o)) and on a crest (way.crest x mvCrest: the cell above the ground crest.r m to both sides along some line by
+   crest.dh m or more, from 0 to 1): it keeps to cover and off the skyline.
+   A change of technique is an ANA event cb (st 'tec', q the squad's id, v the technique); a bound's leader calls "Avançar!", the holding
+   team's "Cobrindo!" (SAY). Everything is from hash2 and the state (no Math.random): replay, tests and the online host stay the same.
+   on: 0 leaves ORG as it was */
+const MV = { on: 1, disp: [5, 10], wood: .55, night: .6, min: 2.5, vig: 45, bound: 30, lat: 14, snap: 7, every: 2,
+  way: { o: .6, crest: 1.5 }, crest: { r: 60, dh: 3 }, tecs: ['desloc', 'vig', 'lances'], pos: null };
+/* the technique squad q moves in, under order O */
+function mvTec(q, O) {
+  O = O || q.ord; const t = q.tec || (O && O.tec);
+  if (t && MV.tecs.includes(t)) return t;
+  const F = orgForm(q, O); return F === 'line' ? 'lances' : F === 'wedge' ? 'vig' : 'desloc';
+}
+/* man i's team: t its index, j his place in it, nt its size, nT how many teams */
+function mvEq(q, i) {
+  const n = Math.max(q.n0, 1), m = q.men[i];
+  if (q.eq && q.eq.length > 1 && m) for (let t = 0; t < q.eq.length; t++) { const j = (q.eq[t].men || []).indexOf(m); if (j >= 0) return { t, j, nt: q.eq[t].men.length, nT: q.eq.length }; }
+  if (n < 4) return { t: 0, j: i, nt: n, nT: 1 };
+  const a = Math.ceil(n / 2); return i < a ? { t: 0, j: i, nt: a, nT: 2 } : { t: 1, j: i - a, nt: n - a, nT: 2 };
+}
+/* the ground at x z for the gap: k its share of the open gap, wood, night */
+function mvEnv(x, z) {
+  const wood = kindAt(x, z) === 1 || (!!S.T.ug && ugAt(x, z) >= UG.thr), night = !!(S.sky && S.sky.L < SKY.dark);
+  return { k: (wood ? MV.wood : 1) * (night ? MV.night : 1), wood, night };
+}
+/* a team's formation in technique tec */
+const mvForm = (tec, env, O) => (tec === 'desloc' ? (env.wood || env.night ? 'fila' : 'coluna') : tec === 'vig' ? (env.wood ? 'coluna' : 'cunha') : O && O.k === 'assault' ? 'linha' : 'cunha');
+/* how far along its way the squad is, growing as it goes, and which team bounds now (lances) */
+const mvAl = q => (q.tp ? q.ts : q.s * (q.ds || 1));
+const mvPh = q => (((Math.floor(mvAl(q) / MV.bound) % 2) + 2) % 2);
+/* whether the squad is in contact, and the enemy it faces (a man's target), once a step */
+function mvCon(q) {
+  if (q.mvCT === S.t) return q.mvC;
+  q.mvCT = S.t; let c = null;
+  for (const m of q.men) if (!m.dead && !m.down && m.ai) { const g = m.ai.tgt; if (g && !g.dead) { c = { e: { x: g.x, z: g.z } }; break; } if (m.sup > S.t) c = c || { e: null }; }
+  return (q.mvC = c);
+}
+const MVC = { c: 0, p: 0, x: 0, z: 0, all: false };
+const mvCov = (x, z) => { coverAt(x, z, MVC); return MVC.c + MVC.p; };
+/* man i's place on the move (orgSlot's, by teams and technique) */
+function mvSlot(q, i) {
+  const O = q.ord, tec = mvTec(q), E = mvEq(q, i), sd = q.team * 37 + (q.id || 0), s0 = q.tp ? q.ts : q.s, sg = q.tp ? 1 : q.ds;
+  const a0 = q.tp ? routeAt(q.tp, s0) : routeAt(S.T.routes[q.ri], s0), env = mvEnv(a0.x, a0.z), F = mvForm(tec, env, O);
+  const d = Math.max(MV.min, (MV.disp[0] + (MV.disp[1] - MV.disp[0]) * hash2(sd, 5, 11)) * env.k), span = Math.ceil(Math.max(q.n0, 1) / E.nT) * d;
+  let b = 0, l = 0;
+  if (tec === 'lances') {
+    const D = MV.bound, u = (((mvAl(q) % (2 * D)) + 2 * D) % (2 * D)), odd = E.t % 2;
+    b = !odd ? (u < D ? -u : u - 2 * D) : (u < D ? u : 2 * D - u);
+    l = (odd ? 1 : -1) * (F === 'linha' ? (E.nt * d) / 2 + d / 2 : MV.lat * env.k / 2);
+    b += (E.t >> 1) * span;
+  } else if (tec === 'vig') { b = E.t * Math.max(span + d, MV.vig * env.k); l = E.t * d * .5; }
+  else b = E.t * (span + d);
+  const j = E.j;
+  if (F === 'linha') l += (j - (E.nt - 1) / 2) * d;
+  else if (F === 'cunha') { const k = (j + 1) >> 1; b += d * .8 * k; l += (j ? (j % 2 ? 1 : -1) : 0) * d * .8 * k; }
+  else { b += d * j; if (F === 'coluna') l += (j % 2 ? 1 : -1) * d * (.35 + .35 * hash2(sd, i, 3)); }
+  const G = ORG, w = Math.min(1, d / G.gap), wl = F === 'fila' ? .3 : 1;
+  const nb = (orgN(i * 7 + 1, s0, sd, G.wl) * G.jit[1] + Math.sin(S.t * G.breathe[1] + i * 1.7 + sd) * G.breathe[0]) * w;
+  const nl = (orgN(i * 7 + 2, s0, sd, G.wl) * G.jit[0] * w + orgN(97, s0, sd, G.drift[1]) * G.drift[0] * (F === 'fila' || F === 'coluna' ? .5 : 1)) * wl;
+  const at = (bb, ll) => {
+    const p = q.tp ? routeAt(q.tp, s0 - bb) : routeAt(S.T.routes[q.ri], s0 - q.ds * bb), fx = p.dx * sg, fz = p.dz * sg;
+    let x = p.x - fz * ll, z = p.z + fx * ll;
+    if (hgt(x, z) < S.T.WL + G.wet) { const c = clamp(ll, -G.bridge, G.bridge); x = p.x - fz * c; z = p.z + fx * c; }   // a bridge or a ford: in single file on the way
+    return { x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW) };
+  };
+  const C = mvCon(q);
+  if (!C) return at(b + nb, l + nl);
+  const base = at(b, l);
+  if (MV.pos) { const p = MV.pos(q, i, base, C.e); if (p) return p; }   // the soldier's position (P2) first
+  const nz = at(b + nb, l + nl), pk = mvCov(nz.x, nz.z) >= mvCov(base.x, base.z) ? nz : base, m = q.men[i];
+  if (!m) return pk;
+  const h = m.mvCv;
+  if (h && S.t < h.t && Math.abs(h.bx - pk.x) < 3 && Math.abs(h.bz - pk.z) < 3) return h.p;
+  const used = []; for (const o of q.men) if (o !== m && o.mvCv && S.t < o.mvCv.t) used.push(o.mvCv.p);
+  const c = cvPick({ x: pk.x, z: pk.z, team: q.team }, C.e, MV.snap, used);
+  m.mvCv = { t: S.t + MV.every, bx: pk.x, bz: pk.z, p: { x: c.x, z: c.z } };
+  return m.mvCv.p;
+}
+orgSlot = (g => (q, i) => (MV.on ? mvSlot(q, i) : g(q, i)))(orgSlot);
+/* the leader of team t of q (its first man up), or null */
+function mvLead(q, t) { for (let i = 0; i < q.men.length; i++) { const m = q.men[i]; if (!m.dead && !m.down && m.ai && mvEq(q, i).t === t) return m; } return null; }
+/* a squad's beat: its technique told to ANA when it changes, the bounds called */
+squadThink = (g => q => {
+  g(q);
+  if (!MV.on || q.net || q.tn) return;   // a squad underground (TUN) is not on the move
+  const tec = mvTec(q);
+  if (tec !== q.mvTec) { if (q.mvTec !== undefined && anaLive() && ANA.S === S) anaPush({ k: 'cb', t: anaR(S.t), s: q.team, st: 'tec', q: q.id, v: tec }); q.mvTec = tec; q.mvB = undefined; }
+  if (tec !== 'lances' || q.at || q.halt || q.state || (q.bg && q.bg.length) || q.n0 < 4) return;
+  const ph = mvPh(q); if (ph === q.mvB) return;
+  if (q.mvB !== undefined) { const a = mvLead(q, ph), c = mvLead(q, 1 - ph); if (a) say(a, SAYC.adv); if (c) say(c, SAYC.cover); }
+  q.mvB = ph;
+})(squadThink);
+/* how much a cell of the undergrowth's grid (gi gj, c m) stands on a crest: above the ground crest.r m to both sides along its steepest
+   line, by crest.dh m for 1; once a terrain (U.mvCr) */
+function mvCrest(gi, gj, c, U) {
+  const A = U.mvCr || (U.mvCr = new Float32Array(U.nx * U.nz).fill(-1)), k = gj * U.nx + gi; if (A[k] >= 0) return A[k];
+  const x = (gi + .5) * c, z = -U.HW + (gj + .5) * c, h = hgtT(S.T, x, z), R = MV.crest.r; let best = 0;
+  for (let a = 0; a < 4; a++) { const dx = Math.cos(a * Math.PI / 4) * R, dz = Math.sin(a * Math.PI / 4) * R; best = Math.max(best, Math.min(h - hgtT(S.T, x + dx, z + dz), h - hgtT(S.T, x - dx, z - dz))); }
+  return (A[k] = clamp(best / MV.crest.dh, 0, 1));
+}
+/* the cost factor of a cell of a way laid by ugPoly: dearer in the open (the tactical map's o) and on a crest */
+function mvWayK(gi, gj, c, U, M) {
+  if (!MV.on) return 1;
+  let k = 1 + MV.way.crest * mvCrest(gi, gj, c, U);
+  if (M && M.o) k *= 1 + MV.way.o * (1 - clamp(M.o[m4Cell(M, (gi + .5) * c, -U.HW + (gj + .5) * c)] || 0, 0, 1));
+  return k;
+}
+/* a trip given to a squad that is not on a plain march: laid again over cover and off the crests, on a copy (the trip is cached) */
+function mvWay(q, tp, O) {
+  if (!MV.on || !tp || !S.T.ug || mvTec(q, O) === 'desloc') return tp;
+  const c = polyOf(tp.map(o => ({ x: o.x, z: o.z }))); for (const k of ['ri', 's1']) if (tp[k] !== undefined) c[k] = tp[k];
+  return orgPoly(ugPoly(c, q.team));
+}
+setOrd = (g => (q, O) => {
+  g(q, O);
+  if (!MV.on || q.ord !== O || !q.tp || q.tp !== O.trp || q.tp.mv) return;
+  const w = mvWay(q, q.tp, O); if (w !== q.tp) { w.mv = 1; q.tp = O.trp = w; }
+})(setOrd);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -31432,7 +32501,7 @@ function buildWorld() {
   const tp = tg.attributes.position, tc = new Float32Array(tp.count * 3);
   for (let k = 0; k < tp.count; k++) { tp.setY(k, T.h[k]); groundColor(k, tp.getX(k), tp.getZ(k), c); tc.set([c.r, c.g, c.b], k * 3); }
   tg.setAttribute('color', new THREE.BufferAttribute(tc, 3)); tg.computeVertexNormals();
-  scene.add(new THREE.Mesh(tg, mat(0xffffff, { vertexColors: true })));
+  { const tm = new THREE.Mesh(tg, mat(0xffffff, { vertexColors: true })); tm.renderOrder = -10; scene.add(tm); }   // drawn first: the trenches' holes are cut into it (FHOLE)
   const wg = new THREE.PlaneGeometry(lx, lz); wg.rotateX(-Math.PI / 2);
   const water = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({ color: P.water, shininess: 90, transparent: true, opacity: .9 }));
   water.position.set(T.x0 + lx / 2, T.WL, T.z0 + lz / 2); scene.add(water);
@@ -32513,7 +33582,7 @@ function ugTiles() {
     for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
       const gi = ti * n + a, gj = tj * n + b; if (gi >= U.nx || gj >= U.nz) continue;
       const d = U.d[gj * U.nx + gi] / 255; if (d < .12) continue;
-      const m = Math.floor(d * D.per + hash2(gi, gj, 151));
+      const m = Math.floor(d * D.per * (UG.q[gfxLevel()] || 1) + hash2(gi, gj, 151));   // fewer at Baixa (UG.q)
       for (let e = 0; e < m; e++) {
         const h = s => hash2(gi * 7 + e, gj * 5 + s, 152), x = (gi + h(1)) * U.c, z = -HW + (gj + h(2)) * U.c, y = hgt(x, z);
         if (y < WL + .3) continue;
@@ -32528,14 +33597,17 @@ function ugTiles() {
     me.userData.c = g.boundingSphere.center; G.tiles.set(k, me); scene.add(me);
   }
 }
-/* the world, then in a seat that shows it my own model around the eye: same camera, depth cleared, a near plane close enough for a cockpit */
+/* the world, then in a seat that shows it my own model around the eye: same camera, depth cleared, a near plane close enough for a cockpit;
+   then on foot the weapon in hand (vmRender) */
 function render3d() {
   bushTiles(); ugTiles();
   renderer.render(scene, camera);
-  if (!camSt.body) return;
-  camera.layers.set(1); camera.near = .06; camera.far = 150; camera.updateProjectionMatrix(); renderer.autoClearColor = false;
-  renderer.render(scene, camera);
-  renderer.autoClearColor = true; camera.layers.set(0); camera.near = 2; camera.far = 30000; camera.updateProjectionMatrix();
+  if (camSt.body) {
+    camera.layers.set(1); camera.near = .06; camera.far = 150; camera.updateProjectionMatrix(); renderer.autoClearColor = false;
+    renderer.render(scene, camera);
+    renderer.autoClearColor = true; camera.layers.set(0); camera.near = 2; camera.far = 30000; camera.updateProjectionMatrix();
+  }
+  vmRender();   // on foot, the weapon in hand over it all (cf-arma-1p)
 }
 const PV = new THREE.Vector3();
 function proj(x, y, z) {
@@ -32569,7 +33641,7 @@ function preview(m, L, canvas, ang) {
 /* ---------- woods, trenches and sandbags: what is seen of them ----------
    FLOOK: every work is a few boxes of one instanced mesh, set again when a work comes, goes, rises or is hurt (S.fv) and every `every`
    frames. A trench: the dark floor of its cut, a bank of spoil on each side (the higher one toward the enemy), the two ends, and the
-   planks of a crossing; the ground itself is not cut, it hides the soldier's body below it. Sandbags: three courses of bags.
+   planks of a crossing; the cut itself (walls and floor, the ground over it not drawn) is FHOLE's. Sandbags: three courses of bags.
    ghost: the outline of what the build mode would start. tree: a tree a burst brought down is charred; tint: how much the standing
    ones differ; trunk: [m of bare trunk under the crown, the crown's radius], for a tree of scale 1; lie: a felled tree is pressed flat
    [s after it fell, how high its trunk then lies, what is left of the crown's height]. eye: the lowest the eye goes over the ground in a trench, where the near plane comes in to `near` so that the ground at
@@ -32589,7 +33661,7 @@ function fortBoxes(put) {
     box.prop = (id, lx, ly, lz, sx, sy, sz) => typeof packProp === 'function' && packProp(id, M.mx.compose(M.v.set(f.x + X.x * lx + Y.x * ly + Z.x * lz, f.y + X.y * lx + Y.y * ly + Z.y * lz, f.z + X.z * lx + Y.z * ly + Z.z * lz), q, M.s.set(sx, sy, sz)), dk);
     if (f.k === 1) {
       const w = TR.size[1], B = L.bank, hf = B[0] * p + .04, hb = B[1] * p + .04;
-      box(0, .06, 0, hw * 2, .1, w * Math.max(.35, p), L.floor);
+      if (!FHOLE.on) box(0, .06, 0, hw * 2, .1, w * Math.max(.35, p), L.floor);   // the hole (FHOLE) has its own floor, down where the men stand
       box(0, hf * .3, w / 2 + B[2] / 2, hw * 2 + 1.6, hf * .6, B[2], L.earth); box(0, hf * .8, w / 2 + B[2] * .45, hw * 2 + .6, hf * .4, B[2] * .5, L.spoil);
       box(0, hb * .3, -w / 2 - B[3] / 2, hw * 2 + 1.2, hb * .6, B[3], L.earth); box(0, hb * .8, -w / 2 - B[3] * .45, hw * 2 + .2, hb * .4, B[3] * .5, L.spoil);
       for (const e of [1, -1]) box(e * (hw + .45), hb / 2, 0, .9, hb, w + .4, L.earth);
@@ -32672,7 +33744,7 @@ function hudFort(P, u, ink, acc, disp) {
    a vehicle in a dense wood the near plane goes out instead, so that the crowns between the eye and the hull are not drawn */
 function fortCam(p) {
   const cp = camera.position, low = !!p && !!p.man && !p.dead && p.dg > .1;
-  if (low) cp.y = Math.max(cp.y, hgt(cp.x, cp.z) + FLOOK.eye);
+  if (low) { const g = hgt(cp.x, cp.z), cut = FHOLE.on ? trenchAt(cp.x, cp.z, -.25) : null; cp.y = Math.max(cp.y, cut ? g - cut.F.depth * cut.prog + FLOOK.eye : g + FLOOK.eye); }   // in the cut (FHOLE) the eye stays over its floor
   camera.near = low ? FLOOK.near : p && p.kind && !p.man && !p.dead && !S.demo && !curSeat() && (kindAt(p.x, p.z) === 1 || kindAt(cp.x, cp.z) === 1) ? FLOOK.wood : 2;
 }
 /* ---------- buildings: what is seen of them ----------
@@ -33675,24 +34747,29 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
 }
 /* first person: the weapon in hand, drawn on the glass. From the hip it comes up from the lower right; sighted (camSt.ak) it stands in the
-   middle with its own sight: notch and post in 1944, a red dot today, a range ladder on a rocket launcher, a seeker window on a guided one */
+   middle with its own sight: notch and post in 1944, a red dot today, a range ladder on a rocket launcher, a seeker window on a guided one.
+   When the weapon is a model this frame (vmRender, VM.on) only those sight marks are drawn here, as they were, coming in as it is sighted */
 function fpMan(P, u, ink, acc, disp, blink) {
+  const vm = VM.on && VM.f === frameId;
   const a = P.arms[P.w], w = a.d, k = camSt.ak || 0, ts = S.t - a.t, calm = reduced ? 0 : 1, s = Math.min(cw, ch) / 600, cx = cw / 2, cy = ch / 2;
   const bob = calm * Math.sin(P.step * 2.3) * 5 * s * Math.min(1, Math.hypot(P.v.x, P.v.z) / 2.5), rc = calm * (ts < .12 ? 1 - ts / .12 : 0) * (w.k ? 26 : 9) * s, sw = S.t < P.swT ? (P.swT - S.t) / MAN.swap * 160 * s : 0;
   const ox = (1 - k) * 170 * s + bob * .7, oy = (1 - k) * 46 * s + Math.abs(bob) + rc + sw + (a.rl > 0 ? 70 * s : 0), metal = '#17191b', wood = S.modern ? '#2b2e2c' : '#4b3525';
   const quad = (x0, y0, w0, x1, y1, w1, col) => { hx.beginPath(); hx.moveTo(cx + ox + x0 - w0, cy + oy + y0); hx.lineTo(cx + ox + x1 - w1, cy + oy + y1); hx.lineTo(cx + ox + x1 + w1, cy + oy + y1); hx.lineTo(cx + ox + x0 + w0, cy + oy + y0); hx.closePath(); hx.fillStyle = col; hx.fill(); };
   if (w.lockT) {   // the launcher on the shoulder, and sighted its seeker window
-    quad(150 * s, ch / 2, 70 * s, 110 * s, 40 * s, 46 * s, '#30352d');
+    if (!vm) quad(150 * s, ch / 2, 70 * s, 110 * s, 40 * s, 46 * s, '#30352d');
     if (k > .5) { hx.strokeStyle = S.lockOk ? FOE : acc; hx.lineWidth = 2; const r = 150 * s; for (const [i, j] of CORN) { hx.beginPath(); hx.moveTo(cx + i * r, cy + j * (r - 26 * s)); hx.lineTo(cx + i * r, cy + j * r); hx.lineTo(cx + i * (r - 26 * s), cy + j * r); hx.stroke(); } hx.beginPath(); hx.arc(cx, cy, 5, 0, TAU); hx.stroke(); txt(w.name.toUpperCase(), cx - r, cy + r + 6 * u, 11 * u, acc); }
     return;
   }
   if (w.k) {   // a rocket launcher: the tube beside the eye, and a ladder of ranges under the aiming mark
-    quad(120 * s, ch / 2, 64 * s, 80 * s, 30 * s, 40 * s, '#3a3d33');
+    if (!vm) quad(120 * s, ch / 2, 64 * s, 80 * s, 30 * s, 40 * s, '#3a3d33');
     if (k > .5) { hx.strokeStyle = metal; hx.lineWidth = 3 * s; hx.strokeRect(cx - 34 * s, cy - 16 * s, 68 * s, 130 * s); hx.lineWidth = 1.5; [.25, .5, 1].forEach((f, i) => { const yy = cy + .125 * GR * (w.rng * f / w.spd) ** 2 / (w.rng * f) * (ch / (2 * Math.tan(camera.fov * Math.PI / 360))); hx.beginPath(); hx.moveTo(cx - (14 - i * 3) * s, yy); hx.lineTo(cx + (14 - i * 3) * s, yy); hx.stroke(); txt(Math.round(w.rng * f) + '', cx + 20 * s, yy - 6 * u, 10 * u, ink); }); }
     return;
   }
-  quad(0, ch / 2, (60 - 16 * k) * s, 0, (118 - 30 * k) * s, (26 - 6 * k) * s, wood);   // the stock and the receiver
-  quad(0, (118 - 30 * k) * s, (15 - 4 * k) * s, 0, (52 - 34 * k) * s, (7 - 2 * k) * s, metal);   // the barrel
+  if (vm) { if (k <= .5) return; hx.globalAlpha = Math.min(1, (k - .5) * 3); }   // the model is the weapon: only its sight, sighted
+  else {
+    quad(0, ch / 2, (60 - 16 * k) * s, 0, (118 - 30 * k) * s, (26 - 6 * k) * s, wood);   // the stock and the receiver
+    quad(0, (118 - 30 * k) * s, (15 - 4 * k) * s, 0, (52 - 34 * k) * s, (7 - 2 * k) * s, metal);   // the barrel
+  }
   if (S.modern) {   // a tube with a red dot
     const r = (34 + 22 * k) * s, yy = cy + oy + (62 - 62 * k) * s; hx.lineWidth = 9 * s; hx.strokeStyle = metal; hx.beginPath(); hx.arc(cx + ox, yy, r, 0, TAU); hx.stroke();
     hx.fillStyle = 'rgba(120,200,210,.07)'; hx.fill(); if (k > .5) { hx.fillStyle = '#ff3b30'; hx.beginPath(); hx.arc(cx, cy, 2.2, 0, TAU); hx.fill(); }
@@ -33701,6 +34778,7 @@ function fpMan(P, u, ink, acc, disp, blink) {
     hx.fillRect(cx + ox - 2.5 * s, yy + (50 - 50 * k) * s, 5 * s, 16 * s);
     hx.fillRect(cx + ox - 30 * s, yy + (96 - 78 * k) * s, 24 * s, 26 * s); hx.fillRect(cx + ox + 6 * s, yy + (96 - 78 * k) * s, 24 * s, 26 * s); hx.fillRect(cx + ox - 30 * s, yy + (112 - 78 * k) * s, 60 * s, 12 * s);
   }
+  hx.globalAlpha = 1;
 }
 /* a soldier as a model of its own, for a hangar card: the rig's boxes, standing with the kit's weapon */
 function manModel(d) {
@@ -39109,6 +40187,280 @@ buildWorld = (g => () => { for (const s of PM.slots) kill(s.root); PM.slots = []
 try { const b = document.getElementById('briefing'), dock = b && b.parentElement; if (dock && PACK.on) { const p = document.createElement('p'); p.className = 'hint'; p.id = 'packCred'; p.textContent = PACK.cred; p.style.cssText = 'grid-column:1/-1;font-size:11px;opacity:.6;margin:2px 0 0'; dock.appendChild(p); } } catch (e) {}
 /* the vehicles and the soldier are asked for a moment after the page opens, so the first battle already has them */
 if (PACK.on) setTimeout(() => { for (const id of new Set([...Object.values(PACK.tank), ...Object.values(PACK.trn), 'soldier', 'p_debris'])) packGet(id); }, 1500);
+/* ---------- first person: the weapon in hand as a model (cf-arma-1p, NOT TESTED: docs/nao-testado/cf-arma-1p.md) ----------
+   On foot in the eye seat (SEAT.inf) the kit's weapon is the pack's model (VMW: which one and how long; a scope on the 1944 snipers' rifles)
+   held by two simple arms, in a scene of its own (VM.sc) seen by a camera of its own (VM.cam, its own field of view VM.fov), drawn after the
+   world with only the depth cleared: it never goes into a wall, and the world's zoom does not stretch it. From the hip it sits low on the
+   right; sighted (camSt.ak) its top comes up to just under the line of sight in the middle, where fpMan's sight marks (as they were) stand
+   over it; a launcher sits on the shoulder beside the eye; a scoped rifle gives way to the scope. A step sways it, a shot kicks it back and
+   up, a reload lowers and rolls it, a swap brings it up from below, running turns it across the chest, a turn of the view drags it behind
+   for a moment. The light is the world's (its sky and its sun, turned into the eye's frame). Visual only: the aim, the shot, the hit boxes
+   and the net are not touched. Off, and fpMan draws the weapon of before on the glass: the pack off (?pack=0, file://, a server without it,
+   level 0), ?vm=0 or localStorage cf-vm 0, aboard a vehicle, and until the weapon's model has arrived. The mortar is a tube of boxes of its
+   own (the pack has none) ---------- */
+const VMW = {
+  k98: ['w_kar98', 1.1], garand: ['w_kar98', 1.1], m1carb: ['w_kar98', .9], k98s: ['w_kar98', 1.1, 1], m1903: ['w_kar98', 1.1, 1],
+  m4: ['w_m4', .84], ak: ['w_ak', .94], akm: ['w_ak', .88], mp40: ['w_smg', .83], mp7: ['w_smg', .64], vityaz: ['w_smg', .72],
+  mg42: ['w_smg', 1.12], bar: ['w_smg', 1.15], m249: ['w_m4', 1.04], pkp: ['w_ak', 1.12], pkm: ['w_ak', 1.1],
+  m82: ['w_sniper', 1.45], osv96: ['w_sniper', 1.5], svd: ['w_sniper', 1.22],
+  p38: ['w_pistol', .22], m1911: ['w_pistol', .22], m17: ['w_pistol', .2], mp443: ['w_pistol', .2], pm: ['w_pistol', .16],
+  pzf: ['w_bazooka', 1], bazooka: ['w_bazooka', 1.37], rpg: ['w_rpg', .95], rpg7v: ['w_rpg', .95],
+  javelin: ['w_launcher', 1.2], stinger: ['w_launcher', 1.5], igla: ['w_launcher', 1.6], strela: ['w_launcher', 1.4], malyutka: ['w_launcher', .9], kornet: ['w_launcher', 1.2]
+};
+/* where the grip sits in the eye's frame (x right, y up, -z ahead), from the hip and sighted; sighted y and x are worked out from the model */
+const VMP = { rifle: [[.15, -.16, -.3], [0, 0, -.2]], pistol: [[.13, -.13, -.36], [0, 0, -.38]], tube: [[.19, -.1, -.22], [0, 0, -.12]], mort: [[.1, -.36, -.55], [.1, -.36, -.55]] };
+const VM = { fov: 54, M: new Map(), on: false, f: -1, t: 0, rn: 0, sx: 0, sy: 0, ph: null, pp: 0, sc: null, cam: null, hemi: null, sun: null, lsc: null, L: [], box: null, off: false };
+try { VM.off = /[?&]vm=0/.test(location.search) || localStorage.getItem('cf-vm') === '0'; } catch (e) {}
+const vmOk = () => !VM.off && typeof PACK !== 'undefined' && PACK.on && PACK.lvl() > 0;
+/* which model a weapon is: its pack id, length, scope and how it is held */
+function vmPick(d, kit) {
+  if (!d) return null;
+  if (d.k === 'mort') return { key: 'mort', id: null, len: .75, cls: 'mort' };
+  const key = PACK_SARM.get(d), e = (key && VMW[key]) || (d.k ? [d.k === 'sam' || d.k === 'atgm' ? 'w_launcher' : 'w_bazooka', 1.2] : d.snp ? ['w_sniper', 1.2] : d.lmg ? ['w_smg', 1.1] : [kit && kit.era === 'ww2' ? 'w_kar98' : kit && kit.side ? 'w_ak' : 'w_m4', .9]);
+  return { key: e.join(':'), id: e[0], len: e[1], scope: !!e[2], cls: d.k ? 'tube' : e[0] === 'w_pistol' ? 'pistol' : 'rifle' };
+}
+function vmInit() {
+  if (VM.sc) return;
+  VM.sc = new THREE.Scene(); VM.cam = new THREE.PerspectiveCamera(VM.fov, 1, .01, 6);
+  VM.hemi = new THREE.HemisphereLight(0xffffff, 0x5a5648, .78); VM.sun = new THREE.DirectionalLight(0xfff2d8, .85); VM.sc.add(VM.hemi, VM.sun, VM.sun.target);
+  VM.box = new THREE.BoxGeometry(1, 1, 1); VM.box.userData.keep = true;
+}
+const VMY = typeof THREE !== 'undefined' ? new THREE.Vector3(0, 1, 0) : null, VMQ = typeof THREE !== 'undefined' ? new THREE.Quaternion() : null;
+/* a box from a to b (an arm's segment), t thick */
+function vmLimb(g, a, b, t, mt) {
+  const A = new THREE.Vector3().fromArray(a), v = new THREE.Vector3().fromArray(b).sub(A), m = new THREE.Mesh(VM.box, mt), L = v.length();
+  m.position.copy(A).addScaledVector(v, .5); m.quaternion.setFromUnitVectors(VMY, v.normalize()); m.scale.set(t, L, t); g.add(m); return m;
+}
+/* the weapon and the arms, built once per model: root (the eye's frame, moved each frame) > turn (the weapon's own frame: +x the muzzle,
+   the grip at the origin) > the model, the scope, the hands and arms, the flash */
+function vmBuild(pk) {
+  vmInit();
+  const root = new THREE.Group(), turn = new THREE.Group(); turn.rotation.y = Math.PI / 2; root.add(turn);
+  const metal = mat(0x2b2e2a), sleeve = mat(0x5f6a3c), hand = mat(0xb08a6a), V = { root, sleeve, hand, pk };
+  if (pk.cls === 'mort') {   // the tube carried slanted up, the base plate at its foot
+    const t = new THREE.Group(); t.rotation.z = .8; turn.add(t);
+    const tube = new THREE.Mesh(new THREE.CylinderGeometry(.045, .05, pk.len, 10), metal); tube.rotation.z = -Math.PI / 2; tube.position.x = pk.len / 2 - .1; t.add(tube);
+    const base = new THREE.Mesh(VM.box, metal); base.scale.set(.05, .3, .3); base.position.x = -.12; t.add(base);
+    V.box = new THREE.Box3(new THREE.Vector3(-.15, -.15, -.15), new THREE.Vector3(.6, .6, .15)); V.mz = [pk.len - .1, 0];
+  } else {
+    const P = packGet(pk.id); if (!P) return null;
+    const s = pk.len / P.dims[0], g = packPivot(P, 'hull') || [0, 0, 0], m = packWhole(P, 0, s);
+    m.position.set(-g[0] * s, -g[1] * s, -g[2] * s); turn.add(m); turn.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(turn.matrixWorld).invert(), B = new THREE.Box3();
+    m.traverse(c => { if (c.isMesh) { c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, c.matrixWorld))); } });
+    if (pk.scope) {   // a 1944 sniper's scope over the receiver
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(.017, .02, .26, 10), metal); sc.rotation.z = -Math.PI / 2; sc.position.set(.06, B.max.y + .03, 0); turn.add(sc);
+      B.max.y += .05;
+    }
+    V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H];
+  }
+  const B = V.box, L = pk.len, lx = pk.cls === 'pistol' ? .01 : pk.cls === 'mort' ? .3 : clamp(.3 * L, .16, .42), ly = pk.cls === 'pistol' ? -.05 : B.min.y * .5 - .02, lz = pk.cls === 'pistol' ? -.03 : 0;
+  const R = new THREE.Group(); turn.add(R);
+  const hb = (x, y, z) => { const m = new THREE.Mesh(VM.box, hand); m.scale.set(.085, .06, .06); m.position.set(x, y, z); R.add(m); };
+  hb(0, -.035, 0); vmLimb(R, [-.03, -.05, .02], [-.3, -.21, .13], .075, sleeve); vmLimb(R, [-.3, -.21, .13], [-.6, -.36, .32], .085, sleeve);
+  hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
+  if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
+    const f = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    f.position.set(V.mz[0], V.mz[1], 0); f.visible = false; turn.add(f); V.flash = f;
+  }
+  /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
+  const ads = VMP[pk.cls][1].slice();
+  if (pk.cls === 'rifle' || pk.cls === 'pistol') ads[1] = -B.max.y - (pk.cls === 'pistol' ? .006 : .01);
+  else if (pk.cls === 'tube') { ads[0] = (B.max.z - B.min.z) / 2 + .05; ads[1] = -(B.min.y + B.max.y) / 2 - .03; }
+  V.hip = VMP[pk.cls][0]; V.ads = ads;
+  VM.sc.add(root); root.visible = false;
+  return V;
+}
+/* the model of a weapon, or null while its pack file is not here (asking for it starts the fetch) */
+function vmGet(pk) {
+  let V = VM.M.get(pk.key); if (V) return V;
+  try { V = vmBuild(pk); } catch (e) { console.warn('arma em primeira pessoa: ' + pk.key, e); V = null; }
+  if (V) VM.M.set(pk.key, V);
+  return V;
+}
+/* each frame, after the world (render3d): the weapon in hand, if any */
+function vmRender() {
+  const now = performance.now(), dt = Math.min(.1, (now - (VM.t || now)) / 1000), P = S.my; VM.t = now; VM.on = false; VM.f = frameId;
+  for (const V of VM.M.values()) V.root.visible = false;
+  if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; return; }
+  if (scoped(P) && camSt.ak > .5) return;   // the scope is the view
+  const a = P.arms[P.w], d = a && a.d, pk = vmPick(d, P.def); if (!pk) return;
+  for (const o of P.arms) { const q = o !== a && vmPick(o.d, P.def); if (q && q.id) packGet(q.id); }   // the other weapon too, so a swap finds it here
+  const V = vmGet(pk); if (!V) return;
+  vmInit();
+  /* the light: the world's sky and sun, the sun turned into the eye's frame */
+  if (VM.lsc !== scene) { VM.lsc = scene; VM.L = scene ? scene.children.filter(c => c.isHemisphereLight || c.isDirectionalLight) : []; }
+  const hl = VM.L.find(c => c.isHemisphereLight), sl = VM.L.find(c => c.isDirectionalLight);
+  if (hl) { VM.hemi.color.copy(hl.color); VM.hemi.groundColor.copy(hl.groundColor); VM.hemi.intensity = hl.intensity; }
+  if (sl) { VM.sun.color.copy(sl.color); VM.sun.intensity = sl.intensity; VM.sun.position.copy(sl.position).sub(sl.target.position).normalize().applyQuaternion(VMQ.copy(camera.quaternion).invert()); }
+  const col = (P.cc || (MCOL[P.def.era] && MCOL[P.def.era][P.def.side]) || [0x5f6a3c])[0];
+  if (V.sleeve.userData.c !== col) { V.sleeve.color.setHex(col); V.sleeve.userData.c = col; }
+  const hc = S.modern ? 0x34352f : 0xb08a6a; if (V.hand.userData.c !== hc) { V.hand.color.setHex(hc); V.hand.userData.c = hc; }
+  /* the motion */
+  const k = clamp(camSt.ak || 0, 0, 1), calm = reduced ? .25 : 1, cls = pk.cls, ts = S.t - a.t, big = cls === 'tube' || cls === 'mort';
+  const sp = Math.min(1, Math.hypot(P.v.x, P.v.z) / 2.5), ph = P.step || 0;
+  VM.rn += ((P.run ? 1 : 0) - VM.rn) * Math.min(1, dt * 8);
+  const h = S.aim ? S.aim.h : 0, pt = S.aim && S.aim.d ? Math.asin(clamp(S.aim.d.y, -1, 1)) : 0;
+  if (VM.ph === null) { VM.ph = h; VM.pp = pt; }
+  let dh = h - VM.ph; dh -= Math.round(dh / TAU) * TAU; VM.ph = h; const dp = pt - VM.pp; VM.pp = pt;
+  const e = Math.exp(-dt * 9); VM.sx = clamp(VM.sx * e + dh * .5, -.09, .09); VM.sy = clamp(VM.sy * e + dp * .5, -.07, .07);
+  const T = big ? .3 : .12, rc = ts >= 0 && ts < T ? (1 - ts / T) ** 2 * calm : 0;
+  const rl = a.rl > 0 && d.rl ? Math.sin(Math.PI * clamp(1 - a.rl / d.rl, 0, 1)) ** .6 : 0, sw = S.t < P.swT ? clamp((P.swT - S.t) / MAN.swap, 0, 1) : 0;
+  const hip = V.hip, ads = V.ads, lerp = (i) => hip[i] + (ads[i] - hip[i]) * k, loose = (1 - .75 * k) * calm, run = VM.rn * (1 - k);
+  const bx = Math.sin(ph * 1.15) * .009 * sp * loose, by = -Math.abs(Math.sin(ph * 2.3)) * .01 * sp * loose + Math.sin(S.t * 1.6) * .0018 * (1 - k) * calm;
+  const R = V.root;
+  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045) * rc);
+  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose, .35 * run + .55 * rl, 'YXZ');
+  if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .07 : .12) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
+  R.visible = true;
+  /* drawn over the world: its own camera and field of view, the depth cleared */
+  const C = VM.cam, asp = cw / Math.max(1, ch); if (C.aspect !== asp) { C.aspect = asp; C.updateProjectionMatrix(); }
+  const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth(); renderer.render(VM.sc, C); renderer.autoClear = ac;
+  VM.on = true;
+}
+/* ---------- trenches cut into the ground, and the tunnels' mouths (FHOLE; cf-trincheiras-tuneis, NOT TESTED: docs/nao-testado/cf-trincheiras-tuneis.md) ----------
+   A trench is drawn as a hole: the ground over it is not drawn, its walls and floor are. The terrain is drawn first (renderOrder -10), then
+   three meshes before everything else: the lid of each hole, lift m over the ground the terrain mesh draws there (its own triangles: meshH),
+   marks where the hole shows (stencil 1, no colour, no depth); the lid again, only there, sets the depth as far as it goes, so the ground
+   already drawn there hides nothing any more; then the walls and the floor (lit, earth at the lip to dark at the floor, boards of the
+   revetment every seg m), with the depth as any other mesh, so that whatever stands in the trench (its soldiers) is drawn over them and the
+   ground in front of the hole still hides it. An end joined in line to another trench (trNet: f.tl) has no end wall, so a corridor is one
+   cut. A tunnel mouth this side may see (its own, or one it found; all of them for a spectator or an AI x AI match) is a small square shaft
+   (mouth: [width, length, depth]) with a frame of logs. Built again when the works or the mouths change, at most every `every` s while a
+   site is being dug. While the eye is under the ground (a soldier's eye in a trench) the lids are not drawn: from below no ground is drawn
+   anyway. bot: the floor's width over the lip's (the walls lean in) */
+const FHOLE = { on: 1, lift: .22, seg: 2, every: .4, wall: [0x6a593f, 0x3a3024], floor: 0x2a2219, board: .86, log: 0x4d3d2a, mouth: [1.6, 1.6, 2.4], bot: .82 };
+let gHole = null;
+/* the ground as the terrain mesh draws it (two triangles a cell, as THREE.PlaneGeometry splits it), not as hgt() blends it */
+function meshH(x, z) {
+  const T = S.T, N = T.N, gx = clamp((x - T.x0) / T.cx, 0, N - .001), gz = clamp((z - T.z0) / T.cz, 0, N - .001), i = gx | 0, j = gz | 0, u = gx - i, v = gz - j, k = j * (N + 1) + i, h = T.h;
+  const h00 = h[k], h10 = h[k + 1], h01 = h[k + N + 1], h11 = h[k + N + 2];
+  return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
+}
+function holeInit() {
+  const lidA = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide, fog: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc,
+    stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp });
+  const lidB = new THREE.ShaderMaterial({ vertexShader: 'void main() { vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); p.z = p.w * 0.99999; gl_Position = p; }',
+    fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }', colorWrite: false, depthWrite: true, depthTest: true, depthFunc: THREE.AlwaysDepth, side: THREE.DoubleSide,
+    stencilWrite: true, stencilRef: 1, stencilFunc: THREE.EqualStencilFunc, stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.KeepStencilOp });
+  const wall = new THREE.MeshLambertMaterial({ vertexColors: true });
+  const mk = (m, o) => { const me = new THREE.Mesh(new THREE.BufferGeometry(), m); me.renderOrder = o; me.frustumCulled = false; me.matrixAutoUpdate = false; scene.add(me); return me; };
+  gHole = { a: mk(lidA, -9), b: mk(lidB, -8), w: mk(wall, -7), sig: '', T: -1e9, n: -1, sc: scene };
+}
+/* which side's eye the scene is drawn for: its tunnels and the mouths it found (null: every mouth) */
+const holeSide = () => (S.spec || (S.watch && !S.my) ? null : S.my ? S.my.team : isSide(S.me) ? S.me : null);
+function holeBuild() {
+  const L = FHOLE, TR = FORT.trench, lid = [], pos = [], nor = [], col = [], C = new THREE.Color(), me = holeSide();
+  const quad = (p, n, c) => {   // four corners around, the normal it must face, a colour a corner
+    const ax = p[1][0] - p[0][0], ay = p[1][1] - p[0][1], az = p[1][2] - p[0][2], bx = p[2][0] - p[0][0], by = p[2][1] - p[0][1], bz = p[2][2] - p[0][2];
+    const flip = (ay * bz - az * by) * n[0] + (az * bx - ax * bz) * n[1] + (ax * by - ay * bx) * n[2] < 0, o = flip ? [0, 2, 1, 0, 3, 2] : [0, 1, 2, 0, 2, 3];
+    for (const i of o) { pos.push(p[i][0], p[i][1], p[i][2]); nor.push(n[0], n[1], n[2]); C.setHex(c[i] >>> 0); if (c[i] > 0xffffff) C.multiplyScalar(L.board); col.push(C.r, C.g, C.b); }
+  };
+  const lidQ = p => { for (const i of [0, 1, 2, 0, 2, 3]) lid.push(p[i][0], p[i][1], p[i][2]); };
+  /* a cut: centre x z, along (ux uz), half length hw, half width hd, depth d; ends[0|1]: draw that end wall */
+  const cut = (x, z, ux, uz, hw, hd, d, ends, boards) => {
+    const vx = -uz, vz = ux, n = Math.max(1, Math.ceil(2 * hw / L.seg)), T = [], B = [];
+    for (let i = 0; i <= n; i++) {
+      const s = -hw + 2 * hw * i / n, cx = x + ux * s, cz = z + uz * s, fy = hgt(cx, cz) - d;
+      T.push([[cx - vx * hd, meshH(cx - vx * hd, cz - vz * hd) + L.lift, cz - vz * hd], [cx + vx * hd, meshH(cx + vx * hd, cz + vz * hd) + L.lift, cz + vz * hd]]);
+      B.push([[cx - vx * hd * L.bot, fy, cz - vz * hd * L.bot], [cx + vx * hd * L.bot, fy, cz + vz * hd * L.bot]]);
+    }
+    const W = L.wall, dark = c => (boards ? c + 0x1000000 : c);
+    for (let i = 0; i < n; i++) {
+      const w0 = i & 1 && boards ? dark(W[0]) : W[0], w1 = i & 1 && boards ? dark(W[1]) : W[1];
+      lidQ([T[i][0], T[i][1], T[i + 1][1], T[i + 1][0]]);
+      quad([T[i][0], T[i + 1][0], B[i + 1][0], B[i][0]], [vx, 0, vz], [w0, w0, w1, w1]);
+      quad([T[i][1], T[i + 1][1], B[i + 1][1], B[i][1]], [-vx, 0, -vz], [w0, w0, w1, w1]);
+      quad([B[i][0], B[i][1], B[i + 1][1], B[i + 1][0]], [0, 1, 0], [L.floor, L.floor, L.floor, L.floor]);
+    }
+    if (ends[0]) quad([T[0][0], T[0][1], B[0][1], B[0][0]], [ux, 0, uz], [W[0], W[0], W[1], W[1]]);
+    if (ends[1]) quad([T[n][0], T[n][1], B[n][1], B[n][0]], [-ux, 0, -uz], [W[0], W[0], W[1], W[1]]);
+  };
+  const box = (x, y, z, sx, sy, sz, a, c) => {   // a log: a box turned by a, its faces out
+    const ca = Math.cos(a), sa = Math.sin(a), P = (i, j, k) => [x + (i * sx * ca - k * sz * sa) / 2, y + j * sy / 2, z + (i * sx * sa + k * sz * ca) / 2], cc = [c, c, c, c];
+    quad([P(-1, 1, -1), P(1, 1, -1), P(1, 1, 1), P(-1, 1, 1)], [0, 1, 0], cc);
+    for (const [i, k, nx, nz] of [[1, 0, ca, sa], [-1, 0, -ca, -sa], [0, 1, -sa, ca], [0, -1, sa, -ca]]) {
+      const q = i ? [P(i, 1, -1), P(i, 1, 1), P(i, -1, 1), P(i, -1, -1)] : [P(-1, 1, k), P(1, 1, k), P(1, -1, k), P(-1, -1, k)];
+      quad(q, [nx, 0, nz], cc);
+    }
+  };
+  if (S.forts && S.forts.length) {
+    if (typeof trNet === 'function') trNet();
+    for (const f of S.forts) {
+      if (f.k !== 1 || f.gone) continue;
+      const d = TR.depth * f.prog; if (d < .25) continue;
+      const ux = -Math.sin(f.a), uz = -Math.cos(f.a), tl = f.tl || [null, null];
+      cut(f.x, f.z, ux, uz, f.o.hw, f.o.hd, d, [!(tl[0] && tl[0].dot > .8), !(tl[1] && tl[1].dot > .8)], S.era === 'ww2');
+    }
+  }
+  if (S.tun) for (const tn of S.tun) {
+    if (tn.st) continue;
+    for (const w of ['a', 'b']) {
+      if (w === 'b' && tn.prog < 1) continue;
+      if (me !== null && !tunSeen(tn, me, w)) continue;
+      const p = tunEnd(tn, w), [mw, ml, md] = L.mouth; if (!p.x && !p.z) continue;
+      cut(p.x, p.z, 1, 0, ml / 2, mw / 2, w === 'a' ? Math.max(.4, md * Math.min(1, tn.prog * 4)) : md, [1, 1], 0);
+      const y = meshH(p.x, p.z) + .12;
+      box(p.x, y, p.z - mw / 2 - .18, ml + .7, .26, .3, 0, L.log); box(p.x, y, p.z + mw / 2 + .18, ml + .7, .26, .3, 0, L.log);
+      box(p.x - ml / 2 - .18, y + .2, p.z, .3, .26, mw + .2, 0, L.log); box(p.x + ml / 2 + .18, y + .2, p.z, .3, .26, mw + .2, 0, L.log);
+    }
+  }
+  const set = (me, attrs) => { const g = new THREE.BufferGeometry(); for (const k in attrs) g.setAttribute(k, new THREE.Float32BufferAttribute(attrs[k], 3)); me.geometry.dispose(); me.geometry = g; me.visible = attrs.position.length > 0; };
+  set(gHole.a, { position: lid }); gHole.b.geometry.dispose(); gHole.b.geometry = gHole.a.geometry; gHole.b.visible = gHole.a.visible;
+  set(gHole.w, { position: pos, normal: nor, color: col });
+}
+/* each frame, after the works (fortScene) */
+function holeScene() {
+  if (!FHOLE.on || !S || !S.T || typeof THREE === 'undefined') return;
+  if (!gHole || gHole.sc !== scene || gHole.a.parent !== scene) holeInit();
+  const me = holeSide();
+  let sig = me + '|';
+  for (const f of S.forts || []) if (f.k === 1 && !f.gone && f.prog * FORT.trench.depth >= .25) sig += f.id + ':' + Math.round(f.prog * 20) + (f.tl ? (f.tl[0] ? 1 : 0) + '' + (f.tl[1] ? 1 : 0) : '') + ',';
+  if (S.tun) for (const tn of S.tun) if (!tn.st) sig += 't' + tn.id + ':' + (tn.fd ? tn.fd.join('') : '') + ':' + Math.round(Math.min(1, tn.prog * 4) * 8) + (tn.prog >= 1 ? 'd' : '') + ',';
+  const now = performance.now() / 1000;
+  if (sig !== gHole.sig && (now - gHole.T > FHOLE.every || sig.length !== gHole.sig.length)) { gHole.sig = sig; gHole.T = now; holeBuild(); }
+  const cp = camera.position, under = cp.y < meshH(cp.x, cp.z) + FHOLE.lift + .05;
+  gHole.a.visible = gHole.b.visible = !under && gHole.w.visible;
+}
+fortScene = (g => () => { g(); holeScene(); })(fortScene);
+/* the general's map: the side's tunnels (a dashed line between the mouths, what is dug of it) and the enemy mouths it found */
+function gTun(g, V, P) {
+  if (!S || !S.tun || !S.tun.length) return;
+  const t = V.t, own = gCol(V, t);
+  g.save(); g.lineWidth = 2;
+  for (const tn of S.tun) {
+    if (tn.st) continue;
+    if (tn.team === t || V.all) {
+      const ax = P.X(tn.a.x), ay = P.Y(tn.a.z), bx = P.X(tn.b.x), by = P.Y(tn.b.z), c = gCol(V, tn.team);
+      g.strokeStyle = c; g.globalAlpha = .85; g.setLineDash([5, 4]); g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax + (bx - ax) * tn.prog, ay + (by - ay) * tn.prog); g.stroke();
+      if (tn.prog < 1) { g.globalAlpha = .3; g.beginPath(); g.moveTo(ax + (bx - ax) * tn.prog, ay + (by - ay) * tn.prog); g.lineTo(bx, by); g.stroke(); }
+      g.setLineDash([]); g.globalAlpha = 1; g.fillStyle = c;
+      g.fillRect(ax - 4, ay - 4, 8, 8); if (tn.prog >= 1) g.fillRect(bx - 4, by - 4, 8, 8);
+      if (tn.prog < 1) { g.font = gMono(10); g.fillText('túnel ' + Math.round(tn.prog * 100) + '%', ax + 6, ay - 6); }
+      else if (tn.n) { g.font = gMono(10); g.fillText(tn.n + ' no túnel', (ax + bx) / 2 + 6, (ay + by) / 2 - 6); }
+    } else for (const w of ['a', 'b']) {
+      if (!tunSeen(tn, t, w)) continue;
+      const p = tunEnd(tn, w), x = P.X(p.x), y = P.Y(p.z); if (!gOn(P, p.x, p.z, 10)) continue;
+      g.strokeStyle = gCol(V, tn.team); g.beginPath(); g.moveTo(x - 5, y - 5); g.lineTo(x + 5, y + 5); g.moveTo(x + 5, y - 5); g.lineTo(x - 5, y + 5); g.stroke();
+      g.font = gMono(10); g.fillStyle = gCol(V, tn.team); g.fillText('boca de túnel', x + 7, y - 6);
+    }
+  }
+  g.restore();
+}
+GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'eng') + 1), 0, { id: 'tun', nm: 'Túneis', on: 1, draw: gTun });
+/* the General's hand on a tunnel (O, the kind Túnel): a click near one of the side's tunnel mouths sends the selection (or those the general
+   picks) through it; elsewhere the first click is the way in and the second the way out (Shift: the general picks the way out) */
+gorTarget = (g => (px, py, shift) => {
+  if (GOR.mode !== 'fort' || GOR.fk !== 'tun') { GOR.tunA = null; return g(px, py, shift); }
+  const w = gorW(px, py), r1 = v => Math.round(v * 10) / 10, x = r1(w.x), z = r1(w.z), ids = gorIds();
+  const M = tunMouths(GV.t).find(o => o.own && o.tn.prog >= 1 && Math.hypot(o.x - x, o.z - z) * GV.sc < 14);
+  let c;
+  if (M) { c = { c: 'tun', k: 'use', id: M.tn.id }; if (ids.length) c.ids = ids; else if (GOR.on) c.n = GOR.on; GOR.tunA = null; }
+  else if (!GOR.tunA && !shift) { GOR.tunA = { x, z }; gorToast('Túnel: entrada marcada. Clique a saída (Shift+clique: o general escolhe a saída)'); return gorBar(); }
+  else { const A = GOR.tunA || { x, z }; c = { c: 'tun', k: 'dig', x: A.x, z: A.z }; if (GOR.tunA) { c.x2 = x; c.z2 = z; } if (ids.length) c.ids = ids; GOR.tunA = null; }
+  gorSend(c); GOR.mode = ''; gorBar();
+})(gorTarget);
+/* ===== end of the trenches cut into the ground and the tunnels' mouths ===== */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

@@ -40,6 +40,8 @@ module.exports = {
     { pid: "2IabhRwQkCt", title: "Bazooka", author: "Poly by Google", lic: "CC-BY 3.0" },
     { pid: "2qqg9SbrsZ", title: "RPG Launcher", author: "austincford", lic: "CC-BY 3.0" },
     { pid: "1aIZys4mhg", title: "Frag Grenade West", author: "Pichuliru", lic: "CC0 1.0" },
+    { pid: "i65hEldsw6", title: "Sniper Rifle", author: "Quaternius", lic: "CC0 1.0" },
+    { pid: "52kQzphmeF", title: "Pistol", author: "Quaternius", lic: "CC0 1.0" },
     { pid: "LW3jwpPfiN", title: "Sack Trench", author: "Quaternius", lic: "CC0 1.0" },
     { pid: "iHyRewQQcN", title: "Sack Trench Small", author: "Quaternius", lic: "CC0 1.0" },
     { pid: "3OEFd1AWfa", title: "Crate", author: "Quaternius", lic: "CC0 1.0" },
@@ -86,6 +88,9 @@ module.exports = {
     w_launcher: { src: '2IabhRwQkCt', pca: 1, yaw: 180, len: 1.0, grip: [.45, .3, .5], budget: 2500 },
     w_rpg: { src: '2qqg9SbrsZ', pca: 1, yaw: 180, len: .95, grip: [.45, .3, .5], budget: 2500 },
     w_grenade: { src: '1aIZys4mhg', len: .1, grip: [.5, .5, .5], budget: 1000 },
+    /* the first-person weapons the pack lacked (cf-arma-1p): a scoped rifle for the snipers, a pistol for the side arms */
+    w_sniper: { src: 'i65hEldsw6', pca: 1, yaw: 0, len: 1.2, grip: [.36, .3, .5], budget: 2500 },
+    w_pistol: { src: '52kQzphmeF', pca: 1, yaw: 0, len: .21, grip: [.3, .2, .5], budget: 2000 },
     /* the field */
     p_sandbags: { src: 'LW3jwpPfiN', pca: 1, len: 3 },
     p_nest: { src: 'iHyRewQQcN', pca: 1, len: 2.3 },

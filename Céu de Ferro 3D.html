@@ -6514,6 +6514,19 @@ function roadDist(T, x, z, m) {
   const a = f[k] + (f[k + 1] - f[k]) * u, b = f[k + R.nx] + (f[k + R.nx + 1] - f[k + R.nx]) * u;
   return Math.max(C, a + (b - a) * (gz - j));
 }
+/* on a road for a work: within D m of a main road's centre line, the old rule, and for a narrower road as far from its drawn edge as that
+   leaves from a main road's (cf-obras-sair: D was taken from any road's centre, so beside a track or a dirt road, 6 to 7 m wide, a work was
+   refused 5 m off its edge in the grass, and a supply base 19 m off: 'em cima da estrada' where no road showed). RNE: the drawn half-width
+   (the ribbon's shoulder) over RN.w */
+const RNE = 1.15;
+function roadEdge(T, x, z) {
+  if (!T.net || !T.rix) return routeDist(T, x, z) - RN.w[0] * RNE;
+  const C = RN.cell, l = T.rix.get(Math.floor((x - T.x0) / C) * 4096 + Math.floor((z - T.z0) / C));
+  let best = 1e9;
+  if (l) for (let i = 0; i < l.length; i += 5) { const d = segDist(l[i], l[i + 1], l[i + 2], l[i + 3], x, z) - RN.w[l[i + 4]] * RNE; if (d < best) best = d; }
+  return best < C / 2 ? best : roadDist(T, x, z) - RN.w[0] * RNE;
+}
+const onRoadW = (x, z, D) => roadEdge(S.T, x, z) < D - RN.w[0] * RNE;
 /* the roads of a terrain as edges { p polyline, c class }: the network's, or the two routes of map version 1 */
 const roadsOf = T => T.net ? T.net.e : T.routes.map(p => ({ p, c: 0 }));
 /* strokes the roads on a 2D map with the context's colour: alpha and line width by class (RN.draw), relative to a main road's */
@@ -9802,8 +9815,8 @@ function stepMan(m, dt) {
     const v = (run ? MAN.run : MAN.walk * STANCE[m.st].spd * (c.ads ? MAN.ads.spd : 1)) * (1 - Math.min(MAN.limp[1], m.wl * MAN.limp[0])) * Math.min(1, go) / go * dt * rubble(m.x, m.z);
     let nx = m.x + c.mx * v, nz = m.z + c.mz * v;
     for (const o of near(nx, nz, 1)) if (S.os[o.id] < 2 && pushOut(o, nx, nz, MAN.r * MAN.sc)) { nx += PUSH.x; nz += PUSH.z; }   // a wall or a trunk: it slides along it
-    const ny = hgt(nx, nz);
-    if (!(ny <= S.T.WL + .2 || (ny - hgt(m.x, m.z)) / (Math.hypot(nx - m.x, nz - m.z) || 1) > 1.1 || nx < 0 || nx > S.W || Math.abs(nz) > S.HW)) { m.x = nx; m.y = manY(nx, nz); m.z = nz; m.step += Math.hypot(nx - x0, nz - z0); m.moveT = S.t; }
+    const ny = hgt(nx, nz), h0 = hgt(m.x, m.z), wet = ny <= S.T.WL + .2 && !(h0 <= S.T.WL + .2 && ny >= h0 - .01);   // one set down in the water (out of a hull afloat, thrown from one) wades out: a step no deeper (cf-obras-sair)
+    if (!(wet || (ny - h0) / (Math.hypot(nx - m.x, nz - m.z) || 1) > 1.1 || nx < 0 || nx > S.W || Math.abs(nz) > S.HW)) { m.x = nx; m.y = manY(nx, nz); m.z = nz; m.step += Math.hypot(nx - x0, nz - z0); m.moveT = S.t; }
   }
   m.run = run; m.v = { x: (m.x - x0) / dt, y: (m.y - y0) / dt, z: (m.z - z0) / dt };
   manArms(m, dt);
@@ -10687,7 +10700,7 @@ function siteWhy(t, x, z, a) {
   for (const [i, j] of SITE5) { const lx = i * w / 2, lz = j * d / 2, h = hgt(x + lx * c + lz * s, z - lx * s + lz * c); lo = Math.min(lo, h); hi = Math.max(hi, h); }
   if (lo < S.T.WL + .6) return 'water';
   if (hi - lo > BLD.slope * R * 2) return 'steep';
-  if (routeDist(S.T, x, z) < BLD.road + R) return 'road';
+  if (onRoadW(x, z, BLD.road + R)) return 'road';
   if (S.sup.some(b => !b.dead && hdist(b, at) < BLD.apart) || S.base.some(b => hdist(b, at) < BLD.main)) return 'base';
   for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
@@ -16434,7 +16447,7 @@ const FEND = [-1, -.5, 0, .5, 1];
 function fortWhy(k, t, x, z, a, pre) {
   const F = FORT.K[k], L = F.size[0] / 2, w = F.size[1] / 2, ux = -Math.sin(a), uz = -Math.cos(a), at = { x, z }; let lo = 1e9, hi = -1e9, road = false, n = 0;
   if (!(x > 30 && x < S.W - 30 && Math.abs(z) < S.HW - 30)) return 'map';
-  for (const e of FEND) { const px = x + ux * L * e, pz = z + uz * L * e, h = hgt(px, pz); lo = Math.min(lo, h); hi = Math.max(hi, h); if (routeDist(S.T, px, pz) < F.road) road = true; }
+  for (const e of FEND) { const px = x + ux * L * e, pz = z + uz * L * e, h = hgt(px, pz); lo = Math.min(lo, h); hi = Math.max(hi, h); if (onRoadW(px, pz, F.road)) road = true; }
   if (lo < S.T.WL + .6) return 'water';
   if (hi - lo > FORT.slope * L * 2) return 'steep';
   if (road) return 'road';
@@ -21045,7 +21058,7 @@ function ecoFlat(x, z, r) {
   let lo = 1e9, hi = -1e9;
   for (const [i, j] of SITE5) { const h = hgt(x + i * r, z + j * r); lo = Math.min(lo, h); hi = Math.max(hi, h); }
   if (lo < S.T.WL + .6 || hi - lo > BLD.slope * r * 2) return false;
-  if (routeDist(S.T, x, z) <= BLD.road + r) return false;
+  if (onRoadW(x, z, BLD.road + r + 1e-9)) return false;
   for (const o of near(x, z, r + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < r + BLD.pad) return false;
   return true;
 }
@@ -21111,7 +21124,7 @@ function ecoWhy(t, k, x, z, a) {
   if (lo < S.T.WL + .6) return 'water';
   if (hi - lo > BLD.slope * R * 2) return 'steep';
   const rd = routeDist(S.T, x, z);
-  if (rd < BLD.road + R) return 'road';
+  if (onRoadW(x, z, BLD.road + R)) return 'road';
   for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
   const own = ecoLive(t), lot = ecoLot(t, k, x, z) >= 0;
   if (own.some(e => hdist(e, at) < (lot && e.lot >= 0 ? ECO.lot.apart : ECO.apart))) return 'near';
@@ -24847,6 +24860,9 @@ function twrKey() {
   if (f) twrUp(P, f);
 }
 trnKeys = (g => function () { g(); twrKey(); })(trnKeys);
+/* an AI soldier takes a post's gun, and keeps it, only when he is its crew or while where he is going lies at the post; before,
+   any soldier of the side who stood in its band took it (a builder, a sapper walking by) and was held at it for the match (cf-obras-sair) */
+const postGoal = (o, f) => !o.ai || o === S.my || !!o.pid || (o.sq && o.sq.wpost === f) || Math.hypot(o.ai.gx - f.x, o.ai.gz - f.z) <= POSTS.walk[0];   // its own crew keeps it as before
 function postMan(f) {
   const g = f.gm;
   if (g && (g.dead || g.in || g.fc !== f || g.team !== f.team)) { if (g.pa) postFree(g); f.gm = null; }
@@ -24856,7 +24872,7 @@ function postMan(f) {
   for (const o of S.men) {
     if (o.dead || o.in || o.fc !== f || o.team !== f.team) continue;
     const d = hdist(o, f);
-    if (pl(o)) { if (d < bp) { bp = d; P = o; } } else if (!o.def.mort && !o.def.drone && d < bd) { bd = d; m = o; }
+    if (pl(o)) { if (d < bp) { bp = d; P = o; } } else if (!o.def.mort && !o.def.drone && postGoal(o, f) && d < bd) { bd = d; m = o; }
   }
   if (f.gm && !P) return;
   m = P || m;
@@ -24879,6 +24895,7 @@ manThink = (g => m => {
   g(m);
   const f = m.pa && m.fc, A = m.ai;
   if (!f || !A || f.gm !== m) return;
+  if (!postGoal(m, f)) { postFree(m); return; }   // his squad sends him elsewhere: he lets the gun go (cf-obras-sair)
   const s = postSlots(f, 1)[0], p = clearOf(s.x, s.z, 1, {});
   A.gx = p.x; A.gz = p.z; A.run = false; if (A.st === 2) A.st = 1;
 })(manThink);
@@ -35369,6 +35386,7 @@ function enpLayout(t, s) {
   ent.sort((u, v) => u.rel - v.rel);
   if (ent.length && ent[0].rel < 1.75) { const p = at(ent[0].b, R - 7); out.push({ k: 4, x: p.x, z: p.z, a: ent[0].b, b: ent[0].b, pri: ent[0].rel - .2, ent: 1 }); }   // the most exposed road in
   { const p = at(ae, R - 11); out.push({ k: 1, x: p.x, z: p.z, a: ae, b: ae, pri: 1.2 }); }   // the trench behind the face
+  for (const p of out) p.ring = { x: s.x, z: s.z, R, rb: wrap(ae + Math.PI), key: Math.round(s.x) + ',' + Math.round(s.z) };   // the ring each piece belongs to (enpWay: the way out of it is its open rear)
   return out.sort((u, v) => u.pri - v.pri);
 }
 /* the work that stands for piece p (begun or up): the one it started, else one of its kind on its line, ENP.near [across, along the bearing] */
@@ -35381,9 +35399,63 @@ function enpAt(t, p) {
 const enpMissing = (t, plan) => plan.filter(p => !p.skip && !enpAt(t, p)).length;
 /* a piece begun: where it was laid out, else a little out or in */
 function enpStart(t, p) {
-  for (const dr of ENP.tries) { const f = fortStart(p.k, t, p.x + Math.cos(p.b) * dr, p.z - Math.sin(p.b) * dr, p.a); if (f) return f; }
+  for (const dr of ENP.tries) { const f = fortStart(p.k, t, p.x + Math.cos(p.b) * dr, p.z - Math.sin(p.b) * dr, p.a); if (f) { if (p.ring) f.ring = p.ring; return f; } }
   return null;
 }
+/* the way out of a ring and round it (cf-obras-sair). The ring is closed but for its open rear (ENP.gap) and the roads through it, and a
+   body goes round one obstacle at a time (wayTo's circle, jammed's side-step): one inside it whose goal lies past the walled side stood
+   behind the face wall for good, and one outside whose goal lies in it went from wall to wall. While the straight line to the goal
+   crosses a piece of a ring, the body heads, from inside, for the open rear (RINGW.out m past the ring), and from outside round the ring
+   (RINGW.step rad at a time, RINGW.out m off it) the short way to the rear when its goal is in the ring, else to the goal's side. The
+   rings: S.ringW, kept as long as no work comes or goes (S.fn) */
+const RINGW = { out: 5, step: .55, near: 9 };
+function ringsW() {
+  if (S.ringW && S.ringW.n === S.fn) return S.ringW;
+  const M = new Map();
+  for (const f of S.forts) if (f.ring && !f.gone && f.k !== 1) { let r = M.get(f.ring.key); if (!r) M.set(f.ring.key, (r = Object.assign({ w: [] }, f.ring))); r.rb = f.ring.rb; r.w.push(f.o); }
+  const l = [...M.values()]; l.n = S.fn; return (S.ringW = l);
+}
+/* a segment against a work's box, d m wider */
+function segBox(o, ax, az, bx, bz, d) {
+  const L = (x, z) => [(x - o.x) * o.c - (z - o.z) * o.s, (x - o.x) * o.s + (z - o.z) * o.c], [px, pz] = L(ax, az), [qx, qz] = L(bx, bz), hw = o.hw + d, hd = o.hd + d;
+  let t0 = 0, t1 = 1;
+  for (const [p, q, h] of [[px, qx, hw], [pz, qz, hd]]) {
+    const v = q - p;
+    if (Math.abs(v) < 1e-9) { if (Math.abs(p) > h) return false; continue; }
+    let a = (-h - p) / v, b = (h - p) / v; if (a > b) [a, b] = [b, a];
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 > t1) return false;
+  }
+  return true;
+}
+function enpWay(x, z, gx, gz, r) {
+  if (!S.forts || !S.fn) return null;
+  const l = ringsW(); if (!l.length) return null;
+  for (const R of l) {
+    const dc = Math.hypot(x - R.x, z - R.z), dg = Math.hypot(gx - R.x, gz - R.z);
+    if (dc > R.R + RINGW.near + 30 && dg > R.R + RINGW.near + 30) { const vx = gx - x, vz = gz - z, L2 = vx * vx + vz * vz || 1, t = clamp(((R.x - x) * vx + (R.z - z) * vz) / L2, 0, 1); if (Math.hypot(x + vx * t - R.x, z + vz * t - R.z) > R.R + RINGW.near) continue; }
+    if (!R.w.some(o => S.os[o.id] < 2 && segBox(o, x, z, gx, gz, r))) continue;
+    const at = (b, d) => ({ x: R.x + Math.cos(b) * d, z: R.z - Math.sin(b) * d });
+    if (dc < R.R) return at(R.rb, R.R + RINGW.out);   // inside: out by the open rear
+    const bc = Math.atan2(-(z - R.z), x - R.x), to = dg < R.R ? R.rb : Math.atan2(-(gz - R.z), gx - R.x), dd = wrap(to - bc);
+    return at(bc + Math.sign(dd || 1) * Math.min(Math.abs(dd) || RINGW.step, RINGW.step), R.R + RINGW.out);   // outside: round it
+  }
+  return null;
+}
+wayTo = (g => (M, x, z, gx, gz, r, heavy) => { const w = enpWay(x, z, gx, gz, heavy ? Math.max(r, 2) : Math.max(r, .4)); return w ? g(M, x, z, w.x, w.z, r, heavy) : g(M, x, z, gx, gz, r, heavy); })(wayTo);
+/* no work and no supply base is begun on a vehicle standing there (cf-obras-sair: a truck or a car under a wall, a trench or a base was
+   wedged between its two bump circles, pushed back and forth): 'unit' */
+const UNITW = { pad: .5 };
+function unitOn(x, z, a, hl, hw) {
+  const ux = -Math.sin(a), uz = -Math.cos(a);
+  for (const u of S.units) {
+    if (u.dead || !u.def || !u.def.env || (u.y !== undefined && u.y - hgt(u.x, u.z) > 3)) continue;
+    const e = u.def.env, rr = Math.hypot(e[3], e[5]) * .8 + UNITW.pad, dx = u.x - x, dz = u.z - z, al = dx * ux + dz * uz, ac = dx * -uz - dz * -ux;
+    if (Math.hypot(Math.max(0, Math.abs(al) - hl), Math.max(0, Math.abs(ac) - hw)) < rr) return true;
+  }
+  return false;
+}
+fortWhy = (g => (k, t, x, z, a, pre) => { const w = g(k, t, x, z, a, pre), F = FORT.K[k]; if (w || pre || !F || F.span || !F.size) return w; return unitOn(x, z, a, F.size[0] / 2, F.size[1] / 2) ? 'unit' : ''; })(fortWhy);
+siteWhy = (g => (t, x, z, a) => { const w = g(t, x, z, a); if (w && w !== 'cost' && w !== 'cap') return w; return unitOn(x, z, -a - Math.PI / 2, Math.hypot(BLD.size[0], BLD.size[1]) / 2, Math.hypot(BLD.size[0], BLD.size[1]) / 2) ? 'unit' : w; })(siteWhy);
 /* ===== the orders: perim and fob ===== */
 const enpOf = C => C.enp || (C.enp = { T: 0, fobT: 0, done: {}, fobs: [], fl: [] });
 function enpSay(t, s, at, key) {
@@ -37654,7 +37726,7 @@ function fortScene() {
 let FWHY = null;
 function hudFort(P, u, ink, acc, disp) {
   const B = S.fm, k = B ? B.k : S.bm ? 0 : -1, dim = 'rgba(158,170,162,.95)', names = ['BASE', 'TRINCHEIRA', 'SACOS DE AREIA'];
-  FWHY = FWHY || Object.assign({}, BWHY, { fort: 'Em cima de outra trincheira ou barricada', tcap: 'Seu lado já cavou o máximo de trincheiras', bcap: 'Seu lado já ergueu o máximo de barricadas',
+  FWHY = FWHY || Object.assign({}, BWHY, { road: 'Em cima da estrada', fort: 'Em cima de outra trincheira ou barricada', tcap: 'Seu lado já cavou o máximo de trincheiras', bcap: 'Seu lado já ergueu o máximo de barricadas',
     server: 'O servidor desta sala ainda não conhece trincheiras e sacos de areia: precisa ser reiniciado', wait: 'Aguardando o anfitrião' });
   if (k >= 0) {
     let x = cw / 2 - 150 * u;
@@ -38907,7 +38979,7 @@ function glassFx(P, D, st) {
 const AAC = '#ff5cf4', isAA = (P, g) => !!P.q && g.kind === 'aa' && !g.dead && g.team !== P.team;
 addEventListener('keydown', e => { if (e.code === 'Digit5' && !e.repeat && playMode === 'play' && !sw.on && !GV.on && S && S.my && !S.my.kind && !S.my.man && S.my.def.flares && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) { AF.on = !AF.on; S.banner = { text: 'Flares automáticos ' + (AF.on ? 'ligados' : 'desligados'), sub: 'Tecla 5 liga e desliga', life: 2 }; } });
 addEventListener('keydown', e => { if (e.code === 'KeyI' && !e.repeat && !GV.on && S && S.my && S.my.kind && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.fixPri = S.fixPri ? 0 : 1; });
-const BWHY = { map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Em cima da estrada', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
+const BWHY = { unit: 'Há um veículo aí', map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Perto demais da estrada: a base fica a uns 7 m da beira', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
   cap: 'Seu lado já tem o máximo de bases (cresce com os pontos tomados e a economia)', cost: 'Seu lado não tem a energia e o metal desta obra', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
 /* ---------- missiles: what the player is shown ----------
    Top: the warning gear (S.rwr: a radar tracking, a radar missile launched or active, by name and clock; S.warn: a missile the vehicle

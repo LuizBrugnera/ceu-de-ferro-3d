@@ -42,7 +42,18 @@ Ruído determinístico (`hash2`), sem `Math.random` nas funções novas.
 
 ## A×B curto (linha de base)
 
-Seis sementes (ww2 e modern, 1–3), partidas de 8 min, `HON.on` 0 × 1, com `nice`. Os números estão no PR. Se a IA ficou mais burra num ponto, o ajuste certo é na percepção (quem chama `notice`, o alcance de `told`), não voltar a ler a verdade.
+Três sementes por época (ww2 e modern, 1–3), partidas de 8 min de relógio, `HON.on` 0 × 1, com `nice` (12 partidas, nenhum erro, nenhum NaN). Em 8 min ninguém vence. Os números são os tickets perdidos por lado e os pontos de cada lado no fim:
+
+| Época, semente | Verdade (0): perdidos lado 0 / 1, pontos | Honestidade (1): perdidos lado 0 / 1, pontos |
+| --- | --- | --- |
+| ww2 1 | 101 / 107, 4–3 | 50 / 123, 4–3 |
+| ww2 2 | 87 / 153, 4–3 | 112 / 113, 4–3 |
+| ww2 3 | 66 / 128, 4–3 | 83 / 129, 4–3 |
+| modern 1 | 114 / 105, 5–4 | 114 / 145, 5–4 |
+| modern 2 | 161 / 183, 5–4 | 140 / 122, 5–4 |
+| modern 3 | 135 / 132, 4–5 | 161 / 167, 5–4 |
+
+A intensidade do combate (soma dos perdidos) fica igual dentro do ruído: na ww2, média de 214 com a verdade e 203 com a honestidade; na modern, 277 e 283. Os pontos são os mesmos, menos na modern 3. Com seis pares e partidas curtas, isso só mostra que a IA não desabou. Não prova que ela não piorou um pouco: falta o torneio do P6 com partidas inteiras. Se a IA ficou mais burra num ponto, o ajuste certo é na percepção (quem chama `notice`, o alcance de `told`), não voltar a ler a verdade.
 
 ## Riscos que vejo
 

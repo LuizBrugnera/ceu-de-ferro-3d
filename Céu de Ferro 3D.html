@@ -31084,6 +31084,333 @@ genCard = (f => (t, id) => {
   if (n) c.see.splice(2, 0, n + (n === 1 ? ' homem atordoado' : ' homens atordoados') + ' por explosão');
   c.stun = n; return c;
 })(genCard);
+/* ---------- CEREBRO: contrato (P0) ----------
+   The contract between the layers of the soldiers' mind, copied as it stands from the research (cf-cerebro-pesquisa, 2.5) because the P0
+   PR (cf-lideres) is not in main yet. When P0 lands ONE copy stays, P0's, and its fala keeps calling brainSay (P5, the section below).
+   The shapes the packs fill (P0 links them in addSquad and addMan; until then the speech makes the board on first use, flBB):
+   q.bb = { ord: null, cont: Map id→{x,z,c,g,t,de}, est: {by man: ferido, municao, moral}, plano: null {proc, passo, tarefas}, conf: 0 (−2..2), fl: null (linha de frente) }
+   q.lid = m;  q.eq = [{ id:'A', men:[...], tar:null, papel:'seguir' }, { id:'B', ... }]
+   m.rf = { k: null, ate: 0 } (reflexo ativo);  m.mo = { s: 0, m: 1, est: 'firme' } (supressão, moral, estado);  m.tar = null (tarefa da equipe) */
+const BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3 };   // alcance da voz (m), do sinal de mão (m), atraso de sucessão (s)
+// ORDEM: desce (general → pelotão → líder → equipe). Uma por destinatário; a nova substitui, salvo sequência.
+// k: 'mover'|'manter'|'assalto'|'base'|'lance'|'vigiar'|'recuar'|'limpar'|'evacuar'|'seguir'|'cavar'; por: propósito (o "para quê" da intenção)
+const ord = (k, de, a = {}) => ({ id: (S.ordN = (S.ordN || 0) + 1), k, de, t: S.t, por: a.por, area: a.area /*{x,z,r}*/, alvo: a.alvo /*{x,z}*/,
+  setor: a.setor /*{a0,a1} rad*/, apos: a.apos /*id de tarefa que precisa terminar*/, sinal: a.sinal /*'fogo'|'fumaca'|t*/,
+  roe: a.roe, lat: a.lat, tec: a.tec /*técnica de movimento*/ });
+// RELATO: sobe (soldado → líder → pelotão/general). Chega pela voz (≤ BRAIN.voz), sinal (com visada) ou rádio (CN existente).
+// k: 'contato'|'feito'|'nao-da'|'ferido'|'baixa'|'municao'|'moral'|'prisioneiro'|'pos' (cheguei)
+const rel = (k, de, a = {}) => ({ k, de, t: S.t, x: a.x, z: a.z, c: a.c /*classe*/, n: a.n, g: a.g /*degrau*/, conf: a.conf });
+// FALA: cada ordem, relato e reflexo pode falar. A fala é balão + som + canal de informação: quem a ouve (distância, barulho) recebe o
+// relato/aviso: "Granada!" faz o colega reagir sem ter visto a granada.
+const fala = (m, k, dados) => brainSay(m, k, dados);
+/* ---------- CEREBRO: falas (P5) ----------
+   What the soldiers say, out of the same data as what they decide (research 2.1, rule 6: a line never lies and always explains), so a line
+   never comes without a decision. A decision that may speak records a cb event first (flCb: the man, its kind, the second); brainSay(m, k, d)
+   speaks only for a man with a decision of his own within FALA.orig s, and records the line as a cb event too ('fala'), so that each line
+   can be matched to its decision (tests/brain-falas.js).
+   FALAS: the lines by kind, in pt-BR, a few ways of saying each: c the old call code (SAYC) a guest online sees in its place (none: 'brain',
+   nothing), p the priority (3 a reflex cuts in, 2 an order, 1 a report, 0 talk), cat the cb kind of the decision, ask: a mate answers.
+   The fire command is the manual's: alert, direction (clock hour from the caller's facing), distance (in words), description (what the
+   caller makes of it, at the rung he reached, and where: a window, a trench, the woods, behind a house or a wall), command (the leader's).
+   Limits (FALA): one line every gap s by squad (a reflex and an answer cut in), min lines a minute by squad (a bucket of cap; a reflex
+   takes from it too, and only a reflex speaks while it is empty), no line the
+   squad said within rep s, SAY.gap s between one man's lines; a squad in contact that has been quiet quiet s talks (the leader asks
+   "Estado?" or "Alguém vê ele?" and a mate who heard answers, resp s later: a two-line exchange, F.E.A.R.'s). An order towards where mates
+   died (death: within [0] m, in the last [1] s) gets "Nem pensar!".
+   The balloon (SAY's, drawn by the HUD) shows the whole line, within r m of the camera's man, for as long as it takes to read (cps s a
+   letter, life s at most); online the host's soldier carries the old call code with the line's slot (code + 32 * (hour + 13 * slot)): the
+   host shows the line, a guest the call. som: the line spoken aloud by the browser within somR m of the player (off by default).
+   The voice is a channel (HEAR.voz): a call is heard within r m in the quiet, less under fire (each man or vehicle that fired within din m
+   in the last 1.5 s cuts it by k, min m at least), a wall takes HEAR.wall of it. A mate who hears it gets what it says: "Granada!" gets him
+   away from where the grenade was called (after his reaction time, react s) if he is within nade m of it, a contact called makes it known
+   to him as one told (AIM.told), and looked at, and the squad leader who hears a report writes it on his board (q.bb). An enemy who hears
+   it turns to the voice (ln), as to any sound */
+HEAR.voz = { r: BRAIN.voz, min: 15, din: 60, k: .35 };
+const FALA = { gap: 1.5, min: 5, cap: 2, rep: 10, orig: 1, tick: 1, quiet: 22, ask: 30, call: 30, moved: 40, again: 15, resp: [.7, 1.6], ack: .35, death: [30, 120],
+  nade: 12, see: [3, 15, 1.2], react: [.2, .6], r: 300, cps: .07, life: 6, som: 0, somR: 60, enemy: 1, ana: .6,
+  tx: [], txN: 0, id: 0, log: [], logN: 400, H: [], st: { ditas: 0, semOrigem: 0, cortadas: 0, repetidas: 0, ouvidas: 0, nade: 0, contato: 0, perguntas: 0, respostas: 0 } };
+/* the words: numbers (a distance), clock hours */
+const FLN = { u: ['zero', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove', 'dez', 'onze', 'doze', 'treze', 'catorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'],
+  d: ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'],
+  c: ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos', 'seiscentos', 'setecentos', 'oitocentos', 'novecentos'],
+  h: ['', 'uma hora', 'duas horas', 'três horas', 'quatro horas', 'cinco horas', 'seis horas', 'sete horas', 'oito horas', 'nove horas', 'dez horas', 'onze horas', 'doze horas'] };
+function flNum(n) {
+  n = Math.max(0, Math.round(n));
+  if (n < 20) return FLN.u[n];
+  if (n < 100) return FLN.d[(n / 10) | 0] + (n % 10 ? ' e ' + FLN.u[n % 10] : '');
+  if (n === 100) return 'cem';
+  if (n < 1000) return FLN.c[(n / 100) | 0] + (n % 100 ? ' e ' + flNum(n % 100) : '');
+  const k = (n / 1000) | 0, r = n % 1000;
+  return (k > 1 ? flNum(k) + ' mil' : 'mil') + (r ? (r < 100 || r % 100 === 0 ? ' e ' : ' ') + flNum(r) : '');
+}
+const flDist = d => flNum(d < 100 ? Math.max(10, Math.round(d / 10) * 10) : d < 1000 ? Math.round(d / 50) * 50 : Math.round(d / 100) * 100);
+const flUp = s => (s ? s[0].toUpperCase() + s.slice(1) : s);
+const flHora = h => flUp(FLN.h[h] || '');   // "Duas horas"
+const flAs = h => (!h ? '' : h === 1 ? 'à uma hora' : 'às ' + FLN.h[h]);   // "às duas horas"
+/* what a caller makes of a contact: the class at the rung he has it (FLC), soldiers counted among those he knows near it, and where it is */
+const FLC = { snp: 'atirador', at: 'anticarro', mg: 'metralhadora', man: 'soldado', tank: 'blindado', lav: 'blindado leve', truck: 'caminhão', car: 'viatura', art: 'canhão', aa: 'antiaérea', aag: 'antiaérea',
+  rad: 'radar', heli: 'helicóptero', plane: 'avião', '?': 'movimento' };
+const FLCV = {};
+function flWhere(t) {
+  if (!t || !t.man) return '';
+  if (t.cbin) return 'na janela';
+  if (t.fc) return 'na trincheira';
+  if (kindAt(t.x, t.z) === 1) return 'na mata';
+  for (const o of near(t.x, t.z, 8)) if (o.B && S.os[o.id] < 2) return 'atrás da casa';
+  coverAt(t.x, t.z, FLCV); return FLCV.p > 0 ? 'atrás do muro' : '';
+}
+function flWhat(m, t, g) {
+  if (g < 2) return 'movimento';
+  const c = belCls(t); let w = FLC[c] || 'inimigo';
+  if (c === 'man' && m.pm) { let n = 0; for (const [o, e] of m.pm) if (e.kn && !o.dead && o.man && o.team === t.team && Math.abs(o.x - t.x) < 25 && Math.abs(o.z - t.z) < 25) n++; w = n > 2 ? 'grupo de infantaria' : n === 2 ? 'dois soldados' : 'soldado'; }
+  const p = flWhere(t); return p ? w + ' ' + p : w;
+}
+/* the data of a contact as m has it (his own meter e: where he puts it, at what rung), for the lines that call it */
+function flCont(m, t, e) {
+  const g = S.t - e.kt < e.rt ? 1 : e.ic >= 1 ? 3 : e.rc >= 1 ? 2 : 1, x = g < 2 ? t.x + e.ex : t.x, z = g < 2 ? t.z + e.ez : t.z, h = sayClock(m, x, z);
+  return { t, x, z, h, g, c: g >= 2 ? belCls(t) : '?', H: flHora(h), A: flAs(h), D: flDist(Math.hypot(x - m.x, z - m.z)), W: flWhat(m, t, g), P: g >= 2 ? flUp(flWhere(t)) : '' };
+}
+const flTiro = (a, d) => (d.W ? a + ' ' + d.H + ', ' + d.D + ', ' + d.W + '!' : a);
+const FALAS = {
+  granada: { c: 'nade', p: 3, cat: 'reflexo', v: [() => 'Granada!', () => 'Granada! Sai daí!', () => 'Granada, abaixa!'] },
+  'ao-chao': { c: 'down', p: 3, cat: 'reflexo', v: [() => 'Ao chão!', () => 'Abaixa, abaixa!', () => 'Todo mundo no chão!'] },
+  medico: { c: 'med', p: 3, cat: 'reflexo', v: [() => 'Médico!', () => 'Fui atingido! Médico!', () => 'Tô ferido! Médico!'] },
+  drone: { c: 'drone', p: 3, cat: 'reflexo', v: [() => 'Drone!', () => 'Drone em cima!', () => 'Drone! Se esconde!'] },
+  rendo: { c: 'sur', p: 3, cat: 'reflexo', v: [() => 'Não atira! Eu me rendo!', () => 'Eu me rendo!', () => 'Não atira!'] },
+  'lanca-granada': { c: 'frag', p: 2, cat: 'ordem', v: [() => 'Lá vai granada!', () => 'Granada saindo!', () => 'Granada! Cobre!'] },
+  fumaca: { c: 'smk', p: 2, cat: 'ordem', v: [() => 'Fumaça!', () => 'Soltando fumaça!', () => 'Fumaça saindo!'] },
+  maos: { c: 'hands', p: 2, cat: 'ordem', v: [() => 'Mãos ao alto!', () => 'Larga a arma!'] },
+  tiro: { c: 'con', p: 2, cat: 'ordem', v: [d => flTiro('Contato!', d) + ' Fogo!', d => flTiro('Atenção!', d) + ' Fogo à vontade!', d => flTiro('Esquadra!', d) + ' Abrir fogo!'] },
+  blindado: { c: 'armor', p: 2, cat: 'ordem', v: [d => (d.A ? 'Blindado ' + d.A + '!' : 'Blindado!'), () => 'Tanque! Abriga!', d => (d.A ? 'Tanque ' + d.A + '!' : 'Blindado! Fumaça e sai da vista!')] },
+  avancar: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Avança!', () => 'Vamos, pra frente!', () => 'Avançar!'] },
+  mover: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Vamos andando!', () => 'Em frente, comigo!', () => 'Movendo!'] },
+  assalto: { c: 'adv', p: 2, cat: 'ordem', ask: 1, v: [() => 'Assalto! Vai, vai!', () => 'Pra cima deles!', () => 'Assaltar!'] },
+  recuar: { c: 'back', p: 2, cat: 'ordem', v: [() => 'Recuar!', () => 'Pra trás, recuar!', () => 'Rompe o contato! Pra trás!'] },
+  manter: { c: 0, p: 2, cat: 'ordem', v: [() => 'Segura aqui!', () => 'Ninguém sai daqui!', () => 'Mantém a posição!'] },
+  base: { c: 'cover', p: 2, cat: 'ordem', v: [() => 'Base de fogo aqui!', () => 'Fogo de cobertura!', () => 'Prende eles no fogo!'] },
+  cobrindo: { c: 'cover', p: 2, cat: 'ordem', v: [() => 'Cobrindo!', () => 'Te cubro!', () => 'Fogo de cobertura!'] },
+  lance: { c: 'bound', p: 2, cat: 'ordem', ask: 1, v: [() => 'Por lances!', () => 'Lances! Um cobre, outro anda!', () => 'Por lances, vai!'] },
+  vigiar: { c: 0, p: 2, cat: 'ordem', v: [() => 'Fica de olho!', () => 'Vigia o setor!', () => 'Olho aberto!'] },
+  seguir: { c: 0, p: 2, cat: 'ordem', v: [() => 'Comigo!', () => 'Me segue!', () => 'Atrás de mim!'] },
+  cavar: { c: 0, p: 2, cat: 'ordem', v: [() => 'Cava aqui!', () => 'Abre trincheira!', () => 'Pá na mão, cava!'] },
+  evacuar: { c: 'fetch', p: 2, cat: 'ordem', v: [() => 'Tira ele daqui!', () => 'Evacua o ferido!', () => 'Leva ele pra trás!'] },
+  limpar: { c: 'bld', p: 2, cat: 'ordem', ask: 1, v: [() => 'Limpa o prédio!', () => 'Entra e limpa!', () => 'Cômodo por cômodo!'] },
+  'fogo-longe': { c: 'far', p: 2, cat: 'ordem', v: [() => 'Fogo de longe!', () => 'Atirando de longe, abriga!'] },
+  artilharia: { c: 'arty', p: 2, cat: 'ordem', v: [() => 'Artilharia!', () => 'Chegando! Abriga!', () => 'Artilharia! Se espalha!'] },
+  aeronave: { c: 'air', p: 2, cat: 'ordem', v: [() => 'Aeronave!', () => 'Avião! Se esconde!'] },
+  mina: { c: 'mine', p: 2, cat: 'ordem', v: [() => 'Mina!', () => 'Campo minado! Para!'] },
+  atirador: { c: 'snp', p: 2, cat: 'ordem', v: [() => 'Atirador!', () => 'Sniper! Abaixa!'] },
+  emboscada: { c: 'amb', p: 2, cat: 'ordem', v: [() => 'Emboscada!', () => 'Emboscada! Reage!'] },
+  'cessar-fogo': { c: 'ff', p: 2, cat: 'ordem', v: [() => 'Cessar fogo, são amigos!', () => 'Cessar fogo! Amigos!'] },
+  'predio-cai': { c: 'bld', p: 2, cat: 'ordem', v: [() => 'O prédio vai cair, saiam!', () => 'Sai do prédio, vai cair!'] },
+  perimetro: { c: 'per', p: 2, cat: 'ordem', v: [() => 'Perímetro!', () => 'Faz o perímetro!'] },
+  fixar: { c: 'fix', p: 2, cat: 'ordem', v: [() => 'Fixar e flanquear!', () => 'Segura eles aí que a gente flanqueia!'] },
+  assumo: { c: 0, p: 2, cat: 'ordem', v: [() => 'O sargento caiu! Eu assumo!', () => 'Caiu o líder! Comigo!', () => 'Eu assumo! Comigo!'] },
+  contato: { c: 'con', p: 1, cat: 'relato', v: [d => flTiro('Contato!', d), d => flTiro('Inimigo!', d), d => (d.W ? flUp(d.W) + ', ' + d.A + '!' : 'Inimigo!')] },
+  baixa: { c: 0, p: 1, cat: 'relato', v: [() => 'Homem abatido!', () => 'Perdemos um!', () => 'Caiu um dos nossos!'] },
+  'homem-ferido': { c: 'hurt', p: 1, cat: 'relato', v: [() => 'Homem ferido!', () => 'Ferido aqui!'] },
+  ferido: { c: 'hurt', p: 1, cat: 'relato', v: [() => 'Tô ferido!', () => 'Me acertaram!'] },
+  socorro: { c: 'fetch', p: 1, cat: 'relato', v: [() => 'Vou buscá-lo!', () => 'Me cobre que eu vou!', () => 'Deixa comigo, vou lá!'] },
+  municao: { c: 'ammo', p: 1, cat: 'relato', v: [() => 'Sem munição!', () => 'Munição!', () => 'Tô no fim da munição!'] },
+  'pegou-arma': { c: 'pick', p: 1, cat: 'relato', v: [() => 'Peguei a arma dele!', () => 'Tô com a arma dele!'] },
+  pos: { c: 0, p: 1, cat: 'relato', v: [() => 'Em posição!', () => 'Posição!', () => 'Pronto!'] },
+  feito: { c: 0, p: 1, cat: 'relato', v: [() => 'Feito!', () => 'Limpo!', () => 'Pronto, feito!'] },
+  'nao-da': { c: 0, p: 1, cat: 'relato', v: [() => 'Não dá!', () => 'Não tem como!'] },
+  moral: { c: 0, p: 1, cat: 'relato', v: [() => 'Não aguento mais!', () => 'A gente vai morrer aqui!'] },
+  prisioneiro: { c: 'hands', p: 1, cat: 'relato', v: [() => 'Peguei um prisioneiro!', () => 'Tenho um preso!'] },
+  'estado?': { c: 0, p: 0, cat: 'pergunta', ask: 1, v: [() => 'Estado?', () => 'Todo mundo bem?', () => 'Situação?'] },
+  've?': { c: 0, p: 0, cat: 'pergunta', ask: 1, v: [() => 'Alguém vê ele?', () => 'Cadê ele?', () => 'Onde ele tá?'] },
+  ok: { c: 0, p: 0, cat: 'resposta', v: [() => 'Tudo certo!', () => 'Na escuta!', () => 'Inteiro!'] },
+  'ferido-eu': { c: 'hurt', p: 1, cat: 'resposta', v: [() => 'Tô ferido!', () => 'Tô sangrando, mas dá!'] },
+  'municao-eu': { c: 'ammo', p: 1, cat: 'resposta', v: [() => 'Tô sem munição!', () => 'Munição acabando!'] },
+  've-sim': { c: 0, p: 1, cat: 'resposta', v: [d => (d.P ? d.P + ', ' + d.A + '!' : flUp(d.A) + ', ' + d.D + '!'), d => 'Ali, ' + (d.P ? d.P.toLowerCase() + ', ' : '') + d.A + '!'] },
+  've-nao': { c: 0, p: 0, cat: 'resposta', v: [() => 'Não vejo nada!', () => 'Perdi ele!', () => 'Sumiu!'] },
+  recusa: { c: 0, p: 1, cat: 'resposta', v: [() => 'Nem pensar!', () => 'Lá não, sargento!', () => 'Tá louco? Lá morreu gente!'] },
+  entendido: { c: 0, p: 0, cat: 'resposta', v: [() => 'Entendido!', () => 'Indo!', () => 'Copiado!'] } };
+/* the old calls (SAY, cf-cerebro-soldado part 1) are lines of the same table: say() from the AI goes through brainSay, the call site being
+   where the old code decided (a drill taken, a man down, a mate fetched, a grenade or smoke thrown) */
+const FLSAY = { 1: 'contato', 2: 'granada', 3: 'lanca-granada', 4: 'medico', 5: 'homem-ferido', 6: 'socorro', 7: 'rendo', 8: 'maos', 9: 'drone', 10: 'pegou-arma', 11: 'fumaca', 12: 'ao-chao', 13: 'blindado',
+  14: 'avancar', 15: 'recuar', 16: 'cobrindo', 17: 'fogo-longe', 18: 'artilharia', 19: 'aeronave', 20: 'mina', 21: 'atirador', 22: 'emboscada', 23: 'municao', 24: 'cessar-fogo', 25: 'predio-cai', 26: 'perimetro', 27: 'lance', 28: 'fixar' };
+SAYC.brain = 29; SAY.l[29] = () => '';   // a line with no old call: a guest shows nothing
+for (let i = 1; i < SAY.l.length; i++) SAY.l[i] = (f => a => (a >= 13 && FALA.tx[(a / 13) | 0]) || f(a % 13))(SAY.l[i]);   // the host's whole line, from its slot; a guest's the call
+SAY.r = FALA.r;
+const flId = o => o.flI || (o.flI = ++FALA.id);
+const flQ = o => o.fala || (o.fala = { n: 0, b: 1, bt: S.t, said: new Map(), k: 0, last: -99, cont: -99, ask: -99, tk: 0, cham: new Map(), mortes: [] });
+const flBB = q => q.bb || (q.bb = { ord: null, cont: new Map(), est: {}, plano: null, conf: 0, fl: null });
+const flLid = q => (q.lid && !q.lid.dead && !q.lid.down ? q.lid : q.men.find(m => !m.dead && !m.down && m.ai) || null);
+/* a decision: the cb event (ANA, while it has room: ana of its max) and the man's last decision, which a line needs as its origin */
+function flCb(m, st, d) {
+  if (!BRAIN.on || !m) return;
+  if (st !== 'fala') { m.cbT = S.t; m.cbK = st; }
+  const e = Object.assign({ k: 'cb', t: anaR(S.t), s: m.team, st, m: flId(m) }, d);
+  FALA.log.push(e); if (FALA.log.length > FALA.logN) FALA.log.splice(0, FALA.log.length - FALA.logN);
+  if (anaLive() && ANA.ev.length < ANA.max * FALA.ana) anaPush(e);
+}
+function brainSay(m, k, d) {
+  const F = FALAS[k], st = FALA.st; d = d || {};
+  if (!BRAIN.on || !F || !m || m.dead || m.gone || m.net || !m.ai) return null;
+  if (!(S.t - (m.cbT === undefined ? -99 : m.cbT) <= FALA.orig)) { st.semOrigem++; return null; }   // no line without a decision
+  const p = d.p === undefined ? F.p : d.p, Q = flQ(m.sq || m);
+  Q.b = Math.min(FALA.cap, Q.b + (S.t - Q.bt) * FALA.min / 60); Q.bt = S.t;
+  if (p < 3 && (S.t < (m.sayN || 0) || (!d.resp && S.t < Q.n) || Q.b < 1)) { st.cortadas++; return null; }
+  const V = F.v, n = V.length, i0 = Math.floor(hash2(flId(m), Math.floor(S.t * 4), Q.k++) * n) % n;
+  let txt = null;
+  for (let j = 0; j < n && !txt; j++) { const s = V[(i0 + j) % n](d); if (s && !(Q.said.has(s) && S.t - Q.said.get(s) < FALA.rep)) txt = s; }
+  if (!txt) { if (p < 3) { st.repetidas++; return null; } txt = V[i0](d); }
+  const slot = (FALA.txN = (FALA.txN % 1023) + 1); FALA.tx[slot] = txt;
+  m.sayK = (SAYC[F.c] || SAYC.brain) + 32 * (clamp(d.h | 0, 0, 12) + 13 * slot); m.sayT = S.t + clamp(txt.length * FALA.cps, SAY.life, FALA.life); m.sayN = S.t + SAY.gap;
+  if (!d.resp) Q.n = S.t + FALA.gap;
+  Q.b -= 1; Q.last = S.t; Q.said.set(txt, S.t);
+  if (Q.said.size > 24) for (const [s, t] of Q.said) if (S.t - t >= FALA.rep) Q.said.delete(s);
+  st.ditas++;
+  flCb(m, 'fala', { f: k, x: txt });
+  const H = flOuvir(m, k, d);
+  if (F.ask && m.sq) flResp(m, k, d, H);
+  flSom(m, txt);
+  return txt;
+}
+/* perception (the voice reaching each ear, as listen() does for shots): the din round the caller cuts its reach; each AI soldier within it
+   hears it, a mate gets what it says (flOuve), an enemy turns to the voice. Returns the mates who heard it (FALA.H, reused) */
+function flOuvir(m, k, d) {
+  const V = HEAR.voz, H = FALA.H; H.length = 0;
+  let n = 0;
+  for (const l of [S.men, S.units]) for (const o of l) if (!o.dead && Math.abs(o.x - m.x) < V.din && Math.abs(o.z - m.z) < V.din && S.t - shotAt(o) < 1.5) n += o.man ? 1 : 3;
+  const R = Math.max(V.min, V.r / (1 + V.k * n)), my = m.y + 1.5;
+  for (const o of S.men) {
+    if (o === m || o.dead || o.net || !o.ai || Math.abs(o.x - m.x) > R || Math.abs(o.z - m.z) > R) continue;
+    const dd = Math.hypot(o.x - m.x, o.z - m.z); if (dd > R) continue;
+    if (dd > R * HEAR.wall && walled(m.x, my, m.z, o.x, o.y + 1.5, o.z)) continue;   // through a wall it carries wall of the way
+    if (o.team === m.team) { FALA.st.ouvidas++; flOuve(o, m, k, d); if (o.sq && o.sq === m.sq) H.push(o); }
+    else if (FALA.enemy && !o.down && (!o.ln || S.t - o.ln.t > .5)) { const e = dd * HEAR.err; o.ln = { x: m.x + (hash2(flId(o), S.t * 10 | 0, 1) * 2 - 1) * e, z: m.z + (hash2(flId(o), S.t * 10 | 0, 2) * 2 - 1) * e, t: S.t, of: m }; }
+  }
+  return H;
+}
+const flReact = (o, s) => FALA.react[0] + hash2(flId(o), s, 3) * (FALA.react[1] - FALA.react[0]);
+/* what a mate who heard m's line k takes from it */
+function flOuve(o, m, k, d) {
+  if (k === 'granada' && d.b && Math.hypot(o.x - d.x, o.z - d.z) < FALA.nade && !(o.rf && o.rf.k === 'granada' && o.rf.b === d.b)) {   // away from where it was called, after his reaction time
+    o.rf = { k: 'granada', x: d.x, z: d.z, b: d.b, de: m, t0: S.t + flReact(o, flId(d.b)), ate: Math.max(S.t + 2, (d.fz || S.t) + .3), ouviu: 1 }; FALA.st.nade++;
+  }
+  if (d.t && !d.t.dead && (k === 'contato' || k === 'tiro' || k === 've-sim')) {   // a contact called: known to him as one told, and looked at
+    const e = meter(o, d.t);
+    if (!e.kn) { e.kn = true; e.told = true; e.kt = S.t; e.v = Math.max(e.v, 1); FALA.st.contato++; }
+    if (!(o.ai && (o.ai.tgt === d.t)) && (!o.ln || S.t - o.ln.t > .5)) o.ln = { x: d.x, z: d.z, t: S.t, of: d.t };
+  }
+  const q = o.sq; if (!q || q !== m.sq || flLid(q) !== o) return;
+  const B = flBB(q), E = B.est[flId(m)] || (B.est[flId(m)] = {});   // the leader's board: what was reported to him
+  E.t = S.t;
+  if (d.t && (k === 'contato' || k === 'tiro' || k === 've-sim')) B.cont.set(flId(d.t), { x: d.x, z: d.z, c: d.c, g: d.g, t: S.t, de: m });
+  else if (k === 'medico' || k === 'ferido' || k === 'ferido-eu') E.ferido = 1;
+  else if (k === 'municao' || k === 'municao-eu') E.municao = 0;
+  else if (k === 'ok') { E.ferido = 0; E.municao = 1; }
+  else if (k === 'recusa' || k === 'nao-da') E.nao = S.t;
+  else if (k === 'moral') E.moral = 0;
+  else if (k === 'pos' || k === 'feito') E.pos = S.t;
+}
+/* the second line of an exchange: the mate who heard m's question or order and has the most to say answers, resp s later (flD, said in aiMan) */
+const flNoAmmo = o => { const a = o.arms && o.arms[0]; return !!a && a.d.mag > 1 && !(a.res > 0) && a.mag < a.d.mag * .3; };
+function flSees(o) {
+  let best = null, bd = 1e9;
+  if (o.pm) for (const [t, e] of o.pm) if (e.kn && !t.dead && t.team !== o.team && tclass(t) && S.t - e.t < 1.5 && S.t - e.kt >= e.rt) { const dd = Math.hypot(t.x - o.x, t.z - o.z); if (dd < bd) { bd = dd; best = { t, e }; } }
+  return best;
+}
+function flResp(m, k, d, H) {
+  let o = null, r = null, rd = {};
+  const mates = H.filter(o => !o.flD);
+  if (!mates.length) return;
+  if (k === 'estado?') {
+    if ((o = mates.find(o => o.down || o.hp < o.max * .5))) r = 'ferido-eu';
+    else if ((o = mates.find(flNoAmmo))) r = 'municao-eu';
+    else { o = mates[0]; r = 'ok'; }
+  } else if (k === 've?') {
+    for (const x of mates) { const c = !x.down && flSees(x); if (c) { o = x; r = 've-sim'; rd = flCont(x, c.t, c.e); break; } }
+    if (!o) { o = mates[0]; r = 've-nao'; }
+  } else {
+    const A = d.alvo || m, Q = flQ(m.sq), dead = Q.mortes.some(p => S.t - p.t < FALA.death[1] && Math.hypot(p.x - A.x, p.z - A.z) < FALA.death[0]);
+    o = mates.find(o => !o.down) || null; if (!o) return;
+    r = dead ? 'recusa' : hash2(flId(o), S.t * 10 | 0, 5) < FALA.ack ? 'entendido' : null;
+  }
+  if (!o || !r) return;
+  FALA.st.perguntas++;
+  o.flD = { k: r, d: Object.assign(rd, { resp: 1 }), T: S.t + FALA.resp[0] + hash2(flId(o), S.t * 10 | 0, 7) * (FALA.resp[1] - FALA.resp[0]) };
+}
+/* the line spoken aloud by the browser near the player (FALA.som, off by default) */
+function flSom(m, txt) {
+  if (!FALA.som || typeof speechSynthesis === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined' || !S.my || S.my.dead) return;
+  const dd = Math.hypot(m.x - S.my.x, m.z - S.my.z); if (dd > FALA.somR || speechSynthesis.speaking) return;
+  try { const u = new SpeechSynthesisUtterance(txt); u.lang = 'pt-BR'; u.rate = 1.15; u.volume = clamp(1 - dd / FALA.somR, .2, 1); speechSynthesis.speak(u); } catch (e) {}
+}
+/* the squad's talk, at tick s: a mate fallen (the nearest who saw it calls it, and the place is kept: "lá morreu gente"), a contact made out
+   that the squad has not called (or that has moved moved m since, again s on), the leader as a fire command, anyone else as a report; a
+   quiet squad in contact: the leader asks. Each reads only its men's own perception (pm) */
+function flSq(q) {
+  const Q = flQ(q); if (S.t < Q.tk) return; Q.tk = S.t + FALA.tick;
+  const live = q.men.filter(m => !m.dead && !m.down && m.ai && !m.net); if (!live.length) return;
+  const L = flLid(q);
+  for (const d of q.men) if (d.dead && !d.flM) {
+    d.flM = 1; Q.mortes.push({ x: d.x, z: d.z, t: S.t });
+    let w = null, wd = 40; for (const o of live) { const dd = Math.hypot(o.x - d.x, o.z - d.z); if (dd < wd && los(o, eyeY(o), d, bodyY(d))) { wd = dd; w = o; } }
+    if (w) { flCb(w, 'relato', { f: 'baixa' }); brainSay(w, 'baixa', {}); }
+  }
+  if (Q.mortes.length && S.t - Q.mortes[0].t > FALA.death[1]) Q.mortes = Q.mortes.filter(p => S.t - p.t < FALA.death[1]);
+  let best = null, bd = 1e9;
+  for (const m of live) if (m.pm) for (const [t, e] of m.pm) {
+    if (!e.kn || t.dead || t.team === m.team || !tclass(t) || S.t - e.t > 1.5 || S.t - e.kt < e.rt) continue;
+    Q.cont = S.t;
+    const c = Q.cham.get(t), dd = Math.hypot(t.x - m.x, t.z - m.z) - (m === L ? 30 : 0);   // the leader calls what he sees himself
+    if (c && (S.t - c.t < FALA.again || Math.hypot(t.x - c.x, t.z - c.z) < FALA.moved) && S.t - c.t < 120) continue;
+    if (dd < bd) { bd = dd; best = { m, t, e }; }
+  }
+  if (best) {
+    const { m, t, e } = best, lead = m === L, D = flCont(m, t, e);
+    flCb(m, lead ? 'ordem' : 'relato', { f: lead ? 'tiro' : 'contato', c: D.c, g: D.g });
+    if (brainSay(m, lead ? 'tiro' : 'contato', D)) Q.cham.set(t, { t: S.t, x: t.x, z: t.z });
+    if (Q.cham.size > 32) for (const [o, c] of Q.cham) if (o.dead || S.t - c.t > 120) Q.cham.delete(o);
+  }
+  if (L && S.t - Q.cont < FALA.call && S.t - Q.last > FALA.quiet && S.t - Q.ask > FALA.ask) {
+    const k = flSees(L) ? 'estado?' : 've?'; Q.ask = S.t;
+    flCb(L, 'pergunta', { f: k }); brainSay(L, k, {});
+  }
+}
+/* the grenade made out where it lands (perception: who has it at his feet, or in sight in front of him): each who does gets the reflex
+   (m.rf), the nearest of a squad calls "Granada!", and the call carries to those who did not see it */
+function flNade(b) {
+  const by = new Map();
+  for (const o of S.men) {
+    if (o.dead || o.down || o.net || !o.ai || Math.abs(o.x - b.x) > FALA.see[1] || Math.abs(o.z - b.z) > FALA.see[1]) continue;
+    const dd = Math.hypot(o.x - b.x, o.z - b.z); if (dd > FALA.see[1]) continue;
+    const off = Math.abs(wrap(Math.atan2(-(b.z - o.z), b.x - o.x) - gaze(o, 'man')));
+    if (!(dd < FALA.see[0] || (off < FALA.see[2] && los(o, eyeY(o), b, b.y + .1)))) continue;
+    o.rf = { k: 'granada', x: b.x, z: b.z, b, t0: S.t + flReact(o, flId(b)), ate: (b.fz || S.t) + .3, viu: 1 };
+    const k = o.sq || o, w = by.get(k); if ((!b.by || b.by.team !== o.team || dd < 5) && (!w || dd < w.d)) by.set(k, { o, d: dd });
+  }
+  for (const { o } of by.values()) { flCb(o, 'reflexo', { f: 'granada' }); brainSay(o, 'granada', { b, x: b.x, z: b.z, fz: b.fz }); }
+}
+/* hooks into the old code */
+say = (f => (m, k, a, force) => {
+  const K = BRAIN.on && m && m.ai && !m.net && FLSAY[k];
+  if (!K) return f(m, k, a, force);
+  flCb(m, FALAS[K].cat, { f: K, de: 'say' });
+  brainSay(m, K, a ? { h: a, H: flHora(a), A: flAs(a) } : {});
+})(say);
+squadThink = (f => q => { const r = f(q); if (BRAIN.on && !q.net) flSq(q); return r; })(squadThink);
+nadeStep = (f => (b, dt) => { const r = f(b, dt); if (BRAIN.on && !b.flP && b.k === 'nade' && !b.gone && b.y - nadeFloor(b.x, b.z) < .5) { b.flP = 1; flNade(b); } return r; })(nadeStep);
+/* a man with the grenade reflex who is not getting away already (the old flight from a grenade by him) gets away from where it is, once
+   his reaction time is over, until it has gone off; the answer he owes (flD) he says when it is due */
+sqMan = (f => (m, A, q, best) => {
+  f(m, A, q, best);
+  const R = m.rf; if (!BRAIN.on || !R || R.k !== 'granada') return;
+  if (S.t > R.ate) { m.rf = null; return; }
+  if (S.t < R.t0 || A.brk > S.t || m.down) return;
+  const dx = m.x - R.x, dz = m.z - R.z, d = Math.hypot(dx, dz) || 1, p = clearOf(R.x + dx / d * (FALA.nade + 3), R.z + dz / d * (FALA.nade + 3), 1, {});
+  A.bx = A.gx = p.x; A.bz = A.gz = p.z; A.brk = R.ate; A.run = true; A.st = 0; R.go = S.t;
+})(sqMan);
+aiMan = (f => (m, dt) => {
+  f(m, dt);
+  const D = m.flD; if (!D || S.t < D.T) return;
+  m.flD = null; if (!BRAIN.on || m.dead) return;
+  FALA.st.respostas++; flCb(m, 'resposta', { f: D.k }); brainSay(m, D.k, D.d);
+})(aiMan);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

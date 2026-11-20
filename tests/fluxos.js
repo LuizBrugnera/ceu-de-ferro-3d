@@ -11,7 +11,11 @@
    - The hangar stalled for seconds after loading and at each vehicle picked (a CPU profile: 12 of the first 30 s in the turntable's preview).
      Each pack model that arrived (31 of them, one by one, as the battle behind the hangar asks) dropped and rebuilt every card of the carousel,
      planes too, which use none; and every redraw switched the turntable's buffer between the big card's size and the small ones' (setSize,
-     up to 1.6 s each on a weak GPU). Here: an arriving model drops only the cards built without it, and the buffer only grows. */
+     up to 1.6 s each on a weak GPU). Here: an arriving model drops only the cards built without it, and the buffer only grows.
+   - The HUD wrote over itself: the weapon camera's inset (a bomb, a missile) lay over the vehicle's readout in the upper left; the radio lines
+     ran over the title of a vehicle's damage panel; and the warnings under the scoreboard (missile, radar, impact, artillery, base under fire,
+     protection) each had a fixed place, crossing each other and the feed. Here: the inset in the free band on the left, the warnings in one
+     column with the feed after them, and the radio lines ending above the panel the HUD drew. */
 const H = require('./harness'), fs = require('fs'), path = require('path'), vm = require('vm'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8');
 
@@ -64,5 +68,24 @@ console.log('-- the hangar: a pack model that arrives rebuilds only the cards th
   ok(/if \(W > TT\.w \|\| H > TT\.h\) TT\.r\.setSize/.test(pv) && (pv.match(/setSize\(/g) || []).length === 1 && /drawImage\(TT\.r\.domElement, 0, TT\.h - H, W, H, 0, 0, W, H\)/.test(pv), 'preview: setSize only when a card is bigger than the buffer, and the card copied from the corner it was drawn in');
   const t0 = html.indexOf('function ttSpin('), tt = html.slice(t0, html.indexOf('\n}\n', t0));
   ok(/PACK\.ask = new Set\(\)/.test(tt) && /ask: PACK\.ask/.test(tt) && /if \(PACK\.ask\) PACK\.ask\.add\(id\)/.test(html), 'a card built by the turntable keeps the pack models it asked for (PACK.ask, filled by packGet)');
+}
+console.log('-- the HUD does not write over itself --');
+{
+  const a = html.indexOf('WCAM.rect = () => {'), b = html.indexOf('\n};', a) + 3;
+  const W = vm.createContext({ WCAM: { full: false }, clamp: (v, lo, hi) => Math.max(lo, Math.min(hi, v)), cw: 0, ch: 0 });
+  vm.runInContext(html.slice(a, b), W);
+  for (const [cw, ch] of [[1280, 753], [1920, 1033], [1280, 673], [1366, 721]]) {
+    W.cw = cw; W.ch = ch; const r = W.WCAM.rect(), u = Math.max(.62, Math.min(1, cw / 1000));
+    ok(r.y >= 250 * u && r.y + r.h <= ch - 164 * u - 60 * u && r.x >= 12 && r.w >= 160, cw + '×' + ch + ': the weapon camera at ' + r.x + ',' + r.y + ' ' + r.w + '×' + r.h + ', under the readout (' + Math.round(250 * u) + ') and above the radio lines and the damage panel (' + Math.round(ch - 224 * u) + ')');
+  }
+  const c = html.indexOf('function hudWarn('), d = html.indexOf('\n}\n', c) + 3, lines = [];
+  const X = vm.createContext({ cw: 1280, ch: 753, FOE: 'red', AF: { on: 1 }, S: { warn: 1, rwr: [{ k: 2, n: 'SA-11', h: 2 }, { k: 1, n: 'Pantsir', h: 10 }] }, txt: (s, x, y, size) => lines.push([s, y, size]) });
+  if (c > 0) vm.runInContext(html.slice(c, d), X);
+  const end = typeof X.hudWarn === 'function' ? X.hudWarn({ flares: 30 }, 1, 'x', true, 100) : -1;
+  ok(lines.length === 4 && lines.every((l, i) => !i || l[1] - lines[i - 1][1] >= lines[i - 1][2]) && end - lines[3][1] >= lines[3][2], 'the warnings under the scoreboard stack, one line each (' + lines.map(l => Math.round(l[1])).join(', ') + '), and the next free line is after them (' + end + ')');
+  const dh = html.slice(html.indexOf('let wy = hudWarn('), html.indexOf("if (paused) txt('PAUSADO'"));
+  ok(/S\.feed\.forEach\([^\n]*wy \+ i \* 19 \* u/.test(dh) && !/ty \+ (36|58|76|94) \* u/.test(dh), 'the impact, artillery, base and protection lines take the next free line, and the feed comes after them');
+  const hh = html.slice(html.indexOf('function helpHud('), html.indexOf('\n}\n', html.indexOf('function helpHud(')));
+  ok(/const low = hudLow; hudLow = 0;/.test(hh) && /low - 16 \* u - \(n - 1\) \* 16 \* u/.test(hh) && /hudLow = y0;/.test(html) && /if \(y0 > ch \/ 2\) hudLow = y0;/.test(html), 'the radio lines end above the panel the soldier\'s and the vehicle\'s HUD drew this frame');
 }
 done();

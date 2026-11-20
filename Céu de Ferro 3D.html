@@ -39719,6 +39719,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   txt('N KIT DE BASE ×' + P.kit + '   CARGA ×' + P.chg, L, y + 3 * u, 12.5 * u, P.kit + P.chg ? ink : dim);
   if (P.dead) return;
   const W = 190 * u, H = 96 * u, x0 = 14, y0 = ch - 14 - H, C = cover(P), hs = stOf(P.hp / P.max), ls = P.wl > 5 ? 2 : P.wl > 0 ? 1 : 0, as = P.wa > 4 ? 2 : P.wa > 0 ? 1 : 0;
+  hudLow = y0;
   const part = (x, yy, w2, h2, s) => { hx.beginPath(); hx.rect(x0 + x * u, y0 + yy * u, w2 * u, h2 * u); hx.fillStyle = DCOL[s]; hx.fill(); hx.strokeStyle = 'rgba(8,12,13,.75)'; hx.lineWidth = .8; hx.stroke(); };
   hx.fillStyle = 'rgba(8,12,13,.62)'; hx.fillRect(x0, y0, W, H); hx.strokeStyle = 'rgba(158,170,162,.4)'; hx.lineWidth = 1; hx.strokeRect(x0 + .5, y0 + .5, W - 1, H - 1);
   part(37, 8, 14, 13, hs); part(31, 23, 26, 32, hs); part(20, 24, 9, 30, as); part(59, 24, 9, 30, as); part(32, 57, 11, 32, ls); part(45, 57, 11, 32, ls);
@@ -39824,10 +39825,14 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
    field repair with what waits behind it. Bottom left, lifted over the touch stick or a seat's own corner; in a cockpit it takes the top
    left, which the gauges leave free, and oil on the windscreen or a cracked panel are drawn over the view ---------- */
 const DCOL = ['rgba(111,195,178,.6)', '#ffd84a', '#f5762b', '#e2604f'], OUTL = { hull: 1, wingL: 1, wingR: 1, tipL: 1, tipR: 1, stabL: 1, stabR: 1, fin: 1, rotor: 1 };
+/* hudLow: the top of the panel the HUD drew this frame in the lower left corner (the soldier's ESTADO, a vehicle's DANOS), 0 for none. The radio
+   lines end above it: at ch * .78 they ran over the title of a vehicle's panel, which is taller than the soldier's (cf-pol-fluxos) */
+let hudLow = 0;
 function dmgPanel(P, u, ink, acc, seat, blink) {
   const D = P.def.parts, I = D.ix, W = 190 * u, H = 150 * u, x0 = 14;
   const y0 = seat && seat.inst && cw >= 620 && ch >= 400 ? 36 * u : ch - 14 - H - (coarse ? 150 : seat && seat.lift ? seat.lift * u : 0);   // in a cockpit with its gauges up, where the text panel was
   if (!D.length) return;
+  if (y0 > ch / 2) hudLow = y0;   // at the bottom (in a cockpit with its gauges up it sits at the top)
   const st = D.map((d, i) => pst(P, i));
   if (seat && seat.inst) glassFx(P, D, st);
   const paint = s => { hx.fillStyle = s === 3 ? 'rgba(8,12,13,.85)' : DCOL[s]; hx.fill(); hx.strokeStyle = s === 3 ? DCOL[3] : 'rgba(8,12,13,.75)'; hx.lineWidth = s === 3 ? 1.3 : .8; hx.stroke(); };
@@ -39886,11 +39891,18 @@ const BWHY = { unit: 'Há um veículo aí', map: 'Fora do mapa', water: 'Na águ
    Top: the warning gear (S.rwr: a radar tracking, a radar missile launched or active, by name and clock; S.warn: a missile the vehicle
    knows of). Beside the centre, for a plane's missile slot: the seeker's word, the launch zone as a scale (rmin, the range no turn
    escapes, rmax, and the target's range) and the time left to the missile in flight */
-function hudMsl(P, u, ink, acc, disp, blink, y) {
-  const amber = '#ffd24a', k = S.sk, rw = S.rwr; y = y || 0;
-  if (S.warn && blink) txt('ALERTA DE MÍSSIL', cw / 2, y + 14 * u, 16 * u, FOE, 'center', disp);
-  if (AF.on && !P.kind && !P.man && !P.dead) txt('FLARE AUTO · ' + P.flares, cw / 2, y + 32 * u, 11 * u, amber, 'center', disp);
-  if (rw && !P.dead) rw.slice(0, 3).forEach((e, i) => txt((e.k === 2 ? 'RADAR: MÍSSIL ' : 'RADAR TRAVADO: ') + e.n + ' · ' + e.h + ' h', cw / 2, y + (54 + i * 15) * u, 12 * u, e.k === 2 ? (blink ? FOE : amber) : amber, 'center'));
+/* the warnings of the column under the scoreboard: from y, the next free line, one under the other; returns the line after them. Each had a
+   place of its own, and they, the vehicle's alerts and the feed below wrote over each other (cf-pol-fluxos); a blinking one keeps its line
+   while it is on, so nothing below it jumps */
+function hudWarn(P, u, disp, blink, y) {
+  const amber = '#ffd24a', rw = S.rwr;
+  if (S.warn) { txt(blink ? 'ALERTA DE MÍSSIL' : '', cw / 2, y, 16 * u, FOE, 'center', disp); y += 20 * u; }
+  if (AF.on && !P.kind && !P.man && !P.dead) { txt('FLARE AUTO · ' + P.flares, cw / 2, y, 11 * u, amber, 'center', disp); y += 16 * u; }
+  if (rw && !P.dead) for (const e of rw.slice(0, 3)) { txt((e.k === 2 ? 'RADAR: MÍSSIL ' : 'RADAR TRAVADO: ') + e.n + ' · ' + e.h + ' h', cw / 2, y, 12 * u, e.k === 2 ? (blink ? FOE : amber) : amber, 'center'); y += 16 * u; }
+  return y;
+}
+function hudMsl(P, u, ink, acc, disp, blink) {
+  const amber = '#ffd24a', k = S.sk;
   if (!k || P.dead) return;
   const t = S.lockAir, z = k.z, x = cw / 2 + 150 * u, y0 = ch / 2 - 70 * u, H = 140 * u;
   if (k.k) txt(k.k === 'ir' ? (t ? (k.tone > .6 ? 'IR: TOM FORTE' : 'IR: TOM FRACO') : 'IR: BUSCA') : t ? (k.ok ? (blink ? 'RADAR: DISPARE' : 'RADAR: TRAVADO') : 'RADAR: TRAVADO') : 'RADAR: BUSCA', cw / 2, ch / 2 + 86 * u, 12 * u, t && k.ok ? FOE : ink, 'center');
@@ -40041,11 +40053,12 @@ function drawHud() {
     else if (S.dep === 2) txt('BASE DE SUPRIMENTO: ABASTECIDO', cw / 2, ch * .7, 11 * u, ink, 'center');
   }
 
-  hudMsl(P, u, ink, acc, disp, blink, ty);
-  if (tm && !P.dead) txt('IMPACTO EM ' + Math.ceil(S.threat.eta) + ' s' + (P.smk && P.smkT <= S.t ? '  ·  G: FUMAÇA' : lm === tm ? '  ·  TRAVADO' : ''), cw / 2, ty + 36 * u, 14 * u, amber, 'center');
-  if (S.t < S.shellT && !P.dead) txt(blink ? 'ARTILHARIA CAINDO PERTO' : '', cw / 2, ty + 94 * u, 15 * u, FOE, 'center', disp);
-  if (P.inv > 0 && !P.dead && P.kind) txt('Protegido por ' + Math.ceil(P.inv) + ' s', cw / 2, ty + 58 * u, 13 * u, ink, 'center');
-  if (bs.hit > 0) txt('BASE SOB FOGO', cw / 2, ty + 76 * u, 14 * u, FOE, 'center');
+  hudMsl(P, u, ink, acc, disp, blink);
+  let wy = hudWarn(P, u, disp, blink, Math.max(ch * .12, ty + 16 * u));   // the column under the scoreboard: the warnings by weight, then the feed
+  if (tm && !P.dead) { txt('IMPACTO EM ' + Math.ceil(S.threat.eta) + ' s' + (P.smk && P.smkT <= S.t ? '  ·  G: FUMAÇA' : lm === tm ? '  ·  TRAVADO' : ''), cw / 2, wy, 14 * u, amber, 'center'); wy += 19 * u; }
+  if (S.t < S.shellT && !P.dead) { txt(blink ? 'ARTILHARIA CAINDO PERTO' : '', cw / 2, wy, 15 * u, FOE, 'center', disp); wy += 20 * u; }
+  if (bs.hit > 0) { txt('BASE SOB FOGO', cw / 2, wy, 14 * u, FOE, 'center'); wy += 19 * u; }
+  if (P.inv > 0 && !P.dead && P.kind) { txt('Protegido por ' + Math.ceil(P.inv) + ' s', cw / 2, wy, 13 * u, ink, 'center'); wy += 19 * u; }
   if (P.dead && !S.over && !(cdLeft(S.cls, S.model) > 0) && radHold() > 0) txt('PRÓXIMA LEVA PELO RÁDIO EM ' + Math.ceil(radHold()) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
   if (P.dead && S.cq && !S.over && cdLeft(S.cls, S.model) > 0) txt(DEFS[S.cls][S.model].name.toUpperCase() + ' VOLTA EM ' + Math.ceil(cdLeft(S.cls, S.model)) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
   if (S.banner) {
@@ -40054,7 +40067,7 @@ function drawHud() {
     txt(S.banner.sub, cw / 2, ch * .22 + 48 * u, 15 * u, ink, 'center', "'Barlow Semi Condensed', sans-serif");
     hx.globalAlpha = 1;
   }
-  S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, Math.max(ch * .12, ty + 16 * u) + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
+  S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, wy + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
   hx.globalAlpha = 1;
   if (paused) txt('PAUSADO', cw / 2, ch * .45, 36 * u, ink, 'center', disp);
 }
@@ -40842,11 +40855,13 @@ const helpKeys = () => [['8', 'Rádio: atender o pedido de ajuda aberto mais per
   ['9', 'Rádio: pedir ajuda aos NPCs perto. A pé, fogo HE onde você mira (fogo indireto, se for longe); num veículo, reparo se estiver avariado, senão infantaria para limpar o anticarro em volta']];
 function helpNear(P) { return helpRows(P.team, P).map(r => r.concat(Math.hypot(r[2] - P.x, r[3] - P.z))).filter(r => r[5] || r[6] < HELPUI.far).sort((a, b) => a[6] - b[6]); }
 function helpHud() {
+  const low = hudLow; hudLow = 0;
   if (playMode !== 'play' || !S || !S.my || S.my.dead || GV.on) return;
   const P = S.my, l = helpNear(P); if (!l.length) return;
   const u = clamp(cw / 1000, .62, 1), seen = S.hlpSeen || (S.hlpSeen = new Set());
   for (const r of l) if (!r[5] && !seen.has(r[0])) { seen.add(r[0]); S.feed.push({ text: 'Rádio: pedido de ' + NEEDS[NEEDK[r[1]]].s + ' a ' + Math.round(r[6]) + ' m · 8 atende', life: 6, team: P.team }); if (S.feed.length > 4) S.feed.shift(); }
-  let y = ch * .78, first = true;
+  const n = Math.min(l.length, HELPUI.show);
+  let y = low ? Math.min(ch * .78, low - 16 * u - (n - 1) * 16 * u) : ch * .78, first = true;
   for (const r of l.slice(0, HELPUI.show)) {
     const N = NEEDS[NEEDK[r[1]]], who = r[4] === 2 ? 'um jogador atende' : r[4] === 1 ? 'a IA atende' : 'sem resposta';
     const s = r[5] ? 'RÁDIO · seu pedido: ' + N.s + ' · ' + who : 'RÁDIO · ' + N.s + ' a ' + Math.round(r[6]) + ' m · ' + who + (first && r[4] !== 2 ? '  ·  8: ATENDER' : '');
@@ -44777,9 +44792,13 @@ WCAM.fit = () => {
   const W = WCAM.full ? WCAM.big : WCAM.inset[0], H = WCAM.full ? Math.max(120, Math.round(WCAM.big * ch / cw)) : WCAM.inset[1];
   WCAM.rt.setSize(W, H); WCAM.cam.aspect = WCAM.full ? cw / ch : W / H; WCAM.cam.updateProjectionMatrix(); WCAM.last = 0;
 };
+/* the inset: on the left, under the vehicle's readout (name, bars, speed, height, the stores: about 250 px from the top) and above the radio lines
+   and the panel in the lower left corner (about 230 px from the bottom). At 12, 58 it lay over the readout, which then could not be read while a
+   bomb fell (cf-pol-fluxos); the lower right is the transports' seats */
 WCAM.rect = () => {
   if (WCAM.full) return { x: 0, y: 0, w: cw, h: ch };
-  const w = Math.round(clamp(cw * .3, 200, 440)); return { x: 12, y: 58, w, h: Math.round(w * 9 / 16) };
+  const u = clamp(cw / 1000, .62, 1), y = Math.round(Math.max(ch * .34, 250 * u)), room = ch - 230 * u - y;
+  const w = Math.round(clamp(Math.min(cw * .3, room * 16 / 9), 160, 440)); return { x: 12, y, w, h: Math.round(w * 9 / 16) };
 };
 /* where the eye goes: behind the weapon along its heading, above it, never into the ground; frozen once the weapon has ended */
 WCAM.place = () => {

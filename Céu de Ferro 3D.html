@@ -37687,6 +37687,48 @@ function mapImg(w, relief) {
 }
 function buildMap() { mapCv = mapImg(220); mapBig = null; }
 
+/* ---------- a bush (cf-pol-modelos): where it was one faceted ball (an icosahedron of det: 80 triangles at 1, 20 at 0, which read as a
+   green stone), the same triangles as puffs of foliage: at det 1 four overlapping balls of 20 (BUSHL.puffs: x, y, z, radius, tone), at 0 one,
+   each pushed in and out by a few waves and flattened below, lit by normals out of its own middle (soft and round), coloured darker
+   below and inside, lighter on top, each puff in its own tone, and covered in small leaves (bushTex, one grey canvas the colours tint).
+   The thousands of them cost what they did ---------- */
+const BUSHL = { puffs: [[0, .32, 0, .74, 1], [.46, -.04, .3, .58, .86], [-.46, -.06, .28, .55, .8], [.05, -.02, -.48, .58, .93]], wave: .2, under: .8, dark: .74, light: 1.2 };
+function bushGeo(det) {
+  const L = BUSHL, puffs = det ? L.puffs : [[0, 0, 0, 1, 1]], P = [], N = [], C = [], UV = [], v = new THREE.Vector3();
+  puffs.forEach(([px, py, pz, pr, tone], k) => {
+    const g = new THREE.IcosahedronGeometry(1, 0), Q = g.attributes.position;
+    for (let i = 0; i < Q.count; i++) {
+      v.fromBufferAttribute(Q, i).normalize();
+      const w = Math.sin(v.x * 5.1 + 1.3 + k) * Math.sin(v.y * 4.3 + .7) * Math.sin(v.z * 4.7 + 2.1 + k * 2), r = pr * (1 + L.wave * w);
+      P.push(px + v.x * r, py + (v.y < 0 ? v.y * L.under : v.y) * r, pz + v.z * r);
+      const ny = v.y * .8 + .3, nl = Math.hypot(v.x, ny, v.z) || 1; N.push(v.x / nl, ny / nl, v.z / nl);
+      const l = tone * (L.dark + (L.light - L.dark) * clamp(.5 + .5 * v.y + .2 * w, 0, 1)); C.push(l * .96, l, l * .85);
+    }
+    /* the leaves' coordinates: each face projected along the axis it faces most (no stretch on a face seen edge on; the seams hide in the leaves) */
+    for (let i = UV.length / 2; i < P.length / 3; i += 3) {
+      let ax = 0, ay = 0, az = 0; for (let q = 0; q < 3; q++) { ax += N[(i + q) * 3]; ay += N[(i + q) * 3 + 1]; az += N[(i + q) * 3 + 2]; }
+      const A = Math.abs(ax), B = Math.abs(ay), Z = Math.abs(az);
+      for (let q = 0; q < 3; q++) { const x = P[(i + q) * 3], y = P[(i + q) * 3 + 1], z = P[(i + q) * 3 + 2]; UV.push(...(B >= A && B >= Z ? [x, z] : A >= Z ? [z, y] : [x, y]).map((c, j) => c * .8 + (j ? k * .23 : k * .37))); }
+    }
+    g.dispose();
+  });
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(C, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(UV, 2)); g.computeBoundingSphere();
+  return g;
+}
+/* the leaves on a bush: grey (the bush's colour and each one's shade tint it), small leaves in many shades over a darker ground, drawn once */
+function bushTex() {
+  if (BUSHL.tex) return BUSHL.tex;
+  const c = document.createElement('canvas'); c.width = c.height = 128; const x = c.getContext('2d'); let sd = 5; const r = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296;
+  x.fillStyle = '#868686'; x.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    const px = r() * 128, py = r() * 128, l = 150 + r() * 105 | 0;
+    for (const [dx, dy] of [[0, 0], [128, 0], [-128, 0], [0, 128], [0, -128]]) { x.save(); x.translate(px + dx, py + dy); x.rotate(r() * 6.28); x.fillStyle = 'rgb(' + l + ',' + l + ',' + l + ')'; x.beginPath(); x.ellipse(0, 0, 3.2 + 2 * r(), 1.6 + r(), 0, 0, 6.283); x.fill(); x.restore(); }
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(2, 2); t.anisotropy = 4;
+  return (BUSHL.tex = t);
+}
+const bushMat = hex => mat(hex, { vertexColors: true, flatShading: false, map: bushTex() });
+
 function buildWorld() {
   if (scene) scene.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   const E = S.E, W = S.W, HW = S.HW, T = S.T, N = T.N, P = PAL[S.era], c = new THREE.Color();
@@ -37760,13 +37802,13 @@ function buildWorld() {
   wo.seen = S.olog.length; wo.houses.instanceColor.needsUpdate = wo.roofs.instanceColor.needsUpdate = true;
   scene.add(wo.trees, wo.leaf, wo.houses, wo.roofs, wo.holes);
   /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
-  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = new THREE.IcosahedronGeometry(1, 1), rkg = new THREE.DodecahedronGeometry(1, 0);
+  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1), rkg = new THREE.DodecahedronGeometry(1, 0);
   bsg.translate(0, .55, 0); rkg.translate(0, .45, 0);
   /* map version 7 (COV7): the bushes in tiles of COV7.tile m, each an instanced mesh with its own bounds (so that the frustum leaves out what
      is not in view) and drawn only within COV7.see m of the eye (bushTiles); the rocks keep one mesh, bounded by the whole map */
   rkg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW));
   wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr));
-  const bm = mat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
+  const bm = bushMat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
   for (const o of cvl) if (o.k === 'bush') { const k = Math.floor(o.x / BT) * 4096 + Math.floor((o.z + HW) / BT), l = btl.get(k); if (l) l.push(o); else btl.set(k, [o]); }
   wo.bt = [];
   for (const [k, l] of btl) {
@@ -37782,7 +37824,7 @@ function buildWorld() {
   if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
   scene.add(wo.rocks, ...wo.bt);
-  if (T.ug) { const g = new THREE.IcosahedronGeometry(1, 0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: mat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
+  if (T.ug) { const g = bushGeo(0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: bushMat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
   cityScene();
   vegBuild();
   const cm = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .7, depthWrite: false }), cg = new THREE.IcosahedronGeometry(1, 1);

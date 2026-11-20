@@ -33503,6 +33503,312 @@ genCard = (g => (t, id) => {
   c.decide = lines.concat(c.decide);
   return c;
 })(genCard);
+/* ---------- CEREBRO: pelotao (P8, cf-p8-pelotao; NÃO TESTADO, see docs/nao-testado/cf-p8-pelotao.md) ----------
+   The platoon (cf-cerebro-pesquisa §2.2 and P8): the layer between the general and the squads' leaders. One question: how do these squads,
+   together, carry out the operation the general gave them. The general still picks the procedure, the approaches and H-hour (PR, prPick,
+   prGo, prH: nothing of that is redone here); the platoon is the soldier who leads the squads of one operation and runs its method as tasks
+   that wait for each other (plan-space planning, van der Sterren: the tasks of a method, top-down, with their order and signals, instead of a
+   search over the units' states).
+   - Who: a platoon (op.pel) forms for every assault (op.k 'atk') with 2 squads or more, and for the posts that hold the same point (2 or
+     more, with the side's reserve when it is near). Its leader is a soldier: the leader of the base of fire's squad (he sees the objective
+     and hears his base), else the most veteran squad leader. pelQuem: 'Ten. Almeida' ('Cmt.' for the Insurgents); a successor keeps his own
+     rank.
+   - Succession: when he falls (dead, down) or his squad leaves the operation, the platoon has none until the next squad leader takes over:
+     PEL.lead [lo, hi] s (by hash), PEL.far times that when the next neither heard nor saw it nor has a radio, at most PEL.cap s; he calls
+     "O tenente caiu! Eu assumo o pelotão!" (pel-assumo), the diary has it and the general gets the word by radio. Without a leader the
+     platoon takes no new decision: an assault that waits for its base's fire keeps waiting (up to the timeout below).
+   - The board (P.cont): what the squads' leaders know (their q.bb.cont, P3), relayed to the platoon's leader by voice, sign or radio, after
+     that channel's time (pelChan; the radio of a platoon: within the command net when it is simulated, else always). Nothing else.
+   - Methods, each a short list of tasks by squad (P.tar: { id the contract's order id, k, q, apos the ids it waits for, sinal, st }), and an
+     order of the contract (brainOrd, ord) on each squad's board:
+     flanco (fixar e flanquear: the PR procedures p1 and p2): before H-hour the fixing squads take the base of fire ('base') and the
+       manoeuvre walks to its assault position ('manobra'), as PR orders them. At H-hour (prH, OPS.atk screen → go) the manoeuvre does NOT
+       go at once: it holds where it is ('espera', apos the base's task, sinal 'fogo') until the platoon's leader hears his base firing
+       (a shot of a base squad's man within PEL.fogo.sync s, within PEL.ouve m of him: gunfire carries); then "Base atirando! Assalto, vai!"
+       and the assault order PR gave is given ('assalto'). When an assaulting squad is within PEL.lift m of the objective (or the fight is in
+       it) the base shifts its fire ('desloca'; the assault's fight does the rest, as before).
+     apoio (apoio pelo fogo + assalto: every other assault, p5, p6, the assault of M2): the same gate; with 2 squads, where the old assault
+       sent both in, the last one becomes the base of fire (an overwatch from its forming-up place, as the old code does with 3 or more).
+     The gate has a timeout: PEL.fogo.max s after H-hour with no fire heard, the assault goes anyway (passo semApoio, said, a cb event and a
+       line in the diary: the measure of how often the base could not fire). While it waits, the assault's stall clock (op.bT) is held, and
+       its clock (op.T) starts when it goes.
+     defesa (defesa com reserva: posts holding the same point, the reserve near): the posts hold ('manter'), the reserve waits ('reserva',
+       apos 'fixado'). When the platoon's board has PEL.def.n contacts within PEL.def.r m of the point and the posts are firing, the enemy is
+       fixed; PEL.def.fix s later, with the friendly men (posts and reserve) PEL.def.ratio times the contacts or more, the platoon asks the
+       general for the reserve's counter-attack (genCmd ctr, the general's own command: it refuses when the general's defence is not the AI's
+       or the reserve is busy), at most once every PEL.def.every s.
+   - Up: every step of a method is reported to the general by radio (rep 'pel', with the command net's delay) and written in the diary
+     (gLog 'rep'); the unit card (genCard) and the commander's camera (rtsBrain) show the platoon, its leader, its method, its step and
+     each squad's task.
+   - Measured: brain events (brainEv; the review counts them by kind): pel-forma, pel-lider-caiu, pel-assume, pel-espera, pel-assalto
+     ({ apoio 1 when the base was firing, ang the flank angle at the objective between the base and the assault, deg; dt s waited }),
+     pel-desloca, pel-fixado, pel-ctr. The assault's arcs of fire (ANA, the op record's R.a) were already there.
+   Hooks: OPS.atk (outermost: the gate at H-hour), killMan, manDown (the leader falls), genCard, rtsBrain; brainHook 'lid' (the platoon thinks
+   from its squads' leaders' pace: PEL.hz [quiet, waiting for the fire]). Reads no world list (P7). PEL.on 0: every assault and post as
+   before this section */
+const PEL = { on: 1, hz: [.5, 1], lead: [2.5, 5], far: 1.5, cap: 8, ouve: 1500, fogo: { sync: 6, max: 45 }, lift: 120, keep: 90, log: 1,
+  def: { r: 350, n: 2, fix: 20, ratio: 1.2, near: 900, every: 90, shot: 10, lost: 30 } };
+const PELM = { flanco: 'fixar e flanquear', apoio: 'apoio pelo fogo e assalto', defesa: 'defesa com reserva' };
+const PELP = { forma: 'em preparação', espera: 'o assalto espera o fogo da base', assalto: 'assalto com a base atirando', semApoio: 'assalto sem fogo de apoio (a base não abriu fogo a tempo)',
+  desloca: 'a base desloca o fogo, o assalto está no objetivo', manter: 'os postos seguram', fixado: 'inimigo fixado nos postos', ctr: 'contra-ataque da reserva' };
+const PELOS = { form: 'reunião', rec: 'reconhecimento', mv: 'a manobra anda para a posição de assalto', prep: 'preparação', screen: 'preparação (fumaça)' };
+const PELT = { base: 'base de fogo', manobra: 'manobra', espera: 'espera o fogo da base', assalto: 'assalto', desloca: 'desloca o fogo', manter: 'manter o posto', reserva: 'reserva', ctr: 'contra-ataque' };
+const PELK = { base: 'base', manobra: 'mover', espera: 'assalto', assalto: 'assalto', desloca: 'base', manter: 'manter', reserva: 'manter', ctr: 'assalto' };   // the contract's order kinds
+const pelOn = () => !!PEL.on && brainSim();
+Object.assign(FALAS, {
+  'pel-assumo': { c: 0, p: 3, cat: 'ordem', v: [d => (d.q || 'O tenente') + ' caiu! Eu assumo o pelotão!', d => 'Perdemos ' + (d.o || 'o tenente') + '! Pelotão, comigo!', () => 'Eu comando o pelotão agora!'] },
+  'pel-base': { c: 'con', p: 2, cat: 'ordem', v: [() => 'Base de fogo, abre fogo no objetivo!', () => 'Base, fogo no objetivo!', () => 'Metralha o objetivo, base!'] },
+  'pel-espera': { c: 0, p: 2, cat: 'ordem', v: [() => 'Assalto, aguarda o fogo da base!', () => 'Segura o assalto! Espera a base atirar!', () => 'Ninguém sai antes da base abrir fogo!'] },
+  'pel-vai': { c: 'adv', p: 2, cat: 'ordem', v: [() => 'Base atirando! Assalto, vai!', () => 'Fogo de apoio no ar! Assaltar!', () => 'A base tá cobrindo! Pra cima!'] },
+  'pel-sem-apoio': { c: 'adv', p: 2, cat: 'ordem', v: [() => 'Sem fogo da base! Assalto, vai assim mesmo!', () => 'A base não abriu! Vamos sem ela!'] },
+  'pel-cessar': { c: 0, p: 2, cat: 'ordem', v: [() => 'Base, desloca o fogo! O assalto chegou!', () => 'Cessar fogo no objetivo! Desloca!', () => 'Base, levanta o fogo!'] },
+  'pel-ctr': { c: 'adv', p: 2, cat: 'ordem', v: [() => 'Estão presos nos postos! Reserva, contra-atacar!', () => 'Reserva, agora! Contra-ataque!'] } });
+const pelSay = (m, k, d) => { if (!m || !brainUp(m)) return null; flCb(m, (FALAS[k] && FALAS[k].cat) || 'ordem', { f: k, de: 'pelotao' }); return brainSay(m, k, d || {}); };
+const pelUp = q => (q.lid && q.men.includes(q.lid) && brainUp(q.lid) ? q.lid : q.men.find(brainUp) || null);   // the man who speaks for a squad
+const pelQuem = (P, m) => (!m ? '' : m === P.lid0 ? (insT(m.team) ? 'Cmt. ' : 'Ten. ') + lidNome(m) : lidQuem(m));
+const pelNm = P => (P.k === 'def' ? 'da defesa de ' + gName(P.w) : 'do assalto sobre ' + gName(P.op.O));
+function pelNew(k, t) {
+  const P = { id: (S.pelN = (S.pelN || 0) + 1), k, t, met: null, passo: k === 'def' ? 'manter' : 'forma', why: '', sq: [], base: [], hold: [], tar: [], cont: new Map(),
+    lid: null, lidQ: null, lid0: null, lidV: null, nt: 0, ev: 'forma', T0: S.t, H: 0, over: false };
+  brainEv('pel-forma', t, { p: P.id, k });
+  return P;
+}
+/* the next leader: the base's squad leader first, then the most veteran, the nearest to the one who fell; never the one who fell */
+function pelPick(P, fell) {
+  let b = null, bs = -1e9;
+  for (const q of P.sq) {
+    const L = pelUp(q); if (!L || L === fell) continue;
+    const base = P.base.includes(q) || q.apr === 'fix';
+    const s = (base ? 10 : 0) + vetLvl(q) * 2 - (fell ? Math.hypot(L.x - fell.x, L.z - fell.z) / 500 : 0) + hash2(q.id | 0, P.id, 1.3) * .1;
+    if (s > bs) { bs = s; b = { L, q }; }
+  }
+  return b;
+}
+function pelLead(P, s) { P.lid = s.L; P.lidQ = s.q; s.L.pelL = P; if (!P.lid0) P.lid0 = s.L; }
+/* how long a word of de takes to reach to (squad q's leader to the platoon's), or null: voice, sign, the platoon's radio */
+function pelChan(de, to, q) {
+  if (!brainUp(de) || !brainUp(to)) return null;
+  if (de === to) return 0;
+  const d = Math.hypot(de.x - to.x, de.z - to.z);
+  if (d <= BRAIN.voz) return BRAIN.voice;
+  if (d <= BRAIN.sinal && los(de, eyeY(de), to, eyeY(to))) return BRAIN.sign;
+  if (!cnOn() || q.cnL === 2) return BRAIN.radio;
+  return null;
+}
+/* an order of the contract on squad q's board and a task of the platoon's method */
+function pelTask(P, q, k, a) {
+  for (let i = P.tar.length - 1; i >= 0; i--) if (P.tar[i].q === q) P.tar.splice(i, 1);
+  const o = brainOrd(q, ord(PELK[k] || k, P.lid, a || {}));
+  const T = { id: o ? o.id : 0, k, q, apos: a && a.apos, sinal: a && a.sinal, st: 'vai' }; P.tar.push(T); return T;
+}
+const pelTk = (P, q) => P.tar.find(T => T.q === q) || null;
+function pelLog(P, s, key, at) {
+  if (!PEL.log) return;
+  gLog(P.t, 'rep', 'Pelotão ' + pelNm(P) + (P.lid ? ' (' + pelQuem(P, P.lid) + ')' : '') + ': ' + s, P.lid || at, 'pel' + P.id + key, at);
+}
+/* the word up to the general, by radio (rep goes through the command net's delay) */
+function pelRep(P, k) { const q = P.lidQ && P.lidQ.live > 0 ? P.lidQ : P.sq[0]; if (q) rep(q, 'pel', { k, p: P.id, met: P.met, passo: P.passo, n: P.cont.size, why: P.why }); }
+/* ---- the leader ---- */
+function pelCai(P, m) {
+  if (!pelOn() || P.over || P.lid !== m) return;
+  const s = pelPick(P, m), heard = !!s && (Math.hypot(s.L.x - m.x, s.L.z - m.z) <= BRAIN.voz || los(s.L, eyeY(s.L), m, bodyY(m)) || !cnOn() || s.q.cnL === 2);
+  const dt = Math.min(PEL.cap, (PEL.lead[0] + hash2(P.id, m.ai ? m.ai.i | 0 : 0, S.t | 0) * (PEL.lead[1] - PEL.lead[0])) * (heard ? 1 : PEL.far));
+  P.lid = null; P.lidQ = null; P.lidV = { de: m, t: S.t, at: S.t + dt }; P.ev = 'lider';
+  brainEv('pel-lider-caiu', P.t, { p: P.id });
+}
+function pelAssume(P) {
+  const V = P.lidV, s = pelPick(P, V.de); if (!s) { V.at = S.t + 2; return; }
+  P.lidV = null; pelLead(P, s);
+  const o = V.de === P.lid0 ? (insT(P.t) ? 'o comandante' : 'o tenente') : 'o ' + lidQuem(V.de);
+  pelSay(s.L, 'pel-assumo', { q: o.charAt(0).toUpperCase() + o.slice(1), o });
+  brainEv('pel-assume', P.t, { p: P.id, dt: Math.round((S.t - V.t) * 10) / 10 });
+  pelLog(P, pelQuem(P, V.de) + (V.de.dead ? ' morto' : ' fora de combate') + '; ' + pelQuem(P, s.L) + ' assume o pelotão em ' + gN(S.t - V.t) + ' s', 'as', s.L);
+  pelRep(P, 'assume');
+}
+killMan = (g => (m, ...r) => { const was = m.dead, v = g(m, ...r); if (!was && m.dead && m.pelL && m.pelL.lid === m) pelCai(m.pelL, m); return v; })(killMan);
+manDown = (g => (m, ...r) => { const v = g(m, ...r); if (v && m.pelL && m.pelL.lid === m) pelCai(m.pelL, m); return v; })(manDown);
+/* ---- the board: what the squads' leaders know, after their word's time ---- */
+function pelBoard(P) {
+  const L = P.lid, C = P.cont;
+  if (L) for (const q of P.sq) {
+    if (!q.bb || !q.bb.cont.size) continue;
+    const dt = pelChan(q.lid && q.men.includes(q.lid) ? q.lid : null, L, q); if (dt === null) continue;
+    for (const [k, c] of q.bb.cont) if (S.t - c.t >= dt) { const was = C.get(k); if (!was || was.t < c.t) C.set(k, { x: c.x, z: c.z, c: c.c, g: c.g, t: c.t, q }); }
+  }
+  if (C.size) for (const [k, c] of C) if (S.t - c.t > PEL.keep) C.delete(k);
+}
+/* the base is firing, as the platoon's leader hears it */
+function pelFogo(P) {
+  const L = P.lid; if (!L) return false;
+  for (const q of P.base) for (const m of q.men) if (!m.dead && S.t - (m.shotT || -99) < PEL.fogo.sync && Math.hypot(m.x - L.x, m.z - L.z) <= PEL.ouve) { P.fogoT = S.t; return true; }
+  return false;
+}
+/* ---- the assault ---- */
+function pelAtk(op) {
+  const l = opLive(op).filter(q => !q.net); if (l.length < 2) return null;
+  const P = pelNew('atk', l[0].team); P.op = op; P.sq = l; P.met = PRFIX[op.pr] ? 'flanco' : 'apoio';
+  const s = pelPick(P, null); if (s) pelLead(P, s);
+  for (const q of l) if (q.apr === 'fix') pelTask(P, q, 'base', { por: 'base de fogo sobre ' + gName(op.O), alvo: { x: op.O.x, z: op.O.z } });
+  else if (q.apr === 'man') pelTask(P, q, 'manobra', { por: 'chegar à posição de assalto sem ser visto', alvo: q.fp ? { x: q.fp.x, z: q.fp.z } : undefined });
+  pelLog(P, PELM[P.met] + ' com ' + l.length + ' esquadras', 'fm', op.O);
+  return P;
+}
+/* H-hour: the base takes its fire, the assault waits for it */
+function pelH(C, op) {
+  const l = opLive(op).filter(q => !q.net); if (l.length < 2) return;
+  const P = op.pel || (op.pel = pelAtk(op)); if (!P) return;
+  P.sq = l; P.met = PRFIX[op.pr] ? 'flanco' : 'apoio';
+  const O = op.O; let base = l.filter(q => cnOrd(q) && cnOrd(q).k === 'overwatch');   // the order given, on its way by radio or not (CN)
+  if (!base.length && !PRFIX[op.pr] && op.fp && op.fp.length) {   // apoio: the last squad fires from its forming-up place, as the old code's cover with 3 or more
+    const i = l.length - 1, q = l[i], fp = op.fp[i % op.fp.length];
+    opTake(op, q, apOrd(op, q, { k: 'overwatch', ri: op.ri, s: op.fs, x: fp.x, z: fp.z, R: 12, ax: O.x, az: O.z })); base = [q];
+  }
+  if (!base.length) return;   // nothing to fire in support: the assault as it was
+  P.base = base; P.hold = []; P.H = S.t; P.tar.length = 0;
+  for (const q of base) pelTask(P, q, 'base', { por: 'fixar ' + gName(O) + ' com fogo', alvo: { x: O.x, z: O.z }, sinal: 'fogo' });
+  const bt = P.tar.map(T => T.id), r = S.T.routes[op.ri];
+  for (const q of l) {
+    if (base.includes(q) || !cnOrd(q) || cnOrd(q).k !== 'assault') continue;
+    const L = q.men.find(brainUp); if (!L) continue;
+    q.pelA = cnOrd(q); P.hold.push(q);
+    opTake(op, q, { k: 'hold', ri: op.ri, s: clamp(sOn(op.ri, L.x, L.z), 0, r.len), x: L.x, z: L.z, R: 12, quiet: 1 });
+    pelTask(P, q, 'espera', { por: 'assaltar ' + gName(O) + ' com a base atirando', alvo: { x: O.x, z: O.z }, apos: bt, sinal: 'fogo' });
+  }
+  if (!P.hold.length) { P.passo = 'assalto'; return; }
+  P.passo = 'espera'; P.why = base.length + (base.length > 1 ? ' esquadras' : ' esquadra') + ' na base, ' + P.hold.length + ' no assalto';
+  pelSay(P.lid, 'pel-base'); pelSay(pelUp(P.hold[0]), 'pel-espera');
+  brainEv('pel-espera', P.t, { p: P.id, b: base.length, a: P.hold.length });
+  pelLog(P, 'hora H: ' + PELP.espera + ' (' + P.why + ')', 'es', O); pelRep(P, 'espera');
+}
+/* the flank angle at the objective between the base and the assault (deg) */
+function pelAng(P, op) {
+  const O = op.O, b = P.base.map(pelUp).find(Boolean), a = P.hold.map(pelUp).find(Boolean); if (!a || !b) return 0;
+  const ax = a.x - O.x, az = a.z - O.z, bx = b.x - O.x, bz = b.z - O.z, n = Math.hypot(ax, az) * Math.hypot(bx, bz) || 1;
+  return Math.round(Math.acos(clamp((ax * bx + az * bz) / n, -1, 1)) * 180 / Math.PI);
+}
+/* the assault goes: the order PR (or the old assault) gave it */
+function pelGo(P, op, fire) {
+  const ang = pelAng(P, op), dt = S.t - P.H;
+  for (const q of P.hold) {
+    if (!(q.live > 0) || q.op !== op || !q.pelA) continue;
+    if (q.cnP) { q.pelA.op = op; q.cnP.O = q.pelA; } else opTake(op, q, q.pelA);   // the hold still on its way by radio: the assault takes its place there
+    apIn(op, q); q.pelA = null;
+    const T = pelTk(P, q); if (T) { T.k = 'assalto'; T.st = 'vai'; }
+  }
+  op.T += dt; op.best = 1e9; op.bT = S.t;   // the assault's clock starts when it goes
+  P.passo = fire ? 'assalto' : 'semApoio'; P.why = fire ? 'base atirando, flanco a ' + ang + '°' : 'nenhum tiro da base em ' + Math.round(dt) + ' s';
+  pelSay(P.lid || pelUp(P.hold[0]), fire ? 'pel-vai' : 'pel-sem-apoio');
+  brainEv('pel-assalto', P.t, { p: P.id, apoio: fire ? 1 : 0, ang, dt: Math.round(dt * 10) / 10 });
+  pelLog(P, PELP[P.passo] + (fire ? ' (flanco a ' + ang + '° da base, ' + Math.round(dt) + ' s depois da hora H)' : ''), 'go', op.O); pelRep(P, P.passo);
+}
+function pelAtkThink(P, op) {
+  const B = P.base;
+  for (const T of P.tar) if (T.k === 'base') { const f = T.q.men.some(m => !m.dead && S.t - (m.shotT || -99) < PEL.fogo.sync); T.st = f ? 'fogo' : T.q.at ? 'pos' : 'vai'; }
+  if (P.passo === 'forma') { P.met = PRFIX[op.pr] ? 'flanco' : 'apoio'; P.why = PELOS[op.st] || ''; return; }
+  if (P.passo === 'espera') {
+    op.bT = S.t;   // waiting for the base is not a stall
+    if (!B.some(q => q.live > 0 && P.sq.includes(q))) return pelGo(P, op, 0);   // the base is gone
+    if (P.lid && pelFogo(P)) return pelGo(P, op, 1);
+    if (S.t - P.H > PEL.fogo.max) return pelGo(P, op, 0);
+    return;
+  }
+  if (P.passo === 'assalto' || P.passo === 'semApoio') {
+    const near = op.st === 'fight' || P.hold.some(q => { const L = pelUp(q); return !!L && hdist(L, op.O) < PEL.lift; });
+    if (!near) return;
+    P.passo = 'desloca'; P.why = 'o assalto chegou ao objetivo';
+    for (const T of P.tar) if (T.k === 'base') T.k = 'desloca';
+    pelSay(P.lid, 'pel-cessar'); brainEv('pel-desloca', P.t, { p: P.id }); pelLog(P, PELP.desloca, 'dl', op.O); pelRep(P, 'desloca');
+  }
+}
+/* ---- the defence with a reserve ---- */
+function pelDefSq(t, w) { const o = []; for (const q of S.squads) if (q.team === t && q.live > 0 && !q.state && !q.net && !q.op && q.ord && q.ord.k === 'hold' && q.ord.tw === w && q.job !== 'base') o.push(q); return o; }
+function pelRes(t, w) { for (const q of S.squads) if (q.team === t && q.job === 'base' && !q.state && !q.net && q.live >= 3 && q.ord && q.ord.res) { const L = pelUp(q); if (L && hdist(L, w) < PEL.def.near) return q; } return null; }
+function pelDefOf(q) {
+  const O = q.ord; if (!S.cq || q.op || !O || O.k !== 'hold' || !O.tw || q.job === 'base') return null;
+  const pi = gPts().indexOf(O.tw); if (pi < 0) return null;
+  const D = S.pelD || (S.pelD = new Map()), key = q.team * 1000 + pi; let P = D.get(key);
+  if (!P || P.over) {
+    const l = pelDefSq(q.team, O.tw); if (l.length < PEL.def.n) return null;
+    P = pelNew('def', q.team); P.w = O.tw; P.pi = pi; P.met = 'defesa'; P.sq = l;
+    const s = pelPick(P, null); if (s) pelLead(P, s);
+    for (const o of l) pelTask(P, o, 'manter', { por: 'segurar ' + gName(O.tw), area: { x: O.tw.x, z: O.tw.z, r: PEL.def.r } });
+    D.set(key, P); pelLog(P, PELM.defesa + ' com ' + l.length + ' postos', 'fm', O.tw);
+  }
+  return P;
+}
+function pelDefThink(P) {
+  const w = P.w, K = PEL.def;
+  if (w.hold !== P.t || P.sq.length < 1) { P.over = true; return; }
+  const res = pelRes(P.t, w);
+  if (res !== P.res) { P.res = res; if (res) pelTask(P, res, 'reserva', { por: 'contra-atacar quando o inimigo estiver fixado em ' + gName(w), apos: P.tar.filter(T => T.k === 'manter').map(T => T.id), sinal: 'fixado' }); }
+  let n = 0, x = 0, z = 0;
+  for (const c of P.cont.values()) if (S.t - c.t < K.lost && Math.hypot(c.x - w.x, c.z - w.z) < K.r) { n++; x += c.x; z += c.z; }
+  const fire = P.sq.some(q => q.men.some(m => !m.dead && S.t - (m.shotT || -99) < K.shot));
+  if (n >= K.n && fire && P.passo === 'manter' && P.lid) {
+    P.passo = 'fixado'; P.fixT = S.t; P.why = n + ' contatos a menos de ' + K.r + ' m';
+    brainEv('pel-fixado', P.t, { p: P.id, n }); pelLog(P, PELP.fixado + ' (' + P.why + ')', 'fx', w); pelRep(P, 'fixado');
+  } else if (P.passo === 'fixado' && !n && S.t - P.fixT > K.lost) { P.passo = 'manter'; P.why = ''; }
+  if (P.passo !== 'fixado' || !P.lid || !res || res.op || S.t - P.fixT < K.fix || S.t < (P.ctrT || 0)) return;
+  const own = P.sq.reduce((a, q) => a + q.live, 0) + res.live; if (own < n * K.ratio) return;
+  P.ctrT = S.t + K.every;
+  const r = genCmd(P.t, { c: 'ctr', x: x / n, z: z / n, pi: P.pi }, 'ai');
+  if (!r || !r.ok) { pelLog(P, 'pediu o contra-ataque da reserva; o general não deu (' + ((r && r.why) || '?') + ')', 'cn', w); return; }
+  P.passo = 'ctr'; P.why = own + ' homens contra ' + n + ' contatos'; const T = pelTk(P, res); if (T) { T.k = 'ctr'; T.st = 'vai'; }
+  pelSay(P.lid, 'pel-ctr'); brainEv('pel-ctr', P.t, { p: P.id, own, n });
+  pelLog(P, PELP.ctr + ' (' + P.why + ')', 'ct', { x: x / n, z: z / n }); pelRep(P, 'ctr');
+}
+/* ---- the platoon's think, from its squads' leaders' pace ---- */
+function pelThink(P, op) {
+  if (S.t < P.nt && !P.ev) return;
+  P.nt = S.t + 1 / PEL.hz[P.passo === 'espera' ? 1 : 0]; P.ev = null;
+  if (op) P.sq = opLive(op).filter(q => !q.net); else P.sq = pelDefSq(P.t, P.w);
+  if (P.lid && (!brainUp(P.lid) || !P.sq.includes(P.lidQ))) pelCai(P, P.lid);
+  if (!P.lid && !P.lidV) { const s = pelPick(P, null); if (s) pelLead(P, s); }
+  if (P.lidV) { if (S.t >= P.lidV.at) pelAssume(P); }
+  pelBoard(P);
+  if (op) pelAtkThink(P, op); else pelDefThink(P);
+}
+brainHook('lid', q => {
+  if (!pelOn()) return;
+  const op = q.op;
+  if (op) { if (op.k !== 'atk' || op.over) return; const P = op.pel || (op.pel = pelAtk(op)); if (P) pelThink(P, op); return; }
+  const P = pelDefOf(q); if (P && !P.over) pelThink(P, null);
+});
+/* the gate at H-hour, outermost of the assault; with the platoon off, an assault left waiting goes */
+OPS.atk = (g => (C, op) => {
+  const st = op.st; g(C, op);
+  if (op.over) return;
+  if (pelOn()) { if (st === 'screen' && op.st === 'go') pelH(C, op); }
+  else if (op.pel && op.pel.passo === 'espera') pelGo(op.pel, op, 0);
+})(OPS.atk);
+/* ---- what the general, the MCP and the commander's camera see ---- */
+function pelOf(q) {
+  if (q.op && q.op.pel && !q.op.over) return q.op.pel;
+  const O = q.ord, D = S.pelD; if (!D || !O || !O.tw || !S.cq) return null;
+  const P = D.get(q.team * 1000 + gPts().indexOf(O.tw)); return P && !P.over && P.sq.includes(q) ? P : null;
+}
+const pelTxt = P => (P.passo === 'forma' ? PELOS[P.op.st] || PELP.forma : PELP[P.passo] || P.passo);
+genCard = (g => (t, id) => {
+  const c = g(t, id); if (!c || !pelOn()) return c;
+  const q = S.squads.find(q => q.team === t && q.id === id && q.live > 0 && !q.net); if (!q) return c;
+  const P = pelOf(q); if (!P) return c;
+  const T = pelTk(P, q), V = P.lidV;
+  c.pel = { id: P.id, nm: P.lid ? pelQuem(P, P.lid) : '', vaga: V ? { de: pelQuem(P, V.de), falta: Math.max(0, Math.round(V.at - S.t)) } : null, met: P.met, passo: P.passo, why: P.why || '',
+    tar: T ? { k: T.k, st: T.st } : null, sq: P.sq.map(o => ({ id: o.id, tar: (pelTk(P, o) || {}).k || '' })), cont: P.cont.size };
+  const lines = ['Pelotão ' + pelNm(P) + ': ' + (V ? 'sem comandante (' + pelQuem(P, V.de) + ' caiu; o próximo assume em ' + Math.max(0, Math.round(V.at - S.t)) + ' s)' : pelQuem(P, P.lid) + ' no comando') + ' · ' + (PELM[P.met] || P.met)];
+  lines.push('Pelotão: ' + pelTxt(P) + (P.why && P.passo !== 'forma' ? ' (' + P.why + ')' : '') + (T ? '; esta esquadra: ' + (PELT[T.k] || T.k) + (T.st === 'fogo' ? ' (atirando)' : '') : ''));
+  c.decide = lines.concat(c.decide || []);
+  return c;
+})(genCard);
+if (typeof rtsBrain === 'function') rtsBrain = (g => q => {
+  const L = g(q); if (!pelOn()) return L;
+  const P = pelOf(q); if (!P) return L;
+  const T = pelTk(P, q);
+  L.push('Pelotão: ' + (P.lid ? pelQuem(P, P.lid) : 'sem comandante') + ' · ' + (PELM[P.met] || P.met || ''));
+  L.push((T ? (PELT[T.k] || T.k) + ' · ' : '') + rtsS(pelTxt(P)));
+  return L;
+})(rtsBrain);
+/* ---------- end of CEREBRO: pelotao ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

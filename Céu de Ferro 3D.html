@@ -21189,6 +21189,7 @@ function ecoInit() {
     d: lsN().map(() => ({ en: ECO.start.en, mt: ECO.start.mt, inc: { en: 0, mt: 0 }, use: { en: 0, mt: 0 }, bill: { en: 0, mt: 0 }, ba: { en: 0, mt: 0 }, pa: { en: 0, mt: 0 },
       q: [], res: {}, keep: Object.assign({}, ECO.ai.res), miss: {}, lost: {}, kn: {}, sc: null, tg: null, aiT: 1, dead: [], n0: {}, made: 0, lk: [] })) });
   if (!E.sim) return;
+  const nf = S.floats.length;   // the starting sites are built from the first second: no "… pronta" float for them (a guest trims them the same way)
   for (const t of lsN()) {
     const b = S.base[t], free = q => !E.l.some(e => e.k === 'mine' && Math.hypot(e.x - q.x, e.z - q.z) <= ECO.dep);
     const d = E.d[t], dp = E.dep.find(q => q.half === t) || E.dep.filter(free).sort((p, q) => Math.hypot(p.x - b.x, p.z - b.z) - Math.hypot(q.x - b.x, q.z - b.z))[0];   // a side with no half of its own: the free deposit nearest its base
@@ -21197,6 +21198,7 @@ function ecoInit() {
     const fab = ecoLive(t, 'fab')[0];
     for (const k in ECO.res0) { const u = ECO.unit[k]; if (u[4] && u[4] !== S.era) continue; d.res[k] = new Array(ECO.res0[k]).fill(u[3] === 'veh' && fab ? fab.id : 'hq'); }
   }
+  S.floats.length = Math.min(S.floats.length, nf);
 }
 /* the producers of a category: the HQ's slots (a barracks more for each finished supply base), the finished factories for vehicles */
 function ecoProd(t, cat) {
@@ -29917,9 +29919,11 @@ function bmrHud(t, R, y, u, ink) {
   const d = S.eco && S.eco.d[t]; if (!d || t < 0 || S.demo && !S.watch) return y;
   const n = v => Math.round(v), w = bmrView(t), s = w.spentLastMinute, inc = d.inc || { en: 0, mt: 0 }, use = d.use || { en: 0, mt: 0 };
   y += 6 * u; txt('GENERAL · SUPRIMENTOS', R, y, 11 * u, ink, 'right'); y += 15 * u;
-  txt('ENERGIA ' + n(d.en) + '  +' + n(inc.en) + ' −' + n(use.en + s.en) + '/min', R, y, 12.5 * u, d.en < 60 ? FOE : ink, 'right'); y += 15 * u;
-  txt('METAL ' + n(d.mt) + '  +' + n(inc.mt) + ' −' + n(use.mt + s.mt) + '/min', R, y, 12.5 * u, d.mt < 60 ? FOE : ink, 'right'); y += 15 * u;
-  txt((w.crates >= 0 ? 'CAIXAS ' + w.crates + ' · ' : '') + 'OBRAS −' + n(s.en) + ' E −' + n(s.mt) + ' M/min', R, y, 11 * u, ink, 'right'); y += 15 * u;
+  const out = v => (n(v) > 0 ? ' −' + n(v) : '');   // what goes out a minute, left out when nothing does (no "−0")
+  txt('ENERGIA ' + n(d.en) + '  +' + n(inc.en) + out(use.en + s.en) + '/min', R, y, 12.5 * u, d.en < 60 ? FOE : ink, 'right'); y += 15 * u;
+  txt('METAL ' + n(d.mt) + '  +' + n(inc.mt) + out(use.mt + s.mt) + '/min', R, y, 12.5 * u, d.mt < 60 ? FOE : ink, 'right'); y += 15 * u;
+  const ob = [n(s.en) > 0 && out(s.en) + ' ENERGIA', n(s.mt) > 0 && out(s.mt) + ' METAL'].filter(Boolean), obs = ob.length ? 'OBRAS' + ob.join(' ·') + '/min' : 'SEM OBRAS NO ÚLTIMO MINUTO';
+  txt((w.crates >= 0 ? 'CAIXAS ' + w.crates + ' · ' : '') + obs, R, y, 11 * u, ink, 'right'); y += 15 * u;
   return y;
 }
 /* ---------- the general's builders (CGN, não testado): why the AI's works were ordered and never built, and the fixes ----------
@@ -38891,6 +38895,19 @@ function txt(s, x, y, size, col, align, font) {
   hx.textAlign = align || 'left'; hx.fillStyle = 'rgba(8,12,13,.6)'; hx.fillText(s, x + 1, y + 1);
   hx.fillStyle = col; hx.fillText(s, x, y);
 }
+/* labels over the world that would sit on one another (cf-pol-hud): drawHud empties HTAG.r each frame; tagTxt writes a label only where no
+   label written by it before in the frame is, so the first asked keeps its place (the lock, then the nearest) and a later one on it is left
+   out, or with up > 0 is moved up a line at a time, at most up lines, before it is left out (the floats, which are news) */
+const HTAG = { r: [] };
+function tagTxt(s, x, y, size, col, align, up) {
+  hx.font = size + "px 'Share Tech Mono', ui-monospace, monospace";
+  const w = hx.measureText(s).width + 4, h = size + 2, x0 = (align === 'center' ? x - w / 2 : align === 'right' ? x - w : x) - 2;
+  for (let i = 0; i <= (up || 0); i++, y -= h) {
+    if (HTAG.r.some(r => x0 < r[0] + r[2] && x0 + w > r[0] && y - 1 < r[1] + r[3] && y - 1 + h > r[1])) continue;
+    HTAG.r.push([x0, y - 1, w, h]); txt(s, x, y, size, col, align); return true;
+  }
+  return false;
+}
 function bar(x, y, w, h, k, col) { hx.fillStyle = 'rgba(8,12,13,.5)'; hx.fillRect(x, y, w, h); hx.fillStyle = col; hx.fillRect(x, y, w * clamp(k, 0, 1), h); }
 function tri(x, y, a, s, col) { hx.save(); hx.translate(x, y); hx.rotate(a); hx.beginPath(); hx.moveTo(s, 0); hx.lineTo(-s * .7, -s * .7); hx.lineTo(-s * .7, s * .7); hx.closePath(); hx.fillStyle = col; hx.fill(); hx.restore(); }
 function bracket(x, y, r, col, diamond) {
@@ -39873,7 +39890,7 @@ function hudMsl(P, u, ink, acc, disp, blink, y) {
 }
 
 function drawHud() {
-  hx.setTransform(dpr, 0, 0, dpr, 0, 0); hx.clearRect(0, 0, cw, ch);
+  hx.setTransform(dpr, 0, 0, dpr, 0, 0); hx.clearRect(0, 0, cw, ch); HTAG.r.length = 0;
   if (playMode !== 'play' || !S.my) return;
   const P = S.my, u = clamp(cw / 1000, .62, 1), ink = S.modern ? '#c4f1f7' : '#f3ead2', acc = S.modern ? '#63d2e6' : '#e6b53a';
   const disp = S.modern ? "'Chakra Petch', sans-serif" : "'Saira Stencil One', Impact, sans-serif";
@@ -39899,14 +39916,14 @@ function drawHud() {
     txt('SEM LINHA DE VISADA', cw / 2, ch * .5 + 60 * u, 12 * u, amb, 'center');
   }
   if (!P.dead) dmgPanel(P, u, ink, acc, seat, blink);
-  const cut = sightClip(seat);
+  const cut = sightClip(seat), far = [];   // far: the enemy aircraft's range labels, written after the loop, the lock and then the nearest first
   for (const q of S.planes) {
     if (q === P || q.dead || smoked(cp.x, cp.y, cp.z, q.x, q.y, q.z)) continue;
     const s = proj(q.x, q.y, q.z), rng = dist(q, P), foe = q.team !== me;
     if (onScr(s)) {
       if (foe) {
         const lock = q === S.lockAir; bracket(s.x, s.y, lock ? 20 : 13, FOE);
-        txt((lock ? lockName + ' ' : '') + (rng / 1000).toFixed(1) + ' km', s.x, s.y + (lock ? 23 : 16), 11 * u, FOE, 'center');
+        far.push([lock ? -1 : rng, (lock ? lockName + ' ' : '') + (rng / 1000).toFixed(1) + ' km', s.x, s.y + (lock ? 23 : 16)]);
       } else tri(s.x, s.y - 16, Math.PI / 2, 6, FRIEND);
       if (q.pid) txt(q.name, s.x, s.y - 26 - 12 * u, 12 * u, foe ? FOE : FRIEND, 'center');
     } else if (foe) {
@@ -39915,6 +39932,7 @@ function drawHud() {
       tri(cw / 2 + dx * k, ch / 2 + dy * k, Math.atan2(dy, dx), 9, FOE);
     }
   }
+  far.sort((a, b) => a[0] - b[0]); for (const l of far) tagTxt(l[1], l[2], l[3], 11 * u, FOE, 'center');
   for (const g of S.units) {
     if (g === P) continue;
     const s = proj(g.x, g.y + 5, g.z), foe = g.team !== me;
@@ -39953,7 +39971,7 @@ function drawHud() {
     if (b.prog < 1 && own && d < 400) bar(s.x - 30 * u, s.y + 24 * u, 60 * u, 5 * u, b.prog, acc);
   }
   for (const c of S.chg) { const s = proj(c.x, c.y + 2, c.z); if (s.front) txt('CARGA ' + Math.max(0, Math.ceil(c.T - S.t)) + ' s', s.x, s.y, 13 * u, blink ? FOE : acc, 'center'); }
-  for (const f of S.floats) { const s = proj(f.x, f.y, f.z); if (s.front) txt(f.text, s.x, s.y, 13 * u, acc, 'center'); }
+  for (const f of S.floats) { const s = proj(f.x, f.y, f.z); if (s.front) tagTxt(f.text, s.x, s.y, 13 * u, acc, 'center', 3); }
   const tm = S.threat && P.kind ? S.threat.m : null, lm = S.lockAir && S.lockAir.gnd ? S.lockAir : null, amber = '#ffd24a';
   for (const m of S.missiles) {   // ground-attack missiles: the one coming for me, the one my launcher holds, and for a launcher any within its reach
     if (!m.gnd || m.team === me || !(m === tm || m === lm || (P.kind === 'aa' && S.modern && dist(m, P) < P.arms[0].d.mrng))) continue;

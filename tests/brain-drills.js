@@ -89,18 +89,18 @@ console.log('-- o instrumento --');
   /* the review from events: a match header with brain, the meters of two sides, a brain event, and a side's view of an unfinished match */
   const C = H.load({ ana: true }), $ = C.$, D0 = $('medNew')(), D1 = $('medNew')();
   D0.ct = 600; D0.ex = 300; D0.nw = 6; D0.inc = [10, 5, 5]; D0.rc[5] = 3; D0.rf[12] = 3; D0.rxN = [3, 0]; D0.ld = [2, 4, 2, 1, 2]; D1.ct = 100;
-  const cb = (s, D, t) => Object.assign({ k: 'cb', t, s, c: 'm' }, JSON.parse(JSON.stringify(D)));
-  const ev = [{ k: 'hdr', v: 2, n: 2, t: 0, era, fac: ['A', 'B'], tk: [100, 100], tk0: 100, doc: ['', ''], brain: 0 }, cb(0, $('medNew')(), 60), cb(0, D0, 120), cb(1, D1, 120), { k: 'cb', t: 90, s: 1, c: 'rend' }];
+  const cb = (s, D, t) => Object.assign({ k: 'cb', t, s, st: 'med' }, JSON.parse(JSON.stringify(D)));
+  const ev = [{ k: 'hdr', v: 2, n: 2, t: 0, era, fac: ['A', 'B'], tk: [100, 100], tk0: 100, doc: ['', ''], brain: 0 }, cb(0, $('medNew')(), 60), cb(0, D0, 120), cb(1, D1, 120), { k: 'cb', t: 90, s: 1, st: 'rend' }];
   const R = C.anaReport(ev), B0 = R.brain && R.brain.side[0], R1 = C.anaReport(ev, 1);
   ok(R.brain && R.brain.on === 0 && B0 && B0.sum.exSh === .5 && Math.abs(B0.sum.rxC - .55) < 1e-9 && B0.sum.ldT === 2 && B0.sum.ldGo === .5 && R.brain.side[1].ev.rend === 1,
-    'a revisão lê o último cb m de cada lado (exposto ' + pc(B0 && B0.sum.exSh) + ', abrigo em ' + fmt(B0 && B0.sum.rxC) + ' s, sucessão ' + fmt(B0 && B0.sum.ldT) + ' s) e conta os outros cb por tipo');
+    'a revisão lê o último cb med de cada lado (exposto ' + pc(B0 && B0.sum.exSh) + ', abrigo em ' + fmt(B0 && B0.sum.rxC) + ' s, sucessão ' + fmt(B0 && B0.sum.ldT) + ' s) e conta os outros cb por tipo');
   ok(R1.brain && !R1.brain.side[0] && !!R1.brain.side[1], 'a visão de um lado numa partida em andamento esconde os números do outro');
   const old = C.anaReport(ev.filter(e => e.k !== 'cb').map(e => Object.assign({}, e, { brain: undefined })));
   ok(old.brain === null, 'uma partida de antes da medição não tem seção Cérebro');
   const T = H.load({ seed: 3, ana: true }); T.$('MED').ev = 5; const S = T.watch(era, { min: 2 }); T.run(12);   // the meters every 5 s instead of 60, for a short look
-  const cbs = T.$('ANA').ev.filter(e => e.k === 'cb' && e.c === 'm'), hd = T.$('ANA').ev.find(e => e.k === 'hdr');
-  ok(hd && (hd.brain === 0 || hd.brain === 1) && cbs.length >= 2 && cbs.every(e => e.s >= 0 && Array.isArray(e.inc)), 'numa partida IA × IA com a analytics: o cabeçalho leva brain (' + (hd && hd.brain) + ') e saem eventos cb m por lado (' + cbs.length + ' em ' + Math.round(S.t) + ' s)');
+  const cbs = T.$('ANA').ev.filter(e => e.k === 'cb' && e.st === 'med'), hd = T.$('ANA').ev.find(e => e.k === 'hdr');
+  ok(hd && (hd.brain === 0 || hd.brain === 1) && cbs.length >= 2 && cbs.every(e => e.s >= 0 && Array.isArray(e.inc)), 'numa partida IA × IA com a analytics: o cabeçalho leva brain (' + (hd && hd.brain) + ') e saem eventos cb med por lado (' + cbs.length + ' em ' + Math.round(S.t) + ' s)');
   T.$('medCb')('pris', 0, { n: 1 });
-  ok(T.$('ANA').ev.some(e => e.k === 'cb' && e.c === 'pris' && e.s === 0 && e.n === 1), 'medCb: o evento de um pacote do cérebro entra na analytics'); }
+  ok(T.$('ANA').ev.some(e => e.k === 'cb' && e.st === 'pris' && e.s === 0 && e.n === 1), 'medCb: o evento de um pacote do cérebro entra na analytics'); }
 function MED60(F) { return F.$('MED').lead; }
 H.done();

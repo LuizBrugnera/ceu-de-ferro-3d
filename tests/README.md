@@ -7,6 +7,7 @@ node tests/sim-split.js     # a parte da simulação não chama nada declarado s
 node tests/sides3-start.js  # três lados começam e rodam: a demonstração do hangar com N 3 (nenhuma aeronave para os Insurgentes, que não têm aviação) e o genVM de cada lado (um total por lado; com três lados o anfitrião online travava no t = 0) em moderno com 3 e 2 lados e 1944 (SECS=6)
 node tests/smoke-sight.js   # a IA e a fumaça: tiros no alvo escondido, memória, retomada (TRIALS=12)
 node tests/perception.js    # percepção da IA: campo de visão, tempo para notar, partilha, mira; a escada (detectado, reconhecido, identificado), tempo de reação, primeiro tiro e acertos por distância, e a suíte de honestidade: uma batalha só de IA nas duas épocas em que nenhum tiro vai a alvo não percebido e nenhum míssil guiado a alvo não identificado (SECS=90)
+node tests/brain-honesty.js # cérebro P7 (honestidade): nenhuma seção CEREBRO lê S.men/S.units/S.bombs/S.planes fora das funções de percepção; um exercício com Proxy em S conta zero leituras dessas listas no cérebro; q.fd e A.fd pela crença, a emboscada conta o que vê, a granada só se vista, ouvida ou gritada, o tiro ouvido com erro de rumo e distância (HON.on 0 volta à verdade)
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento
 node tests/squads.js        # pelotões: caminhão, desembarque, comportamento, reação da outra IA
 node tests/pop-push.js      # o lado no teto de população ainda guarnece o assalto com uma esquadra de um posto dispensável (issue #35)

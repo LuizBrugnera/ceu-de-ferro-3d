@@ -24799,17 +24799,54 @@ fortMen = (g => dt => {
   for (const m of S.men) {
     const f = m.fc;
     if (m.pa && (m.dead || m.in || !f || f.gone || f.gm !== m)) postFree(m);
-    const w = m.in || m.dead ? null : m.tw && !m.tw.gone ? m.tw : fortsAt(m.x, m.z).find(q => q.k === 5 && q.prog >= 1 && !q.gone && q.team === m.team);
-    if (w) {   // up the ladder from the band around it, down once it steps off the platform
-      const f = w, o = f.o, dx = m.x - o.x, dz = m.z - o.z, lx = dx * o.c - dz * o.s, lz = dx * o.s + dz * o.c, up = m.tw === f, e = up ? 0 : f.F.ladder;
-      if (Math.abs(lx) < o.hw + e && Math.abs(lz) < o.hd + e) {
-        if (!up) { const k = .8, cx = clamp(lx, -o.hw * k, o.hw * k), cz = clamp(lz, -o.hd * k, o.hd * k); m.x = o.x + cx * o.c + cz * o.s; m.z = o.z - cx * o.s + cz * o.c; }
-        m.y = manY(m.x, m.z) + f.F.eye; m.tw = f; continue;
-      }
-    }
-    if (m.tw) { m.tw = null; m.y = manY(m.x, m.z); }
+    twrMan(m);
   }
 })(fortMen);
+/* the tower and one soldier, each step (cf-obras-sair). Up the ladder from the band of ladder m around it; down when he steps off the
+   platform or the player presses E (twrKey), set on the ground at its foot. m.twOff: the tower he came down from, which does not lift
+   him again until he has left its band (before, a soldier who stepped off stood in the band and was lifted back the next step: nobody
+   got off). An AI soldier climbs only when where he is going lies on the platform (the tower's sniper), not when he walks past it; a
+   copy of another client's soldier (m.net) is up while its owner has it on the platform, which its position says */
+const twrIn = (f, m, e) => { const o = f.o, dx = m.x - o.x, dz = m.z - o.z; return Math.abs(dx * o.c - dz * o.s) < o.hw + e && Math.abs(dx * o.s + dz * o.c) < o.hd + e; };
+function twrDown(m, f) {
+  if (!twrIn(f, m, f.F.ladder)) { m.tw = null; m.y = manY(m.x, m.z); return; }   // taken far from it at once (a teleport, a respawn): down where he is
+  const o = f.o, dx = m.x - o.x, dz = m.z - o.z; let lx = dx * o.c - dz * o.s, lz = dx * o.s + dz * o.c;
+  if (Math.hypot(lx, lz) < .2) { const bx = -Math.cos(f.a), bz = Math.sin(f.a); lx = bx * o.c - bz * o.s; lz = bx * o.s + bz * o.c; }   // from the middle: down behind it
+  if (Math.abs(lx) / o.hw > Math.abs(lz) / o.hd) { lx = Math.sign(lx) * (o.hw + TWR.foot); lz = clamp(lz, -o.hd, o.hd); }
+  else { lz = Math.sign(lz) * (o.hd + TWR.foot); lx = clamp(lx, -o.hw, o.hw); }
+  const p = clearOf(o.x + lx * o.c + lz * o.s, o.z - lx * o.s + lz * o.c, MAN.r * MAN.sc, {});
+  if (!m.net) { m.x = p.x; m.z = p.z; }
+  m.tw = null; m.twOff = f; m.y = manY(m.x, m.z);
+}
+const TWR = { foot: .7 };
+function twrMan(m) {
+  const tw = m.tw && !m.tw.gone && m.tw.prog >= 1 ? m.tw : null;
+  if (m.in || m.dead) { if (m.tw) { m.tw = null; m.y = manY(m.x, m.z); } m.twOff = null; return; }
+  if (m.twOff && (m.twOff.gone || !twrIn(m.twOff, m, m.twOff.F.ladder + .5))) m.twOff = null;
+  if (tw) {   // up: stays while on the platform
+    if (twrIn(tw, m, 0)) { m.y = manY(m.x, m.z) + tw.F.eye; return; }
+    twrDown(m, tw); return;
+  }
+  if (m.tw) { m.tw = null; m.y = manY(m.x, m.z); }
+  const A = m === S.my || m.pid || m.net ? null : m.ai, f = fortsAt(m.x, m.z).find(q => q.k === 5 && q.prog >= 1 && !q.gone && q.team === m.team && (m.net || q !== m.twOff) && twrIn(q, m, m.net ? 0 : q.F.ladder));
+  if (!f || (A && !twrIn(f, { x: A.gx, z: A.gz }, .5))) return;
+  twrUp(m, f);
+}
+function twrUp(m, f) {
+  const o = f.o, k = .8, dx = m.x - o.x, dz = m.z - o.z, cx = clamp(dx * o.c - dz * o.s, -o.hw * k, o.hw * k), cz = clamp(dx * o.s + dz * o.c, -o.hd * k, o.hd * k);
+  if (!m.net) { m.x = o.x + cx * o.c + cz * o.s; m.z = o.z - cx * o.s + cz * o.c; }
+  m.y = manY(m.x, m.z) + f.F.eye; m.tw = f; m.twOff = null;
+}
+/* the player: E on the platform comes down; E at its foot (in the band, after coming down) goes up again. Its own edge of E, since
+   trnKeys keeps the one it boards vehicles with (S.near: a vehicle at hand takes E first) */
+function twrKey() {
+  const P = S.my, e = !!S.input.yawR, hit = e && !S.twK; S.twK = e;
+  if (!hit || !P || !P.man || P.dead || P.in || S.near || S.demo) return;
+  if (P.tw && !P.tw.gone) { twrDown(P, P.tw); return; }
+  const f = fortsAt(P.x, P.z).find(q => q.k === 5 && q.prog >= 1 && !q.gone && q.team === P.team && twrIn(q, P, q.F.ladder + .5));
+  if (f) twrUp(P, f);
+}
+trnKeys = (g => function () { g(); twrKey(); })(trnKeys);
 function postMan(f) {
   const g = f.gm;
   if (g && (g.dead || g.in || g.fc !== f || g.team !== f.team)) { if (g.pa) postFree(g); f.gm = null; }
@@ -42653,7 +42690,8 @@ hudFort = (g => (P, u, ink, acc, disp) => {
 function sapHud(P, u, ink, acc, dim) {
   const f = P.fc && P.fc.k >= 3 && P.fc.prog >= 1 ? P.fc : null;
   if (f && f.gm === P) txt('OPERANDO: ' + postGun(f).name.toUpperCase(), cw / 2, ch * .72, 12 * u, acc, 'center');
-  else if (f && f.k === 5 && P.tw) txt('NA TORRE: OLHO A ' + Math.round(f.F.eye + STANCE[P.st].eye * MAN.sc) + ' m', cw / 2, ch * .72, 12 * u, acc, 'center');
+  else if (P.tw && !P.tw.gone) txt('NA TORRE: OLHO A ' + Math.round(P.tw.F.eye + STANCE[P.st].eye * MAN.sc) + ' m  ·  E: DESCER', cw / 2, ch * .72, 12 * u, acc, 'center');
+  else if (P.twOff && !P.twOff.gone && !S.near) txt('E: SUBIR NA TORRE', cw / 2, ch * .72, 12 * u, dim, 'center');
   if (!P.def.sap) return;
   const L = S.ml;
   if (L) { txt('DESARMANDO A MINA', cw / 2, ch * .66, 13 * u, acc, 'center'); bar(cw / 2 - 70 * u, ch * .66 + 18 * u, 140 * u, 6 * u, 1 - (L.T - S.t) / SAP.clear, acc); return; }

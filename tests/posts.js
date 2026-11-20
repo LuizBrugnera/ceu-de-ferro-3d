@@ -69,6 +69,20 @@ for (const era of ['ww2', 'modern']) {
   const t0 = tw.garr.men[0]; t0.x = tw.x + 30; C.run(.3); const down = !t0.tw && Math.abs(t0.y - $('manY')(t0.x, t0.z)) < .01;
   t0.x = tw.x + tw.o.hw + 1.5; t0.z = tw.z; C.run(.3);
   ok(down && t0.tw === tw && Math.abs(t0.x - tw.x) <= tw.o.hw, era + ': stepped off the platform he is on the ground; from beside the tower he climbs back onto it');
+  {   // cf-obras-sair: the player could not get off the tower (stepped off, he stood in the ladder's band and was lifted back the next step)
+    const P = C.addMan($('INF')[era][0][0], 0, tw.x + tw.o.hd + 1.5, tw.z, 0), gy = () => $('manY')(P.x, P.z), e = $('twrIn');
+    P.ai = null; S.my = P; P.me = true; S.aim = { h: 0, p: 0, d: { x: 1, y: 0, z: 0 } }; S.input = {}; C.run(.1);
+    const up0 = P.tw === tw && P.y > gy() + POSTS.twr.eye - .01;
+    P.x = tw.x + tw.o.hd + .2; C.run(1);
+    const off = !P.tw && Math.abs(P.y - gy()) < .01 && !e(tw, P, 0) && hd(P, tw) < tw.o.r + POSTS.twr.ladder;
+    S.input.yawR = true; C.run(1 / 60); const upE = P.tw === tw; S.input.yawR = false; C.run(.2);
+    S.input.yawR = true; C.run(1 / 60); S.input.yawR = false; C.run(1);
+    const offE = !P.tw && Math.abs(P.y - gy()) < .01 && !e(tw, P, 0) && hd(P, tw) < tw.o.r + POSTS.twr.ladder;
+    ok(up0 && off && upE && offE, era + ': the player at the tower\'s foot climbs onto it; walking off the platform he is on the ground at its foot and stays there; at its foot E takes him up and on it E brings him down');
+    const W = C.addMan($('INF')[era][0][0], 0, tw.x - tw.o.hd - 1, tw.z, 0); W.ai = { gx: tw.x - 60, gz: tw.z }; $('twrMan')(W);
+    ok(!W.tw, era + ': an AI soldier walking past the tower (going elsewhere) is not lifted onto it');
+    S.my = null; P.x += 40; W.x -= 40; W.ai = null; C.run(.1);
+  }
 }
 
 console.log('-- an AI gunner at work --');

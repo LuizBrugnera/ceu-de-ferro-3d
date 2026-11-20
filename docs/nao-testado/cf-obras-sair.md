@@ -1,6 +1,6 @@
 # Obras: entrar, usar e sair (torre de sniper e revisão de todas) — não testado no jogo
 
-Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem como sair dela, revise as outras contruções" e "mesmo em lugares que da pra construir, aparece q estou em cima de uma estrada".
+Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem como sair dela, revise as outras contruções" e "mesmo em lugares que da pra construir, aparece q estou em cima de uma estrada" (PR #163); depois, "SACOS DE AREIA E ALGUMAS CONSTRUÇÕES ESTÃO BRANCAS" (segundo PR).
 
 ## O que mudou
 
@@ -15,6 +15,8 @@ Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem
 - **Anel de muros do perímetro** (HESCO, T-wall e os de 1944, #159; `enpWay`, `segBox`, `ringsW`). O anel só abre atrás e onde a estrada passa, e a IA desvia uma parede por vez, então quem estava dentro e precisava ir para o lado fechado ficava preso atrás da parede da frente. Agora, enquanto a linha reta até o destino cruza uma peça do anel, quem está dentro vai para a abertura de trás (5 m para fora), e quem está fora contorna o anel. Vale também para os carros. Cada peça de um perímetro guarda o anel dela (`f.ring`, posto em `enpStart`).
 - **Obra em cima de veículo** (`unitOn`). Nenhuma obra e nenhuma base de suprimento começa onde há um veículo parado (motivo `unit`, "Há um veículo aí"). Antes, um caminhão sob um muro, uma trincheira ou uma base ficava preso, empurrado para a frente e para trás.
 - **Soldado na água** (`stepMan`). Quem é deixado na água (ao sair de um blindado que boia, ou jogado de um destruído no rio) ficava congelado, porque todo passo na água era recusado. Agora ele pode andar dentro da água desde que não vá para um ponto mais fundo, e assim sai pela margem.
+
+- **Sacos de areia, ninho, posto anticarro (ouriços) e minas brancos** (`packUnit`, `packNorm`). Causa: com o pack de modelos, esses props são um único mesh instanciado, montado juntando as cores de vértice do modelo. As cores do pack vêm em bytes normalizados (`Uint8Array`, 0–255), e no three.js r128 da página `BufferAttribute.getX` não desnormaliza. Assim, a cor lida era 144 em vez de 0,56: até 255 vezes branco. Agora o valor é dividido pelo máximo do tipo. Conferido no Chrome: antes, `getX(0)` dava 144; depois, as cores de `packUnit` ficam entre 0,34 e 0,57 em média e no máximo. Sem o pack (`?pack=0`), as obras são caixas com cores fixas e nada mudou nelas. Os muros HESCO/T-wall (#159) e as paredes (#126) já usavam cores fixas: concreto e HESCO são claros de propósito (cinza e areia), não brancos.
 
 ## Lista revisada (entrar, usar e sair; jogador e IA, a pé e online)
 
@@ -32,6 +34,7 @@ Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem
 | Base de suprimento | OK a pé. Veículo: veja "Obra em cima de veículo". |
 | HESCO, T-wall e base avançada (perímetro) | **Bug na IA, consertado** (`enpWay`). O jogador sai pela traseira. |
 | Prédios com paredes grossas (#126) | OK: o soldado é mais largo que a parede mais grossa e é empurrado para fora; portas e janelas de 2 m ou mais. Não conferi se todo prédio tem porta. |
+| Cor das obras (com o pack) | **Bug, consertado**: sacos de areia, ninho, ouriços e minas saíam brancos (`packUnit`). |
 | Modo de construir (N) | OK: botão direito cancela, e o N passa por todas as obras até fechar. **Bug "em cima da estrada" consertado.** |
 
 ## O que foi testado
@@ -42,9 +45,11 @@ Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem
   - a checagem nova de obra em cima de veículo: recusada com `unit`.
 - A linha antiga `FORT.K.length === 11` falhava desde o #159, que trouxe 3 tipos novos de obra. Virou `>= 11`.
 - Smoke: o servidor sobe numa porta local, a página carrega no Chrome sem erro no console e as funções novas existem.
+- Cor do pack, no Chrome (só por `eval`, sem partida): `packUnit` de `p_sandbags`, `p_nest`, `p_hedgehog` e `p_mine` com cores de 0 a 1.
 
 ## O que NÃO foi testado
 
+- As obras com a cor nova não foram vistas numa partida (não tirei print delas na cena).
 - Nada foi jogado no navegador. Ninguém apertou E na torre, viu as dicas na tela ou desceu da torre de verdade.
 - A saída do anel (`enpWay`) não foi testada em nenhum caso: nem esquadra dentro de um perímetro mandada para a frente, nem carro contornando um anel, nem o custo por quadro (é chamada em todo `wayTo`, com descarte rápido por distância).
 - `postGoal`: um construtor ou sapador que passa pelo posto e larga a arma. Só a guarnição foi coberta, pelo teste antigo do posto anticarro contra o tanque.
@@ -70,3 +75,4 @@ Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem
 5. Partida IA × IA moderna com perímetros (camada Engenharia da Visão de General): depois que o anel fica pronto, mandar a esquadra que segura o ponto atacar para o lado do anel virado para a ameaça; ela deve sair pela traseira e contornar, sem ficar parada atrás da parede.
 6. Ninho de metralhadora construído pela IA: o construtor não deve ficar preso à arma quando a esquadra dele recebe outra ordem.
 7. Blindado anfíbio moderno (LAV-25, BTR) parado no meio do rio: sair com E e andar até a margem.
+8. Com o pack ligado (padrão) e com `?pack=0`: construir sacos de areia, ninho de metralhadora e posto anticarro e armar uma mina; todos com cor de areia, terra ou metal, nenhum branco.

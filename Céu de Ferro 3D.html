@@ -33909,6 +33909,454 @@ if (typeof rtsBrain === 'function') rtsBrain = (g => q => {
   return L;
 })(rtsBrain);
 /* ---------- end of CEREBRO: pelotao ---------- */
+/* ---------- CEREBRO: defesa (DFP, cf-defesa-posicoes; NÃO TESTADO, see docs/nao-testado/cf-defesa-posicoes.md) ----------
+   The captain: "na defesa ... não é legal todos ficarem dentro do ponto um em cima do outro, ainda mais para tanques, eles deveriam pegar
+   posições estratégicas". Before this, every squad that held a point took its places by itself (ptPts: the same windows and the same ring
+   toward the threat for each squad), so two or three squads stacked on the same spots, and a tank on defence stayed on its road in the point.
+   Here a side keeps one DEFENCE PLAN per place it holds (a conquest point, or a town without the conquest; an economy site's guard, a supply
+   base's guard and a person's "defender" on open ground get a small one, DFP.site.r m), made only from what the side knows:
+   - the threat: ptThreat (the side's known enemy within 900 m, else the nearest linked point it does not hold, else the enemy's base);
+   - the approaches (dfpAps): where the roads (the main axes and the network's edges) cross the place's circle, each with its kill zone
+     DFP.ap.kz m out along the road; weighted by the road's class, how much it faces the threat, and the tactical map (M1: choke points k,
+     enemy traffic t) there; DFP.ap.n at most, merged within DFP.ap.merge rad; with no road toward the threat, the open ground that way;
+   - the posts: two for each approach, one each side of the road (DFP.post.lat m across, inside the circle), their sectors crossing on the
+     kill zone (crossfire on the entries); each scored by its line of sight to the kill zone, cover (coverAt, a house or a work within reach),
+     the concealment layer (o) and the enemy's sight (v), off the road and apart from the others;
+   - a watch (vigia): DFP.vig.out m beyond the circle toward the threat, the best hidden place (hideAt);
+   - a reserve: DFP.res.back of the radius behind the middle, away from the threat, in a building's ground floor or the best cover;
+   - the armour's places (dfpTkMake, only once a tank is sent): hull down (the turret sees the kill zone, the hull is hidden from an enemy's
+     eye there: a crest, a fold, a wall), never in the middle (DFP.tk.mid m), DFP.tk.apart m apart, each with an alternate DFP.tk.alt m off;
+     and the AA's: behind the middle, open sky (no wood, no building over it), the higher the better.
+   The squads holding a place share it (dfpPts, a hook on ptPts): by id, the first two take the main approach's two posts (one each: their
+   fires cross), the third the reserve, then the second approach (split in its two posts), the third approach, the reserve again. A lone
+   squad splits in two teams on the main approach's two posts. The first squad of DFP.vig.min men or more sends its last two to the watch.
+   Each man's place is a window facing the kill zone, a work's place (trenches, sandbags, the HESCO of cf-engenharia-pontos: S.forts), a cover
+   point of P2's registry (tpsPts) that covers him crouched from the kill zone, or a line across the sector DFP.post.sp m apart; never within
+   DFP.post.gap m of another place of the plan; the men with anti-tank weapons take the places nearest the road. At rest a man watches his
+   sector (scanDir). All but the watch are inside the circle: the capture counts the weight inside (cqStep), so they all hold the point.
+   The plan is made again when the threat's bearing moves more than DFP.rethr rad (the side learned of an enemy elsewhere), or it is older
+   than DFP.keep s and the threat moved at all; a squad whose places came from an older plan, or whose share changed (a squad more or less
+   at the place), takes new ones (q.pts dropped). Nobody runs after the enemy: the posts keep the hold order they had (the dpol policy and the
+   QRF are the threat board's, untouched), the tanks drive only between their two places.
+   Tanks and light armour (lav): the general sends up to DFP.tk.n to a threatened point (its known enemy within DFP.tk.near m) through
+   genCmd dpos k tank (the AI's own decision is a command, as every other); each goes by the tactical trip (M5's m5Go) to the road nearest its
+   place, then across to it, and holds there (u.ai.dfp), its brain fighting as ever; DFP.tk.scoot s after it first fires it moves to its
+   alternate (shoot and scoot), and back after the next. It goes home (m5Home) when the point falls, the AI's tank has seen no threat there for
+   DFP.tk.calm s, or it is hurt below DFP.tk.hp. One AA vehicle of the side near the point takes the AA place the same way.
+   The person and the MCP: genCmd dpos { pi, k: auto (default: the plan made again now) | off (the old places, as before this section) | on |
+   tank (n 1-3 tanks there) | tkoff (send them home) }, and dpos { pi, id: a squad, x, z, a? } puts that squad's post where they say (its
+   sector the threat's way, or a rad, atan2(dz, dx)); the question dfp (gask) answers every plan of the side. The general's log has each plan
+   and each tank sent; the general's view draws the posts and their sectors, the watch, the reserve and the tanks' places (layer dfp), and
+   the commander's camera says each squad's post (rtsBrain).
+   Only the host (or solo) plans or moves anything. What the side knows only (ptThreat: C.known; the tactical map); the vehicles it moves are
+   its own. No random number is drawn here. DFP.on 0: every post as before this section */
+const DFP = { on: 1, dt: 2, rethr: .6, keep: 90, tkEvery: 8,
+  ap: { n: 3, kz: 160, merge: .45, open: .9 },
+  post: { lat: [45, 75, 105], dep: [.78, .62], max: .92, sp: 5, gap: 3.2, bld: 28, wins: 3, snap: 24, sw: .55, apart: 22, fort: 35 },
+  vig: { out: [80, 200], hide: 60, men: 2, min: 5 },
+  res: { back: .3, sp: 3.5 },
+  tk: { n: 2, pts: 3, reach: 1800, near: 1500, apart: 60, min: 30, alt: [45, 90], mid: 55, scoot: 9, hp: .4, calm: 150, hull: 1.1, tur: 2.6, eye: 2.4,
+    rad: [.55, .8, 1.05, 1.3], ang: [0, .45, -.45, .9, -.9, 1.35, -1.35], bld: 4, kinds: { tank: 1, lav: 1 } },
+  aa: { back: [.25, .45], ang: [0, .6, -.6] },
+  site: { r: 70 } };
+Object.assign(GEN.cn, { dpos: 'posições de defesa' });
+Object.assign(GEN.no, { tank: 'Nenhum carro de combate livre perto do ponto', far: 'Longe demais do ponto' });
+const dfpOn = () => !!DFP.on && (typeof BRAIN === 'undefined' || !!BRAIN.on);
+const dfpSim = () => !S.net || !!S.host;
+const dfpCell = (M, x, z) => clamp((z + S.HW) / M.c | 0, 0, M.nz - 1) * M.nx + clamp(x / M.c | 0, 0, M.nx - 1);
+const dfpTm = t => { const C = S.cmd && S.cmd[t], M = C && C.tm; return M && M.o && M.v ? M : null; };
+const DFC = { c: 0, p: 0, x: 0, z: 0, all: false };
+/* the key of the place order O holds (q: the squad, for a person's "defender" on open ground), '' when it is no place of a plan */
+function dfpKeyOf(t, O, q) {
+  if (!O || O.k !== 'hold' || O.x === undefined || O.res) return '';
+  const P = O.tw && typeof O.tw === 'object' && O.tw.r ? O.tw : null;
+  if (P) { if (Math.hypot(O.x - P.x, O.z - P.z) >= P.r) return ''; const i = S.cq ? S.cq.p.indexOf(P) : -1; return t + (i >= 0 ? ':p' + i : ':w' + Math.round(P.x) + ',' + Math.round(P.z)); }
+  if (O.es) return O.es.dead ? '' : t + ':e' + O.es.id;
+  if (O.b) return O.b.dead ? '' : t + ':b' + O.b.id;
+  if (q && q.op && q.op.k === 'usr' && q.op.o === 'hold') return t + ':u' + Math.round(O.x / 10) + ',' + Math.round(O.z / 10);
+  return '';
+}
+/* the place of a conquest point (or a town) for side t */
+function dfpOfPt(t, P) {
+  const i = S.cq ? S.cq.p.indexOf(P) : -1;
+  return { key: t + (i >= 0 ? ':p' + i : ':w' + Math.round(P.x) + ',' + Math.round(P.z)), x: P.x, z: P.z, r: P.r, P, pi: i, nm: gName(P) };
+}
+/* the place order O holds: { key, x, z, r, P, pi, nm } or null */
+function dfpPlace(t, O, q) {
+  const key = dfpKeyOf(t, O, q); if (!key) return null;
+  if (O.tw && typeof O.tw === 'object' && O.tw.r) return dfpOfPt(t, O.tw);
+  const r = DFP.site.r, c = O.es || O.b || O;
+  return { key, x: c.x, z: c.z, r, P: null, pi: -1, nm: O.es ? (ECO.tx.nm[O.es.k] || 'instalação') + ' ' + O.es.id : O.b ? 'a base de suprimento' : 'a posição ' + gNear(c.x, c.z) };
+}
+/* the side's plan for place D, made (again) when there is none, force, or the threat moved (DFP.rethr; DFP.keep) */
+function dfpPlan(t, D, force) {
+  const M = S.dfp || (S.dfp = new Map()), pl = M.get(D.key), e = ptThreat(t, D.P || null, D.x, D.z), th = Math.atan2(e.z - D.z, e.x - D.x);
+  if (pl && !force) { const dv = Math.abs(wrap(th - pl.th)); if (dv < DFP.rethr && !(S.t - pl.T > DFP.keep && dv > .05)) return pl; }
+  const n = dfpMake(t, D, e, th, pl); M.set(D.key, n); return n;
+}
+/* where the roads cross the place's circle, the most threatened first (DFP.ap.n at most): { x, z (the entry), a (its bearing from the
+   middle, atan2(dz, dx)), kx, kz (the kill zone, DFP.ap.kz m out along the road), c (0 an axis, 1-3 the network's class, -1 open ground), w } */
+function dfpAps(t, D, th, M) {
+  const R = D.r * .95, L = [], T = S.T;
+  const add = (p, cls) => {
+    for (let i = 1; i < p.length; i++) {
+      const a = p[i - 1], b = p[i];
+      if (Math.min(a.x, b.x) > D.x + R || Math.max(a.x, b.x) < D.x - R || Math.min(a.z, b.z) > D.z + R || Math.max(a.z, b.z) < D.z - R) continue;
+      const dx = b.x - a.x, dz = b.z - a.z, fx = a.x - D.x, fz = a.z - D.z, A = dx * dx + dz * dz; if (A < 1e-6) continue;
+      const B = 2 * (fx * dx + fz * dz), Cc = fx * fx + fz * fz - R * R, ds = B * B - 4 * A * Cc; if (ds < 0) continue;
+      const sq = Math.sqrt(ds);
+      for (const [k, out] of [[(-B - sq) / (2 * A), -1], [(-B + sq) / (2 * A), 1]]) {   // the first root goes in along the line (out is back), the second out
+        if (k < 0 || k >= 1) continue;
+        const x = a.x + dx * k, z = a.z + dz * k, s = a.s + (b.s - a.s) * k, K = routeAt(p, clamp(s + out * DFP.ap.kz, 0, p.len));
+        L.push({ x, z, a: Math.atan2(z - D.z, x - D.x), kx: K.x, kz: K.z, c: cls });
+      }
+    }
+  };
+  for (const r of T.routes) add(r, 0);
+  if (T.net && T.net.e) for (const e of T.net.e) if (e.p && e.p.length > 1) add(e.p, e.c || 3);
+  for (const o of L) {
+    const f = Math.cos(wrap(o.a - th)); o.w = (o.c === 0 ? 1.5 : o.c === 1 ? 1.4 : o.c === 2 ? 1.2 : 1) * (1 + 1.5 * Math.max(0, f)) * (f < -.3 ? .4 : 1);
+    if (M) { const q = dfpCell(M, o.kx, o.kz); o.w += .5 * Math.min(1, (M.k && M.k[q]) || 0) + .3 * Math.min(1, (M.t && M.t[q]) || 0); }
+  }
+  L.sort((a, b) => b.w - a.w);
+  const out = [];
+  for (const o of L) if (!out.some(k => Math.abs(wrap(k.a - o.a)) < DFP.ap.merge)) out.push(o);
+  if (!out.some(o => Math.abs(wrap(o.a - th)) < DFP.ap.open)) out.push({ x: D.x + Math.cos(th) * R, z: D.z + Math.sin(th) * R, a: th, kx: D.x + Math.cos(th) * (R + DFP.ap.kz), kz: D.z + Math.sin(th) * (R + DFP.ap.kz), c: -1, w: 1.6 });
+  out.sort((a, b) => b.w - a.w);
+  return out.slice(0, DFP.ap.n);
+}
+/* a post on side sd (1 or -1) of approach ap: { x, z, a (its sector's bearing, to the kill zone), w (half its width), kx, kz, ap, sd, k } */
+function dfpPost(t, D, ap, sd, taken, M) {
+  const P = DFP.post, ux = Math.cos(ap.a), uz = Math.sin(ap.a), vx = -uz * sd, vz = ux * sd, K = { x: ap.kx, z: ap.kz }, ky = hgt(K.x, K.z) + 1, E = { x: ap.x, z: ap.z }, ey = hgt(E.x, E.z) + 1, foe = 1 - t;
+  let b = null, bs = -1e9;
+  for (const dep of P.dep) for (const lat of P.lat) {
+    let x = D.x + ux * D.r * dep + vx * lat, z = D.z + uz * D.r * dep + vz * lat;
+    const dc = Math.hypot(x - D.x, z - D.z); if (dc > D.r * P.max) { const k = D.r * P.max / dc; x = D.x + (x - D.x) * k; z = D.z + (z - D.z) * k; }
+    const y = hgt(x, z); if (y < S.T.WL + .5 || x < 60 || x > S.W - 60 || Math.abs(z) > S.HW - 60) continue;
+    let s = 0;
+    if (los({ x, z }, y + 1.2, K, ky)) s += 3;
+    if (los({ x, z }, y + 1.2, E, ey)) s += 1;
+    coverAt(x, z, DFC); s += DFC.p * 1.5;
+    if (near(x, z, P.bld).some(o => o.B && drBldOk(o) && !(o.B.in && o.B.in[foe]))) s += 1.2;
+    for (const f of S.forts) if (f.prog >= 1 && !f.dead && !(f.in && f.in[foe]) && Math.abs(f.x - x) < P.fort && Math.abs(f.z - z) < P.fort) { s += 1.5; break; }
+    if (M) { const q = dfpCell(M, x, z); s += (M.o[q] || 0) - .8 * (M.v[q] || 0); }
+    if (routeDist(S.T, x, z) < 10) s -= 2;
+    for (const o of taken) if (Math.hypot(o.x - x, o.z - z) < P.apart) s -= 3;
+    if (s > bs) { bs = s; b = { x, z }; }
+  }
+  return b ? { x: b.x, z: b.z, a: Math.atan2(K.z - b.z, K.x - b.x), w: P.sw, kx: K.x, kz: K.z, ex: E.x, ez: E.z, ap: ap.i, sd, k: 'posto', sc: Math.round(bs * 10) / 10 } : null;
+}
+/* the watch: DFP.vig.out m beyond the circle toward the threat, hidden */
+function dfpVig(t, D, th) {
+  const V = DFP.vig, d = D.r + (V.out[0] + V.out[1]) / 2, h = hideAt(clamp(D.x + Math.cos(th) * d, 100, S.W - 100), clamp(D.z + Math.sin(th) * d, -S.HW + 100, S.HW - 100), V.hide), dd = Math.hypot(h.x - D.x, h.z - D.z);
+  if (dd < D.r + V.out[0] * .5 || dd > D.r + V.out[1] + 40 || hgt(h.x, h.z) < S.T.WL + .5) return null;
+  return { x: h.x, z: h.z, a: th, w: .8, k: 'vigia', kx: h.x + Math.cos(th) * 300, kz: h.z + Math.sin(th) * 300 };
+}
+/* the reserve: behind the middle, away from the threat, in the ground floor of the nearest standing building, else the best cover */
+function dfpRes(t, D, th) {
+  const k = DFP.res.back * D.r, x = D.x - Math.cos(th) * k, z = D.z - Math.sin(th) * k, at = { x, z }, foe = 1 - t;
+  const b = near(x, z, 40).filter(o => drBldOk(o) && !(o.B.in && o.B.in[foe])).sort((p, q) => hdist(p, at) - hdist(q, at))[0] || null;
+  const c = covBest(x, z, 12, { x: D.x + Math.cos(th) * 300, z: D.z + Math.sin(th) * 300 });
+  return { x: c.x, z: c.z, bl: b, a: th, w: .8, k: 'reserva', kx: D.x + Math.cos(th) * 300, kz: D.z + Math.sin(th) * 300 };
+}
+const dfpApNm = a => (a.c < 0 ? 'campo aberto' : a.c === 0 ? 'a estrada principal' : a.c === 1 ? 'uma estrada' : 'uma estrada secundária');
+function dfpMake(t, D, e, th, was) {
+  const t0 = AIB.now(), M = dfpTm(t), aps = dfpAps(t, D, th, M), posts = [];
+  aps.forEach((ap, i) => { ap.i = i; for (const sd of [1, -1]) { const p = dfpPost(t, D, ap, sd, posts, M); if (p) posts.push(p); } });
+  const pl = { key: D.key, t, x: D.x, z: D.z, r: D.r, P: D.P || null, pi: D.pi, nm: D.nm, th, ex: e.x, ez: e.z, ap: aps, posts, vig: dfpVig(t, D, th), res: dfpRes(t, D, th),
+    v: (was ? was.v : 0) + 1, T: S.t, seen: S.t, off: was ? was.off : 0, used: new Map(), tk: null, aa: null, tkU: was ? was.tkU || [] : [], thrT: was ? was.thrT || 0 : 0, thrN: was ? was.thrN || 0 : 0, tkNo: 0 };
+  AIB.u += AIB.now() - t0;
+  if (!pl.off && (D.P || D.key.includes(':u'))) gLog(t, 'def', 'Defesa de ' + D.nm + ': ' + posts.length + ' postos em fogo cruzado ' + (aps.length > 1 ? 'nas ' + aps.length + ' entradas mais ameaçadas (' + aps.map(dfpApNm).join(', ') + ')' : 'na entrada mais ameaçada (' + aps.map(dfpApNm).join('') + ')')
+    + (pl.vig ? ', vigia ' + Math.round(Math.hypot(pl.vig.x - D.x, pl.vig.z - D.z) - D.r) + ' m à frente' : '') + ', reserva protegida' + (was && !was.off ? ' (a ameaça mudou de lado)' : ''), { x: D.x, z: D.z }, 'dfp' + D.key);
+  return pl;
+}
+/* the squads holding plan pl's place, by id */
+function dfpSqs(t, pl) {
+  const out = [];
+  for (const q of S.squads) if (q.team === t && !q.net && q.live > 0 && !q.state && q.ord && dfpKeyOf(t, q.ord, q) === pl.key) out.push(q);
+  return out.sort((a, b) => a.id - b.id);
+}
+/* the posts the j-th of n squads takes ('res': the reserve) */
+function dfpRole(pl, n, j) {
+  const ap = i => pl.posts.filter(p => p.ap === i), a0 = ap(0), a1 = ap(1), a2 = ap(2), seq = [];
+  if (n === 1) return a0.length ? a0 : a1.length ? a1 : 'res';
+  if (a0.length >= 2) seq.push([a0[0]], [a0[1]]); else if (a0.length) seq.push(a0);
+  seq.push('res'); if (a1.length) seq.push(a1); if (a2.length) seq.push(a2);
+  return seq[j] || 'res';
+}
+/* the places of a team of m men at post p, none within gap of what is in used (pushed as they are taken): windows, works, the registry, a line */
+function dfpTeam(t, p, m, used) {
+  const P = DFP.post, foe = 1 - t, K = { x: p.kx, z: p.kz }, c = [], out = [], g = P.gap;
+  const free = (x, z) => { for (const u of used) if (Math.abs(u.x - x) < g && Math.abs(u.z - z) < g && Math.hypot(u.x - x, u.z - z) < g) return false; return true; };
+  if (p.k === 'posto') {
+    const bs = near(p.x, p.z, P.bld).filter(o => drBldOk(o) && !(o.B.in && o.B.in[foe])).sort((a, b) => hdist(a, p) - hdist(b, p)).slice(0, 2);
+    for (const o of bs) for (const w of bldWins(o, K.x - o.x, K.z - o.z).slice(0, P.wins)) c.push(w);
+    for (const f of S.forts) if (f.prog >= 1 && !f.dead && !(f.in && f.in[foe]) && Math.abs(f.x - p.x) < P.fort && Math.abs(f.z - p.z) < P.fort) for (const s of fortSlots(f)) c.push(s);
+    if (typeof tpsPts === 'function' && tpsOn()) {
+      const l = tpsPts(p.x, p.z, P.snap).filter(q => !q.in && !q.l && !tpsWet(q) && !(q.ve && !q.ve.includes(t)) && tpsProt(q, K.x, K.z, 1) >= 2).sort((a, b) => hdist(a, p) - hdist(b, p)).slice(0, m * 2);
+      for (const q of l) c.push({ x: q.x, z: q.z });
+    }
+  }
+  if (p.k === 'reserva' && p.bl) for (const b of bldBays(p.bl, p.x, p.z)) c.push(b);
+  for (const s of c) { if (out.length >= m) break; if (free(s.x, s.z)) { const o = s.b || s.f ? Object.create(s) : { x: s.x, z: s.z }; out.push(o); used.push({ x: s.x, z: s.z }); } }
+  const ax = Math.cos(p.a), az = Math.sin(p.a), sp = p.k === 'reserva' ? DFP.res.sp : P.sp;
+  for (let i = 0, tries = 0; out.length < m && tries < m * 6; tries++, i++) {   // the line across the sector, wider each round until every man has a place
+    const off = (i % 2 ? 1 : -1) * Math.ceil(i / 2) * sp, x = p.x - az * off, z = p.z + ax * off;
+    const b = p.k === 'reserva' ? clearOf(x, z, 1, {}) : clearOf(...(q => [q.x, q.z])(covBest(x, z, 4, K)), 1, {});
+    if (hgt(b.x, b.z) < S.T.WL + .3 || !free(b.x, b.z)) continue;
+    out.push({ x: b.x, z: b.z }); used.push({ x: b.x, z: b.z });
+  }
+  while (out.length < m) { const k = out.length, x = p.x + Math.cos(k * 2.4) * (4 + k), z = p.z + Math.sin(k * 2.4) * (4 + k); out.push({ x, z }); used.push({ x, z }); }   // never short of a place
+  for (const o of out) { o.sa = -p.a; o.sw = p.w; o.dk = p.k; if (p.k === 'reserva') o.res = 1; }   // sa: the heading scanDir turns to (the game's atan2(-dz, dx))
+  return out;
+}
+/* is m carrying an anti-tank weapon with rounds */
+const dfpAT = m => { const w = m && m.arms && m.arms[1]; return !!w && !!w.d && (w.d.k === 'heat' || w.d.k === 'atgm') && w.mag + w.res > 0; };
+/* the places of squad q holding the place of order O, from its side's plan (null: none, ptPts as before) */
+function dfpPts(q, O) {
+  const t = q.team, D = dfpPlace(t, O, q); if (!D) return null;
+  const pl = dfpPlan(t, D); if (!pl || pl.off) return null;
+  const L = dfpSqs(t, pl); if (!L.includes(q)) L.push(q);
+  const j = L.indexOf(q), n = Math.max(q.n0, 1), out = new Array(n), used = [];
+  for (const [id, l] of pl.used) if (id !== q.id && L.some(o => o.id === id)) for (const p of l) used.push(p);
+  let role = dfpRole(pl, L.length, j), nm;
+  if (q.dfpA && hdist(q.dfpA, pl) < pl.r + DFP.vig.out[1]) {   // a person's post for this squad
+    const a = Number.isFinite(q.dfpA.a) ? q.dfpA.a : Math.atan2(pl.ez - q.dfpA.z, pl.ex - q.dfpA.x);
+    role = [{ x: q.dfpA.x, z: q.dfpA.z, a, w: .7, kx: q.dfpA.x + Math.cos(a) * 150, kz: q.dfpA.z + Math.sin(a) * 150, ex: q.dfpA.x + Math.cos(a) * 60, ez: q.dfpA.z + Math.sin(a) * 60, k: 'posto', ap: -1, own: 1 }];
+  }
+  const men = new Map(); for (const m of q.men) if (m.ai) men.set(m.ai.i, m);
+  let idx = [...Array(n).keys()];
+  const nv = j === 0 && pl.vig && n >= DFP.vig.min && role !== 'res' ? DFP.vig.men : 0;
+  if (nv) { const V = idx.splice(n - nv, nv), sp = dfpTeam(t, pl.vig, nv, used); V.forEach((i, k) => { out[i] = sp[k]; }); }
+  const posts = role === 'res' ? [pl.res] : role;
+  const teams = posts.map(() => []); idx.forEach((i, k) => teams[Math.floor(k * posts.length / idx.length)].push(i));   // split in halves, front to back
+  posts.forEach((p, k) => {
+    const I = teams[k]; if (!I.length) return;
+    const sp = dfpTeam(t, p, I.length, used), ex = p.ex !== undefined ? p.ex : p.kx, ez = p.ez !== undefined ? p.ez : p.kz;
+    sp.sort((a, b) => Math.hypot(a.x - ex, a.z - ez) - Math.hypot(b.x - ex, b.z - ez));   // the nearest the road first: the anti-tank men's
+    I.sort((a, b) => (dfpAT(men.get(b)) ? 1 : 0) - (dfpAT(men.get(a)) ? 1 : 0) || a - b);
+    I.forEach((i, k2) => { out[i] = sp[k2]; });
+  });
+  for (let i = 0; i < n; i++) if (!out[i]) out[i] = { x: pl.x + Math.cos(i * 2.4) * 6, z: pl.z + Math.sin(i * 2.4) * 6, sa: -pl.th, sw: .8, dk: 'posto' };
+  nm = role === 'res' ? 'reserva protegida' : role[0].own ? 'posto marcado pelo general' : (role.length > 1 ? 'dois postos em fogo cruzado' : 'posto em fogo cruzado') + ' na entrada ' + (role[0].ap + 1) + (role.length === 1 ? (role[0].sd > 0 ? ' (lado esquerdo)' : ' (lado direito)') : '');
+  if (nv) nm += ', vigia à frente';
+  pl.used.set(q.id, out.map(o => ({ x: o.x, z: o.z })));
+  out.dfp = pl.v; q.dfpV = pl.v; q.dfpRS = L.map(o => o.id).join(','); q.dfpK = pl.key; q.dfpR = nm; q.dfpP = role === 'res' ? [pl.res] : role;
+  return out;
+}
+ptPts = (g => (q, O) => {
+  if (q.wpost && !q.wpost.gone && q.ord && q.ord.k === 'hold' && q.ord.x === q.wpost.x && q.ord.z === q.wpost.z) return g(q, O);   // a crewed post's crew: its own places (POSTS)
+  const r = dfpOn() && dfpSim() && S.T ? dfpPts(q, O) : null;
+  return r || g(q, O);
+})(ptPts);
+/* at rest at a post of the plan, a man watches his sector */
+scanDir = (g => (a, oc) => {
+  const q = a.sq, P = q && q.at && q.pts && q.pts.dfp && a.ai ? q.pts[a.ai.i % q.pts.length] : null;
+  if (!P || P.sa === undefined || (a.ln && S.t - a.ln.t < HEAR.ln)) return g(a, oc);
+  const y = P.sa + P.sw * Math.sin(S.t * TAU / ((SCAN[oc] || SCAN.man)[1]) + ((a.ai && a.ai.seed) || 0));
+  return { x: Math.cos(y), y: 0, z: -Math.sin(y) };
+})(scanDir);
+/* ---- the armour ---- */
+/* the tanks' places of plan pl: the best DFP.tk.pts, DFP.tk.apart apart, each with its alternate */
+function dfpTkMake(t, pl) {
+  const t0 = AIB.now(), T = DFP.tk, M = dfpTm(t), WL = S.T.WL + 1;
+  const K = (pl.ap.length ? pl.ap : [{ kx: pl.x + Math.cos(pl.th) * (pl.r + DFP.ap.kz), kz: pl.z + Math.sin(pl.th) * (pl.r + DFP.ap.kz) }]).map(a => ({ x: a.kx, z: a.kz, y: hgt(a.kx, a.kz) })), K0 = K[0];
+  const ev = (x, z, bld) => {
+    if (x < 100 || x > S.W - 100 || Math.abs(z) > S.HW - 100) return null;
+    const c = clearOf(x, z, T.bld, {}); x = c.x; z = c.z;
+    const y = hgt(x, z); if (y < WL || bldAt(x, z, T.bld)) return null;
+    const P = { x, z };
+    if (!los(P, y + T.tur, K0, K0.y + 1.2)) return null;   // the turret must see the main kill zone
+    let s = 2; const hd = !los(K0, K0.y + T.eye, P, y + T.hull); if (hd) s += 3;   // hull down from it
+    for (let i = 1; i < K.length; i++) if (los(P, y + T.tur, K[i], K[i].y + 1.2)) s += 1;
+    const dc = Math.hypot(x - pl.x, z - pl.z); if (dc < T.mid) s -= 4; if (dc > pl.r * 1.4) s -= 1;
+    if (bld) s += 1;
+    if (M) { const q = dfpCell(M, x, z); s += (M.o[q] || 0) - .8 * (M.v[q] || 0); }
+    if (routeDist(S.T, x, z) < 8) s -= .5;
+    return { x, z, s, hd, kx: K0.x, kz: K0.z };
+  };
+  const L = [];
+  for (const k of T.rad) for (const a of T.ang) { const c = ev(pl.x + Math.cos(pl.th + a) * pl.r * k, pl.z + Math.sin(pl.th + a) * pl.r * k, 0); if (c) L.push(c); }
+  const hx = pl.x + Math.cos(pl.th) * pl.r * .6, hz = pl.z + Math.sin(pl.th) * pl.r * .6;
+  for (const o of near(hx, hz, pl.r * .7).filter(o => o.B && o.K.sight && S.os[o.id] < 2).sort((a, b) => Math.hypot(a.x - hx, a.z - hz) - Math.hypot(b.x - hx, b.z - hz)).slice(0, 4))   // beside a building: a wall on a flank
+    for (const q of CORN4) { const lx = q[0] * (o.hw + 5), lz = q[1] * (o.hd + 5), c = ev(o.x + lx * o.c + lz * o.s, o.z - lx * o.s + lz * o.c, 1); if (c) L.push(c); }
+  L.sort((a, b) => b.s - a.s);
+  const out = [];
+  for (const c of L) { if (out.length >= T.pts) break; if (out.every(o => Math.hypot(o.x - c.x, o.z - c.z) >= T.apart)) out.push(c); }
+  for (const o of out) {   // the alternate: across the line to the kill zone or a little back, apart from every other place
+    const a = Math.atan2(o.kz - o.z, o.kx - o.x), ux = Math.cos(a), uz = Math.sin(a); let b = null;
+    for (const d of T.alt) for (const [lx, bk] of [[1, 0], [-1, 0], [.7, -.7], [-.7, -.7]]) {
+      const c = ev(o.x - uz * lx * d + ux * bk * d, o.z + ux * lx * d + uz * bk * d, 0);
+      if (c && c.s > 0 && (!b || c.s > b.s) && out.every(p => Math.hypot(p.x - c.x, p.z - c.z) >= (p === o ? T.alt[0] * .8 : T.min)) && out.every(p => !p.alt || Math.hypot(p.alt.x - c.x, p.alt.z - c.z) >= T.min)) b = c;
+    }
+    o.alt = b ? { x: b.x, z: b.z, hd: b.hd } : null;
+  }
+  AIB.u += AIB.now() - t0;
+  return out;
+}
+/* the AA's place: behind the middle, open sky, high */
+function dfpAaSpot(t, pl) {
+  let b = null, bs = -1e9;
+  for (const k of DFP.aa.back) for (const a of DFP.aa.ang) {
+    const x = pl.x - Math.cos(pl.th + a) * pl.r * k, z = pl.z - Math.sin(pl.th + a) * pl.r * k, y = hgt(x, z);
+    if (y < S.T.WL + 1 || bldAt(x, z, 6)) continue;
+    let s = 0, m = 0; if (kindAt(x, z) === 1) s -= 3; if (near(x, z, 18).some(o => o.B && S.os[o.id] < 2)) s -= 2;
+    for (let i = 0; i < 4; i++) m += hgt(x + Math.cos(i * TAU / 4) * 60, z + Math.sin(i * TAU / 4) * 60);
+    s += clamp((y - m / 4) / 8, -1, 1.5);
+    if (s > bs) { bs = s; b = { x, z }; }
+  }
+  return b;
+}
+const dfpVehOk = (u, t) => u.team === t && u.ai && !u.net && !u.dead && !u.gone && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.dfp && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && !u.caT && u.hp >= u.max * .6;
+/* the vehicles holding plan pl's places now */
+function dfpTkLive(pl) {
+  pl.tkU = (pl.tkU || []).filter(u => !u.dead && !u.gone && u.ai && u.ai.dfp && u.ai.dfp.key === pl.key);
+  return pl.tkU;
+}
+function dfpTkSet(u, pl, i, by) {
+  const sp = i >= 0 ? pl.tk[i] : pl.aa;
+  u.ai.dfp = { key: pl.key, i, v: pl.v, x: sp.x, z: sp.z, alt: sp.alt || null, cur: 0, kx: sp.kx, kz: sp.kz, by: by || 'ai', shot: 0, T0: S.t };
+  if (hdist(u, sp) > M5.near && m5Net()) m5Go(u, sp.x, sp.z, 'dfp');   // by the tactical trip to the road nearest it, then across
+  if (!pl.tkU.includes(u)) pl.tkU.push(u);
+  gLog(pl.t, 'def', (i < 0 ? 'Antiaérea toma posição de céu aberto em ' : (sp.hd ? 'Carro de combate toma posição desenfiada em ' : 'Carro de combate toma posição de tiro em ')) + pl.nm + (sp.alt ? ', com posição alternativa para trocar depois de atirar' : ''), sp, 'dfpt' + pl.key + '.' + i);
+}
+/* send up to n tanks (and one AA) of side t to plan pl's places: how many went */
+function dfpTkGo(t, pl, n, by) {
+  if (!pl.tk) pl.tk = dfpTkMake(t, pl);
+  const have = dfpTkLive(pl), busy = new Set(have.map(u => u.ai.dfp.i)); let sent = 0;
+  for (let k = have.filter(u => u.ai.dfp.i >= 0).length; k < n; k++) {
+    const i = pl.tk.findIndex((s, j) => !busy.has(j)); if (i < 0) break;
+    const sp = pl.tk[i]; let b = null, bd = DFP.tk.reach;
+    for (const u of S.units) if (DFP.tk.kinds[u.kind] && dfpVehOk(u, t) && (!(u.ai.tgt && !u.ai.tgt.dead) || hdist(u, pl) < pl.r * 1.5)) { const d = hdist(u, sp); if (d < bd) { bd = d; b = u; } }
+    if (!b) break;
+    dfpTkSet(b, pl, i, by); busy.add(i); sent++;
+  }
+  if (!busy.has(-1)) {
+    const A = pl.aa || (pl.aa = dfpAaSpot(t, pl));
+    if (A) { let b = null, bd = DFP.tk.reach; for (const u of S.units) if (u.kind === 'aa' && dfpVehOk(u, t)) { const d = hdist(u, A); if (d < bd) { bd = d; b = u; } } if (b) dfpTkSet(b, pl, -1, by); }
+  }
+  return sent;
+}
+function dfpTkFree(u) {
+  if (!u.ai || !u.ai.dfp) return;
+  u.ai.dfp = null;
+  if (typeof m5Home === 'function') m5Home(u);
+}
+/* the plan was made again: the nearest free place of the new one */
+function dfpTkRe(u, pl, H) {
+  if (H.i < 0) { const A = pl.aa || (pl.aa = dfpAaSpot(pl.t, pl)); if (A) { H.x = A.x; H.z = A.z; } H.v = pl.v; return; }
+  if (!pl.tk) pl.tk = dfpTkMake(pl.t, pl);
+  const busy = new Set(dfpTkLive(pl).filter(o => o !== u && o.ai.dfp.v === pl.v).map(o => o.ai.dfp.i)); let b = -1, bd = 1e9;
+  pl.tk.forEach((s, i) => { const d = hdist(s, u); if (!busy.has(i) && d < bd) { bd = d; b = i; } });
+  if (b < 0) return dfpTkFree(u);
+  const s = pl.tk[b]; Object.assign(H, { i: b, v: pl.v, x: s.x, z: s.z, alt: s.alt || null, cur: 0, kx: s.kx, kz: s.kz, shot: 0 });
+}
+/* a vehicle holding its place: its brain fights as ever; the drive is the place's, and shoot and scoot */
+const dfpVeh = old => (u, dt) => {
+  const A = u.ai, H = A && A.dfp;
+  if (!H) return old(u, dt);
+  const pl = S.dfp && S.dfp.get(H.key), P = pl && pl.P;
+  if (!DFP.on || !pl || (P && S.cq && P.hold >= 0 && P.hold !== u.team) || u.hp < u.max * DFP.tk.hp || (H.by === 'ai' && S.t - Math.max(pl.thrT || 0, H.T0) > DFP.tk.calm)) { dfpTkFree(u); return old(u, dt); }
+  if (H.v !== pl.v) dfpTkRe(u, pl, H);
+  if (!A.dfp) return old(u, dt);
+  u.rail = false; old(u, dt); u.rail = false;
+  if (A.amb) return;
+  const s = H.cur && H.alt ? H.alt : H, d = driveTo(u, s.x, s.z);
+  if (H.i < 0) return;   // the AA: no scoot, its aim is the sky's
+  const f = u.ctl.fire, fired = Array.isArray(f) ? !!f[0] : !!f;
+  if (fired && !H.shot) H.shot = S.t;
+  if (H.shot && H.alt && d < 6 && S.t - H.shot > DFP.tk.scoot) { H.cur = H.cur ? 0 : 1; H.shot = 0; }
+  if (!(A.tgt && !A.tgt.dead) && !A.inf && !A.low && H.kx !== undefined) u.ctl.aim = vnorm({ x: H.kx - u.x, y: 0, z: H.kz - u.z });
+};
+AI.tank = dfpVeh(AI.tank); AI.lav = dfpVeh(AI.lav); AI.aa = dfpVeh(AI.aa);
+/* ---- each DFP.dt s on the host: the threat of each plan, plans made again, squads given their new places, the AI's tanks ---- */
+function dfpThr(t, x, z) {
+  const C = S.cmd && S.cmd[t], R = DFP.tk.near; let n = 0;
+  if (C && C.known) for (const o of C.known) { if (o.dead) continue; const ox = sX(o, C.t), oz = sZ(o, C.t); if (ox !== undefined && Math.abs(ox - x) < R && Math.abs(oz - z) < R && Math.hypot(ox - x, oz - z) < R) n++; }
+  return n;
+}
+function dfpStep() {
+  const M = S.dfp, t0 = AIB.now();
+  if (M) for (const [k, pl] of [...M]) {
+    const L = dfpSqs(pl.t, pl), tk = dfpTkLive(pl), P = pl.P;
+    if ((P && S.cq && P.hold >= 0 && P.hold !== pl.t) || (!L.length && !tk.length && S.t - pl.seen > 60)) { for (const u of tk) dfpTkFree(u); for (const q of L) if (q.pts && q.pts.dfp) q.pts = null; M.delete(k); continue; }
+    if (L.length || tk.length) pl.seen = S.t;
+    const n = dfpThr(pl.t, pl.x, pl.z); pl.thrN = n; if (n) pl.thrT = S.t;
+    const np = dfpPlan(pl.t, pl), rs = L.map(q => q.id).join(',');
+    for (const q of L) if (q.pts && (np.off ? q.pts.dfp : !q.pts.dfp || q.dfpV !== np.v || q.dfpRS !== rs)) q.pts = null;
+  }
+  dfpAi();
+  AIB.u += AIB.now() - t0;
+}
+/* the AI general's armour on defence: tanks to the (at most two) most threatened points it holds, by its own command */
+function dfpAi() {
+  if (!S.cq || !S.cmd) return;
+  for (const t of lsN()) {
+    const C = S.cmd[t]; if (!C || genBy(t, 'def') !== 'ai' || S.t < (C.dfpT || 0)) continue;
+    C.dfpT = S.t + DFP.tkEvery;
+    const L = [];
+    S.cq.p.forEach((p, i) => { if (p.hold === t && p.r) { const n = dfpThr(t, p.x, p.z); if (n) L.push({ p, i, n }); } });
+    L.sort((a, b) => b.n - a.n);
+    for (const o of L.slice(0, 2)) {
+      const pl = dfpPlan(t, dfpOfPt(t, o.p)); pl.thrT = pl.seen = S.t; pl.thrN = o.n;
+      if (pl.off || S.t < (pl.tkNo || 0) || dfpTkLive(pl).filter(u => u.ai.dfp.i >= 0).length >= DFP.tk.n) continue;
+      const r = genCmd(t, { c: 'dpos', pi: o.i, k: 'tank', n: DFP.tk.n, why: 'inimigo conhecido perto do ponto' }, 'ai');
+      if (!r.ok) pl.tkNo = S.t + 60;
+    }
+  }
+}
+step = (g => dt => { g(dt); if (DFP.on && dfpOn() && S.T && (!S.net || S.host) && !S.over && (S.dfpT = (S.dfpT || 0) - dt) <= 0) { S.dfpT = DFP.dt; dfpStep(); } })(step);
+/* ---- the funnel: dpos, and the question dfp ---- */
+const dfpDrop = (t, pl) => { for (const q of dfpSqs(t, pl)) q.pts = null; };
+GC.dpos = { d: 'def', f(t, c, by) {
+  if (!dfpSim() || !DFP.on) return gBad('off');
+  const P = Number.isInteger(c.pi) ? gPts()[c.pi] : null; if (!P || !P.r) return gBad('at');
+  if (P.hold !== t && !(P.hold < 0 && S.squads.some(q => q.team === t && q.ord && q.ord.tw === P))) return gBad('at');
+  const D = dfpOfPt(t, P), k = c.k === undefined ? 'auto' : c.k;
+  if (c.id !== undefined) {
+    const q = gSq(t, c.id); if (!q) return gBad('sq');
+    if (!gMapOk(c.x, c.z)) return gBad('map');
+    if (Math.hypot(c.x - P.x, c.z - P.z) > P.r + DFP.vig.out[1]) return gBad('far');
+    if (dfpKeyOf(t, q.ord, q) !== D.key) { if (!gOrdOk(q, P.ri)) return gBad('reach'); if (q.op) { gDrop(q); q.op = null; q.back = null; } holdPt(cmdOf(t), P, q); }
+    q.dfpA = { x: c.x, z: c.z, a: Number.isFinite(c.a) ? c.a : undefined }; q.pts = null; dfpPlan(t, D);
+    gLog(t, 'def', 'Esquadra ' + q.id + ' com posto marcado pelo general em ' + D.nm, { x: c.x, z: c.z }, 'dfpa' + q.id);
+    return gYes();
+  }
+  if (k === 'auto' || k === 'on' || k === 'off') {
+    const pl = dfpPlan(t, D, k !== 'off'); pl.off = k === 'off' ? 1 : 0; dfpDrop(t, pl);
+    if (k === 'off') { for (const q of dfpSqs(t, pl)) q.dfpA = null; gLog(t, 'def', 'Defesa de ' + D.nm + ': posições escolhidas desligadas (cada esquadra no próprio posto)', P, 'dfpo' + D.key); }
+    return gYes();
+  }
+  if (k === 'tank') {
+    const pl = dfpPlan(t, D), n = Number.isInteger(c.n) ? clamp(c.n, 1, 3) : DFP.tk.n, s = dfpTkGo(t, pl, n, by);
+    return s > 0 || dfpTkLive(pl).filter(u => u.ai.dfp.i >= 0).length >= n ? gYes() : gBad('tank');
+  }
+  if (k === 'tkoff') { const pl = S.dfp && S.dfp.get(D.key); for (const u of pl ? dfpTkLive(pl).slice() : []) dfpTkFree(u); gLog(t, 'def', 'Blindados da defesa de ' + D.nm + ' voltam à estrada', P, 'dfpk' + D.key); return gYes(); }
+  return gBad('kind');
+}, r(t, c) { return { pi: c.pi }; } };
+/* what the side's plans are: the place, the threat's bearing (deg, atan2(dz, dx)), the approaches with their kill zones, the posts and their
+   sectors, the watch, the reserve, the squads and their posts, the tanks' and the AA's places and who holds them */
+function dfpView(t) {
+  const r = v => Math.round(v), r2 = v => Math.round(v * 100) / 100, out = [];
+  if (S.dfp) for (const pl of S.dfp.values()) {
+    if (pl.t !== t) continue;
+    const L = dfpSqs(t, pl), tk = dfpTkLive(pl), who = i => { const u = tk.find(u => u.ai.dfp.i === i); return u ? u.kind : ''; };
+    out.push({ pi: pl.pi, nm: pl.nm, x: r(pl.x), z: r(pl.z), r: r(pl.r), off: pl.off ? 1 : 0, v: pl.v, age: r(S.t - pl.T), th: r(pl.th * 180 / Math.PI), e: [r(pl.ex), r(pl.ez)], thr: pl.thrN || 0,
+      ap: pl.ap.map(a => ({ x: r(a.x), z: r(a.z), kx: r(a.kx), kz: r(a.kz), w: Math.round(a.w * 10) / 10, k: a.c < 0 ? 'campo' : a.c === 0 ? 'eixo' : 'estrada' })),
+      posts: pl.posts.map(p => ({ x: r(p.x), z: r(p.z), a: r2(p.a), w: r2(p.w), kx: r(p.kx), kz: r(p.kz), ap: p.ap, sq: (L.find(q => q.dfpP && q.dfpP.includes(p)) || {}).id || 0 })),
+      own: L.filter(q => q.dfpA).map(q => ({ x: r(q.dfpA.x), z: r(q.dfpA.z), sq: q.id })),
+      vig: pl.vig ? { x: r(pl.vig.x), z: r(pl.vig.z) } : null, res: pl.res ? { x: r(pl.res.x), z: r(pl.res.z), sq: (L.find(q => q.dfpP && q.dfpP.includes(pl.res)) || {}).id || 0 } : null,
+      sq: L.map(q => ({ id: q.id, k: q.dfpR || '', n: q.live })),
+      tk: (pl.tk || []).map((s, i) => ({ x: r(s.x), z: r(s.z), hd: s.hd ? 1 : 0, alt: s.alt ? [r(s.alt.x), r(s.alt.z)] : null, kx: r(s.kx), kz: r(s.kz), u: who(i) })),
+      aa: pl.aa ? { x: r(pl.aa.x), z: r(pl.aa.z), u: who(-1) } : null });
+  }
+  return { ok: true, why: '', l: out };
+}
+genQuery = (f => (t, q) => (q && q.q === 'dfp' && lsSide(t) ? (dfpSim() ? dfpView(t) : gBad('off')) : f(t, q)))(genQuery);
+genVM = (g => (t, all) => { const V = g(t, all); if (V && typeof V === 'object' && DFP.on && dfpSim() && S.dfp) V.dfp = dfpView(t).l; return V; })(genVM);   // a guest keeps the host's (gen)
+GENK.push('dfp');   // a guest's general sees the host's defence plans (the layer and the Defesa tab)
+if (typeof rtsBrain === 'function') rtsBrain = (g => q => { const L = g(q); if (q.dfpR && q.pts && q.pts.dfp) L.push('Defesa: ' + q.dfpR); return L; })(rtsBrain);
+/* ---------- end of CEREBRO: defesa ---------- */
 /* ---------- the soldier's stimuli (P1): what he perceives that his reflexes answer ----------
    The one place of the soldier's brain that looks at the world, each by what a man can see or hear: a round cracking past or striking him
    (drInc), a blast (heard within hear m, its weight k by distance and size), a grenade (seen in flight or on the ground within see m in
@@ -43678,6 +44126,71 @@ addEventListener('pointerup', () => { BM.drag = null; });
 cv.addEventListener('wheel', e => { if (!bmLive() || !e.deltaY) return; e.preventDefault(); const p = bmXY(e); bmZoom(e.deltaY < 0 ? 1.25 : 1 / 1.25, p.x, p.y); }, { passive: false });
 cv.addEventListener('dblclick', e => { if (!bmLive()) return; e.preventDefault(); const P = S.my; BM.z = Math.max(BM.z, 4); BM.cx = P.x; BM.cz = P.z; bmClamp(); });
 /* ===== end of the battle map ===== */
+/* ---------- CEREBRO: defesa on the general's view (DFP; NÃO TESTADO, see docs/nao-testado/cf-defesa-posicoes.md) ----------
+   The layer dfp (Posições de defesa) draws each plan of the side (V.dfp, the host's dfpView): every post as a wedge over its sector, a
+   dotted line to its kill zone (an x on the road), the watch (V), the reserve (R), the tanks' places (a square, filled when a tank holds it,
+   H when it is hull down) with a dashed line to the alternate, the AA's (AA). Defesa gets "Posições de defesa": for each point of the side,
+   Refazer (dpos auto), Desligar/Ligar (off, on), Carros + (tank, one more), Soltar carros (tkoff) and Marcar posto: the one squad selected
+   gets its post where the next click on the map falls (dpos id x z) */
+function gDfp(g, V, P) {
+  const L = Array.isArray(V.dfp) ? V.dfp : []; if (!L.length) return;
+  const k = P.k, own = gCol(V, V.t), lab = !!gLay('lab').on, dot = (x, y, r, fill) => { g.beginPath(); g.arc(x, y, r, 0, TAU); g.fillStyle = fill; g.fill(); };
+  for (const d of L) {
+    if (d.off) continue;
+    for (const a of d.ap || []) { const x = P.X(a.kx), y = P.Y(a.kz), s = 4 * k; g.beginPath(); g.moveTo(x - s, y - s); g.lineTo(x + s, y + s); g.moveTo(x + s, y - s); g.lineTo(x - s, y + s); g.strokeStyle = '#ffd166'; g.lineWidth = 1.6; g.stroke(); }
+    for (const p of d.posts || []) {
+      const x = P.X(p.x), y = P.Y(p.z), R = 20 * k, sa = Math.atan2(P.Y(p.z + Math.sin(p.a) * 100) - y, P.X(p.x + Math.cos(p.a) * 100) - x);
+      g.beginPath(); g.moveTo(x, y); g.arc(x, y, R, sa - p.w, sa + p.w); g.closePath(); g.fillStyle = own; g.globalAlpha = p.sq ? .22 : .1; g.fill(); g.globalAlpha = .85; g.strokeStyle = own; g.lineWidth = 1.2; g.stroke(); g.globalAlpha = 1;
+      g.beginPath(); g.moveTo(x, y); g.lineTo(P.X(p.kx), P.Y(p.kz)); g.setLineDash([2, 4]); g.strokeStyle = own; g.lineWidth = 1; g.stroke(); g.setLineDash([]);
+      dot(x, y, 3 * k, own); if (lab && p.sq) gTxt(g, 'E' + p.sq, x + 5 * k, y - 5 * k, 10 * k, own);
+    }
+    for (const o of d.own || []) { const x = P.X(o.x), y = P.Y(o.z); gRing(g, x, y, 6 * k, own, 1.8); if (lab) gTxt(g, 'E' + o.sq, x + 7 * k, y - 6 * k, 10 * k, own); }
+    if (d.vig) { const x = P.X(d.vig.x), y = P.Y(d.vig.z); gRing(g, x, y, 5 * k, own, 1.4); gTxt(g, 'V', x, y + 4 * k, 10 * k, own, 'center'); }
+    if (d.res) { const x = P.X(d.res.x), y = P.Y(d.res.z); gRing(g, x, y, 7 * k, own, 1.4); gTxt(g, 'R', x, y + 4 * k, 10 * k, own, 'center'); }
+    for (const s of d.tk || []) {
+      const x = P.X(s.x), y = P.Y(s.z), h = 6 * k;
+      if (s.alt) { g.beginPath(); g.moveTo(x, y); g.lineTo(P.X(s.alt[0]), P.Y(s.alt[1])); g.setLineDash([5, 4]); g.strokeStyle = own; g.lineWidth = 1.2; g.stroke(); g.setLineDash([]); g.strokeRect(P.X(s.alt[0]) - h * .6, P.Y(s.alt[1]) - h * .6, h * 1.2, h * 1.2); }
+      g.strokeStyle = own; g.lineWidth = 1.8; g.strokeRect(x - h, y - h, h * 2, h * 2); if (s.u) { g.fillStyle = own; g.globalAlpha = .5; g.fillRect(x - h, y - h, h * 2, h * 2); g.globalAlpha = 1; }
+      if (lab) gTxt(g, s.hd ? 'CC desenfiado' : 'CC', x + h + 3 * k, y + 3 * k, 10 * k, own);
+    }
+    if (d.aa) { const x = P.X(d.aa.x), y = P.Y(d.aa.z); gRing(g, x, y, 6 * k, own, d.aa.u ? 2.4 : 1.2); gTxt(g, 'AA', x, y - 8 * k, 10 * k, own, 'center'); }
+  }
+}
+GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'unit')), 0, { id: 'dfp', nm: 'Posições de defesa', on: 1, draw: gDfp });
+GORW.dpos = 1;
+Object.defineProperty(GORT, 'dpos', { enumerable: true, get: () => 'Posto: clique onde a esquadra selecionada deve ficar' });
+gorDefP = (g => V => {
+  g(V);
+  const pol = $('#gcPol'); if (!pol) return;
+  if (!$('#gcDfp')) { const sec = gE('section'), h = gE('h3', '', 'Posições de defesa'), ul = gE('ul', 'gc-list'); sec.id = 'gcDfp'; ul.id = 'gcDfpL'; h.title = 'Onde cada esquadra e cada carro de combate fica em cada ponto: postos em fogo cruzado nas entradas, vigia à frente, reserva protegida, carros em posição desenfiada'; sec.append(h, ul); pol.after(sec); }
+  const tac = gorTac(), L = Array.isArray(V.dfp) ? V.dfp : [], ids = gorIds(), pts = (V.pts || []).map((p, i) => ({ p, i })).filter(o => o.p.hold === S.me && o.p.r);
+  const sg = JSON.stringify([L.map(d => [d.pi, d.v, d.off, (d.sq || []).length, (d.tk || []).filter(s => s.u).length, d.aa && d.aa.u]), pts.map(o => o.i), tac, ids.length, GOR.mode, GOR.dfpPi]);
+  if (GOR.sig.dfp === sg) return; GOR.sig.dfp = sg;
+  const btn = gorBtn;
+  gorFill('#gcDfpL', pts.length ? pts.map(o => {
+    const d = L.find(d => d.pi === o.i), n = d ? (d.tk || []).filter(s => s.u).length : 0, nm = (o.p.L ? o.p.L + ' · ' : '') + (o.p.name || '');
+    return gorLi(nm + (d ? (d.off ? ' · posições desligadas' : ' · ' + (d.posts || []).length + ' postos, ' + (d.sq || []).length + ' esq.' + (n ? ', ' + n + (n === 1 ? ' carro' : ' carros') : '') + (d.aa && d.aa.u ? ', AA' : '')) : ' · sem plano ainda'),
+      [btn('Refazer', { a: 'dpos', pi: o.i, k: 'auto' }, 'Escolher de novo as posições pelo terreno e pela ameaça conhecida', undefined, !tac),
+        btn(d && d.off ? 'Ligar' : 'Desligar', { a: 'dpos', pi: o.i, k: d && d.off ? 'on' : 'off' }, d && d.off ? 'Voltar às posições escolhidas pelo plano' : 'Cada esquadra volta ao próprio posto, como antes', undefined, !tac),
+        btn('Carros +', { a: 'dpos', pi: o.i, k: 'tank', n: Math.min(3, n + 1) }, 'Um carro de combate livre a mais em posição desenfiada neste ponto (até 3)', undefined, !tac || n >= 3),
+        btn('Soltar carros', { a: 'dpos', pi: o.i, k: 'tkoff' }, 'Os carros e a antiaérea da defesa deste ponto voltam à estrada', undefined, !tac || !(n || (d && d.aa && d.aa.u))),
+        btn('Marcar posto', { a: 'dposm', pi: o.i }, 'A esquadra selecionada ganha um posto onde você clicar, perto do ponto', GOR.mode === 'dpos' && GOR.dfpPi === o.i, !tac || ids.length !== 1)]);
+  }) : gorNone('Nenhum ponto do lado'));
+})(gorDefP);
+gorAct = (g => (d, shift) => {
+  if (d.a === 'dpos') { const c = { c: 'dpos', pi: +d.pi, k: d.k }; if (d.n !== undefined) c.n = +d.n; gorSend(c); }
+  else if (d.a === 'dposm') { GOR.mode = GOR.mode === 'dpos' && GOR.dfpPi === +d.pi ? '' : 'dpos'; GOR.dfpPi = +d.pi; GOR.sig = {}; gorBar(); }
+  else return g(d, shift);
+  if (GV.V && GOR.tab !== 'sit') gorCmdPanel(GV.V);
+})(gorAct);
+gorTarget = (g => (px, py, shift) => {
+  if (GOR.mode !== 'dpos') return g(px, py, shift);
+  const w = gorW(px, py), ids = gorIds(), r1 = v => Math.round(v * 10) / 10;
+  if (ids.length === 1 && Number.isInteger(GOR.dfpPi)) gorSend({ c: 'dpos', pi: GOR.dfpPi, id: ids[0], x: r1(w.x), z: r1(w.z) });
+  else gorToast('Marcar posto: selecione uma esquadra só', true);
+  if (!shift) GOR.mode = ''; GOR.sig = {}; gorBar();
+})(gorTarget);
+/* ---------- end of CEREBRO: defesa on the general's view ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

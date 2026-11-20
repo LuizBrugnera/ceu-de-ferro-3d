@@ -9794,7 +9794,7 @@ function stepMan(m, dt) {
   if (c.aim) { m.h = wrap(m.h + clamp(wrap(Math.atan2(-c.aim.z, c.aim.x) - m.h), -k, k)); m.ap += clamp(Math.asin(clamp(c.aim.y, -1, 1)) - m.ap, -k, k); }
   manDir(m);
   const go = Math.hypot(c.mx, c.mz), run = c.run && go > .1 && m.st === 0 && !m.wind && !c.ads;
-  m.stam = clamp(m.stam + (run ? -dt / MAN.stam : dt / MAN.rest), 0, 1); if (m.stam <= 0) m.wind = true; else if (m.stam > MAN.wind) m.wind = false;
+  m.stam = 1; m.wind = false;   // o fôlego é infinito (cf-folego): a corrida não cansa
   if (go > .01 && S.t >= m.stT) {
     const v = (run ? MAN.run : MAN.walk * STANCE[m.st].spd * (c.ads ? MAN.ads.spd : 1)) * (1 - Math.min(MAN.limp[1], m.wl * MAN.limp[0])) * Math.min(1, go) / go * dt * rubble(m.x, m.z);
     let nx = m.x + c.mx * v, nz = m.z + c.mz * v;
@@ -12062,9 +12062,8 @@ const ZS = { a: 0, x: 0, y: 0 };
 /* the muzzle's wander, each step, and the breath (ctl.hb: held) */
 function sway(m, dt) {
   const c = m.ctl, H = SNIPE.hold, W = m.sw || (m.sw = { a: SNIPE.sway[0], ph: rand(0, 9), br: H.t, out: -9, x: 0, y: 0, hb: false });
-  const mv = m.v.x * m.v.x + m.v.z * m.v.z > .3, hb = !!c.hb && W.br > 0 && S.t >= W.out && !mv && !m.in;
-  if (c.hb && !mv && W.br <= 0 && S.t >= W.out) W.out = S.t + H.out;
-  W.br = clamp(W.br + (hb ? -dt : S.t < W.out ? 0 : dt * H.t / H.rest), 0, H.t); W.hb = hb;
+  const mv = m.v.x * m.v.x + m.v.z * m.v.z > .3, hb = !!c.hb && !mv && !m.in;
+  W.br = H.t; W.out = -9; W.hb = hb;   // fôlego preso infinito (cf-folego): não gasta, não há 'sem fôlego'
   const want = SNIPE.sway[m.st] * (mv ? SNIPE.move : 1) * (1 + m.wa * MAN.shake) * (hb ? H.k : S.t < W.out ? 1.8 : 1) * (m.sup > S.t ? 2 : 1);
   W.a += (want - W.a) * Math.min(1, dt / SNIPE.settle[want < W.a ? 1 : 0]);
   W.ph += dt * SNIPE.rate * (hb ? .5 : 1);
@@ -37117,7 +37116,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   }
   txt(P.def.name, L, y, 17 * u, acc, 'left', disp); y += 23 * u;
   txt('SAÚDE', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.hp / P.max, P.hp < P.max * .45 ? FOE : ink); y += 15 * u;
-  txt('FÔLEGO', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.stam, P.wind ? FOE : acc); y += 19 * u;
+  y += 4 * u;
   txt(st.name.toUpperCase() + (P.run ? ' · CORRENDO' : P.ctl.ads ? ' · MIRANDO' : ''), L, y, 14 * u, ink); y += 20 * u;
   const gad = !!(P.sl && P.sl.n >= 3);   // a compartment of 3 to 5 in hand (cf-slots-arma)
   P.arms.forEach((m, i) => {
@@ -37658,7 +37657,7 @@ function trnRows(k, d, pvp, swapRow) {
     const [a0, a1] = d.arms;
     return [['Mouse', 'Apontar. Fora da luneta o tiro sai disperso: o fuzil de precisão é fraco de perto'], ['W / S / A / D', 'Andar'], ['Z', 'Postura: em pé, agachado, deitado. Deitado e parado a mira para de oscilar em pouco mais de um segundo, e depois de ' + String(SNIPE.hide.still).replace('.', ',') + ' s você fica muito mais difícil de ver'],
       ['Botão direito', 'Luneta. A mira oscila com a respiração; as marcas abaixo do centro mostram a queda do projétil a cada 200 m'], ['Roda do mouse', 'Trocar o aumento da luneta, ' + a0.zoom.map(z => Math.round(62 / z) + '×').join(' e ')],
-      ['Shift', 'Na luneta, prender o fôlego: a mira firma por até ' + String(SNIPE.hold.t).replace('.', ',') + ' s. Segurar até o fim deixa a mira tremendo por um tempo'],
+      ['Shift', 'Na luneta, prender o fôlego: a mira firma enquanto a tecla estiver apertada (o fôlego é infinito)'],
       ['Botão esquerdo ou Espaço', a0.name + ': um tiro por aperto, ' + String(a0.rate).replace('.', ',') + ' s entre dois. Tiro na cabeça mata' + (a0.am ? '. Em veículo leve o projétil atinge a peça que estiver na linha: motor, rodas, tripulação' : '')],
       ['R', 'Recarregar'], ['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name], ['F / G', 'Granada de mão e granada de fumaça'], ['E', 'Embarcar no carro, caminhão ou blindado aliado ao lado; a bordo, desembarcar'],
       ['N', 'Obras, como os outros soldados: base de suprimento, trincheira, sacos de areia'], ['C', 'Trocar a visão: por cima do ombro e pelos olhos'], swapRow, esc];
@@ -37749,8 +37748,7 @@ function trnSight(P, u, ink, acc, disp, blink) {
   const a = S.aim.d, e = manEye(P), rng = S.modern ? rayAim(e, a, 2500) : 0, k = W ? W.br / H.t : 1, out = W && S.t < W.out;
   txt(Math.round(62 / camera.fov) + '×', x - R * .68, y + R * .6, 12 * u, ink, 'center');
   if (rng) txt(Math.round(rng) + ' m', x + R * .68, y + R * .6, 12 * u, ink, 'center');
-  bar(x - 60 * u, y + R * .8, 120 * u, 5 * u, k, out ? FOE : W && W.hb ? acc : ink);
-  txt(out ? 'SEM FÔLEGO' : W && W.hb ? 'FÔLEGO PRESO' : 'SHIFT: PRENDER O FÔLEGO', x, y + R * .8 - 14 * u, 10 * u, out ? FOE : ink, 'center');
+  txt(W && W.hb ? 'FÔLEGO PRESO' : 'SHIFT: PRENDER O FÔLEGO', x, y + R * .8 - 14 * u, 10 * u, out ? FOE : ink, 'center');
 }
 /* ---------- crew: the prompt, the legend, and where to enter ----------
    The first choice of where to enter is the mid-match picker in another form (sw.entry, when it closes by itself): only the list of
@@ -38169,7 +38167,7 @@ const LEGEND = {
   inf(d, o) {
     const [a0, a1] = d.arms;
     const rows = [['Mouse', 'Apontar. O soldado vira com a mira, e a cruz abre conforme a dispersão: menor agachado, deitado, parado e mirando'],
-      ['W / S / A / D', 'Andar para onde a mira aponta e para os lados'], ['Shift', 'Correr, em pé, enquanto houver fôlego'], ['Z', 'Postura: em pé, agachado, deitado. Mais baixo é mais lento, mais preciso e mais difícil de ver e de acertar'],
+      ['W / S / A / D', 'Andar para onde a mira aponta e para os lados'], ['Shift', 'Correr, em pé (o fôlego é infinito)'], ['Z', 'Postura: em pé, agachado, deitado. Mais baixo é mais lento, mais preciso e mais difícil de ver e de acertar'],
       ['Botão esquerdo ou Espaço', a0.name + (a0.auto ? ' (rajada enquanto apertado)' : ' (um tiro por aperto)')], ['Botão direito', 'Mirar pela alça: campo mais fechado e menos dispersão'], ['R', 'Recarregar']];
     if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; sem linha de visada não trava: morro, prédio, árvores ou fumaça no caminho)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);
     rows.push(['F', 'Granada de mão, uns 30 m'], ['G', 'Granada de fumaça: uma cortina pequena que esconde dos dois lados'], ['N', 'Obras: mostra o contorno à sua frente, verde onde dá para construir e vermelho com o motivo onde não dá. Cada toque passa para a próxima: base de suprimento, trincheira, sacos de areia, e fecha. O clique começa a obra (a base gasta o kit) e o botão direito cancela. Fique parado junto da obra para construir (' + BLD.time + ' s sozinho, mais rápido com outros soldados ao lado); um tiro recebido interrompe. Pronta, ela remunicia e repara soldados e veículos do seu lado a até ' + BLD.r + ' m e vira ponto de entrada. Encostado em uma base inimiga, N arma a carga de demolição, que explode em ' + BLD.charge.fuse + ' s'], ['Prédios', 'Entre pelas portas, pelos buracos abertos nas paredes e pelas janelas do térreo. A escada em caracol fica no canto dos fundos: dê a volta no pilar para subir ou descer; nos prédios de teto plano ela leva ao telhado. Parede de pé para tiros e esconde; janela e buraco deixam ver e atirar, nos dois sentidos. Canhão, foguete e a carga de demolição (N, de frente para a parede, a até ' + CITY.plant + ' m) abrem buracos; sem apoio as lajes caem andar por andar, e o prédio vem abaixo quando o térreo cede'], ['C', 'Trocar a visão: por cima do ombro e primeira pessoa'], o.swap, o.esc);

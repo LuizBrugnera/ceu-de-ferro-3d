@@ -25531,6 +25531,262 @@ anaReport = (f => (ev, me) => {
   return R;
 })(anaReport);
 
+/* ---------- CEREBRO: medicao (P6; não testado, ver docs/nao-testado/cf-p6-medicao.md) ----------
+   How "real" the soldiers look, in numbers (section 4 of the research cf-cerebro-pesquisa): the meters of each side, the analytics event cb
+   (cérebro), the review's section Cérebro (R.brain) and what tools/balance.js --brain and tests/brain-drills.js read. An observer, as the
+   analytics is: it reads the battle as it is (S.men, S.squads, the truth), draws no random numbers and changes nothing the battle reads (its
+   own fields on soldiers and squads start with med; cover is read with coverAt on its own object, never through the soldier's cache).
+   So the honesty test of the brain (P7, tests/brain-honesty.js) is to leave this section out: it measures the brain, it is not the brain.
+   The contract (section 2.5, P0): until P0 lands, only what P6 needs, without declaring a name P0 declares (a second const BRAIN would stop the
+   whole page): BRAIN on the global object when nobody declared it. With P0's const BRAIN the name resolves to P0's and this line does nothing.
+   The meters (MED; per side, S.medD[s], counted while the analytics runs, or with S.med set, as the drills do), a soldier of the AI being
+   "in contact" when an enemy his squad believes in (q.bel, fresh within belT s; else his own target) is within r m:
+     ct    soldier-seconds in contact; ex of them in the open (medProt: no protection toward that enemy); nw of those standing still with no task
+           (medTask: no m.tar of the brain's, not firing, no target, not fetching a wounded mate): "the bot in the middle of nowhere"
+     inc   rounds that came at him (drInc: near misses and hits): [from a side his cover protected, the shooter unknown, known and ignored]
+     rc rf the reaction to the first round after calm s of quiet: histograms (rxBin s, the last bin: not within rxMax s) of the time to cover
+           (protected from where it came) and to firing back; rxN [reactions, already in cover]
+     mv    [soldier-seconds moving in contact, of them with a mate of the other fire team firing within fmT s] (fire and movement)
+     bd    the bounds under fire (moving in contact while the squad took fire within fireT s): a histogram of their length (bdBin s)
+     nn    [the nearest mate's distance in contact × s, s, s with him nn m or more]; bl [blasts with a casualty of the side, with two or more,
+           casualties] (dispersion)
+     gr    [men of the side within nadeR m of a hand grenade at any time from its landing to its blast (looked at every rxDt s), of them
+           neither killed nor down by it]
+     wd    [men down (WND), fetched and treated, died down, rescuers killed while fetching]
+     ld    [leaders lost (q.lid of P3, else the first man up), s to the next leader summed, successions, squads still on the mission lead s later,
+           checked]; mo [routs]; fl [calls (say) by men of squads in contact, squad-seconds in contact]; ai [the AI frame meter's mean summed, samples, worst]
+   Event cb (cérebro) { s the side, c the kind }: c 'm' the meters of side s since the match began, every ev s and at the end (the review keeps
+   the last); any other c is a brain package's own event (medCb: 'rend' a surrender, 'pris' a prisoner, 'nb' a grenade thrown back...), counted
+   by side and kind in the review. The header carries brain, BRAIN.on when the match began. */
+if (!globalThis.BRAIN) globalThis.BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3 };
+const MED = { on: 1, dt: .5, ev: 60, r: 400, belT: 10, calm: 30, rxBin: .1, rxMax: 8, rxDt: .1, bdBin: .5, bdMax: 15, mvV: 1.2, stillV: .5, idle: 3, fmT: 1.5,
+  fireT: 5, nadeR: 8, nadeY: 1, nn: 5, lead: 60,
+  /* the targets (section 4), for the review and the tournament */
+  goal: { ex: '−50% contra o cérebro desligado', nw: '~0', inc: 'protegido sobe; conhecida e ignorada perto de 0', rx: 'abrigo 0,3–1,5 s; fogo ≤ 2 s', fm: '≥ 70%', bd: '3–6 s',
+    nn: '≥ 5 m; menos baixas múltiplas', gr: '≥ 70%', wd: 'socorridos sobe; ≤ 0,3', ld: '≤ 4 s; ≥ 60%', mo: '> 0 e plausível', fl: '2–6', ai: '≤ 4; ≤ 8 ms', hon: '0 (teste)' } };
+const medNew = () => ({ ct: 0, ex: 0, nw: 0, inc: [0, 0, 0], rc: Array(Math.round(MED.rxMax / MED.rxBin) + 1).fill(0), rf: Array(Math.round(MED.rxMax / MED.rxBin) + 1).fill(0), rxN: [0, 0],
+  mv: [0, 0], bd: Array(Math.round(MED.bdMax / MED.bdBin) + 1).fill(0), nn: [0, 0, 0], bl: [0, 0, 0], gr: [0, 0], wd: [0, 0, 0, 0], ld: [0, 0, 0, 0, 0], mo: [0], fl: [0, 0], ai: [0, 0, 0] });
+const MEDK = ['ct', 'ex', 'nw', 'inc', 'rc', 'rf', 'rxN', 'mv', 'bd', 'nn', 'bl', 'gr', 'wd', 'ld', 'mo', 'fl', 'ai'];
+const medD = s => { const L = S.medD || (S.medD = []); return L[s] || (L[s] = medNew()); };
+const medHist = (h, v, bin) => { h[Math.min(h.length - 1, Math.max(0, Math.floor(v / bin)))]++; };
+const MEDCV = { c: 0, p: 0, x: 0, z: 0, all: false };
+/* whether m is protected from an enemy at x z: in a building, a work or a trench, or cover on that side (manHit's rule). P2's position
+   service is to replace it (medProt = (f => (m, x, z) => ...)(medProt)) */
+let medProt = (m, x, z) => {
+  if (m.cbin || m.fc || m.dg > .3) return true;
+  const c = coverAt(m.x, m.z, MEDCV); if (!c.p) return false;
+  return c.all || (m.st > 0 && (x - m.x) * c.x + (z - m.z) * c.z > 0);
+};
+/* whether m has something to do: the brain's task (m.tar, contract 2.5), or firing, a target, a wounded mate to fetch */
+let medTask = m => !!m.tar || S.t - (m.shotT === undefined ? -1e9 : m.shotT) < MED.idle || !!(m.ai && (m.ai.tgt || m.ai.rsc));
+/* his fire team: the contract's q.eq when there is one, else today's (the parity of his place in the squad, as the bounds have it) */
+const medTeam = (q, m) => { if (Array.isArray(q.eq)) { for (let i = 0; i < q.eq.length; i++) if (q.eq[i].men && q.eq[i].men.includes(m)) return i; return -1; } return m.ai ? m.ai.i & 1 : 0; };
+const medOn = () => !!S && !!S.medOk;
+/* the nearest enemy squad q believes in within MED.r of m (fresh within belT s), else m's own target */
+function medNear(m, q) {
+  let best = null, bd = MED.r * MED.r;
+  if (q.bel) for (const [t, b] of q.bel) { if (t.dead || S.t - b.t > MED.belT) continue; const d = (b.x - m.x) ** 2 + (b.z - m.z) ** 2; if (d < bd) { bd = d; best = b; } }
+  const g = m.ai && m.ai.tgt;
+  if (!best && g && !g.dead && (g.x - m.x) ** 2 + (g.z - m.z) ** 2 < MED.r * MED.r) best = g;
+  return best;
+}
+const medBdEnd = (m, D) => { medHist(D.bd, S.t - m.medB, MED.bdBin); m.medB = undefined; };
+/* the leader of q as the meters see him: P3's q.lid, else the first man up (squadThink's) */
+const medLeader = q => (q.lid !== undefined ? (q.lid && !q.lid.dead && !q.lid.down ? q.lid : null) : q.men.find(m => !m.dead && !m.down) || null);
+function medLead(q, D) {
+  const L = medLeader(q), was = q.medLd;
+  if (was && (was.dead || was.down) && q.medLx === undefined) {   // lost: the mission is looked at lead s on (once at a time: a check under way is kept)
+    q.medLx = S.t; D.ld[0]++;
+    if (!q.medLc) { q.medLc = 1; (S.medLq || (S.medLq = [])).push({ q, t: S.t + MED.lead }); }
+  }
+  if (q.medLx !== undefined) { if (L && L !== was) { D.ld[1] += S.t - q.medLx; D.ld[2]++; q.medLx = undefined; q.medLd = L; } }
+  else if (L) q.medLd = L;
+}
+/* the squads that lost a leader lead s ago: still on the mission (in the field, someone to lead, not routed, not withdrawing); a squad wiped
+   out and gone from S.squads is not */
+function medLeadCheck() {
+  const L = S.medLq; if (!L || !L.length) return;
+  let k = 0;
+  for (const c of L) {
+    if (S.t < c.t) { L[k++] = c; continue; }
+    const q = c.q, D = medD(q.team); q.medLc = 0; D.ld[4]++;
+    if (S.squads.includes(q) && medLeader(q) && q.state !== 1 && !(q.ord && q.ord.k === 'withdraw')) D.ld[3]++;
+  }
+  L.length = k;
+}
+/* every dt s: each squad of the AI and its men */
+function medSample(h) {
+  medLeadCheck();
+  for (const q of S.squads) {
+    if (q.net || !q.men || !(q.team >= 0)) continue;
+    const D = medD(q.team), fire = !!q.drW && q.drW.length > 0 && S.t - q.drW[q.drW.length - 1].t < MED.fireT;
+    medLead(q, D);
+    if (q.state === 1 && !q.medRt) { q.medRt = 1; D.mo[0]++; }
+    let any = false;
+    for (const m of q.men) {
+      if (m.dead || m.down || m.in || m.net || !m.ai) { if (m.medB !== undefined) medBdEnd(m, D); continue; }
+      const e = medNear(m, q);
+      if (!e) { if (m.medB !== undefined) medBdEnd(m, D); continue; }
+      any = true; D.ct += h;
+      const sp = Math.hypot(m.v.x, m.v.z);
+      if (!medProt(m, e.x, e.z)) { D.ex += h; if (sp < MED.stillV && !medTask(m)) D.nw += h; }
+      if (sp > MED.mvV) {
+        D.mv[0] += h;
+        const tm = medTeam(q, m); for (const n of q.men) if (n !== m && !n.dead && !n.down && medTeam(q, n) !== tm && S.t - (n.shotT === undefined ? -1e9 : n.shotT) < MED.fmT) { D.mv[1] += h; break; }
+        if (m.medB === undefined && fire) m.medB = S.t;
+      } else if (m.medB !== undefined) medBdEnd(m, D);
+      let nd = 1e9; for (const n of q.men) if (n !== m && !n.dead && !n.in) { const d = Math.hypot(n.x - m.x, n.z - m.z); if (d < nd) nd = d; }
+      if (nd < 1e9) { D.nn[0] += nd * h; D.nn[1] += h; if (nd >= MED.nn) D.nn[2] += h; }
+    }
+    if (any) { D.fl[1] += h; q.medC = S.t; }
+  }
+}
+/* a round came at m from by (drInc): the sector, and the reaction it starts after a quiet spell */
+function medInc(m, by, vx, vz) {
+  const D = medD(m.team), vl = Math.hypot(vx || 0, vz || 0); let ux, uz;
+  if (vl > 1) { ux = -vx / vl; uz = -vz / vl; } else { const dx = by.x - m.x, dz = by.z - m.z, dl = Math.hypot(dx, dz) || 1; ux = dx / dl; uz = dz / dl; }
+  const px = m.x + ux * 50, pz = m.z + uz * 50, pr = medProt(m, px, pz), e = m.pm && m.pm.get(by);
+  D.inc[pr ? 0 : (e && e.kn) || (m.sq && m.sq.bel && m.sq.bel.has(by)) ? 2 : 1]++;
+  if (!m.medR && S.t - (m.medL === undefined ? -1e9 : m.medL) > MED.calm) { m.medR = { t: S.t, x: px, z: pz, c: pr ? 0 : -1, f: -1, in: pr }; D.rxN[0]++; if (pr) D.rxN[1]++; (S.medRx || (S.medRx = [])).push(m); }
+  m.medL = S.t;
+}
+/* the reactions under way, every rxDt s: to cover, and fire back */
+function medRx() {
+  const L = S.medRx; if (!L || !L.length) return;
+  let k = 0;
+  for (const m of L) {
+    const R = m.medR, D = medD(m.team), age = S.t - R.t;
+    if (!m.dead && !m.down) {
+      if (R.c < 0 && medProt(m, R.x, R.z)) R.c = age;
+      if (R.f < 0 && m.shotT !== undefined && m.shotT > R.t) R.f = m.shotT - R.t;
+    }
+    if (m.dead || m.down || (R.c >= 0 && R.f >= 0) || age > MED.rxMax) {
+      if (!m.dead && !m.down) { medHist(D.rc, R.c >= 0 ? R.c : 1e9, MED.rxBin); medHist(D.rf, R.f >= 0 ? R.f : 1e9, MED.rxBin); } else { D.rxN[0]--; if (R.in) D.rxN[1]--; }
+      m.medR = null; continue;
+    }
+    L[k++] = m;
+  }
+  L.length = k;
+}
+/* the meters of each side, as events cb c 'm' (trailing empty bins left out) */
+function medEmit() {
+  if (!S.medD) return;
+  const a = AIB.stat(), cut = h => { let n = h.length; while (n && !h[n - 1]) n--; return h.slice(0, n); };
+  S.medD.forEach((D, s) => {
+    if (!D) return;
+    if (a.n) { D.ai[0] += a.avg; D.ai[1]++; D.ai[2] = Math.max(D.ai[2], a.worst); }
+    const e = { k: 'cb', t: anaR(S.t), s, c: 'm' };
+    for (const k of MEDK) { const v = D[k]; e[k] = Array.isArray(v) ? (k === 'rc' || k === 'rf' || k === 'bd' ? cut(v) : v.map(anaR)) : anaR(v); }
+    anaPush(e);
+  });
+}
+/* a brain package's own event (a surrender, a prisoner, a grenade thrown back...): counted by side and kind, and in the analytics */
+function medCb(c, s, d) {
+  if (!MED.on || !S || !c || !(s >= 0)) return;
+  const E = S.medE || (S.medE = {}), k = s + ':' + c; E[k] = (E[k] || 0) + 1;
+  if (anaLive() && ANA.S === S) anaPush(Object.assign({ k: 'cb', t: anaR(S.t), s, c: String(c).slice(0, 12) }, d));
+}
+function medStep(dt) {
+  S.medOk = MED.on && (!S.net || S.host) && (!!S.med || (anaLive() && ANA.S === S && !S.cq.ph));
+  if (!S.medOk) return;
+  if ((S.medRa = (S.medRa || 0) + dt) >= MED.rxDt) { S.medRa = 0; medRx(); }
+  if ((S.medA = (S.medA || 0) + dt) >= MED.dt) { const h = S.medA; S.medA = 0; medSample(h); }
+  if (anaLive() && ANA.S === S && S.t >= (S.medEvT || 0)) { if (S.medEvT) medEmit(); S.medEvT = S.t + MED.ev; }
+}
+step = (g => dt => { g(dt); if (S) medStep(dt); })(step);
+drInc = (f => (m, by, vx, vz, w) => { f(m, by, vx, vz, w); if (m && m.ai && !m.net && by && by.team !== m.team && medOn()) medInc(m, by, vx, vz); })(drInc);
+/* a hand grenade: who of the other sides came near it between its landing and its blast, and who of them came out of it */
+nadeStep = (f => (b, dt) => {
+  if (b.k !== 'nade' || b.gone || !medOn()) return f(b, dt);
+  if (S.t >= (b.medN || 0) && (b.rest || b.y - hgt(b.x, b.z) < MED.nadeY)) {
+    const W = b.medW || (b.medW = []), R = MED.nadeR; b.medN = S.t + MED.rxDt;
+    for (const m of S.men) if (!m.dead && !m.down && !m.in && !m.net && m.ai && m.team !== b.team && Math.abs(m.x - b.x) < R && Math.abs(m.z - b.z) < R && Math.hypot(m.x - b.x, m.z - b.z) < R && !W.includes(m)) W.push(m);
+  }
+  f(b, dt);
+  if (b.gone && b.medW) { for (const m of b.medW) { const D = medD(m.team); D.gr[0]++; if (!m.dead && !m.down) D.gr[1]++; } b.medW = null; }
+})(nadeStep);
+/* a blast: how many of each side it killed or put down at once */
+explode = (f => (x, y, z, r, dmg, by, team, he, ob) => {
+  if (!medOn() || !(r > 0)) return f(x, y, z, r, dmg, by, team, he, ob);
+  const V = [];
+  for (const m of S.men) if (!m.dead && !m.down && !m.in && !m.net && m.ai && Math.abs(m.x - x) < r && Math.abs(m.z - z) < r) V.push(m);
+  f(x, y, z, r, dmg, by, team, he, ob);
+  const n = []; for (const m of V) if (m.dead || m.down) n[m.team] = (n[m.team] || 0) + 1;
+  n.forEach((k, s) => { if (!k) return; const D = medD(s); D.bl[0]++; if (k > 1) D.bl[1]++; D.bl[2] += k; });
+})(explode);
+manDown = (f => (m, dmg, h) => { const r = f(m, dmg, h); if (r && m.ai && !m.net && medOn()) medD(m.team).wd[0]++; return r; })(manDown);
+rescue = (f => (m, A, c) => { const d = A.rsc, was = !!d && !!d.down && !d.dead, r = f(m, A, c); if (was && !d.down && !d.dead && medOn()) medD(d.team).wd[1]++; return r; })(rescue);
+killMan = (f => (m, by) => {
+  const live = !m.dead && m.ai && !m.net && medOn(), dn = live && !!m.down, rs = live && !!m.ai.rsc;
+  f(m, by);
+  if (live && m.dead) { const D = medD(m.team); if (dn) D.wd[2]++; if (rs) D.wd[3]++; }
+})(killMan);
+/* a call by a man whose squad is in contact (at the last look): the calls a minute of a squad in contact */
+say = (f => (m, k, a, force) => { const was = m && m.sayT; f(m, k, a, force); if (m && m.sayT !== was && m.sq && m.sq.medC !== undefined && S.t - m.sq.medC <= MED.dt * 1.5 && !m.net && medOn()) medD(m.team).fl[0]++; })(say);
+anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) h.brain = BRAIN.on ? 1 : 0; S.medEvT = 0; })(anaBegin);
+cqEnd = (f => (...a) => { if (MED.on && S && S.medOk && anaLive() && ANA.S === S && !S.over && !S.cq.ph) medEmit(); f(...a); })(cqEnd);
+/* the review's meters: a side's raw counters from its last event (missing pieces empty), many added up (the tournament), and what they say */
+function medRaw(e) {
+  const D = medNew();
+  if (e) for (const k of MEDK) { const v = e[k]; if (Array.isArray(D[k])) { if (Array.isArray(v)) v.forEach((x, i) => { if (i < D[k].length) D[k][i] = +x || 0; }); } else D[k] = +v || 0; }
+  return D;
+}
+function medAdd(a, b) {
+  for (const k of MEDK) { if (Array.isArray(a[k])) b[k].forEach((x, i) => { if (k === 'ai' && i === 2) a[k][i] = Math.max(a[k][i], x); else a[k][i] += x; }); else a[k] += b[k]; }
+  return a;
+}
+/* the median of a histogram (bin s a bin; the last bin, not within the window: Infinity), null with nothing in it */
+function medMed(h, bin) {
+  const n = h.reduce((a, b) => a + b, 0); if (!n) return null;
+  let c = 0; for (let i = 0; i < h.length; i++) { c += h[i]; if (c >= n / 2) return i === h.length - 1 ? Infinity : (i + .5) * bin; }
+  return null;
+}
+/* the measures (section 4) from raw counters; ev the brain's own events by kind; n the matches they come from (per match counts) */
+function medSum(D, ev, n) {
+  const sh = (a, b) => (b ? a / b : null), inc = D.inc[0] + D.inc[1] + D.inc[2], m = n || 1, E = ev || {};
+  return { ct: D.ct, ex: D.ex, exSh: sh(D.ex, D.ct), nw: D.nw, nwSh: sh(D.nw, D.ct), inc, incP: sh(D.inc[0], inc), incU: sh(D.inc[1], inc), incK: sh(D.inc[2], inc),
+    rx: D.rxN[0], rxIn: sh(D.rxN[1], D.rxN[0]), rxC: medMed(D.rc, MED.rxBin), rxF: medMed(D.rf, MED.rxBin), rxNo: sh(D.rc[D.rc.length - 1], D.rc.reduce((a, b) => a + b, 0)),
+    fm: sh(D.mv[1], D.mv[0]), bdN: D.bd.reduce((a, b) => a + b, 0), bd: medMed(D.bd, MED.bdBin), nn: sh(D.nn[0], D.nn[1]), nn5: sh(D.nn[2], D.nn[1]),
+    bl: D.bl[0], bl2: D.bl[1], bl2Sh: sh(D.bl[1], D.bl[0]), gr: D.gr[0], grOk: sh(D.gr[1], D.gr[0]), down: D.wd[0], aid: sh(D.wd[1], D.wd[0]), medLost: sh(D.wd[3], D.wd[1]),
+    ldLost: D.ld[0], ldT: sh(D.ld[1], D.ld[2]), ldGo: sh(D.ld[3], D.ld[4]), rout: D.mo[0] / m, rend: (E.rend || 0) / m, pris: (E.pris || 0) / m,
+    fl: D.fl[1] ? D.fl[0] / (D.fl[1] / 60) : null, ai: D.ai[1] ? D.ai[0] / D.ai[1] : null, aiW: D.ai[1] ? D.ai[2] : null };
+}
+/* the rows [measure, value, target] of a summary: the review's table and the tournament's */
+function medRows(M) {
+  const d = v => String(v).replace('.', ','), f1 = v => (v === null || v === undefined ? '—' : d(Math.round(v * 10) / 10)), pc = v => (v === null || v === undefined ? '—' : Math.round(v * 100) + '%');
+  const s = v => (v === null || v === undefined ? '—' : v === Infinity ? '> ' + MED.rxMax + ' s' : f1(v) + ' s'), mn = v => f1(v / 60), G = MED.goal;
+  return [
+    ['Tempo exposto sob fogo: soldado-min no aberto com inimigo conhecido a ≤ ' + MED.r + ' m (do tempo em contato)', mn(M.ex) + ' (' + pc(M.exSh) + ')', G.ex],
+    ['"Bot no meio do nada": soldado-min parado no aberto, sem tarefa, com inimigo conhecido perto (do tempo em contato)', mn(M.nw) + ' (' + pc(M.nwSh) + ')', G.nw],
+    ['Tiros recebidos: de um lado que o abrigo protegia; ameaça desconhecida; conhecida e ignorada', pc(M.incP) + '; ' + pc(M.incU) + '; ' + pc(M.incK) + ' (' + M.inc + ')', G.inc],
+    ['Reação ao 1º tiro: mediana até o abrigo; até atirar de volta (reações; já abrigados)', s(M.rxC) + '; ' + s(M.rxF) + ' (' + M.rx + '; ' + pc(M.rxIn) + ')', G.rx],
+    ['Fogo e movimento: movimento em contato com a outra equipe atirando', pc(M.fm), G.fm],
+    ['Lances sob fogo: mediana da duração (lances)', (M.bd === Infinity ? '> ' + MED.bdMax + ' s' : s(M.bd)) + ' (' + M.bdN + ')', G.bd],
+    ['Dispersão: vizinho mais perto em contato (média; ≥ ' + MED.nn + ' m); explosões com 2 ou mais baixas, de todas com baixa', (M.nn === null ? '—' : f1(M.nn) + ' m') + '; ' + pc(M.nn5) + '; ' + M.bl2 + ' de ' + M.bl, G.nn],
+    ['Granadas: ameaçados (a ≤ ' + MED.nadeR + ' m) que escaparam', pc(M.grOk) + ' (' + M.gr + ')', G.gr],
+    ['Feridos: caídos socorridos; socorristas mortos por socorro (caídos)', pc(M.aid) + '; ' + (M.medLost === null ? '—' : f1(M.medLost)) + ' (' + M.down + ')', G.wd],
+    ['Liderança: tempo de sucessão; esquadras na missão ' + MED.lead + ' s depois (líderes perdidos)', s(M.ldT) + '; ' + pc(M.ldGo) + ' (' + M.ldLost + ')', G.ld],
+    ['Moral por partida: debandadas; rendições; prisioneiros', f1(M.rout) + '; ' + f1(M.rend) + '; ' + f1(M.pris), G.mo],
+    ['Falas por minuto por esquadra em contato', f1(M.fl), G.fl],
+    ['Custo da IA por quadro: média; pior (ms)', (M.ai === null ? '—' : f1(M.ai)) + '; ' + (M.aiW === null ? '—' : f1(M.aiW)), G.ai],
+    ['Honestidade: leituras da verdade no cérebro', 'tests/brain-honesty.js', G.hon]];
+}
+/* R.brain { on: BRAIN.on of the match (null: a match before it), side: [{ raw, ev (the brain's own events by kind), sum } | null] } */
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  const H = ev.find(e => e.k === 'hdr') || {}, n = R.ns || 2, last = [], cnt = anaSides(n).map(() => ({}));
+  let any = false;
+  for (const e of ev) {
+    if (e.k !== 'cb' || !(e.s >= 0 && e.s < n)) continue; any = true;
+    if (e.c === 'm') { if (!last[e.s] || e.t >= last[e.s].t) last[e.s] = e; } else cnt[e.s][e.c] = (cnt[e.s][e.c] || 0) + 1;
+  }
+  if (!any && H.brain === undefined) { R.brain = null; return R; }
+  const hide = anaHide(me, n, R.over);
+  R.brain = { on: H.brain === undefined ? null : H.brain, side: anaSides(n).map(s => { if ((hide && s !== me) || !last[s]) return null; const raw = medRaw(last[s]); return { raw, ev: cnt[s], sum: medSum(raw, cnt[s], 1) }; }) };
+  return R;
+})(anaReport);
+/* ---------- end of CEREBRO: medicao ---------- */
+
 /* ---------- the laws of war (W14): the general's part, and the analytics' ----------
    mil, the general's order { pi a point of the match on a town | x z within a town }: the town's civilians become a militia squad of the side that
    holds it, through a Dispatch order (civTake). Refused where the town turned against the side (hate), with nobody left to arm (nociv), and, for a
@@ -35127,6 +35383,18 @@ aarShow = (f => (R, sub) => {
   b.append(aarTable(aarSd(R).filter(s => c[s]).map(s => { const x = c[s]; return Object.assign([N(s), x.sent, x.late, x.lost, d(x.lag) + ' s', Math.round(x.out * 100) + '%', x.hqDown ? Math.round(x.hqDown) + ' s' : '—', x.df], { cls: aarK(s) }); }),
     ['Lado', 'Ordens', 'Fora da rede', 'Perdidas', 'Demora média', 'Esquadras fora', 'Sem QG', 'Localizados']));
   b.append(aarEl('p', 'aar-note', 'Ordens do comando pelo rádio: as que chegaram de fora da rede demoraram de 20 a 60 s, as perdidas não chegaram. Esquadras fora: a média das que estavam fora da rede ou cortadas pelo bloqueador. Localizados: transmissores dos outros lados achados por radiogoniometria.'));
+})(aarShow);
+/* ---------- CEREBRO: medicao, a revisão (P6; não testado) ----------
+   The review's section Cérebro: the measures of section 4 for each side the review shows (R.brain, from the cb events), beside the target */
+aarShow = (g => (R, sub) => {
+  g(R, sub);
+  const B = R && R.brain, SD = B ? aarSd(R).filter(s => B.side[s]) : []; if (!SD.length) return;
+  const b = $('#aarBody'), N = s => R.fac[s] || 'Lado ' + (s + 1), rows = SD.map(s => medRows(B.side[s].sum));
+  b.append(aarEl('h3', '', 'Cérebro'));
+  b.append(aarTable(rows[0].map((r, i) => [r[0], ...rows.map(x => x[i][1]), r[2]]), ['Medida', ...SD.map(N), 'Meta']));
+  const ev = SD.map(s => Object.entries(B.side[s].ev).map(([k, v]) => k + ' ' + v).join(', ')).filter(Boolean);
+  b.append(aarEl('p', 'aar-note', 'Cérebro novo ' + (B.on === null ? 'sem registro' : B.on ? 'ligado' : 'desligado') + ' nesta partida. Em contato: um inimigo em que a esquadra acredita a até ' + MED.r + ' m. No aberto: sem prédio, obra, trincheira ou abrigo do lado desse inimigo.'
+    + (ev.length ? ' Eventos do cérebro: ' + ev.join('; ') + '.' : '')));
 })(aarShow);
 
 /* the general's strategies (STG) in the review: here, after aarShow, since the page's DOM part comes after the simulation the tests load */

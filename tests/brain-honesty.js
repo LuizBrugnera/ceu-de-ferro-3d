@@ -23,7 +23,8 @@ const PERC_OK = new Map([
 
 /* the CEREBRO sections that only measure: an observer, as the analytics is, reads the battle and changes nothing it reads (it decides nothing),
    so it is left out of the scan, each by its name with its reason, in review. tests/brain-drills.js checks that the battle is the same with it off */
-const OBSERVERS = new Map([['medicao', 'the measurement of the brain (P6): the meters, the cb events and the review read the battle as the analytics does']]);
+const OBSERVERS = new Map([['medicao', 'the measurement of the brain (P6): the meters, the cb events and the review read the battle as the analytics does'],
+  ['urbano-medicao', 'the measurement of the town, the anti-tank man and the sniper (G7, cf-g2-g7-urbano): meters and cb events, as medicao']]);
 console.log('-- 1. the code --');
 {
   const heads = [], re = /\/\* ---------- CEREBRO: ([^\n]*)/g; let m;

@@ -34,7 +34,13 @@
    doctrines, off and on, and prints the A×B: the result (wins, draws, length, tickets) and the measures side by side, and how many pairs
    played the very same match (no code reads BRAIN yet: all of them). Use --nobudget with it, so the population cap does not depend on how
    busy the machine is and the two halves differ only by the brain.
-     node tools/balance.js --torneio N --brain ab [--min minutes] [--nobudget] [--json file] ... */
+     node tools/balance.js --torneio N --brain ab [--min minutes] [--nobudget] [--json file] ...
+
+   --set NAME.key=value (any number of them) sets a switch of the page in every match of the tournament before it is played (a number, or
+   a string), kept in the header's tour.set: the A×B of a package with its own switch is two tournaments on the same seeds, one with each
+   value, each with --json, and the second with --ref the first's (cf-g2-g7-urbano: --set URB.on=0 and --set URB.on=1).
+   The town (URBANO, G7 of cf-ia-opensource): every review with the meters of CEREBRO: urbano-medicao (the cb events st urb) adds a section
+   Urbano, the measures beside their targets (the page's own urbSum and urbRows), with --ref the same from an earlier --json. */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), crypto = require('crypto'), { fork } = require('child_process'), os = require('os');
 const H = require(path.join(__dirname, '..', 'tests', 'harness.js'));
 const ROOT = path.join(__dirname, '..'), DIR = process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(ROOT, 'data', 'matches');
@@ -63,6 +69,7 @@ function args(a) {
     else if (k === '--jobs') o.jobs = +v();
     else if (k === '--save') o.save = path.resolve(v());
     else if (k === '--json') o.json = path.resolve(v());
+    else if (k === '--set') { const [a, b] = String(v()).split('='); if (!/^[A-Za-z_$][\w$]*(\.[\w$]+)+$/.test(a || '') || b === undefined) throw new Error('--set NOME.campo=valor'); (o.set || (o.set = {}))[a] = b !== '' && Number.isFinite(+b) ? +b : b; }
     else if (k === '--one') o.one = JSON.parse(v());
     else if (k === '-h' || k === '--help') o.help = true;
     else o.dirs.push(path.resolve(k));
@@ -99,6 +106,7 @@ function playOne(m) {
   const C = H.load({ seed: m.seed, eco: !!m.eco, lg: !!m.lg, rec: !!m.rec, mapv: m.mapv || 4, ana: true });
   if (m.nobudget) C.$('AIB').now = () => 0;
   if (m.brain === 0 || m.brain === 1) C.$('BRAIN').on = m.brain;
+  if (m.set) for (const [k, v] of Object.entries(m.set)) C.$(k + ' = ' + JSON.stringify(v));   // --set: a page's switch, before the match
   const S = C.watch(m.era, { doc: m.doc, per: m.per, dif: m.dif, len: m.len || 0, min: m.min, n: m.n > 2 ? m.n : undefined });
   if (m.n > 2 && S.N !== m.n) throw new Error('a página não montou ' + m.n + ' lados (S.N = ' + S.N + '): falta a fundação de N lados ou a era não aceita');
   const lim = S.cq.T0 + 120, t0 = Date.now(), AIB = C.$('AIB'), K = { n: 0, gen: 0, genWorst: 0, avg: 0, worst: 0 };
@@ -108,7 +116,7 @@ function playOne(m) {
     return !S.over;
   });
   const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr'), r2 = v => Math.round(v * 100) / 100;
-  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain },
+  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain }, m.set && { set: m.set },
     K.n && { aib: { gen: r2(K.gen / K.n), genWorst: r2(K.genWorst), avg: r2(K.avg / K.n), worst: r2(K.worst), n: K.n } });
   return { file: save(m.save, m.era, ev, 'tourney'), over: S.over, t: Math.round(S.t), wall: Math.round((Date.now() - t0) / 1000) };
 }
@@ -129,7 +137,7 @@ function plan(o) {
   const eras = n === 3 ? ['modern'] : !o.era || o.era === 'all' ? ERAS : [o.era], pairs = tuples(docs, n);
   if (n === 3 && o.era && o.era !== 'modern' && o.era !== 'all') throw new Error('--lados 3 só na Frente atual (--era modern)');
   const tour = crypto.randomBytes(4).toString('hex'), out = [];
-  for (let i = 0; i < o.n; i++) out.push({ tour, n, era: eras[Math.floor(i / pairs.length) % eras.length], doc: o.pers ? null : pairs[i % pairs.length], per: o.pers ? pairs[i % pairs.length] : null, dif: o.dif || null, seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, lg: o.lg, rec: o.rec, nobudget: o.nobudget, mapv: o.mapv, save: o.save || DIR });
+  for (let i = 0; i < o.n; i++) out.push({ tour, n, era: eras[Math.floor(i / pairs.length) % eras.length], doc: o.pers ? null : pairs[i % pairs.length], per: o.pers ? pairs[i % pairs.length] : null, dif: o.dif || null, seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, lg: o.lg, rec: o.rec, nobudget: o.nobudget, mapv: o.mapv, save: o.save || DIR, set: o.set || null });
   if (o.brain === '0' || o.brain === '1') for (const m of out) m.brain = +o.brain;
   if (o.brain === 'ab') return [...out.map(m => Object.assign({}, m, { brain: 0 })), ...out.map(m => Object.assign({}, m, { brain: 1 }))];   // the same matches, off then on
   return out;
@@ -142,7 +150,7 @@ async function tourney(o) {
     const go = () => {
       if (next >= P.length) return res();
       const m = P[next++], k = fork(__filename, ['--one', JSON.stringify(m)], { stdio: ['ignore', 'pipe', 'inherit', 'ipc'] });
-      k.on('message', r => { made.push(r.file); console.log('  ' + String(made.length).padStart(3) + '/' + P.length + '  ' + m.era + ' ' + (m.per || m.doc).join(' × ') + (m.dif ? ' (' + m.dif.join(' × ') + ')' : '') + (m.brain === 0 || m.brain === 1 ? ' cérebro ' + m.brain : '') + ' seed ' + m.seed + (r.over ? '' : ' (sem fim)') + ', ' + Math.round(r.t / 60) + ' min de partida em ' + r.wall + ' s'); });
+      k.on('message', r => { made.push(r.file); console.log('  ' + String(made.length).padStart(3) + '/' + P.length + '  ' + m.era + ' ' + (m.per || m.doc).join(' × ') + (m.dif ? ' (' + m.dif.join(' × ') + ')' : '') + (m.brain === 0 || m.brain === 1 ? ' cérebro ' + m.brain : '') + (m.set ? ' ' + Object.entries(m.set).map(([k, v]) => k + '=' + v).join(' ') : '') + ' seed ' + m.seed + (r.over ? '' : ' (sem fim)') + ', ' + Math.round(r.t / 60) + ' min de partida em ' + r.wall + ' s'); });
       k.on('exit', go);
     };
     go();
@@ -278,6 +286,21 @@ function brainPrint(C, B, ref) {
   if (Object.keys(B.ev).length) L.push('', 'Eventos do cérebro: ' + Object.entries(B.ev).map(([k, v]) => k + ' ' + v).join(', ') + '.');
   return L.join('\n');
 }
+/* the town's measures over many reviews (R.urb, G7): each side's raw counters added up (the page's urbAdd), then the page's urbSum; null without any */
+function urb(C, reps) {
+  const R = reps.filter(r => r.urb && r.urb.side.some(Boolean)); if (!R.length) return null;
+  const raw = C.$('urbNew')();
+  for (const r of R) for (const x of r.urb.side) if (x) C.$('urbAdd')(raw, x);
+  return { n: R.length, on: [...new Set(R.map(r => r.urb.on))], raw, sum: C.$('urbSum')(raw, R.length) };
+}
+/* the town's section, with a reference column from an earlier --json (its urb.raw worked out again) */
+function urbPrint(C, U, ref) {
+  const L = ['', '## Urbano (G7)', '', U.n + ' partidas com a medição urbana (URB.on ' + U.on.map(v => (v === null ? '?' : v)).join(', ') + '; os dois lados somados' + (ref ? '; referência: ' + ref.n + ' partidas, URB.on ' + ref.on.join(', ') : '') + ').'];
+  const R = ref ? C.$('urbRows')(C.$('urbSum')(C.$('urbAdd')(C.$('urbNew')(), ref.raw), ref.n)) : null;
+  L.push('', '| Medida | Valor | Meta |' + (R ? ' Referência |' : ''), '| --- | --- | --- |' + (R ? ' --- |' : ''));
+  C.$('urbRows')(U.sum).forEach((r, i) => L.push('| ' + r.join(' | ') + ' |' + (R ? ' ' + R[i][1] + ' |' : '')));
+  return L.join('\n');
+}
 /* the A×B of the brain: the same seeds off (a) and on (b); pairs that played the very same match (result, length and tickets) */
 function abPrint(C, A, B, ra, rb) {
   const key = r => (r.tour ? r.tour.seed + ':' + r.era + ':' + r.doc.join(',') : r.file), m = new Map(ra.map(r => [key(r), r]));
@@ -310,6 +333,7 @@ async function main() {
   let ref = o.ref ? JSON.parse(fs.readFileSync(o.ref, 'utf8')) : null;
   if (ref && ref.ab) ref = ref.a;   // an A×B's --json: its half with the brain off is the reference
   A.brain = brain(C, real); if (AL) AL.brain = brain(C, loc);
+  A.urb = urb(C, real); if (AL) AL.urb = urb(C, loc);
   if (o.brain === 'ab') {   // the A×B: the two halves of the tournament by the brain each match was played with
     const arm = v => real.filter(r => (r.tour && r.tour.brain !== undefined ? r.tour.brain : r.brain ? r.brain.on : null) === v), ra = arm(0), rb = arm(1);
     const X = Object.assign(aggregate(ra), { brain: brain(C, ra) }), Y = Object.assign(aggregate(rb), { brain: brain(C, rb) });
@@ -317,10 +341,10 @@ async function main() {
     if (o.json) fs.writeFileSync(o.json, JSON.stringify({ ab: 1, tour: { n: o.n, era: o.era || 'all', min: o.min || null, nobudget: !!o.nobudget, mapv: o.mapv || 4, seed: o.seed || 1 }, a: Object.assign({ files: ra.map(r => r.file) }, X), b: Object.assign({ files: rb.map(r => r.file) }, Y) }, null, 1));
     return;
   }
-  console.log(print(A, title, ref) + (A.brain ? brainPrint(C, A.brain, ref && ref.brain) : ''));
-  if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)', ref) + (AL.brain ? brainPrint(C, AL.brain, ref && ref.brain) : ''));
-  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: o.mapv || 4, seed: o.seed || 1 } : null;
+  console.log(print(A, title, ref) + (A.brain ? brainPrint(C, A.brain, ref && ref.brain) : '') + (A.urb ? urbPrint(C, A.urb, ref && ref.urb) : ''));
+  if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)', ref) + (AL.brain ? brainPrint(C, AL.brain, ref && ref.brain) : '') + (AL.urb ? urbPrint(C, AL.urb, ref && ref.urb) : ''));
+  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: o.mapv || 4, seed: o.seed || 1, set: o.set || null } : null;
   if (o.json) fs.writeFileSync(o.json, JSON.stringify(Object.assign({ files: real.map(r => r.file), local: AL && Object.assign({ files: loc.map(r => r.file) }, AL) }, tour && { tour }, A), null, 1));
 }
 if (require.main === module) main().catch(e => { console.error(e.stack); process.exit(1); });
-module.exports = { srcOf, aggregate, readMatch, files, save, plan, tuples, playOne, print, mano, manoPrint, brain, brainRef, brainPrint, abPrint, ALERT, MANO };
+module.exports = { srcOf, aggregate, readMatch, files, save, plan, tuples, playOne, print, mano, manoPrint, brain, brainRef, brainPrint, urb, urbPrint, abPrint, ALERT, MANO };

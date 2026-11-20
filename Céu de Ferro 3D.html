@@ -5524,8 +5524,8 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const pick = arr => arr[(Math.random() * arr.length) | 0];
 const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
 const vlen = a => Math.hypot(a.x, a.y, a.z);
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-const hdist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const dist = (a, b) => { const x = a.x - b.x, y = a.y - b.y, z = a.z - b.z; return Math.sqrt(x * x + y * y + z * z); };   // not Math.hypot: 3x dearer in V8, and these two run millions of times a second (cf-lag)
+const hdist = (a, b) => { const x = a.x - b.x, z = a.z - b.z; return Math.sqrt(x * x + z * z); };
 function vnorm(a) { const l = Math.hypot(a.x, a.y, a.z) || 1; return { x: a.x / l, y: a.y / l, z: a.z / l }; }
 /* body axes from the attitude quaternion: f = nose, u = up, r = right wing */
 function axes(p) {
@@ -6969,12 +6969,14 @@ function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
 /* the nearest road to a point: route ri, distance s along it and the signed offset to its side */
 function railOf(x, z) {
   let b = { d: 1e9 };
-  S.T.routes.forEach((r, ri) => {
+  const R = S.T.routes;
+  for (let ri = 0; ri < R.length; ri++) {
+    const r = R[ri];
     for (let i = 1; i < r.length; i++) {
-      const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.hypot(ox, oz);
+      const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.sqrt(ex * ex + ez * ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.sqrt(ox * ox + oz * oz);   // sqrt, not Math.hypot: 3x dearer (cf-lag)
       if (d < b.d) b = { d, ri, s: a.s + L * t, off: (oz * ex - ox * ez) / L };
     }
-  });
+  }
   return b;
 }
 /* ---------- path-finding on the road network (map version 2; nothing in the game calls it yet) ----------
@@ -9798,6 +9800,25 @@ function ranOver(m) {
    battle with the time since its last run, not every step: at 60 steps a second every other one, and half the soldiers on each (at, the
    time each new one starts with, so the two halves take turns). His body (the move, the turn, the stance, the arms) still steps every step */
 const MANB = { dt: 1 / 30, k: 0, at: () => ((MANB.k ^= 1) ? MANB.dt / 2 : 0) };
+/* MGR (cf-lag): the soldiers by squares of c m, for a scan that looks at every soldier for the ones within r m (a soldier's target,
+   manThink's): mgrNear(x, z, r) hands back, in the order of S.men, every soldier that may be within r m of x z, a few more too, so a scan
+   over them makes the same tests on the same soldiers in the same order as one over S.men (they test the distance first). Made again each
+   step (S.t) or when S.men is another list; a soldier added since is always in it, and pad m covers a step's walk or ride */
+const MGR = { c: 250, pad: 100, L: null, S: null, t: NaN, n: 0, g: new Map(), idx: [] };
+function mgrNear(x, z, r) {
+  const M = MGR, L = S.men;
+  if (M.L !== L || M.t !== S.t || M.S !== S) {
+    M.L = L; M.t = S.t; M.S = S; M.n = L.length; M.g.clear();
+    for (let i = 0; i < L.length; i++) { const o = L[i], k = Math.floor(o.x / M.c) * 4096 + Math.floor(o.z / M.c); let a = M.g.get(k); if (!a) M.g.set(k, (a = [])); a.push(i); }
+  }
+  const R = r + M.pad, i0 = Math.floor((x - R) / M.c), i1 = Math.floor((x + R) / M.c), j0 = Math.floor((z - R) / M.c), j1 = Math.floor((z + R) / M.c), I = M.idx; I.length = 0;
+  if (!Number.isFinite(i0 + i1 + j0 + j1) || (i1 - i0 + 1) * (j1 - j0 + 1) > 400) return L.slice();   // a point off the map or a wide look: all of them
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const a = M.g.get(i * 4096 + j); if (a) for (const n of a) I.push(n); }
+  I.sort((a, b) => a - b);
+  const out = []; for (const n of I) out.push(L[n]);
+  for (let n = M.n; n < L.length; n++) out.push(L[n]);
+  return out;
+}
 function stepMan(m, dt) {
   m.inv -= dt;
   if (m.in) return inSeat(m, dt);
@@ -10213,7 +10234,7 @@ function manThink(m) {
   }
   c.w = best ? 1 : 0;
   if (!best) {
-    for (const o of S.men) { const d = hdist(o, m); if (!o.dead && !o.down && d < IAI.see && d < bs && foe(m, o) && known(A, m, o)) { bs = d; best = o; } }
+    for (const o of mgrNear(m.x, m.z, IAI.see)) { const d = hdist(o, m); if (!o.dead && !o.down && d < IAI.see && d < bs && foe(m, o) && known(A, m, o)) { bs = d; best = o; } }   // MGR: those that may be within IAI.see m, in the order of S.men
     for (const u of S.units) { const d = hdist(u, m) + 150; if (!u.dead && u.team !== m.team && soft(u) && d < IAI.soft + 150 && d < bs && known(A, m, u)) { bs = d; best = u; } }
   }
   A.tgt = best;
@@ -10237,7 +10258,7 @@ function aiMan(m, dt) {
   if (A.rsc && rescue(m, A, c)) return;
   if (m.def.snp) return aiSniper(m, dt);
   if (m.def.mort && !(m.sq && (m.sq.state === 1 || m.sq.fd < CMD.mort.self))) return aiMortar(m, dt);
-  if ((A.think -= dt) <= 0) { A.think = lodThink(m) + Math.max(A.think, -MANB.dt); manThink(m); }   // the time over is carried (a mind's beat at most), so he thinks every IAI.think s at a beat of MANB.dt as he did every step
+  if ((A.think -= dt) <= 0) { A.think = lodThink(m) + Math.max(A.think, -dt); manThink(m); }   // the time over is carried (this beat's at most), so he thinks every IAI.think s at a beat of MANB.dt as he did every step. Not -MANB.dt (cf-lag): when CLK lengthens the steps a beat is up to 2/30 s, the cut lined every soldier's thought up with the others' and 160-240 of them thought in one step, twice a second
   const t = sight(A, m, A.tgt), pin = m.sup > S.t && !A.mv && !(A.brk > S.t), rout = !!m.sq && m.sq.state === 1, dx = A.gx - m.x, dz = A.gz - m.z, d = Math.hypot(dx, dz), w = (m.arms[c.w] || m.arms[0]).d;
   if (!t) A.tgt = null;
   if (d > 1.5 && (rout || !pin)) {
@@ -11576,12 +11597,15 @@ const SLICE = { spot: 1.25, min: 60, plan: 1 };
    to hmax s: a step costs much the same however long it is, so the battle keeps more of the clock for the same time a frame. Never fewer
    than pay least s of the debt (the .05 s a frame of before, in fewer steps than before): no frame gives the battle less than it did. Only
    when even that does not pay the debt does the battle slow down (before: below 20 frames a second, whatever a step cost). With cheap steps
-   nothing changes: the same steps of the same length as before. plan(r, k) is the frame's: n steps of d s, g s of battle in all; cost(ms, n)
-   tells it what the n steps took */
-const CLK = { h: .017, hmax: 1 / 30, catch: .25, least: .05, budget: 100, ema: .2, c: 0,
+   nothing changes: the same steps of the same length as before. frame, share (cf-lag): the steps of h s that do not fit in frame ms, nor in
+   share of the frame's real time (a frame slow for its drawing keeps its short steps), are not taken while fewer, longer ones (fin, up to
+   hmax s each) pay the whole debt: before, a costly step (18 ms) filled every frame up to the budget with steps of h s, 100 ms a frame,
+   10 frames a second, for the same battle that 2 longer steps pay at 23 frames a second.
+   plan(r, k) is the frame's: n steps of d s, g s of battle in all; cost(ms, n) tells it what the n steps took */
+const CLK = { h: .017, hmax: 1 / 30, catch: .25, least: .05, budget: 100, frame: 20, share: .5, ema: .2, c: 0,
   plan(r, k) {
-    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), hi = Math.ceil(g / CLK.h - 1e-9), lo = Math.ceil(Math.min(g, CLK.least * (k || 1)) / CLK.hmax - 1e-9);
-    const n = CLK.c > 0 ? Math.max(1, lo, Math.min(hi, Math.floor(CLK.budget / CLK.c))) : hi, d = Math.min(g / n, CLK.hmax);
+    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), hi = Math.ceil(g / CLK.h - 1e-9), lo = Math.ceil(Math.min(g, CLK.least * (k || 1)) / CLK.hmax - 1e-9), fin = Math.ceil(g / CLK.hmax - 1e-9);
+    const n = CLK.c > 0 ? Math.max(1, lo, Math.min(hi, Math.floor(CLK.budget / CLK.c), Math.max(fin, Math.floor(Math.max(CLK.frame, Math.min(CLK.catch, r > 0 ? r : .016) * 1000 * CLK.share) / CLK.c)))) : hi, d = Math.min(g / n, CLK.hmax);
     return { n, d, g: n * d };
   },
   cost(ms, n) { if (n > 0 && ms >= 0) { const c = ms / n; CLK.c = CLK.c ? CLK.c + (c - CLK.c) * CLK.ema : c; } } };
@@ -25282,12 +25306,13 @@ const aidAreas = t => { const P = aidQrfAt(t), b = S.base[t], l = [{ x: b.x, z: 
 function aidDome(C, A, sq) {
   const t = C.t, D = POSTS.dome, K = AID.dome;
   if (S.era !== D.era || (S.net && !(Net.ft && Net.sap))) return;
+  const plan = afpOn(t) || civIns() === t;   // where the general's fortification plan runs, it alone starts the dome (AFD, in afpWant); the Insurgents have none (cf-cupula-general)
   for (const q of sq) if (q.dome && (q.dome.gone || q.dome.prog >= 1 || q.op)) {   // the builders of one that is up (or lost) go back
     const f = q.dome; q.dome = null;
     if (f.prog >= 1 && !f.gone) gLog(t, 'eng', 'Cúpula antifoguete pronta ' + ecoNear(f.x, f.z), f, 'dome' + f.id);
     if (!q.op && cnOrd(q).dome === f) setOrd(q, cnOrd(q).back || post(t, q.job, q.jk) || { k: 'hold', ri: q.ri, s: q.s });
   }
-  if (S.t < A.dT) return;
+  if (plan || S.t < A.dT) return;
   A.dT = S.t + K.again / 4;
   const mine = S.forts.filter(f => f.k === 6 && f.team === t && !f.gone);
   if (mine.length >= D.cap || mine.some(f => f.prog < 1) || !aidPay(t, D.cost)) return;
@@ -29559,10 +29584,10 @@ function afpWant(C, A) {
   return { out, tier };
 }
 /* the builder: the squad nearest the site within AFP.reach m, with what its job weighs (AFP.by), free of every other task */
-function afpBuilder(t, x, z, mine) {
-  let best = null, bd = AFP.reach;
+function afpBuilder(t, x, z, mine, quiet) {
+  let best = null, bd = AFP.reach;   // quiet: only a squad with no enemy within FORT.ai.dq m (the dome's builder walks off at once, cf-cupula-general)
   for (const q of S.squads) {
-    if (q.team !== t || q.net || !(q.live >= W21.live) || q.state || q.op || q.lift || q.rd || q.qrf || q.sapT || q.dome || (q.aidP && !q.aidP.gone && q.aidP.prog < 1) || aidRide(q)) continue;
+    if (q.team !== t || q.net || !(q.live >= W21.live) || q.state || q.op || q.lift || q.rd || q.qrf || q.sapT || q.dome || (q.aidP && !q.aidP.gone && q.aidP.prog < 1) || aidRide(q) || (quiet && q.fd < FORT.ai.dq)) continue;
     const pen = q.job === 'sap' ? (mine ? 0 : CGN.sap) : AFP.by[q.job]; if (pen === undefined) continue;   // the sappers build a post too, after the engineers (CGN)
     const O = q.ord, L = gLead(q); if (!O || !L || O.k === 'supply' || O.k === 'build' || O.b || O.T) continue;
     const dd = hdist(L, { x, z }); if (O.tw && (dd > CGN.tw || q.fd < CGN.twq)) continue;   // a garrison or a squad holding a point builds only near its post, with no enemy near (CGN: AFP.by.garr was never reached)
@@ -29576,25 +29601,28 @@ function afpSay(C, A, it, ok, s) {
 }
 /* one item: true when its order went */
 function afpTry(C, A, it) {
+  if (!it.big && A.save && A.save.big && !A.save.go && afdFull(C.t) && W21.dig[it.k] && FORT.K[W21.dig[it.k]].cost) { A.fn[it.key] = S.t + AFP.every; return false; }   // the dome's money is ready: the plan's other paid works wait, and leave it the builders (cf-cupula-general)
   const t = C.t, K = W21.dig[it.k], F = K ? FORT.K[K] : null, no = s => { A.fn[it.key] = S.t + AFP.again; afpSay(C, A, it, 0, s); return false; };
   if (it.k === 'aapos' && ecoSim() && ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length) {   // none in the reserve: the economy is told it is short of one
     const d = S.eco.d[t], m = d.miss.aaf || (d.miss.aaf = []); if (!m.length || S.t - m[m.length - 1] >= ECO.miss) m.push(S.t);
     A.fn[it.key] = S.t + AFP.every * 2; afpSay(C, A, it, 0, 'aguarda uma antiaérea fixa da produção'); return false;
   }
   if (afpMine(it.k) && (!sapOn() || mines().filter(o => !o.gone && o.team === t).length > SAP.cap - W21.mf)) return no('limite de minas do lado');
-  if (F && F.cost && !aidPay(t, F.cost)) {   // the economy saves for it a while, then lets it go a while
-    if (!A.save && S.t >= A.saveC) { const k = ECO.ai.keep; A.save = { en: F.cost[0] + k.en, mt: F.cost[1] + k.mt, T: S.t + AFP.save, key: it.key }; afpSay(C, A, it, 0, 'a economia poupa ' + F.cost[0] + ' de energia e ' + F.cost[1] + ' de metal para a obra'); }
+  S.afpK = it.big && A.save && A.save.big ? A.save.key : it.key; const pay = !(F && F.cost) || aidPay(t, F.cost); S.afpK = null;   // the work the economy saves for is not held back by its own saving; what was saved for one dome goes to the dome wanted now (cf-cupula-general)
+  if (!pay) {   // the economy saves for it a while, then lets it go a while
+    if ((!A.save || (it.big && !A.save.big)) && (S.t >= A.saveC || (it.big && !A.saveB))) { const k = it.big ? { en: 0, mt: 0 } : ECO.ai.keep; A.save = { en: F.cost[0] + k.en, mt: F.cost[1] + k.mt, T: S.t + (it.save || AFP.save), key: it.key, big: !!it.big }; afpSay(C, A, it, 0, 'a economia poupa ' + F.cost[0] + ' de energia e ' + F.cost[1] + ' de metal para a obra'); }
     A.fn[it.key] = S.t + AFP.every; return false;
   }
   const bc = F ? F.cost : afpMine(it.k) ? bmrMineCost() : null;
-  if (bc && !bmrPay(t, bc, 'afp')) { A.fn[it.key] = S.t + AFP.every; if (S.t >= (A.budT || 0)) { A.budT = S.t + 60; afpSay(C, A, it, 0, 'aguarda o orçamento de obras (' + Math.round(BMR.bud.share * 100) + '% da renda por minuto)'); } return false; }   // over the works' budget of the minute (BMR): later, without holding the economy
+  if (bc && !it.big && !bmrPay(t, bc, 'afp')) { A.fn[it.key] = S.t + AFP.every; if (S.t >= (A.budT || 0)) { A.budT = S.t + 60; afpSay(C, A, it, 0, 'aguarda o orçamento de obras (' + Math.round(BMR.bud.share * 100) + '% da renda por minuto)'); } return false; }   // over the works' budget of the minute (BMR): later, without holding the economy
   const sp = it.spot(); if (!sp) return no('nenhum lugar livre ali');
-  const q = afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + gN(AFP.reach / 1000) + ' km');
+  const q = (it.big && afpBuilder(t, sp.x, sp.z, false, true)) || afpBuilder(t, sp.x, sp.z, afpMine(it.k)); if (!q) return no('nenhuma esquadra livre a menos de ' + gN(AFP.reach / 1000) + ' km');
   const mw = q.mis ? q.mis.why : undefined, r = genCmd(t, { c: 'fort', k: it.k, x: sp.x, z: sp.z, a: it.a, ids: [q.id], why: 'plano de fortificação: ' + it.why }, 'ai');
   if (!r.ok) return no('recusado, ' + gNo(r.why).toLowerCase());
   const op = C.ops.find(o => o.k === 'usr' && o.id === r.id) || null;
   A.fo.push({ op, key: it.key, k: it.k, x: sp.x, z: sp.z, cx: it.cx, cz: it.cz, T0: S.t, q, mw, it, Tm: AFP.T + hdist(gLead(q), sp) * CGN.walkK });   // the walk there on top of the work's time (CGN)
-  if (A.save && A.save.key === it.key) A.save = null;
+  if (A.save && it.big && A.save.big) Object.assign(A.save, { key: it.key, go: 1, T: S.t + A.fo[A.fo.length - 1].Tm });   // the dome's fund stays put while its builders walk there: it is paid when the work begins (fortStart)
+  else if (A.save && A.save.key === it.key) A.save = null;
   afpSay(C, A, it, 1, 'ordenado (' + (GEN.job[q.job] || q.job).toLowerCase() + ' a ' + Math.round(hdist(gLead(q), sp)) + ' m)');
   return true;
 }
@@ -29617,7 +29645,11 @@ function afpPlan(t) {
   if (!afpOn(t)) return;
   const C = cmdOf(t), A = afpOf(C);
   afpKeep(C, A);
-  if (A.save && S.t > A.save.T) { A.save = null; A.saveC = S.t + AFP.cool; }
+  if (A.save && A.save.go && !A.fo.some(o => o.key === A.save.key && !S.forts.some(f => f.team === t && f.k === W21.dig[o.k] && !f.gone && Math.hypot(f.x - o.x, f.z - o.z) < AFP.near))) A.save = null;   // the work begun (paid) or given up: the fund goes back to the economy
+  if (A.save && S.t > A.save.T) {
+    if (A.save.big && !A.save.ext && !A.save.go && afdFull(t)) { A.save.ext = 1; A.save.T = S.t + AFD.hold; }   // the dome's money is ready and only a builder is missing: a while more (cf-cupula-general)
+    else { A.saveB = A.save.big; A.save = null; A.saveC = S.t + AFP.cool; }   // a big work (the dome) may take its turn after a small one's save at once
+  }
   if (S.t < Math.max(A.T, AFP.start)) return;
   A.T = S.t + AFP.every;
   const W = afpWant(C, A); A.tier = W.tier;
@@ -29629,7 +29661,7 @@ function afpPlan(t) {
     if (afpHas(t, it)) { A.have[it.key] = 1; continue; }
     if (S.t < (A.fn[it.key] || 0)) continue;
     if (A.lost[it.key] !== undefined && (S.t - A.lost[it.key] < AFP.redo || cmdKnown(C, it.x, it.z, AFP.calm) > 0)) continue;
-    if (afpTry(C, A, it) || --n <= 0) return;   // one order a plan
+    if (afpTry(C, A, it) || (!it.big && --n <= 0)) return;   // one order a plan; a dome that cannot go here (no builder, no room) lets the plan try the next place now (cf-cupula-general)
   }
 }
 fortPlan = (g => (t, sq) => { g(t, sq); afpPlan(t); })(fortPlan);
@@ -29794,6 +29826,116 @@ function bmrLine(t) {
     (w.crates >= 0 ? ' · caixas nos nós ' + w.crates : '');
 }
 ecoVM = (g => (t, all) => { const V = g(t, all); if (V && V.rows && S.eco) { const at = Math.max(0, V.rows.length - 1); V.rows.splice(at, 0, { label: 'Obras', value: bmrLine(t).replace(/^Obras: /, '') }); } return V; })(ecoVM);
+/* ---------- the dome in the general's fortification plan (AFD, cf-cupula-general; NOT TESTED beyond tests/cupula-general.js, see docs/nao-testado/cf-cupula-general.md) ----------
+   The AI general never raised a dome: aidDome started one only with the side's stock at its cost plus the economy's reserve (300 + 120
+   energy, 400 + 120 metal), and the AI economy spends its metal as it comes in (a 10-min AI × AI match held 40 to 210 of it), so it
+   never had that much, though enemy rounds came down on its base by the dozen. Nothing ever saved for it. Now the dome is an item of the
+   general's fortification plan (AFP), which already saves for a paid work, picks the builder and sends it through the funnel (genCmd fort,
+   W21.dig.dome), and says each decision in the log (eng, "Plano de fortificação: cúpula antifoguete ...") and in the General View
+   (the works' line, bmrLine). aidDome now runs only where the plan does not (old maps, a sandbox).
+   Where and why. For each place of the plan (its seat town or factory, its main base, the points it holds and its supply bases), in
+   that order, with no own dome within POSTS.dome.r * cover m of it:
+   - under fire: AID.dome.n or more enemy rounds came down within POSTS.dome.r m of it in the last AID.dome.mem s, or an enemy howitzer,
+     rocket launcher or mortar the side knows has it in reach (its range, the mortar's from its shell's speed);
+   - by doctrine (the seat town or factory and the main base only): from tier doc.tier of the economy, or after doc.T s, while an enemy side fields
+     artillery or rocket launchers (its ERAS side's art or mlrs).
+   A place under fire comes before the plan's other works, the doctrine's after them. At most POSTS.dome.cap a side, one rising at a
+   time. The site: open ground behind the place (away from the enemy base) back m out, not by a house. The plan saves for it AFD.save s:
+   its cost alone (not the economy's reserve on top: the fund is its reserve); a small work's save gives way to it. The economy holds its make orders that only fill the reserve (as for any work), the plan's other paid works wait (aidPay), and the
+   stock it has then plus share of the income from then on go into a fund (d.afd) the economy's step does not see, so the production
+   already queued (which kept eating the whole income: holding new orders alone never let the metal grow) spends only the rest. Its
+   400 metal goes outside the works' budget of the minute (bmrPay: it is more than a minute's budget, so it would never fit). While it
+   saves, the domes come first in the plan's list (a dome that cannot go at one place lets it try the next at once); once the fund holds
+   the whole cost, the plan's other paid works wait, so they do not take its builders, and with no builder free yet the save runs hold s
+   more. The fund stays put while the builders walk there (the work is paid when it begins) and goes back once it has begun. The
+   Insurgents build none (doctrine: no radar nor interceptors); their general says so once. No random number is drawn here */
+const AFD = { save: 420, hold: 240, share: .75, near: 800, cover: .8, back: [60, 120, 180, 240, 300, 360, 420, 480], lat: [0, 50, -50, 100, -100, 150, -150, 220, -220], doc: { tier: 1, T: 420 } };
+W21.fort.dome = 'cúpula antifoguete'; W21.dig.dome = POSTS.dome.k;
+/* what threatens place P of side C from the sky: n enemy rounds lately, sh the words for a known shooter that reaches it ('' none) */
+function afdThreat(C, P) {
+  const t = C.t, A = aidOf(C), D = POSTS.dome, K = AID.dome;
+  const n = A.rk.filter(r => S.t - r.t < K.mem && Math.hypot(r.x - P.x, r.z - P.z) < D.r).length;
+  for (const o of C.known) {
+    if (o.dead) continue;
+    const w = o.man ? (o.def && o.def.mort && o.arms && o.arms[1] ? o.arms[1].d : null) : o.kind === 'art' && o.arms && o.arms[0] ? o.arms[0].d : null;
+    if (!w) continue;
+    const r = w.range || (w.spd ? w.spd * w.spd / GR : 0), x = sX(o, t), z = sZ(o, t);
+    if (Number.isFinite(x) && Math.hypot(x - P.x, z - P.z) < r) return { n, sh: (o.man ? 'morteiro' : w.sal ? 'lançador de foguetes' : 'artilharia') + ' inimigo ao alcance' };
+  }
+  return { n, sh: '' };
+}
+/* the fund of side t holds the whole cost of the work it saves for */
+const afdFull = t => { const C = S.cmd && S.cmd[t], w = C && C.afp && C.afp.save, d = S.eco && S.eco.d[t]; if (!w) return false; if (!ecoSim() || !d) return true; const f = d.afd; return !!f && f.en >= w.en - 1 && f.mt >= w.mt - 1; };
+/* an enemy side that fields artillery or rocket launchers (by its order of battle) */
+const afdDoc = t => lsFoes(t).some(e => { const d = S.E.sides[S.fac[e]]; return !!d && !!(d.art || d.mlrs); });
+/* the site: open ground near place P, the nearest first to the squad that would build it (it covers r m: it need not stand in the middle
+   of the place, AFD.near m out at most), never nearer the enemy base than the place; else behind the place, away from the enemy base */
+function afdSpot(t, P) {
+  const e = mnBase(t, P.x, P.z), d = Math.hypot(P.x - e.x, P.z - e.z) || 1, ux = (P.x - e.x) / d, uz = (P.z - e.z) / d, a = headTo(P.x, P.z, e.x, e.z), c = [];
+  const ok = (x, z) => !near(x, z, 25).some(o => o.K.sight) && Math.hypot(x - e.x, z - e.z) >= d - 50;
+  const q = afpBuilder(t, P.x, P.z, false, true) || afpBuilder(t, P.x, P.z, false), L = q && gLead(q);
+  if (L) {   // toward the builder
+    const g = Math.hypot(L.x - P.x, L.z - P.z) || 1, vx = (L.x - P.x) / g, vz = (L.z - P.z) / g;
+    for (let s = Math.min(AFD.near, g); s >= 0; s -= 100) for (const l of [0, 40, -40, 80, -80]) { const x = P.x + vx * s - vz * l, z = P.z + vz * s + vx * l; if (ok(x, z)) c.push([x, z]); }
+  }
+  for (const b of AFD.back) for (const l of AFD.lat) { const x = P.x + ux * b - uz * l, z = P.z + uz * b + ux * l; if (ok(x, z)) c.push([x, z]); }
+  return afpSpot(t, POSTS.dome.k, a, c);
+}
+afpWant = (g => (C, A) => {
+  const W = g(C, A), t = C.t, D = POSTS.dome;
+  if (S.era !== D.era) return W;
+  if (civIns() === t) { if (!A.dmI) { A.dmI = 1; A.dmw = 'os Insurgentes não têm cúpula antifoguete'; gLog(t, 'eng', 'Plano de fortificação: cúpula antifoguete: ' + A.dmw, null, 'afdins'); } return W; }
+  const mine = S.forts.filter(f => f.k === D.k && f.team === t && !f.gone), go = A.fo.filter(o => o.k === 'dome' && !S.forts.some(f => f.team === t && f.k === D.k && !f.gone && Math.hypot(f.x - o.x, f.z - o.z) < AFP.near)).length;   // ordered, not begun yet
+  if (mine.length + go >= D.cap) { A.dmw = mine.length >= D.cap ? '' : 'construtores a caminho da última'; return W; }
+  if (mine.some(f => f.prog < 1) || go) { A.dmw = go ? 'construtores a caminho' : 'uma em obra'; return W; }
+  const hot = [], cold = [], P = afpPlaces(t), doc = afdDoc(t) && (W.tier >= AFD.doc.tier || S.t >= AFD.doc.T);
+  let note = '';
+  for (const p of P) {
+    const main = !p.pt && !/^sb/.test(p.id), e = mnBase(t, p.x, p.z);   // the seat town (or factory) and the main base: by doctrine too
+    if (mine.some(f => Math.hypot(f.x - p.x, f.z - p.z) < D.r * AFD.cover)) continue;
+    const T = afdThreat(C, p), under = T.n >= AID.dome.n || !!T.sh;
+    if (!under && !(main && doc)) continue;
+    const why = under ? (T.n >= AID.dome.n ? T.n + ' granadas e foguetes inimigos caíram ali há pouco' : T.sh) : 'por doutrina: o inimigo tem artilharia e foguetes';
+    const it = { key: 'dm' + p.id, k: 'dome', x: p.x, z: p.z, cx: p.x, cz: p.z, a: headTo(p.x, p.z, e.x, e.z), nm: 'sobre ' + p.nm, why: 'cúpula antifoguete sobre ' + p.nm + ' (' + why + ')', save: AFD.save, big: 1, dm: why, spot: () => afdSpot(t, p) };
+    (under ? hot : cold).push(it);
+  }
+  const top = hot[0] || cold[0]; if (top) note = 'quer uma ' + top.nm + ': ' + top.dm;
+  A.dmw = note || (afdDoc(t) ? 'sem fogo inimigo sobre as bases; por doutrina, a partir do nível ' + AFD.doc.tier + ' da economia ou de ' + Math.round(AFD.doc.T / 60) + ' min' : 'o inimigo não tem artilharia nem foguetes');
+  if (A.save && A.save.big) W.out.unshift(...hot, ...cold); else { W.out.unshift(...hot); W.out.push(...cold); }   // what the economy is saving for comes first
+  return W;
+})(afpWant);
+/* a dome covers its place: one of the side within POSTS.dome.r * cover m of it */
+afpHas = (g => (t, it) => (it.k === 'dome' ? S.forts.some(f => f.team === t && f.k === POSTS.dome.k && !f.gone && Math.hypot(f.x - it.cx, f.z - it.cz) < POSTS.dome.r * AFD.cover) : g(t, it)))(afpHas);
+/* what the plan said of the dome last: the General View's line */
+afpSay = (g => (C, A, it, ok, s) => { g(C, A, it, ok, s); if (it.k === 'dome') A.dmw = it.nm + ': ' + s; })(afpSay);
+/* while the plan saves for a big work (the dome), the side's other paid works wait (the saved one passes: S.afpK) */
+aidPay = (g => (t, c) => {
+  const C0 = S.cmd && S.cmd[t], w0 = C0 && C0.afp && C0.afp.save;
+  if (w0 && w0.big && S.afpK === w0.key && c && ecoSim() && S.eco.d[t]) { const d = S.eco.d[t]; return d.en >= c[0] && d.mt >= c[1]; }   // the work saved for: its cost is enough (the fund was its reserve)
+  if (!g(t, c)) return false;
+  const C = S.cmd && S.cmd[t], w = C && C.afp && C.afp.save;
+  if (!c || !w || !w.big || S.t > w.T || S.afpK === w.key || !ecoSim() || !S.eco.d[t]) return true;
+  const d = S.eco.d[t]; return d.en - c[0] >= w.en && d.mt - c[1] >= w.mt;
+})(aidPay);
+/* the fund: while the plan saves for a big work, what is put aside is out of the economy's step (production, logistics, recovery) */
+ecoStep = (g => dt => {
+  const hid = [];
+  if (S.eco && ecoSim() && S.cmd) for (const t of lsN()) {
+    const C = S.cmd[t], w = C && C.afp && C.afp.save, d = S.eco.d[t]; if (!d) continue;
+    if (!w || !w.big || S.t > w.T) { d.afd = null; continue; }
+    const f = d.afd || (d.afd = { en: Math.min(w.en, d.en), mt: Math.min(w.mt, d.mt), key: w.key }), inc = d.inc || { en: 0, mt: 0 };
+    f.en = Math.max(0, Math.min(w.en, d.en, f.en + AFD.share * inc.en / 60 * dt)); f.mt = Math.max(0, Math.min(w.mt, d.mt, f.mt + AFD.share * inc.mt / 60 * dt));
+    d.en -= f.en; d.mt -= f.mt; hid.push([d, f]);
+  }
+  try { g(dt); } finally { for (const [d, f] of hid) { d.en = Math.min(ECO.cap.en, d.en + f.en); d.mt = Math.min(ECO.cap.mt, d.mt + f.mt); } }
+})(ecoStep);
+/* the General View's works line: the domes and the plan's last word on them */
+bmrLine = (g => t => {
+  const s = g(t), D = POSTS.dome; if (S.era !== D.era || !S.forts) return s;
+  const n = S.forts.filter(f => f.k === D.k && f.team === t && !f.gone), A = S.cmd && S.cmd[t] && S.cmd[t].afp, up = n.filter(f => f.prog >= 1).length;
+  const f = S.eco && S.eco.d[t] && S.eco.d[t].afd, w = A && A.save;
+  return s + ' · cúpulas antifoguete ' + up + '/' + D.cap + (n.length > up ? ' (' + (n.length - up) + ' em obra)' : '') + (A && A.dmw ? ': ' + A.dmw : '') + (f && w ? ' (poupado ' + Math.round(f.en) + '/' + Math.round(w.en) + ' energia e ' + Math.round(f.mt) + '/' + Math.round(w.mt) + ' metal)' : '');
+})(bmrLine);
 /* the HUD's lines under the supply bases: the general's stock with what comes in a minute, the crates, what the works cost */
 function bmrHud(t, R, y, u, ink) {
   const d = S.eco && S.eco.d[t]; if (!d || t < 0 || S.demo && !S.watch) return y;
@@ -36143,12 +36285,13 @@ function enpFobPick(t, C, A) {
   for (let q = 0; q < M.k.length; q++) {
     const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
     if (!gMapOk(x, z) || M.l[q] < -.25 || (M.f && M.f[q] > 3)) continue;
-    const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
     const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
     const sc = (M.k[q] >= F.choke ? 1 + M.k[q] : 0) + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
+    const v0 = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5); if (v0 <= bs) continue;   // the known enemy only takes from it: it cannot beat the best, so the dear tests below are not made (cf-lag: 2-4 s a call before)
+    const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
     const r = railOf(x, z); if (r.d > F.road) continue;
     if (mine.some(o => Math.hypot(o.x - x, o.z - z) < o.r)) continue;
-    const v = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5) - Math.min(2, cmdKnown(C, x, z, 600) / 3);
+    const v = v0 - Math.min(2, cmdKnown(C, x, z, 600) / 3);
     if (v > bs) { bs = v; best = { x, z, why: (M.k[q] >= F.choke ? 'gargalo' : 'crista') + (crest > F.crest && M.k[q] >= F.choke ? ' numa crista' : ''), sc: v }; }
   }
   if (!best) return null;
@@ -37471,9 +37614,12 @@ function buildWorld() {
   pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
   pg.setAttribute('pc', new THREE.BufferAttribute(new Float32Array(MAXP * 4), 4));
   pg.setAttribute('size', new THREE.BufferAttribute(new Float32Array(MAXP), 1));
-  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 } },
-    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; uniform float scale; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
-    fragmentShader: 'varying vec4 vc; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; gl_FragColor = vec4(vc.rgb, vc.a * smoothstep(0.5, 0.15, d)); }' }));
+  /* what glows (fire, flashes, tracers, a motor's flame: red at full, pc.r 1) is drawn as it is; the rest (smoke, dust, a smoke screen, a
+     soldier's speck) takes the day's light (amb, as the bursts' smoke of XFX) and the haze (fC from fN to fF m), so that a smoke screen
+     does not glow white at night nor stand sharp in the fog (skyScene sets them each frame) */
+  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 }, amb: { value: 1 }, fC: { value: new THREE.Color() }, fN: { value: 1e9 }, fF: { value: 2e9 } },
+    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; varying float vd; uniform float scale; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); vd = -mv.z; gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'varying vec4 vc; varying float vd; uniform float amb, fN, fF; uniform vec3 fC; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; float lit = step(vc.r, 0.98); vec3 c = mix(vc.rgb, vc.rgb * amb, lit); c = mix(c, fC, smoothstep(fN, fF, vd) * lit); gl_FragColor = vec4(c, vc.a * smoothstep(0.5, 0.15, d)); }' }));
   sparks.frustumCulled = false; scene.add(sparks);
   shadows = [];
   for (let i = 0; i < 14; i++) {
@@ -37644,9 +37790,11 @@ function vegMat(o) {
    the far crowns do not thin to nothing */
 const VAK = d => ' vAk = 1.0 + .3 * max(0.0, log2(' + d + ' / 45.0));\n';
 /* the dither of the bands, by the distance d: positive keeps a fragment under the value, negative keeps it over (the other side of
-   the same dither, so two bands that meet share every pixel without a gap) */
+   the same dither, so two bands that meet share every pixel without a gap): at a share t of the fade the band going out keeps the
+   noise under 1 - t and the band coming in the noise over 1 - t, so t - 1 (it was -t, and at the fade's far end both kept almost
+   nothing: a ring of trees round the eye stood as a few dots; tests/veg-fade.js) */
 const VFADE = 'float vegD = distance((modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz, uEye);\n' +
-  ' vFade = vegD < uBand.y ? (uBand.x < 0.0 ? 1.0 : -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0)) : 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0);\n' +
+  ' vFade = vegD < uBand.y ? (uBand.x < 0.0 ? 1.0 : clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0) - 1.0) : 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0);\n' +
   ' if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' + VAK('vegD');
 const VWIND = 'float vegW = clamp((position.y + 12.0) / 26.0, 0.0, 1.0); vegW *= vegW * uWind * step(.85, instanceMatrix[1].y / length(instanceMatrix[1].xyz));\n' +
   ' float vegP = instanceMatrix[3].x * .043 + instanceMatrix[3].z * .061;\n' +
@@ -37663,7 +37811,7 @@ function vegImpMat(tex) {
       ' vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), -h, el * .85));\n' +
       ' transformed = vegC + (rgt * position.x + up * (position.y + 12.0)) * ip.w;\n' +
       ' vImpUv = vec2(uv.x * .5 + ik * .5, uv.y); vImpC = ic;\n' +
-      ' float vegD = dE; vFade = 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0); if (vegD < uBand.y) vFade = -clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0); if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' +
+      ' float vegD = dE; vFade = 1.0 - clamp((vegD - uBand.z) / (uBand.w - uBand.z), 0.0, 1.0); if (vegD < uBand.y) vFade = clamp((vegD - uBand.x) / (uBand.y - uBand.x), 0.0, 1.0) - 1.0; if (vFade < 0.0 && vFade > -.001) vFade = -.001;\n' +
       ' if (ip.w <= 0.0) transformed = vec3(0.0, -1e5, 0.0);\n' + VAK('dE'),
     normal: 'objectNormal = normalize(vec3(0.0, 1.0, 0.0) + .6 * normalize(vec3(uEye.x - ip.x, 0.0, uEye.z - ip.z) + vec3(1e-4, 0.0, 0.0)));\n',
     color2: 'vColor = vImpC;\n' });
@@ -42991,7 +43139,7 @@ function gorGhost(g, P, now) {
    (fire, recon, air support, lift) arm a click on the map. The type chips select every own squad of a kind (Shift adds). Everything goes
    through gorSend. A new match (gorSync) starts with no route */
 Object.assign(GOR, { rt: [], ov: 'atk', on: 0, fk: 'trench', rk: '', rtLast: null, mk2: '' });
-const GORV = ['atk', 'def', 'rec', 'esc', 'amb', 'fire'], GORF = Object.keys(W21.fort), GORN = [0, 1, 2, 3, 4, 6];
+const GORV = ['atk', 'def', 'rec', 'esc', 'amb', 'fire'], GORF = Object.keys(W21.fort), gorFk = () => GORF.filter(k => k !== 'dome' || (S && S.era === POSTS.dome.era)), GORN = [0, 1, 2, 3, 4, 6];
 gorSync = (g => () => { const was = GOR.S; g(); if (GOR.S !== was) Object.assign(GOR, { rt: [], rtLast: null, mk2: '' }); })(gorSync);
 const gorMk = () => (S.eco ? GPC.kinds.filter(k => ECO.unit[k] && (!ECO.unit[k][4] || ECO.unit[k][4] === S.era)) : []);
 const GORX = { rt: 1, ord: 1, fort: 1, rq: 1 }, GORRQ = { recon: 1, lift: 1, radio: 1 };
@@ -43012,7 +43160,7 @@ gorMode = (g => (m, keep) => {
   else if (m === GOR.mode && !keep) {   // the key again: the route ends; the verb or the kind turns
     if (m === 'rt') m = '';
     else if (m === 'ord') GOR.ov = GORV[(GORV.indexOf(GOR.ov) + 1) % GORV.length];
-    else GOR.fk = GORF[(GORF.indexOf(GOR.fk) + 1) % GORF.length];
+    else { const L = gorFk(); GOR.fk = L[(L.indexOf(GOR.fk) + 1) % L.length]; }
   }
   GOR.mode = m; GOR.plan = null; GOR.sig = {};
   gorBar();
@@ -43078,7 +43226,7 @@ function gorOpt() {
     kids.push(gE('span', '', 'Verbo:'), ...GORV.map(v => chip(W21.v[v][0].toUpperCase() + W21.v[v].slice(1), { ov: v }, GOR.ov === v)));
     if ((GOR.ov !== 'fire' || GOR.mk2) && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', GOR.mk2 ? 'Quantos:' : 'Quem:'), ...GORN.filter(n => !GOR.mk2 || n <= GPC.n).map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n, GOR.mk2 ? (n || 1) + ' novos da reserva' : n ? 'O general escolhe ' + n + (n > 1 ? ' esquadras livres' : ' esquadra livre') + ' com caminho até lá' : 'O general escolhe quantas (ataque 3, defesa 2, reconhecimento 1, escolta 2)')));
     if (mks.length && GOR.ov !== 'amb' && !gorIds().length) kids.push(gE('span', '', 'Criar:'), ...mks.map(k => chip(ECO.tx.u[k], { mk2: k }, GOR.mk2 === k, 'Criar unidades novas deste tipo, da reserva, com esta missão (clique de novo: usar as que já estão em campo)')));
-  } else if (m === 'fort') kids.push(gE('span', '', 'Obra:'), ...GORF.map(k => chip(W21.fort[k][0].toUpperCase() + W21.fort[k].slice(1), { fk: k }, GOR.fk === k)));
+  } else if (m === 'fort') kids.push(gE('span', '', 'Obra:'), ...gorFk().map(k => chip(W21.fort[k][0].toUpperCase() + W21.fort[k].slice(1), { fk: k }, GOR.fk === k)));
   else if (m === 'rq' && GORRQ[GOR.rk] && !gorIds().length) kids.push(gE('span', '', 'Quem:'), ...GORN.map(n => chip(n ? String(n) : 'Auto', { on: n }, GOR.on === n)));
   if (GOR.rt.length || m === 'rt') kids.push(gE('span', '', 'Rota: ' + GOR.rt.length + (GOR.rt.length === 1 ? ' ponto' : ' pontos') + (m === 'rt' ? '' : ' · vai com a próxima ordem')), chip('Apagar rota', { rtx: 1 }, undefined, 'Esc também apaga a rota quando nada está armado'));
   el.replaceChildren(...kids);
@@ -44438,6 +44586,14 @@ skyScene = (g => () => {
       if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
     }
   }
+})(skyScene);
+/* the sparks' smoke, dust and screens: the day's light and the haze as drawn this frame (the same as XFX's smoke) */
+skyScene = (g => () => {
+  g();
+  const u = typeof sparks !== 'undefined' && sparks && sparks.material.uniforms;
+  if (!u || !u.amb || !S || !S.sky || !scene) return;
+  u.amb.value = .16 + .84 * clamp(S.sky.L, 0, 1);
+  if (scene.fog) { u.fN.value = scene.fog.near; u.fF.value = scene.fog.far; u.fC.value.copy(scene.fog.color); } else { u.fN.value = 1e9; u.fF.value = 2e9; }
 })(skyScene);
 /* the renderer's pixels: the level's most per CSS pixel */
 resize = (g => () => { g(); const d = Math.min(dpr, GFXQ[GFX.lv].dpr); if (renderer && d !== renderer.getPixelRatio()) { renderer.setPixelRatio(d); renderer.setSize(cw, ch, false); } })(resize);

@@ -46,16 +46,21 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
   - "sem esquadras" (`pool`) caiu de cerca de 2.000 para 300-1.300 avaliações.
   - Mas nenhum desses assaltos chegou à hora H dentro dos 12 min: um foi cancelado porque a reunião demorou demais, e outro foi desfeito porque perdeu uma das 2 esquadras. O `op.formT` foi a correção, e as partidas com ele foram interrompidas.
 
+## Testado em 9f2a313: ok (tarefa cf-testar-ia)
+
+- `tests/approaches.js`: passou inteiro (SECS=180, com a partida IA × IA: os 2 assaltos abertos pelas abordagens, cada esquadra com o seu caminho; 3 buscas de 6,9 ms, pior pedaço 2,4 ms, comandantes 2,8 ms por quadro no Node).
+  - Duas falhas eram do teste, corrigidas em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/97: o cenário "assalto livre do eixo" agora sorteia o p12 do M3 (ponto forte), cujo reconhecimento vai de propósito às posições de assalto, então o cenário do M2 fixa `PR.on = 0`; e o movimento orgânico (#68) arredonda as curvas do caminho (passa a 4,8 m da posição de assalto), então a checagem aceita `ORG.poly.cut` m.
+- `tests/approaches-relay.js`, `tests/tmap-relay.js`, `tests/tmap.js`, `tests/personality.js`: passaram.
+- `tests/campaign.js`: quebrava (crash em `op.over`) por um cenário do quadro de ameaças que dependia do sorteio da partida; corrigido em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/116. Resta 1 falha mais antiga que o M2-M5 aqui (a QRF leva 1 esquadra).
+- `tests/drills.js`: as 3 falhas de hoje (contato, romper contato, anel esperando carona) não existem em 2f2f9dc (M2-M5 todos dentro): vêm de merges posteriores, fora deste pacote. `tests/field.js`: o crash era do M5 (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/105); as 2 falhas restantes (patrulha, ponto parado) são iguais com `M5.on = 0`, fora deste pacote.
+- Partidas IA × IA no harness (1944 12 min, hoje 15 min): sem erro nem NaN; os assaltos da IA abrem pelas abordagens.
+
 ## O que NÃO foi testado
 
-- O `op.formT` (a reunião que espera a caminhada mais longa) numa partida de verdade. Não se sabe se os assaltos agora chegam à hora H.
-- Nenhuma amostra de chegada: não sei o ângulo real de chegada nem a parte fora do eixo (as metas eram ≥ 35% de flanco e ≥ 40% fora do eixo).
-- `drills.js` com a checagem corrigida, e `field`, `personality` e `orders` depois das últimas mudanças.
-- O torneio A/B da D10 (≥ 40 partidas decididas, vitória ≥ 55%).
-- As métricas do M0, que ainda não estão no `main`.
-- O custo no Chrome. No Node da máquina compartilhada, uma busca leva 10-20 ms no total e o pior pedaço 4-13 ms (com 1.200 células por pedaço; reduzi para 600 e não medi de novo). O orçamento do general é ≤ 1 ms por quadro na média.
-- O jogo online: o convidado perguntando `ap` ao anfitrião de verdade (só o relay foi testado).
-- O mapa de hoje (modern) nos testes de cenário. Só o de 1944 tem cenário. O modern só rodou nas partidas.
+- O torneio A/B da D10 (≥ 40 partidas decididas, vitória ≥ 55%) e as métricas de chegada (ângulo real, ≥ 35% de flanco, ≥ 40% fora do eixo).
+- O `op.formT` numa partida longa: nas duas partidas medidas nenhum assalto com procedimento chegou à hora H (ficaram em reunião 200 a 600 s; ver o M3).
+- O custo no Chrome. No Node: 6,9 ms por busca e pedaço de 2,4 ms com a máquina folgada, mas até 59 ms com ela carregada (a checagem do pedaço falha sob carga); a meta é ≤ 1 ms por quadro na média.
+- O jogo online com o convidado perguntando `ap` ao anfitrião de verdade (só o relay foi testado) e o diário no navegador ("Assalto planejado contra X ...").
 
 ## Riscos
 

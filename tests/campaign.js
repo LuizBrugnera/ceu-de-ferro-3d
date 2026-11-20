@@ -112,9 +112,10 @@ console.log('-- the threat board: incidents, triage, the response --');
   for (const q of S.squads.filter(q => q.team === t && q.live >= 3 && !q.state && !q.op && !q.net && !q.lift && q.job !== 'base').slice(0, 1)) {   // a free squad 900 m behind it, as below: where the side's squads stand at 120 s is the match's
     q.job = 'road'; q.ord = { k: 'hold', ri: q.ri, s: q.s }; for (const m of q.men) { m.x = p.x - dx * 900 + (m.x % 7); m.z = p.z + (m.z % 7); }
   }
-  foeAt(p.x + dx * 150, p.z, 45); keep.push(...Cm.known.slice(-45)); look();   // well over the local guard: urgent enough to answer whoever stands near the point
+  const nf = Math.max(20, Math.ceil($('thbOwn')(t, p.x, p.z, THB.r) * 1.6));   // worth an answer whatever the match put there before (the urgency is foe over own)
+  foeAt(p.x + dx * 150, p.z, nf); keep.push(...Cm.known.slice(-nf)); look();
   const I = Cm.thb.find(I => I.key === 'p' + pi);
-  ok(I && I.k === 'pt' && I.foe === 45 && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + 22)) < 1, 'forty-five known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
+  ok(I && I.k === 'pt' && I.foe === nf && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + (nf - 1) / 2)) < 1, nf + ' known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
   const op = I && I.op;
   ok(I && I.st === 'resp' && op && op.k === 'qrf' && !op.over, 'triage answers it: a response operation (qrf)');
   if (op) {

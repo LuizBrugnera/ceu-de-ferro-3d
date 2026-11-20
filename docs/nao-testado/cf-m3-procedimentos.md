@@ -33,12 +33,20 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 - O evento `ap` da medição (M0) ganhou o campo `pr`, com o procedimento escolhido.
 - `PR.on = 0` volta ao assalto do M2, para o A/B.
 
+## Testado em 9f2a313 (tarefa cf-testar-ia)
+
+- **Bug corrigido** em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/97: os estados novos `mv` e `rec` não contavam como "antes da hora H" em nenhum outro lugar. Os blindados do eixo deixavam de esperar na linha de partida (andavam sozinhos para o objetivo enquanto a manobra caminhava), a campanha não adiava a hora H por uma frente em `mv`/`rec`, o M5 não chamava os tanques, a finta e o apoio não se ligavam, e a vista mostrava `mv`/`rec` crus. Agora `atkPreH` cobre os dois (o risco "Campanhas" e o do M5 abaixo ficam resolvidos).
+- `tests/procedures.js` (novo, no `tests/all.sh`): o P1 percorre os estados (reunião → `mv` com a manobra para a posição de assalto do flanco e a fixação para a base de fogo a ~430 m → hora H quando a manobra chega → fixação em `overwatch` e manobra em assalto) e o abandono por atraso (cancelado, com o motivo no diário): **ok**. Mais as checagens do bug acima.
+- `tests/approaches.js`, `tests/man-b.js`, `tests/man-view.js`, `tests/personality.js`, `tests/w13.js`: passaram. `tests/campaign.js`: corrigido em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/116 (o sorteio do `prPick` mudou a partida semeada e o cenário da QRF ficou sem resposta).
+- `general` (3), `gen-cmd` (1), `man-a` (3: notas do `dep`/`gue`, dos embrulhos de nota posteriores), `man-c` (blk e cut): falhas que não são deste pacote (o `blk` já falhava antes; ver a memória de falhas antigas).
+- Partidas no harness: 1944 12 min (lado 1 sorteou P6, P1 e P2) e hoje 15 min (P1): sem erro.
+
 ## O que NÃO foi testado
 
-- Nada rodou em partida: nem um assalto com procedimento, nem o desbordamento, nem a infiltração pelas abordagens. Não sei se algum P1 chega à hora H.
-- Nenhuma suíte foi rodada (`approaches`, `campaign`, `man-a/b/c`, `general`, `drills`, `personality`, `field` ...), nem o A/B, nem custo por quadro.
-- Só se verificou que o script principal compila (`node --check`) e que a página abre no Chrome sem erro de JavaScript (com o servidor em 127.0.0.1).
-- Online: os estados novos (`mv`, `rec`) e o `trn` só rodam no anfitrião. O convidado não foi testado. As chaves novas do relay (`ap`, `ap2`) são do M7 e não entraram.
+- Nenhum assalto com procedimento chegou a `mv` nas duas partidas medidas: o P1 e o P2 ficaram em reunião 200-600 s até o fim (12 e 15 min). Não se sabe se é só a caminhada longa (`op.formT` até 900 s) ou se a reunião trava; falta uma partida de 30 min ou mais com `atklog`.
+- A distribuição P1/P2/P5/P6/P12 em muitas partidas, `PR.late`/`PR.lost`, o desbordamento (`trn`) e a infiltração pelas abordagens em partida, o A/B e o custo por quadro.
+- Online: os estados novos e o `trn` só no anfitrião; o convidado não foi testado.
+- A junção com o M7 (`trn` pelo M3 e pelo M7, `MANT.trn`).
 
 ## Riscos
 

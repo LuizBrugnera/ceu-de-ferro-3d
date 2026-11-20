@@ -173,8 +173,8 @@ console.log('-- the player\'s build mode --');
   ok(seq.join() === 'base,k1' && okT && f && f.k === 1 && f.team === 0 && Math.abs(f.a - 0) < 1e-9 && Math.abs(f.o.c) < 1e-9 && S.fm && !shots && P.kit === BLD.kit, 'N, N: the trench outline, valid; the click starts it across the line of sight, costs no kit, fires no round and leaves the mode open');
   C.run(.3); const again = S.fm.why; S.aim.h = Math.PI / 2; C.run(.1); const turned = S.fm.why; tap('fire'); const f2 = S.forts[1];
   ok(again === 'fort' && turned === '' && f2 && Math.abs(f2.o.s) < 1e-9, 'on top of the first it is refused (' + again + '); turned a quarter, the next piece goes down along the new facing');
-  tap('build'); const k2 = S.fm && S.fm.k; S.aim.h = Math.PI; C.run(.1); tap('fire'); const f3 = S.forts[2]; const ks = []; for (let i = 0; i < 3; i++) { tap('build'); ks.push(S.fm && S.fm.k); } tap('build'); const closed = !S.fm && !S.bm;
-  ok(k2 === 2 && f3 && f3.k === 2 && ks.join() === '3,4,5' && closed, 'N again: sandbags, started the same way; N goes on through the posts of 1944 (' + ks.join(', ') + ', no anti-rocket dome) and then closes the mode');
+  tap('build'); const k2 = S.fm && S.fm.k; S.aim.h = Math.PI; C.run(.1); tap('fire'); const f3 = S.forts[2]; const ks = []; for (let i = 0; i < 4; i++) { tap('build'); ks.push(S.fm && S.fm.k); } tap('build'); const closed = !S.fm && !S.bm;
+  ok(k2 === 2 && f3 && f3.k === 2 && ks.join() === '3,4,5,8' && closed, 'N again: sandbags, started the same way; N goes on through the posts of 1944 and the radio relay (' + ks.join(', ') + ', no anti-rocket dome, no pontoon for a rifleman) and then closes the mode');
   tap('build'); tap('build'); I.ordA = true; C.run(.05); I.ordA = false; ok(!S.fm && !S.bm, 'the right button leaves it');
   S.aim.h = 0; P.x = f.x; P.z = f.z; C.run(TR.time / 1 + 3); ok(f.prog >= 1 && P.fc === f && P.dg > TR.depth - .01, 'standing in its own site the soldier digs it and ends up sheltered in it (m.fc, for ABRIGADO)');
 }

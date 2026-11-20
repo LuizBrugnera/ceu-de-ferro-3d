@@ -395,6 +395,7 @@ function stateView(logN) {
     ticketsNote: NS() === 3 ? 'by faction; a side with no tickets or without its main base is out, and the match goes on until one is left' : 'index 0 = side 0, 1 = side 1',
     seat: pd.ctl, doctrine: pd.doc, posture: pd.post, operations: pd.ops, fireMissions: pd.fm, requests: pd.res, gate: pd.gate,
     commandNet: pd.cn || undefined,
+    seatTowns: pd.sede || undefined,   // cf-sede-ataque-defesa (NOT TESTED): own: your seat town (its threat-board state, garrison squads, sites); foe: each enemy seat town your side knows (how it learned it, its identified sites, the assault on it or why not yet)
     prisoners: pd.pris || undefined,   // P4 (NOT TESTED, docs/nao-testado/cf-p4-prisioneiros.md): the prisoners the side holds, what questioning told it (aged, marked interrogatorio) and the war crimes
     personality: pd.per || undefined, difficulty: pd.dif || undefined, enemyHabits: pd.hab && pd.hab.length ? pd.hab : undefined,   // W17: the side's AI general, and the roads the enemy is seen to use again and again
   };
@@ -603,12 +604,12 @@ const TOOLS = [
   { name: 'end_campaign', description: 'End a campaign (its operations go on by themselves).',
     inputSchema: { type: 'object', properties: { campaign: { type: 'integer' } }, required: ['campaign'], additionalProperties: false },
     run: async a => { const e = need(a, { campaign: ['i', true, 0, 999999] }); if (e) throw new Error(e); return runCmd({ c: 'camp', id: a.campaign, k: 'end' }, 'cmd'); } },
-  { name: 'set_defence_policy', description: 'The defence policy of a place (the defence domain): a point (index) or one of your sites or supply bases (site id). infantry: at most 0-3 squads the threat board sends to answer there (a site: also its own guard, 0-2); anti_air: 0-1 the site\'s fixed AA; reaction: 0 never answer a threat there, 1 by the board\'s triage (default), 2 always. Refused at (no such point), id (no such site of yours), shape.',
-    inputSchema: { type: 'object', properties: { point: { type: 'integer' }, site: { type: 'integer' }, infantry: { type: 'integer', minimum: 0, maximum: 3 }, anti_air: { type: 'integer', minimum: 0, maximum: 1 }, reaction: { type: 'integer', minimum: 0, maximum: 2 }, why: WHYP }, additionalProperties: false },
+  { name: 'set_defence_policy', description: 'The defence policy of a place (the defence domain): a point (index), one of your sites or supply bases (site id), or your seat town (seat_town: true; its sites are part of it). infantry: at most 0-3 squads the threat board sends to answer there (a site: also its own guard, 0-2); anti_air: 0-1 the site\'s fixed AA; reaction: 0 never answer a threat there, 1 by the board\'s triage (default), 2 always. Refused at (no such point), id (no such site of yours), shape.',
+    inputSchema: { type: 'object', properties: { point: { type: 'integer' }, site: { type: 'integer' }, seat_town: { type: 'boolean' }, infantry: { type: 'integer', minimum: 0, maximum: 3 }, anti_air: { type: 'integer', minimum: 0, maximum: 1 }, reaction: { type: 'integer', minimum: 0, maximum: 2 }, why: WHYP }, additionalProperties: false },
     run: async a => {
       const e = need(a, { point: ['i', false, 0, 999], site: ['i', false, 0, 999999], infantry: ['i', false, 0, 3], anti_air: ['i', false, 0, 1], reaction: ['i', false, 0, 2], why: ['s', false] }); if (e) throw new Error(e);
-      if ((a.point === undefined) === (a.site === undefined)) throw new Error('give exactly one of point or site');
-      return runCmd(Object.assign({ c: 'dpol' }, pick(a, ['point', 'site', 'infantry', 'anti_air', 'reaction', 'why'], { point: 'pi', site: 'id', infantry: 'inf', anti_air: 'aa', reaction: 'qrf' })), 'cmd');
+      if ([a.point !== undefined, a.site !== undefined, a.seat_town === true].filter(Boolean).length !== 1) throw new Error('give exactly one of point, site or seat_town');
+      return runCmd(Object.assign({ c: 'dpol' }, a.seat_town === true ? { seat: 1 } : {}, pick(a, ['point', 'site', 'infantry', 'anti_air', 'reaction', 'why'], { point: 'pi', site: 'id', infantry: 'inf', anti_air: 'aa', reaction: 'qrf' })), 'cmd');
     } },
   { name: 'triage_threat', description: 'Set the priority of an incident on the threat board (id from get_threats): -1 ignore it (its answer is called off), 0 the board\'s own judgement, 1-3 a priority (3 the highest).',
     inputSchema: { type: 'object', properties: { id: { type: 'integer' }, priority: { type: 'integer', minimum: -1, maximum: 3 } }, required: ['id', 'priority'], additionalProperties: false },

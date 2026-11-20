@@ -19416,11 +19416,12 @@ MANE.gue = (C, op) => { if (C.gue && C.gue.op === op) C.gue = null; C.gueLo = nu
    ended after CAMP.life s or with its last operation.
    The threat board (C.thb): a side's incidents, each a place of its own the enemy is at (key, k): a point it holds (pt: being taken, its
    bar moving away, or known enemy strength over THB.min within CMD.thr m), an economy site (site: hit lately, THB.hit s, or enemy within
-   THB.r m), a supply base (sup), a column hit (col) and enemy aircraft within THB.air m of a site or the base (air). Each has a value
+   THB.r m), the seat town (seat, key w: enemy within its radius and THB.r m, or a site in it hit; its sites are no incidents of their own;
+   cf-sede-ataque-defesa), a supply base (sup), a column hit (col) and enemy aircraft within THB.air m of a site or the base (air). Each has a value
    (THB.val; a site's is its tickets, ECO.site[k].tk), the enemy strength estimated from what the side knows (C.known only: the fog), what
    the side has there (own), an urgency (enemy against own, +1 when being taken or hit) and a score (value × urgency, × 1 + p for a priority
    set by triage). Triage, every plan turn, the highest score first (D14 A): one under THB.ign is ignored on purpose and the log says why;
-   one with a priority (triage p 1-3) or a policy dpol qrf 2 is never ignored, p -1 or qrf 0 always is. The rest are answered while there
+   one with a priority (triage p 1-3) or a policy dpol qrf 2 is never ignored, nor the seat with a known enemy in it, p -1 or qrf 0 always is. The rest are answered while there
    are responders, at most THB.max at once: the quick reaction force (the base's reserve squad, within THB.qrf m) first, then free squads within THB.far m,
    THB.n by urgency (dpol inf caps it). A response is an operation (qrf) with one H-hour: the first squad fixes the enemy from the defended
    place, the others go round a flank and assault at H, the artillery puts THB.fire rounds on the enemy at H and the air focus goes there.
@@ -19429,7 +19430,7 @@ MANE.gue = (C, op) => { if (C.gue && C.gue.op === op) C.gue = null; C.gueLo = nu
    funnel: camp, dpol, triage, qrf and the question threats. No random number is drawn here */
 const CAMP = { fronts: { cautious: 3, balanced: 4, aggressive: 5 }, sq: 2, max: 2, H: [60, 240], pace: 2.4, slip: 90, step: 10, sec: 2, secK: .6, main: 2, life: 1200,
   role: { main: 'esforço principal', sec: 'frente secundária', fnt: 'finta', raid: 'incursão' } };
-const THB = { min: 2, r: 450, hit: 20, calm: 40, keep: 10, ign: 6, air: 1200, val: { base: 12, town: 6, pt: 4, sup: 5, col: 3, air: 4 },
+const THB = { min: 2, r: 450, hit: 20, calm: 40, keep: 10, ign: 6, air: 1200, val: { base: 12, town: 6, pt: 4, sup: 5, col: 3, air: 4, seat: 14 },
   far: 2600, qrf: 4500, n: [2, 3], max: 3, try: 6, stage: 120, flank: 260, H: [25, 600], pace: 3, fire: 4, life: 900, fail: .4, again: 20, quiet: 20,
   job: { base: 1, held: 1, road: 1, push: 1, wood: 1 } };
 const campN = C => CAMP.fronts[docK(C)] || CAMP.fronts.balanced;
@@ -19527,8 +19528,13 @@ function thbSense(C) {
     if (E > THB.min || ex) see('p' + i, 'pt', p, gName(p), p.base >= 0 ? THB.val.base : p.tw ? THB.val.town : THB.val.pt, E, ex, kx, kz, 'p' + i);
   });
   const hit = id => S.ot[id] !== undefined && S.t - S.ot[id] < THB.hit;
+  const sw = sedeOwn(t);   // cf-sede-ataque-defesa: the seat town is one incident (THB.val.seat), the sites in it are part of it
+  if (sw) {
+    const E = cmdKnown(C, sw.x, sw.z, sw.ru + THB.r), kx = KN.n ? KN.x : sw.x, kz = KN.n ? KN.z : sw.z, h = sedeSites(t, t).some(e => hit(e.id));
+    if (E > THB.min || h) see('w', 'seat', sw, 'a cidade-sede', THB.val.seat, E, h, kx, kz, 'w');
+  }
   for (const e of S.eco ? S.eco.l : []) {
-    if (e.team !== t || e.dead) continue;
+    if (e.team !== t || e.dead || (sw && sedeIn(sw, e))) continue;
     const E = cmdKnown(C, e.x, e.z, THB.r), kx = KN.n ? KN.x : e.x, kz = KN.n ? KN.z : e.z, h = hit(e.id);
     if (E > THB.min || h) see('s' + e.id, 'site', e, e.name + ' ' + gNear(e.x, e.z), ECO.site[e.k].tk, E, h, kx, kz, 's' + e.id);
   }
@@ -19563,13 +19569,13 @@ function thbCan(C, q, I) {
   const w = q.ord.tw; if (!w || w.hold !== C.t) return true;
   const pk = 'p' + gPts().indexOf(w); return !(C.thb || []).some(J => J !== I && !J.over && J.pk === pk);
 }
-/* the responders of I, n at most: the base's reserve (the QRF) first, then the nearest; within THB.far m, not already at the place, able to get there */
+/* the responders of I, n at most: the base's reserve (the QRF) first, then the nearest; within THB.far m, not already at the place (but the QRF in its seat), able to get there */
 function thbPick(C, I, n) {
   const p = railOf(I.x, I.z), c = [], out = [];
   for (const q of S.squads) {
     if (!thbCan(C, q, I)) continue;
     const L = q.men.find(m => !m.dead), d = L ? hdist(L, I) : 1e9;
-    if (d >= THB.r && d <= (q.job === 'base' ? THB.qrf : THB.far)) c.push([q, d - (q.job === 'base' ? THB.qrf : 0)]);
+    if ((d >= THB.r || (I.k === 'seat' && q.job === 'base')) && d <= (q.job === 'base' ? THB.qrf : THB.far)) c.push([q, d - (q.job === 'base' ? THB.qrf : 0)]);   // the seat's own QRF is posted in it (aidQrfPost): it answers from there
   }
   c.sort((a, b) => a[1] - b[1]);
   let k = 0;
@@ -19625,7 +19631,7 @@ function thbTriage(C) {
       if (!exp) { I.st = 'resp'; continue; }
       gLog(t, 'def', 'Reação a ' + I.nm + ' suspensa: ' + exp, I); opEnd(C, I.op); I.op = null;
     }
-    const ign = exp || (I.p <= 0 && !(P && P.qrf === 2) && I.sc < THB.ign ? (I.foe <= 0 ? 'inimigo não localizado' : I.own >= I.foe ? (I.k === 'air' ? 'a antiaérea local basta' : 'a guarda local basta') + ' (força ' + gN(I.own) + ' contra ' + gN(I.foe) + ')' : 'valor baixo (' + gN(I.val) + ', urgência ' + gN(I.urg) + ')') : '');
+    const ign = exp || (I.p <= 0 && !(P && P.qrf === 2) && (I.k === 'seat' ? I.foe <= 0 : I.sc < THB.ign) ? (I.foe <= 0 ? 'inimigo não localizado' : I.own >= I.foe ? (I.k === 'air' ? 'a antiaérea local basta' : 'a guarda local basta') + ' (força ' + gN(I.own) + ' contra ' + gN(I.foe) + ')' : 'valor baixo (' + gN(I.val) + ', urgência ' + gN(I.urg) + ')') : '');
     if (ign) { if (I.st !== 'ign' && ai) gLog(t, 'def', 'Ameaça ignorada de propósito: ' + I.nm + ' — ' + ign, I, 'thi' + I.key); I.st = 'ign'; I.why = ign; continue; }
     I.st = 'open';
     if (!ai || S.t < I.nT) continue;
@@ -23539,6 +23545,7 @@ GC.dpol = { d: 'def', f(t, c, by) {
   if (!ok(c.inf, 0, 3) || !ok(c.aa, 0, 1) || !ok(c.qrf, 0, 2)) return gBad('shape');
   let key = '', nm = '', site = null;
   if (Number.isInteger(c.pi)) { const p = gPts()[c.pi]; if (!p) return gBad('at'); key = 'p' + c.pi; nm = gName(p); }
+  else if (c.seat === 1) { if (!sedeOwn(t)) return gBad('at'); key = 'w'; nm = 'a cidade-sede'; }   // cf-sede-ataque-defesa: the seat town's incident (pk 'w')
   else if (Number.isInteger(c.id)) {
     site = S.eco ? S.eco.l.find(e => e.id === c.id && e.team === t && !e.dead) || null : null;
     const b = site ? null : S.sup.find(b => b.id === c.id && b.team === t && !b.dead); if (!site && !b) return gBad('id');
@@ -34537,6 +34544,192 @@ genCard = (f => (t, id) => {
   return c;
 })(genCard);
 /* ---------- end of CEREBRO: prisioneiros ---------- */
+/* ---------- the seat: its attack and its defence (cf-sede-ataque-defesa; NÃO TESTADO, see docs/nao-testado/cf-sede-ataque-defesa.md) ----------
+   The captain: "não estão atacando a sede dos outros e nem defendendo as suas". A side's seat (aidSeat: the seat town of map version 5 by
+   each main base, the insurgents' HS2 on the map of three sides) was nobody's objective: the assaults and campaigns go for the conquest
+   points (cqAim) and a seat town is none; a raid wants an asset seen in the last MANT.raid.mem s, which a seat deep behind the front never
+   is; and its defence was its sites' own incidents, each worth one site, with nothing left in the town once the base's reserve went out.
+   What a side knows (honest, SEDE.kr): a seat town is marked "Sede" on every side's map (drawTownNames), so it is known as a person knows it;
+   one that is not (the insurgents' HS2, a village by its own name) once the side has identified one of that side's sites within kr m of it
+   (the economy's memory, kn: a unit, a scout, a drone that saw it), or a prisoner of that side was questioned (prisTell: a soldier knows where
+   his seat is). Its sites are another matter: hidden in the town's lots until someone sees them (ECO.lot), so while a seat is unknown or none
+   of its sites is identified the economy's AI sends its scout there (sedeScout, every SEDE.look s). A town does not move: it stays known (C.sede[f] { T, how }).
+   The attack (sedeGo, in cmdAttack's turn): a known enemy seat, within SEDE.reach m of a point the side holds (or its base among the points it
+   may take: the chain of linked points), its free squads within reach (the assault's pool, apPool with the approaches) and the odds of the
+   doctrine (D.atk): an assault on the town (an atk operation, op.sede the side; on HS2 the point itself), as the main effort of a campaign
+   with its H-hour, a fire mission on its best known site (strike) and, before H, sappers (sabot) or a raid (man raid) on that site, which
+   the campaign takes in. The doctrine says when (SEDE.pref): aggressive before the points, balanced when no point assault opened this turn,
+   cautious only when it holds more points than every enemy. In the objective (sedeFight) the squads go for its identified sites and blow
+   them with charges. Raids (MANG.raid) also count a seat's identified sites however long ago they were seen, worth SEDE.raid times more.
+   What it decided and why: the diary (atk), the view (V.sede) and the MCP's state (sede).
+   The defence: the seat is one incident of the threat board (thbSense: key w, THB.val.seat, its sites part of it), so the triage sends
+   the quick reaction force (the base's reserve first) at a high priority; dpol { seat: 1 } is its policy. A garrison (post sgar, SEDE.gar
+   squads, not lent to operations nor to the board) holds the town, by its houses, and comes before every other post while the seat is
+   threatened, right after the assault post otherwise */
+const SEDE = { on: 1, kr: 1000, in: 60, reach: 4500, again: 240, near: 600, pref: { aggressive: 0, balanced: 1, cautious: 2 }, raid: 1.6, gar: 1, gr: 90, look: 600 };
+MIS.job.sgar = 'garrison';
+Object.assign(GEN.job, { sgar: 'Guarnição da sede' }); Object.assign(GEN.tag, { sgar: 'SED' });
+const sedeOwn = t => (SEDE.on && S.T && S.T.burgs ? aidSeat(t) : null);
+const sedeIn = (w, e) => hdist(w, e) < w.ru + SEDE.in;
+/* side f's own sites in its seat (the truth: for f's own defence) */
+const sedeSites = (t, f) => (S.eco ? S.eco.l.filter(e => e.team === f && !e.dead && sedeIn(aidSeat(f) || { x: 1e9, z: 1e9, ru: 0 }, e)) : []);
+const sedeName = f => 'a cidade-sede inimiga' + (S.E.sides[S.fac[f]] ? ' (' + S.E.sides[S.fac[f]].name + ')' : '');
+/* what side t knows of f's seat: { T, how } or null */
+const sedeKn = (C, f) => (C.sede && C.sede[f]) || null;
+function sedeLearn(C, f, how) {
+  const K = C.sede || (C.sede = {}), w = aidSeat(f); if (!w || K[f]) return;
+  K[f] = { T: S.t, how };
+  gLog(C.t, 'atk', 'Sede inimiga localizada: ' + sedeName(f) + ', a ' + gN(hdist(w, S.base[C.t]) / 1000) + ' km da nossa base (' + how + ')', w, 'sedekn' + f);
+}
+/* each plan turn: a seat town marked "Sede" on the map is known as a person knows it; another (HS2) once an identified site of f within SEDE.kr m gives it away */
+function sedeSense(C) {
+  const t = C.t, kn = S.eco && S.eco.d && S.eco.d[t] ? S.eco.d[t].kn : {};
+  for (const f of foes(t)) {
+    const w = aidSeat(f); if (!w || sedeKn(C, f)) continue;
+    if (w.nm === CITY.plan.seat.nm) { sedeLearn(C, f, 'mapa: a cidade marcada "' + w.nm + '"'); continue; }   // drawTownNames shows it to every side, as to a person
+    for (const id in kn) { const k = kn[id]; if (k.t === f && Math.hypot(k.x - w.x, k.z - w.z) < SEDE.kr) { sedeLearn(C, f, 'reconhecimento: ' + String(ECO.tx.nm[k.k] || k.k).toLowerCase() + ' identificada'); break; } }
+  }
+}
+cmdSense = (g => (C, sq) => { g(C, sq); if (SEDE.on) sedeSense(C); })(cmdSense);
+/* a prisoner knows where his side's seat is */
+prisTell = (g => E => {
+  g(E);
+  const m = E && E.m, C = SEDE.on && m && E.t !== m.team && S.cmd ? S.cmd[E.t] : null;
+  if (C && aidSeat(m.team)) sedeLearn(C, m.team, 'interrogatório de prisioneiro');
+})(prisTell);
+/* while an enemy seat is unknown or none of its sites identified, the economy's AI sends its scout there, once every SEDE.look s a seat, in
+   place of its own looking about; what it finds is still the scout's eyes */
+function sedeScout(t, V, out) {
+  const C = S.cmd && S.cmd[t], i = out.findIndex(o => o.c === 'scout'); if (!SEDE.on || !C || (i < 0 && out.length >= 2) || (V.sc && V.sc.left > 0)) return;
+  const L = C.sedeLk || (C.sedeLk = {}), f = foes(t).filter(f => !cqOut(f) && aidSeat(f) && (!sedeKn(C, f) || !sedeFoeSites(t, f).length) && !(S.t < (L[f] || 0))).sort((a, b) => hdist(aidSeat(a), S.base[t]) - hdist(aidSeat(b), S.base[t]))[0];
+  if (f === undefined) return;
+  const w = aidSeat(f); L[f] = S.t + SEDE.look;
+  out.splice(i < 0 ? out.length : i, i < 0 ? 0 : 1, { c: 'scout', x: Math.round(w.x), z: Math.round(w.z), why: (sedeKn(C, f) ? 'achar as instalações d' : 'achar ') + sedeName(f) });   // in place of the usual look about
+}
+ecoAI = (g => (t, V) => { const out = g(t, V); sedeScout(t, V, out); return out; })(ecoAI);
+/* the sites of f's seat side t has identified and that it believes standing, the dearest first (what its men can go for) */
+function sedeFoeSites(t, f) {
+  const w = aidSeat(f), kn = S.eco && S.eco.d && S.eco.d[t] ? S.eco.d[t].kn : null; if (!w || !kn) return [];
+  const V = { fab: 3, pow: 2, mine: 1 };
+  return ecoFoe(t).filter(e => e.team === f && kn[e.id] && !kn[e.id].dead && hdist(e, w) < SEDE.kr).sort((a, b) => (V[b.k] || 0) - (V[a.k] || 0));
+}
+/* the doctrine's turn for the seat: before the points (0), when no point assault opened (1), only when ahead on points (2) */
+const sedePref = C => { const k = docK(C); return Object.hasOwn(SEDE.pref, k) ? SEDE.pref[k] : 1; };
+const sedeAhead = t => { const h = cqHeld(t); return foes(t).every(f => cqOut(f) || cqHeld(f) < h); };
+/* side C's assault on a known enemy seat, if one makes sense now: true when it opened one (or waits for its approaches) */
+function sedeGo(C, sq) {
+  const t = C.t, D = C.doc, R = S.T.routes, ap = apOn(), slot = o => o.k === 'atk' && !(o.walk && S.t - o.T0 > CMD.walkSlot);
+  if (!SEDE.on || !S.cq || S.cq.ph || C.gue || genBy(t, 'atk') !== 'ai' || S.t < C.atkT || S.t < (C.sedeT || 0)) return false;
+  if (C.ops.some(o => o.k === 'atk' && !o.over && o.sede !== undefined)) return false;
+  const on = C.ops.filter(slot).length; if (on >= campRoom(C, sq)) return false;
+  const held = S.cq.p.filter(p => p.hold === t), tg = cqTargets(t), why = (f, w, s) => { const W = C.sedeW; if (!W || W.f !== f || W.why !== s || S.t - W.T > SEDE.again) { C.sedeW = { f, why: s, T: S.t }; gLog(t, 'atk', 'Assalto à ' + sedeName(f).slice(2) + ' ainda não: ' + s, w); } };   // said again when the reason changes, or every SEDE.again s
+  for (const f of foes(t).filter(f => !cqOut(f) && sedeKn(C, f)).sort((a, b) => hdist(aidSeat(a), S.base[t]) - hdist(aidSeat(b), S.base[t]))) {
+    const w = aidSeat(f); if (!w) continue;
+    const pt = S.cq.p.find(p => hdist(p, w) < 250) || null;   // HS2: the seat is a point
+    if (pt && pt.hold === t) continue;
+    if (pt ? !tg.includes(pt) : !(held.some(p => hdist(p, w) < SEDE.reach) || tg.some(p => p.base === f))) { why(f, w, 'longe da nossa linha (nenhum ponto nosso a ' + gN(SEDE.reach / 1000) + ' km)'); continue; }
+    const rp = railOf(w.x, w.z), ri = pt ? pt.ri : rp.ri, s = pt ? pt.s : rp.s, near = held.concat(S.cq.p.filter(p => p.base === t)).sort((a, b) => hdist(a, w) - hdist(b, w))[0];
+    const sd = near ? (Math.sign(s - sOn(ri, near.x, near.z)) || dsOf(t, ri)) : dsOf(t, ri), P = pt ? Object.assign(cqObj(pt), { sede: f }) : { ri, s, sede: f }, o = pt || routeAt(R[ri], clamp(s, 0, R[ri].len));
+    const pool = (ap ? apPool(C, sq, P, sd, o, D.push + 1) : sq.filter(q => atkFit(q, P, sd)).sort((a, b) => hdist(a.men.find(m => !m.dead) || a, o) - hdist(b.men.find(m => !m.dead) || b, o))).slice(0, D.push + 1);
+    const foe = Math.max(CMD.guess, cmdKnown(C, o.x, o.z, w.ru + SEDE.near)), n0 = pool.reduce((a, q) => a + q.live, 0);
+    const own = n0 + S.units.reduce((a, u) => a + (u.kind === 'tank' && u.ai && !u.dead && u.team === t && hdist(u, o) < 2500 ? CMD.val.tank : 0), 0);
+    if (pool.length < 2) { why(f, w, 'esquadras livres insuficientes ao alcance (' + pool.length + ')'); continue; }
+    if (own / foe < D.atk) { why(f, w, 'força ' + gN(own) + ' contra ' + gN(foe) + ', a doutrina pede ' + gN(D.atk) + ' para 1'); continue; }
+    if (ap && !apGet(C, P, sd) && apAsk(C, P, sd)) { C.gate = 'ap'; return true; }   // M2: its approaches are planned in the next pieces, the assault the next turn
+    const ids = pool.map(q => q.id), st = sedeFoeSites(t, f), e = st[0] || null;
+    const K = (C.camp || []).filter(K => !K.over).length < CAMP.max ? genCmd(t, { c: 'camp', H: Math.round(clamp(CAMP.H[1] / 2, CAMP.H[0], CAMP.H[1])), why: 'assalto à ' + sedeName(f).slice(2) }, 'ai') : { ok: false };
+    const a = genCmd(t, Object.assign({ c: 'atk' }, pt ? { pi: gPts().indexOf(pt) } : { ri, s }, { sd, ids }), 'ai', { P, sd, pool, walk: false, own, foe });
+    const op = a.ok ? C.ops.find(x => x.id === a.id && x.k === 'atk' && !x.over) : null;
+    if (!op) { C.sedeT = S.t + SEDE.again / 2; why(f, w, 'o assalto não abriu (' + gNo(a.why) + ')'); return false; }
+    op.sede = f; op.O.sede = f; op.sedeN = st.length;
+    if (K.ok) genCmd(t, { c: 'camp', id: K.id, op: op.id, role: 'main' }, 'ai');
+    const pre = [];
+    if (e) {   // before H: fire on its best known site, and sappers (else a raid) to blow it
+      if (genCmd(t, { c: 'strike', id: e.id, why: 'preparar o assalto à cidade-sede' }, 'ai').ok) pre.push('fogo sobre ' + e.name.toLowerCase());
+      const why2 = 'antes do assalto à cidade-sede', r = genCmd(t, { c: 'sabot', x: Math.round(e.x), z: Math.round(e.z), why: why2 }, 'ai'), r2 = r.ok ? r : genCmd(t, { c: 'man', k: 'raid', x: Math.round(e.x), z: Math.round(e.z), n: 1, why: why2 }, 'ai');
+      pre.push(r2.ok ? (r.ok ? 'sabotagem' : 'incursão') + ' contra ' + e.name.toLowerCase() : 'sem sabotagem nem incursão (' + gNo(r.why) + '; ' + gNo(r2.why) + ')');
+    }
+    C.sedeT = S.t + SEDE.again; C.sedeW = { f, why: 'assalto aberto', T: S.t };
+    gLog(t, 'atk', 'Assalto à ' + sedeName(f).slice(2) + ' planejado: ' + pool.length + ' esquadras, força ' + gN(own) + ' contra ' + gN(foe) + ' (' + (sedeKn(C, f).how) + '; doutrina ' + docK(C) + ')' + (K.ok ? ', em campanha' : '') + (pre.length ? '; antes da hora H: ' + pre.join(', ') : st.length ? '' : '; nenhuma instalação dela identificada ainda'), w, 'sedego' + f, o);
+    return true;
+  }
+  return false;
+}
+cmdAttack = (g => (C, sq) => {
+  if (!SEDE.on || !S.cq) return g(C, sq);
+  const pr = sedePref(C);
+  if (pr === 0 && sedeGo(C, sq)) return;
+  const n = C.ops.filter(o => o.k === 'atk' && !o.over).length; g(C, sq);
+  if (pr > 0 && C.gate !== 'ap' && C.ops.filter(o => o.k === 'atk' && !o.over).length === n && (pr < 2 || sedeAhead(C.t))) sedeGo(C, sq);
+})(cmdAttack);
+gName = (g => O => (O && O.sede !== undefined && !O.tw ? sedeName(O.sede) : g(O)))(gName);
+/* in the objective: each squad of the assault goes for an identified site of the seat and blows it */
+function sedeFight(C, op) {
+  const t = C.t, f = op.sede, l = opLive(op), st = sedeFoeSites(t, f);
+  if (op.st !== 'fight' && op.st !== 'cons') return;
+  l.forEach((q, i) => {
+    const O = q.ord, e = O.raid && !O.raid.dead && O.raid.team === f ? O.raid : st.length ? st[i % st.length] : null; if (!e) return;
+    if (O.raid !== e) { opTake(op, q, { k: 'assault', ri: op.ri, s: op.O.s, x: e.x, z: e.z, R: 7, raid: e, ax: e.x, az: e.z }); if (!op.sdL) { op.sdL = 1; gLog(t, 'atk', 'Na ' + sedeName(f).slice(2) + ': as esquadras vão às instalações identificadas para as demolir', e); } }
+    else if (q.at) for (const m of q.men) if (!m.dead && plant(m, e)) break;
+  });
+}
+OPS.atk = (g => (C, op) => {
+  g(C, op);
+  if (op.sede === undefined) return;
+  if (!op.over) return sedeFight(C, op);
+  if (op.sdE) return;
+  op.sdE = 1; const left = sedeFoeSites(C.t, op.sede).length;
+  gLog(C.t, 'atk', 'Assalto à ' + sedeName(op.sede).slice(2) + ' encerrado: ' + (op.sedeN ? Math.max(0, op.sedeN - left) + ' de ' + op.sedeN + ' instalações identificadas destruídas' : 'nenhuma instalação identificada lá') + (left ? ', ' + left + ' ainda de pé' : ''), op.O);
+})(OPS.atk);
+/* a raid takes a seat's identified site however long ago it was seen (a town does not move), and it is worth more */
+mbRaidAssets = (g => t => {
+  const out = g(t), C = S.cmd && S.cmd[t], kn = S.eco && S.eco.d && S.eco.d[t] ? S.eco.d[t].kn : null; if (!SEDE.on || !C || !kn) return out;
+  for (const f of foes(t)) {
+    const w = sedeKn(C, f) && aidSeat(f); if (!w) continue;
+    for (const e of sedeFoeSites(t, f)) {
+      const a = out.find(a => a.o === e);
+      if (a) { a.val *= SEDE.raid; a.nm += ' na cidade-sede'; }
+      else out.push({ k: 'eco', o: e, x: kn[e.id].x, z: kn[e.id].z, val: MANT.raid.val.eco * SEDE.raid, nm: (e.name ? e.name.toLowerCase() : 'a instalação') + ' inimiga na cidade-sede' });
+    }
+  }
+  return out;
+})(mbRaidAssets);
+/* the garrison of the own seat: SEDE.gar squads by its houses, the nearest to a place SEDE.gr m from its middle toward the nearest enemy base */
+const sedeGarrOn = t => !!sedeOwn(t) && !(S.demo && !S.watch) && genBy(t, 'def') === 'ai';
+function sedeGarr(t, k) {
+  const w = sedeOwn(t); if (!w) return null;
+  const B = foeBase(t, w.x, w.z) || S.base[t], d = Math.hypot(B.x - w.x, B.z - w.z) || 1, a = (k - (SEDE.gar - 1) / 2) * .9;
+  const ux = (B.x - w.x) / d, uz = (B.z - w.z) / d, c = { x: w.x + (ux * Math.cos(a) - uz * Math.sin(a)) * SEDE.gr, z: w.z + (uz * Math.cos(a) + ux * Math.sin(a)) * SEDE.gr };
+  const h = S.T.houses.filter(o => S.os[o.id] < 2 && hdist(o, w) < w.ru).sort((p, q) => hdist(p, c) - hdist(q, c))[0] || clearOf(c.x, c.z, 2, {}), p = railOf(h.x, h.z);
+  return { k: 'hold', ri: p.ri, s: p.s, x: h.x, z: h.z, R: 9 };
+}
+post = (g => (t, job, k) => (job === 'sgar' ? sedeGarr(t, k) : g(t, job, k)))(post);
+/* the post comes right after the assault's, and first of all while the seat is an incident */
+cmdPosts = (g => (C, sq, have) => {
+  const P = g(C, sq, have); if (!SEDE.on || !sedeGarrOn(C.t)) return P;
+  const e = ['sgar', SEDE.gar], hot = (C.thb || []).some(I => !I.over && I.k === 'seat'), i = P.findIndex(p => p[0] === 'push');
+  if (hot) P.unshift(e); else P.splice(i < 0 ? P.length : i + 1, 0, e);
+  return P;
+})(cmdPosts);
+deploy = (g => t => { g(t); if (SEDE.on && sedeGarrOn(t)) for (let k = 0; k < SEDE.gar; k++) { const O = post(t, 'sgar', k); if (O) fieldSquad(t, 'sgar', k, O, O.x, O.z); } })(deploy);
+/* what the view and the MCP show: the own seat (its incident, garrison, response) and each enemy seat the side knows (how, since when, its
+   identified sites, the assault on it or why not) */
+function sedeView(t) {
+  const C = S && S.cmd && (!S.net || S.host) ? S.cmd[t] : null; if (!C || !SEDE.on) return null;
+  const r = Math.round, w = sedeOwn(t), I = (C.thb || []).find(I => !I.over && I.k === 'seat');
+  const own = w ? { x: r(w.x), z: r(w.z), r: r(w.ru), st: I ? I.st : '', foe: I ? Math.round(I.foe) : 0, why: I ? I.why : '', gar: S.squads.filter(q => q.team === t && q.job === 'sgar' && q.live > 0 && !q.state).length, sites: sedeSites(t, t).length } : null;
+  const foe = [];
+  for (const f of foes(t)) {
+    const K = sedeKn(C, f), v = K && aidSeat(f); if (!v) continue;
+    const op = C.ops.find(o => o.k === 'atk' && !o.over && o.sede === f), W = C.sedeW && C.sedeW.f === f ? C.sedeW : null;
+    foe.push({ t: f, x: r(v.x), z: r(v.z), r: r(v.ru), how: K.how, age: r(S.t - K.T), sites: sedeFoeSites(t, f).length, op: op ? { id: op.id, st: op.st } : null, why: W ? W.why : '' });
+  }
+  return { own, foe };
+}
+genVM = (g => (t, all) => { const V = g(t, all), s = V && typeof V === 'object' ? sedeView(t) : null; if (s) V.sede = s; return V; })(genVM);   // a guest keeps the host's (gen)
+genState = (g => t => { const o = g(t); if (o) o.sede = sedeView(t); return o; })(genState);
+GENK.push('sede');
+/* ---------- end of the seat ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -42798,6 +42991,28 @@ function gPris(g, V, P) {
   }
 }
 GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'unit')), 0, { id: 'pris', nm: 'Prisioneiros e interrogatórios', on: 1, draw: gPris });
+/* the seat on the general's map (cf-sede-ataque-defesa; NÃO TESTADO): the own seat town's ring, its garrison and the incident in it; each
+   enemy seat the side knows, dashed, with how it learned it and the assault on it or why not yet (V.sede from sedeView, a guest's from the host) */
+function gSede(g, V, P) {
+  const X = V.sede; if (!X) return;
+  const own = gCol(V, V.t), amb = '#ffd84a', ST = { open: 'AMEAÇADA', resp: 'REAÇÃO EM CURSO', ign: 'AMEAÇA IGNORADA' };
+  const w = X.own;
+  if (w && gOn(P, w.x, w.z, 60)) {
+    const x = P.X(w.x), y = P.Y(w.z);
+    gRing(g, x, y, Math.max(9, w.r * P.s), w.st ? amb : own, w.st ? 2 : 1.2);
+    if (GV.lab) gTxt(g, 'SEDE · guarnição ' + w.gar + (w.st ? ' · ' + (ST[w.st] || w.st) + (w.foe ? ' (inimigo ' + w.foe + ')' : '') : ''), x, y - Math.max(9, w.r * P.s) - 4, 9, w.st ? amb : own, 'center');
+  }
+  for (const f of X.foe || []) {
+    if (!gOn(P, f.x, f.z, 60)) continue;
+    const x = P.X(f.x), y = P.Y(f.z), r = Math.max(9, f.r * P.s), col = gCol(V, f.t);
+    g.setLineDash([4, 3]); gRing(g, x, y, r, col, 1.6); g.setLineDash([]);
+    if (GV.lab) {
+      gTxt(g, 'SEDE INIMIGA · ' + f.sites + (f.sites === 1 ? ' instalação identificada' : ' instalações identificadas'), x, y - r - 4, 9, col, 'center');
+      gTxt(g, f.op ? 'assalto em curso (' + f.op.st + ')' : f.why ? 'assalto: ' + f.why : 'por ' + f.how + ' · há ' + f.age + ' s', x, y + r + 11, 9, f.op ? amb : '#cfd3cc', 'center');
+    }
+  }
+}
+GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'unit')), 0, { id: 'sede', nm: 'Sedes (a nossa e as inimigas conhecidas)', on: 1, draw: gSede });
 function prisHud() {
   if (playMode !== 'play' || !S || !S.my || S.my.dead || GV.on || !PRIS.on) return;
   const P = S.my, u = clamp(cw / 1000, .62, 1); let s = null;

@@ -41153,10 +41153,15 @@ function showOver() {
    list is there. Solo and watch matches go to the server by POST (ANA.post), with a random key a match */
 const AAR = { key: 'ceu-de-ferro-3d-partidas', keep: 12, off: false, pk: null, kS: null, srv: location.protocol === 'http:' || location.protocol === 'https:' };
 const aarHex = () => { const b = new Uint8Array(6); try { crypto.getRandomValues(b); } catch (e) { for (let i = 0; i < 6; i++) b[i] = (Date.now() / (i + 1)) & 255; } return [...b].map(v => v.toString(16).padStart(2, '0')).join(''); };
+/* keepalive (the request outlives a tab closed right after the end) only on the last piece, and only under AAR.ka bytes: the browser refuses
+   keepalive requests past 64 KiB in flight, the pieces of a flush leave together, and with it on all of them the end of a busy match never
+   left the page ("Failed to fetch": no end, no summary on the server, cf-pol-fluxos) */
+AAR.ka = 60000;
 ANA.post = (e, last) => {
   if (!AAR.srv || AAR.off || !ANA.S) return;
   if (AAR.kS !== ANA.S) { AAR.kS = ANA.S; AAR.pk = aarHex(); }
-  try { fetch('/ana', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ k: AAR.pk, era: ANA.S.era, e, end: last ? 1 : 0 }), keepalive: true }).then(r => { if (r.status === 404) AAR.off = true; }, () => {}); } catch (er) {}
+  const body = JSON.stringify({ k: AAR.pk, era: ANA.S.era, e, end: last ? 1 : 0 });
+  try { fetch('/ana', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: !!last && body.length < AAR.ka }).then(r => { if (r.status === 404) AAR.off = true; }, () => {}); } catch (er) {}
 };
 const aarLocal = () => { try { return JSON.parse(localStorage.getItem(AAR.key)) || []; } catch (e) { return []; } };
 ANA.done = R => {

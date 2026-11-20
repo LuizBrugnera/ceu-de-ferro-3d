@@ -5,7 +5,7 @@
    sends its match. About 40 s */
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), http = require('http'), { spawn } = require('child_process');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-ana-srv-'));
-process.env.ANA_DIR = DIR;
+process.env.ANA_DIR = DIR; process.env.ANA_RATE = '10';   // the rate this suite counts against (the server's default is 30)
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const get = (p, port) => new Promise(res => http.get({ host: '127.0.0.1', port: port || N.PORT, path: p }, r => { let b = ''; r.on('data', d => { b += d; }); r.on('end', () => res({ code: r.statusCode, b, type: r.headers['content-type'] })); }).on('error', () => res({ code: 0, b: '' })));
 const post = (p, body, port) => new Promise(res => { const q = http.request({ host: '127.0.0.1', port: port || N.PORT, path: p, method: 'POST', headers: { 'content-type': 'application/json' } }, r => { let b = ''; r.on('data', d => { b += d; }); r.on('end', () => res({ code: r.statusCode, b })); }); q.on('error', () => res({ code: 0 })); q.end(typeof body === 'string' ? body : JSON.stringify(body)); });
@@ -31,13 +31,15 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   g.send({ t: 'ana', n: 0, e: [sn(5)] }); h.send({ t: 'ana', n: 3, e: [sn(5)] }); h.send({ t: 'ana', n: 0, e: [{ k: 'nope', t: 1 }] }); h.send({ t: 'ana', n: 0, e: [{ k: 'sn' }] }); h.send({ t: 'ana', n: 0, e: 'x' });
   await N.sleep(200);
   ok(lines(F).length === 2, 'refused: a guest\'s batch, another match, an unknown kind, an event without its time, a batch that is not a list');
+  h.send({ t: 'ana', n: 0, e: [sn(7), { k: 'veiculo', t: 7 }, { k: 'cb', t: 7, s: 0, st: 'med' }] }); await N.sleep(200);
+  ok(lines(F).length === 4 && lines(F)[2].k === 'sn' && lines(F)[3].k === 'cb', 'a stray event (unknown kind) is left out and the rest of its batch kept, cb among the known kinds (cf-pol-fluxos: one stray cb lost whole batches, the end with them)');
   const mano = [{ k: 'mv', t: 21, s: 0, id: 2, m: 'flk', by: 'ai', h: 1 }, { k: 'ap', t: 22, s: 0, id: 1, L: 'E', walk: 0, a: [1, 0, 0, 2, 0, 0], off: 2, mv: ['flk'] }, { k: 'ab', t: 23, s: 1, id: 3, f: 'amb', e: 'arm' }, { k: 'tr', t: 24, d: 60, e: null, o: [1, 2], v: [[1, 0, 0, 0], [0, 0, 0, 0]] }];
   h.send({ t: 'ana', n: 0, e: [sn(10)] }); h.send({ t: 'ana', n: 0, e: [sn(20)].concat(mano) }); await N.sleep(200);
-  const L = lines(F); ok(L.length === 8 && L[2].t === 10 && L[3].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
-  ok(L.slice(4).map(e => e.k).join() === 'mv,ap,ab,tr', 'the general\'s manoeuvre events (mv, ap, ab, tr) are known kinds');
+  const L = lines(F); ok(L.length === 10 && L[4].t === 10 && L[5].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
+  ok(L.slice(6).map(e => e.k).join() === 'mv,ap,ab,tr', 'the general\'s manoeuvre events (mv, ap, ab, tr) are known kinds');
   for (let i = 0; i < 12; i++) h.send({ t: 'ana', n: 0, e: [sn(100 + i)] });
   await N.sleep(300); const n2 = lines(F).length;
-  ok(n2 - 8 === 7, 'too fast: of 12 batches at once, ' + (n2 - 8) + ' kept (10 a window of 15 s, 3 already used)');
+  ok(n2 - 10 === 6, 'too fast: of 12 batches at once, ' + (n2 - 10) + ' kept (10 a window of 15 s, 4 already used)');
   ok(!fs.existsSync(F.replace('.ndjson.gz', '.json')), 'no summary before the end');
   const lp = JSON.parse((await get('/ana/list')).b), inProg = f[0].slice(0, -10);
   ok(lp.m.length === 0 && (await get('/ana/m/ww2/' + inProg)).code === 404 && (await get('/ana/r/ww2/' + inProg)).code === 404, 'a match still in progress is neither listed nor served');

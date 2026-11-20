@@ -572,10 +572,11 @@ RX.gres = (c, m) => {
   if (o && o !== c && int(m.n, 0, 1e9) && typeof m.ok === 'boolean' && txt(m.why, 12) && Number.isInteger(m.id)) send(o.ws, Object.assign({ t: 'gres', n: m.n, ok: m.ok, why: m.why, id: m.id }, m.r !== undefined && (rec(m.r) || Array.isArray(m.r)) && { r: m.r }));
 };
 /* sappers (welcome says sap: 1): the sapper kits, and three messages. mine: the host's list of the mines, in parts i of n of list q, a row
-   each, [id, kind (0 AT, 1 AP), side, x, z, known (bit s: side s knows it, as many bits as the room has sides)]; each player is passed only the rows of its side's mines and of
+   each, [id, kind (0 AT, 1 AP, 2 a command IED: cf-slots-arma), side, x, z, known (bit s: side s knows it, as many bits as the room has sides)]; each player is passed only the rows of its side's mines and of
    those its side knows, a spectator all of them. The server keeps the host's last whole list, and s its last mine id, and hands them to
    the next host alone, before it is named, so that no side's hidden mines are lost with the old host. mboom: the host says mine id (kind k, side s) went off at p, to the room. mreq: a soldier
-   to the host, k 0 or 1 lay one at p, 2 lift id, 3 its own body or vehicle set id off; 300 ms apart at least. dint: the host says its
+   to the host, k 0 or 1 lay one at p, 2 lift id, 3 its own body or vehicle set id off, 4 lay a command IED at p, 5 its phone sets off
+   its command IEDs, 6 its suicide vest goes off (cf-slots-arma); 300 ms apart at least. dint: the host says its
    anti-rocket dome f engaged the round of key k (drawn from its launch numbers) and stopped it (s 1) or not, to the room */
 {
   const kits = { ww2: ['pionier', 'engineer'], modern: ['blueEng', 'redEng'] };
@@ -584,7 +585,7 @@ RX.gres = (c, m) => {
     if (m.includes(k[0])) throw new Error('sapper kits already there');
     m.splice(m.length / 2, 0, k[0]); m.push(k[1]); for (const id of k) rooms[era].inf.add(id);
   }
-  const row = room => e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && ts(room, e[2]) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] <= ALL(room);
+  const row = room => e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1 || e[1] === 2) && ts(room, e[2]) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] <= ALL(room);
   RX.mine = (c, m) => {
     if (!host(c) || !Number.isInteger(m.q) || m.q < 0 || m.q >= 1e6 || !Number.isInteger(m.i) || !Number.isInteger(m.n) || m.i < 0 || m.i >= m.n || m.n > 4 || !Array.isArray(m.e) || m.e.length > 40 || !m.e.every(row(c.room))) return;
     const r = c.room, b = m.i && r.mbuf && r.mbuf.q === m.q ? r.mbuf : (r.mbuf = { q: m.q, n: m.n, s: 0, e: [] });
@@ -597,11 +598,11 @@ RX.gres = (c, m) => {
     }
   };
   RX.dint = (c, m) => { if (host(c) && Number.isInteger(m.f) && m.f >= 0 && m.f < 65536 && Number.isInteger(m.k) && m.k >= 0 && m.k < 4294967296 && (m.s === 0 || m.s === 1)) cast(c, { t: 'dint', f: m.f, k: m.k, s: m.s }); };
-  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1) && ts(c.room, m.s) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
+  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1 || m.k === 2) && ts(c.room, m.s) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
   RX.mreq = (c, m) => {
-    const h = c.room.host, now = Date.now(), lay = (m.k === 0 || m.k === 1) && vec(m.p, 2), id = (m.k === 2 || m.k === 3) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536;
-    if (!h || h === c || (c.player.cls !== 'inf' && !(m.k === 3 && id)) || !(lay || id) || now - (c.mrq || 0) < 300) return;
-    c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : { id: m.id }));
+    const h = c.room.host, now = Date.now(), lay = (m.k === 0 || m.k === 1 || m.k === 4) && vec(m.p, 2), id = (m.k === 2 || m.k === 3) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536, det = m.k === 5 || m.k === 6;
+    if (!h || h === c || (c.player.cls !== 'inf' && !(m.k === 3 && id)) || !(lay || id || det) || now - (c.mrq || 0) < 300) return;
+    c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : det ? {} : { id: m.id }));
   };
 }
 /* the side of every model a player or an AI row may have (MSIDE), era by era, in place of the half of each list: 0 the Blue force (in modern

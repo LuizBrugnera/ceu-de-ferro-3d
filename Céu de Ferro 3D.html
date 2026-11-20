@@ -23874,7 +23874,7 @@ genState = (g => t => {
   const L = new Map(V.sq.map(e => [e[0], e]));
   for (const q of o.sq) { const e = L.get(q.id); q.link = e ? e[1] : 2; if (e && e[2] !== -2) q.eta = e[2]; }
   o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df,
-    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null })) };   // the gaps (CNR) and the fix on its way to each
+    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null, note: e[5] || '' })) };   // the gaps (CNR) and the fix on its way to each
   return o;
 })(genState);
 /* ---------- abstract orders and routes (W21) ----------
@@ -25228,8 +25228,17 @@ step = (g => dt => { g(dt); if ((!S.net || S.host) && (S.aidT = (S.aidT || 0) - 
    the enemy watches more than vis (the tactical map's v) and with no enemy it knows of within foe m; when no relay can be had there (cap,
    cost, no builder, no way) the vehicle or an operator goes to that site instead, and with no safe site nothing goes. A relay ordered by
    the AI hands its builders back once it is up; a fix not done in T s is given up. CNB: what the net's step and the gap planner cost,
-   ms a call (read only). No random number is drawn here */
-const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200] };
+   ms a call (read only). No random number is drawn here.
+   The builder and the site together (cf-radio-general): the AI names its builder itself (cnWho): the free squad nearest the safe site,
+   the engineers when they are no more than engX m farther, never one that gave a relay up in the last ban s; the site is then picked
+   again with the builder's walk to it weighed in (wk a reach of walk against the score), so that the relay goes up where someone can get
+   to. Within walk m of way (way times the straight line) the relay is ordered; farther, the free radio vehicle or an operator goes first
+   (it covers now) and the relay is ordered only when neither can. A relay's order is given up after T s plus CGN.walkK s a m of the
+   builder's walk (it was T s flat, and a builder 3 km off never got there: the general gave it up, the builder walked back, and the
+   general sent it again, for ever). Each gap the AI cannot close says why in the diary (key gapx, as the others), and each gap has a line
+   for the view (note: the builder's walk left or the work's progress, or why nothing goes) */
+const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200],
+  walk: 1800, way: 1.3, engX: 600, wk: 1, ban: 300, pool: 6 };
 const CNB = { look: 0, lookN: 0, lookW: 0, fix: 0, fixN: 0, fixW: 0,
   stat() { const r = v => Math.round(v * 1000) / 1000; return { look: r(CNB.lookN ? CNB.look / CNB.lookN : 0), lookWorst: r(CNB.lookW), lookN: CNB.lookN, fix: r(CNB.fixN ? CNB.fix / CNB.fixN : 0), fixWorst: r(CNB.fixW), fixN: CNB.fixN }; } };
 FORT.rel = { k: 8, name: 'Antena de rádio', obj: 'mast', size: [2.6, 2.6, 7], time: 60, cap: 3, put: [5, 9], pad: .6, road: 9, min: 1, near: 0, back: 0, conceal: 0, pitch: 9, cost: [30, 40], garr: [], cn: 1 };
@@ -25272,7 +25281,7 @@ function cnGaps(t) {
   return G.sort((a, b) => b.w - a.w || a.ids[0] - b.ids[0]);
 }
 /* where a relay (or, with car, a radio vehicle) can cover gap g for side t: the furthest back toward its base, unwatched and clear of the known enemy */
-function cnSite(t, g, car) {
+function cnSite(t, g, car, from) {
   const C = cmdOf(t), b = S.base[t], R = cnRelR(), dx = b.x - g.x, dz = b.z - g.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, e = lsFoeBase(t, g.x, g.z);
   let best = null, bs = Infinity;
   for (let d = 0; d <= Math.min(R * CNR.keep, L); d += CNR.step) for (const l of CNR.lat) {
@@ -25280,16 +25289,17 @@ function cnSite(t, g, car) {
     if (!gMapOk(x, z) || !g.m.every(p => Math.hypot(p.x - x, p.z - z) < R * .95) || cnJam(t, x, z) > 0) continue;
     const v = cnWatch(C, x, z); if (v > CNR.vis || cmdKnown(C, x, z, CNR.foe) > 0) continue;
     if (!car && FORT.K[FORT.rel.k] && fortWhy(FORT.rel.k, t, x, z, headTo(x, z, e.x, e.z), true)) continue;
-    const s = v - d / R * .5 + Math.abs(l) / R * .2;
+    const s = v - d / R * .5 + Math.abs(l) / R * .2 + (from ? Math.hypot(from.x - x, from.z - z) / R * CNR.wk : 0);   // with a builder: its walk there counts (cf-radio-general)
     if (s < bs) { bs = s; best = { x, z, v }; }
   }
   return best;
 }
 /* the fix of side C on its way for gap g: 1 a relay, 2 a radio vehicle, 3 an operator; 0 none */
-function cnFixOf(C, g) {
+function cnFixOf(C, g) { const f = cnFixAt(C, g); return !f ? 0 : f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3; }
+function cnFixAt(C, g) {
   const R = cnRelR();
-  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3;
-  return 0;
+  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f;
+  return null;
 }
 /* side t's relays: standing or being built, and those ordered whose site has not been started yet */
 function cnRels(t) {
@@ -25302,7 +25312,7 @@ GC.fort = (G => ({ d: G.d, r: G.r, f(t, c, by, R) {
   if (S.net && !Net.crl) return gBad('crl');
   if (cnRels(t) >= FORT.rel.cap) return gBad('rcap');
   const r = G.f(t, c, by, R);
-  if (r.ok) { const C = cmdOf(t); (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, by }); }
+  if (r.ok) { const C = cmdOf(t), Tm = Number.isFinite(c.walk) && c.walk > 0 ? CNR.T + c.walk * CGN.walkK : CNR.T; (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, Tm, by }); }   // the deadline counts the builder's walk (cf-radio-general)
   return r;
 } }))(GC.fort);
 /* the side's free radio vehicle of the AI nearest x z */
@@ -25336,7 +25346,7 @@ function cnCover(t, c, by) {
   const p = railOf(c.x, c.z), r = gSend(t, 'move', c.x, c.z, qs, 1, rt || [], () => ({ x: c.x, z: c.z, O: { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, fast: 1, mk: 'support' } }));
   if (!r) return gBad('way');
   r.op.v = 'radio'; gWhy(r.qs, why);
-  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, by });
+  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, Tm: CNR.T + CNR.hold + (Number.isFinite(c.walk) && c.walk > 0 ? c.walk * CGN.walkK : 0), by });   // the deadline counts the walk (cf-radio-general)
   gLog(t, 'radio', 'Operador de rádio a caminho ' + gNear(c.x, c.z) + ' com a sua esquadra: cobrir a rede ali' + (c.why && by === 'ai' ? ' (' + c.why + ')' : ''), { x: c.x, z: c.z }, null);
   return gYes(r.op.id);
 }
@@ -25347,13 +25357,20 @@ function cnFixed(C, x) {
   if (x.k === 'rel') {
     const f = S.forts.find(f => f.team === t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
     if (f && f.prog >= 1) { free(); return true; }
-    if (!f && (!op || op.over || !opLive(op).length)) return true;
-    if (S.t - x.T0 > CNR.T) { free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo: o general desiste dela', x, null); return true; }
+    const ban = () => { if (x.by !== 'ai' || !op) return; const B = C.cnBan || (C.cnBan = {}); for (const q of op.sq) B[q.id] = S.t + CNR.ban; };   // the builders that gave it up are not sent to a relay again for a while
+    if (!f && (!op || op.over || !opLive(op).length)) {
+      if (x.by === 'ai') { ban(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ': os construtores não puderam erguê-la (' + (op && opLive(op).length ? 'sem lugar para ela ali' : 'perdidos ou desviados') + '); o general procura outro jeito de cobrir a brecha', x, 'relno' + Math.round(x.x / 500) + ',' + Math.round(x.z / 500)); }
+      return true;
+    }
+    if (S.t - x.T0 > (x.Tm || CNR.T)) {
+      const q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.round(Math.hypot(L.x - x.x, L.z - x.z)) : -1;
+      ban(); free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo (' + Math.round(S.t - x.T0) + ' s' + (f ? ', obra em ' + Math.round(f.prog * 100) + '%' : d >= 0 ? ', construtores ainda a ' + d + ' m' : '') + '): o general desiste dela', x, null); return true;
+    }
     return false;
   }
   if (x.k === 'car') return x.u.dead || x.u.gone || !x.u.cnG;
   if (!op || op.over || !opLive(op).length) return true;
-  if (S.t - x.T0 > CNR.T + CNR.hold) { free(); return true; }
+  if (S.t - x.T0 > (x.Tm || CNR.T + CNR.hold)) { free(); return true; }
   return false;
 }
 /* the commander's part, each plan (after its works): the gaps, and the AI closing the heaviest open one */
@@ -25367,12 +25384,48 @@ function cnFix(t) {
   try {
     if (genBy(t, 'sup') !== 'ai' || F.length >= CNR.max) return;
     const g = G.find(g => g.w >= CNR.min && !cnFixOf(C, g)); if (!g) return;
-    const s = cnSite(t, g, false), why = 'brecha na rede ' + gNear(g.x, g.z) + ': ' + gSqTxt(g.n) + ' sem ligação';
-    if (s && genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), why }, 'ai').ok) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ' (' + gSqTxt(g.n) + ' sem ligação): antena de rádio ordenada ' + gNear(s.x, s.z), s, 'gap' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
+    const key = Math.round(g.x / 500) + ',' + Math.round(g.z / 500), at = gNear(g.x, g.z), sq = gSqTxt(g.n) + ' sem ligação', why = 'brecha na rede ' + at + ': ' + sq;
+    const s0 = cnSite(t, g, false), b = s0 ? cnWho(t, s0) : null, s = b ? cnSite(t, g, false, gLead(b)) || s0 : s0, w = b ? hdist(gLead(b), s) * CNR.way : Infinity;   // the builder first, then the site with its walk weighed in
+    const rel = () => {
+      const r = genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), ids: [b.id], walk: Math.round(w), why }, 'ai');
+      if (r.ok) gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): antena de rádio ordenada ' + gNear(s.x, s.z) + ', ' + sqName(b) + ' a ' + (w / 1000).toFixed(1).replace('.', ',') + ' km de caminhada', s, 'gap' + key);
+      return r;
+    };
+    let r1 = null;
+    if (s && b && w <= CNR.walk && (r1 = rel()).ok) return;
     const v = s || cnSite(t, g, true);
-    if (!v) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
-    genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai');
-  } finally { const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms; }
+    if (!v) { g.note = 'SEM LUGAR SEGURO'; return gLog(t, 'radio', 'Brecha na rede ' + at + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + key); }
+    if (cnCar(t, v.x, v.z) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai').ok) return;   // the free radio vehicle drives there: it covers now
+    const o = gPick(t, {}, v.x, v.z, CNR.pool).find(cnOp), wo = o ? hdist(gLead(o), v) * CNR.way : Infinity;   // else whoever walks less: an operator's squad or the relay's builder
+    if (o && !(s && b && !r1 && w < wo) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), ids: [o.id], walk: Math.round(wo), why }, 'ai').ok) return;
+    if (s && b && !r1 && (r1 = rel()).ok) return;   // far, and no vehicle or nearer operator: the relay all the same, with the time its walk takes
+    const no = !s ? 'nenhum lugar para uma antena' : !b ? 'nenhuma esquadra livre para construir a antena' : 'antena recusada: ' + (GEN.no[r1 && r1.why] || (r1 && r1.why) || '?').toLowerCase();
+    g.note = !b && s ? 'SEM CONSTRUTOR LIVRE' : r1 && r1.why === 'rcap' ? 'LIMITE DE ANTENAS' : r1 && r1.why === 'cost' ? 'SEM RECURSOS PARA A ANTENA' : 'SEM REFORÇO POSSÍVEL';
+    gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): ' + no + ', e nenhum veículo-rádio ou operador livre; a rede segue com o buraco', g, 'gapx' + key);
+  } finally {
+    for (const g of G) if (!g.note) { const f = cnFixAt(C, g); if (f) g.note = cnNote(C, f); }
+    const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms;
+  }
+}
+/* the AI's builder of a relay at s: the free squad nearest it (the engineers when no more than engX m farther), none that gave one up lately */
+function cnWho(t, s) {
+  const B = cmdOf(t).cnBan, l = gPick(t, {}, s.x, s.z, CNR.pool).filter(q => !(B && B[q.id] > S.t));
+  if (!l.length) return null;
+  const d = q => hdist(gLead(q), s), n = l[0], e = l.find(q => q.job === 'eng');
+  return e && d(e) <= d(n) + CNR.engX ? e : n;
+}
+/* the view's line for a gap with a fix on its way: the relay's progress or its builders' distance left, the vehicle's */
+function cnNote(C, x) {
+  const km = m => (m / 1000).toFixed(1).replace('.', ',') + ' KM';
+  if (x.k === 'rel') {
+    const f = S.forts.find(f => f.team === C.t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
+    if (f) return 'EM OBRA · ' + Math.round(f.prog * 100) + '%';
+    const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q);
+    return L ? 'CONSTRUTORES A ' + km(Math.hypot(L.x - x.x, L.z - x.z)) : '';
+  }
+  if (x.k === 'car') return x.u && x.u.trip ? 'A ' + km(Math.hypot(x.u.x - x.x, x.u.z - x.z)) : 'NO LUGAR';
+  const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.hypot(L.x - x.x, L.z - x.z) : 0;
+  return L ? (d < 100 ? 'NO LUGAR' : 'A ' + km(d)) : '';
 }
 fortPlan = (g => (t, sq) => { g(t, sq); cnFix(t); })(fortPlan);
 /* after each look of the net: the vehicles sent to cover a place (on its way, then holding), and the relays (ready, lost, spotted) */
@@ -25416,7 +25469,7 @@ fortTargets = (g => (u, all) => { g(u, all); for (const f of S.forts) if (f.cg &
 cnVM = (g => t => {
   const V = g(t); if (!V) return V;
   const C = S.cmd && S.cmd[t], r = Math.round;
-  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e)]);
+  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e), e.note || '']);   // the note: what the general is doing about it, or why nothing goes (cf-radio-general)
   return V;
 })(cnVM);
 /* ---------- analytics (ANA): what a match was, for the after-action review and for balancing ----------
@@ -31310,6 +31363,149 @@ anaReport = (g => (ev, me) => {
   return R;
 })(anaReport);
 /* ===== end of the guerrilla mind ===== */
+/* ---------- CEREBRO: contrato (P0, cf-lideres; não testado além de tests/brain.js, see docs/nao-testado/cf-lideres-p0.md) ----------
+   The contract between the layers of the brain of the AI's soldiers and squads (the architecture of cf-cerebro-pesquisa, its §2.5): one layer,
+   one question. The general says where and what for, the squad's leader how the squad does it now, the fire team who covers and who moves, the
+   soldier how he does his part and lives. Orders go down, reports come up; nobody reaches into the muscles of the layer under it.
+   Each package of the brain is its own section (CEREBRO: <name>) and touches the old code only by wrapping, as the rest of the page does; this one
+   holds the shared objects and the clock, and decides nothing.
+   BRAIN: on (0: every hook of this section is a no-op and the battle is the one before, to the bit; tests/brain.js), voz m a shout carries,
+   sinal m a hand signal is seen (with a line of sight), lead s a succession takes at most, eye m from the player that counts as near (LOD),
+   hz the cadences of the layers: lid (the squad's leader), eq (its fire teams), sold [L0, L1, L2, L3] (the soldier's utility by his level
+   of detail, 0: none: L0 in contact and near, L1 in contact and far, L2 moving without contact, L3 a quiet post), voice and sign s a report
+   takes by voice and by sign (by radio, the command net's: radio s, or lost with no link), rx reports a squad keeps, keep s a contact stays on
+   its board, cbMax brain events a match (the analytics' cap is shared).
+   The objects (created where the battle is simulated, by addSquad and addMan, and for any squad met without them by brainTick):
+     q.bb, the squad's board: ord the order it holds (ord), cont what it knows of the enemy (a Map, key → { x, z, c class, g rung, t, de who
+       reported it }), est by man (wounded, ammunition, morale), plano the method under way ({ proc, passo, tarefas }), conf its confidence
+       (-2..2), fl its front line, inq the reports on their way, rx the last ones that came; ev a pending event that makes the leader think now.
+     q.lid the soldier who leads it (a man of the squad, not an abstraction), q.eq its fire teams [{ id 'A' | 'B', men, lid, tar, papel }]:
+       A the even numbers after the leader, B the odd ones (the split the drills already use); q.tec the movement technique its leader chose.
+     m.rf his reflex under way ({ k, ate }), m.mo his suppression, morale and state ({ s, m, est }), m.tar the task his team gave him.
+   ord(k, de, a): an order (k mover manter assalto base lance vigiar recuar limpar evacuar seguir cavar; por its purpose, area, alvo, setor,
+     apos the task it waits for, sinal what starts it, roe, lat, tec). brainOrd(to, o) gives it to a squad, a team or a soldier: one each,
+     the new one replaces the old.
+   rel(k, de, a): a report (k contato feito nao-da ferido baixa municao moral prisioneiro pos; o the contact it is about, if he knows it). brainRel(q, r) sends it to squad q's leader:
+     by voice within voz m, by sign within sinal m in sight, else by radio when the squad is on the command net, else it is lost; it comes
+     after that channel's time and a contact goes on the board. A leader knows only what he perceives and what reaches him.
+   fala(m, k, dados): what a man says: brainSay of P5 (CEREBRO: falas), heard and seen, and only after a decision of his own (flCb).
+   Hooks for the packages: brainHook(layer, f), layer 'lid' f(q, dt), 'eq' f(q, e, dt), 'sold' f(m, q, dt, lod), 'rel' f(q, r) on a report
+   that came; each runs at its layer's cadence (the leader also at once on q.bb.ev). brainEv(k, s, d): a brain event of side s with no man of
+   its own (an order given, a report sent) for the analytics, in P5's shape ({ k: 'cb', st subkind }; a man's decision is flCb, P5's). brainTick runs every step where the battle is simulated, its time is part of the AI's frame (AIB.u) and of BRAIN's own meter (ms an
+   average of the last steps, tot and nf the match's sum and steps, msMax its worst; AIB.stat() reads them as brain, brainNow and brainMax) */
+const BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3, eye: 300, hz: { lid: 1, eq: 2, sold: [5, 2, 0, 0] }, voice: .6, sign: 1.2, radio: 3, rx: 24, keep: 60, cbMax: 4000,
+  hk: { lid: [], eq: [], sold: [], rel: [] }, ms: 0, msMax: 0, ema: .05, tot: 0, nf: 0, S: null };
+const ord = (k, de, a = {}) => ({ id: (S.ordN = (S.ordN || 0) + 1), k, de, t: S.t, por: a.por, area: a.area, alvo: a.alvo, setor: a.setor, apos: a.apos, sinal: a.sinal, roe: a.roe, lat: a.lat, tec: a.tec });
+const rel = (k, de, a = {}) => ({ k, de, t: S.t, x: a.x, z: a.z, c: a.c, n: a.n, g: a.g, conf: a.conf, o: a.o });   // o: the contact itself, when the reporter knows which (the board's key)
+const brainSim = () => !!BRAIN.on && !!S && (!S.net || S.host);
+const brainHook = (layer, f) => { BRAIN.hk[layer].push(f); return f; };
+function brainEv(k, s, d) {
+  if (!brainSim()) return;
+  const N = S.cbN || (S.cbN = {}); N[k] = (N[k] || 0) + 1;
+  if (anaLive() && (S.cbE = (S.cbE || 0) + 1) <= BRAIN.cbMax) anaPush(Object.assign({ k: 'cb', t: anaR(S.t), s, st: k }, d));
+}
+const fala = (m, k, dados) => brainSay(m, k, dados);   // P5 (CEREBRO: falas) speaks it, only for a man with a decision of his own (flCb)
+const brainUp = m => !!m && !m.dead && !m.down && !!m.ai;
+/* a soldier's own parts of the brain */
+function brainMan(m) { if (!m.mo) { m.rf = { k: null, ate: 0 }; m.mo = { s: 0, m: 1, est: 'firme' }; m.tar = null; } return m; }
+/* a squad's parts: its board, its leader (the first man standing) and its two fire teams */
+function brainSq(q) {
+  if (q.eq) return q;
+  q.bb = Object.assign({ ord: null, cont: new Map(), est: {}, plano: null, conf: 0, fl: null }, q.bb, { inq: [], rx: [], ev: null });   // P5's speech may have made it first (flBB)
+  q.lid = q.men.find(brainUp) || null; q.tec = null;
+  q.eq = [{ id: 'A', men: [], lid: null, tar: null, papel: 'seguir' }, { id: 'B', men: [], lid: null, tar: null, papel: 'seguir' }];
+  brainTeams(q);
+  q.lidT = (hash2(q.team + 1, q.id | 0, 5.3) || 0) / BRAIN.hz.lid; q.eqT = (hash2(q.team + 1, q.id | 0, 7.1) || 0) / BRAIN.hz.eq;
+  return q;
+}
+/* the teams from the squad's men as they are now: other parts of the game move men in and out of a squad (sappers drawn from it, a garrison
+   split, a man swapped for another), so when its roll changes (eqN its length when last made, a man not stamped bq with it) they are made again; the leader stays while
+   he is one of its men (a fallen leader's succession is the leader's package, P3) */
+function brainTeams(q) {
+  if (!q.men.includes(q.lid)) q.lid = q.men.find(brainUp) || null;
+  for (const e of q.eq) { e.men.length = 0; }
+  for (const m of q.men) { brainMan(m); m.bq = q; if (m !== q.lid && m.ai) q.eq[(m.ai.i | 0) & 1 ? 1 : 0].men.push(m); }
+  for (const e of q.eq) if (!e.men.includes(e.lid)) e.lid = e.men.find(brainUp) || null;
+  q.eqN = q.men.length; q.eqL = q.lid;
+}
+const brainRoll = q => { if (q.men.length !== q.eqN || q.lid !== q.eqL) return true; for (const m of q.men) if (m.bq !== q) return true; return false; };
+/* an order to a squad (its board), a fire team or a soldier: one each, the new one replaces the old */
+function brainOrd(to, o) {
+  if (!brainSim() || !to || !o) return null;
+  if (to.men && to.bb) { to.bb.ord = o; to.bb.ev = to.bb.ev || 'ord'; }
+  else if (to.men) to.tar = o;   // a fire team
+  else to.tar = o;
+  brainEv('ord', to.team !== undefined ? to.team : o.de && o.de.team, { o: o.k, id: o.id });
+  return o;
+}
+/* how a report from de reaches q's leader: voice, sign, radio or not at all; and when */
+function brainChan(q, de) {
+  const L = q.lid; if (!brainUp(L) || !de) return null;
+  if (de === L) return { ch: 'eu', dt: 0 };
+  const d = Math.hypot(de.x - L.x, de.z - L.z);
+  if (d <= BRAIN.voz) return { ch: 'voz', dt: BRAIN.voice };
+  if (d <= BRAIN.sinal && los(de, eyeY(de), L, eyeY(L))) return { ch: 'sinal', dt: BRAIN.sign };
+  if (typeof cnOn === 'function' && cnOn() && q.cnL === 2) return { ch: 'radio', dt: BRAIN.radio };
+  return null;
+}
+function brainRel(q, r) {
+  if (!brainSim() || !q || !r) return false;
+  brainSq(q);
+  const c = brainChan(q, r.de); if (!c) return false;
+  r.ch = c.ch; r.at = S.t + c.dt; q.bb.inq.push(r); if (q.bb.inq.length > BRAIN.rx) q.bb.inq.shift();
+  return true;
+}
+/* a report that came: into the board (a contact by its key: the object reported when the reporter knew it, else a grid cell), then the hooks */
+function brainGot(q, r) {
+  const B = q.bb; B.rx.push(r); if (B.rx.length > BRAIN.rx) B.rx.shift();
+  if (r.k === 'contato' && r.x !== undefined) {
+    const key = r.o ? flId(r.o) : -(((Math.round(r.x / 25) + 2048) * 8192 + Math.round(r.z / 25) + 4096) | 0) - 1, was = B.cont.get(key);   // P5's key: the contact's flId
+    if (!was || was.t <= r.t || (r.g || 0) > (was.g || 0)) B.cont.set(key, { x: r.x, z: r.z, c: r.c, g: r.g || 1, t: r.t, de: r.de });
+    B.ev = B.ev || 'contato';
+  }
+  for (const f of BRAIN.hk.rel) f(q, r);
+}
+/* a soldier's level of detail: 0 in contact and near the player, 1 in contact, 2 moving, 3 a quiet post */
+function brainLod(m, q) {
+  const con = (q.bb && q.bb.cont.size > 0) || (m.mo && m.mo.s > .05) || S.t - (m.hitT || -99) < 10;
+  if (con) { const P = S.my; return P && !P.dead && Math.abs(P.x - m.x) < BRAIN.eye && Math.abs(P.z - m.z) < BRAIN.eye && Math.hypot(P.x - m.x, P.z - m.z) < BRAIN.eye ? 0 : 1; }
+  return q.at ? 3 : 2;
+}
+/* the brain's clock, every step where the battle is simulated */
+function brainTick(dt) {   // indexed loops and no closures: nothing allocated on the way, so no collection lands inside the brain's time
+  const H = BRAIN.hk, hz = BRAIN.hz, Q = S.squads, nl = H.lid.length, ne = H.eq.length, ns = H.sold.length;
+  for (let j = 0; j < Q.length; j++) {
+    const q = Q[j]; if (q.net || !(q.live > 0) || q.mil) continue;
+    const B = (q.eq ? q : brainSq(q)).bb;
+    if (B.inq.length) for (let i = 0; i < B.inq.length;) { const r = B.inq[i]; if (r.at <= S.t) { B.inq.splice(i, 1); brainGot(q, r); } else i++; }
+    if ((q.lidT -= dt) <= 0 || B.ev) {   // the roll and the board are kept at the leader's pace
+      q.lidT = 1 / hz.lid; if (brainRoll(q)) brainTeams(q);
+      if (B.cont.size) B.cont.forEach(brainOld, B.cont);
+      const e = B.ev; B.ev = null; for (let i = 0; i < nl; i++) H.lid[i](q, dt, e);
+    }
+    if ((q.eqT -= dt) <= 0) { q.eqT = 1 / hz.eq; for (let k = 0; k < q.eq.length; k++) for (let i = 0; i < ne; i++) H.eq[i](q, q.eq[k], dt); }
+    if (ns) for (let k = 0; k < q.men.length; k++) {   // a soldier's level of detail is looked at when his time comes, not every step
+      const m = q.men[k]; if (!brainUp(m)) continue;
+      if (m.utT === undefined) m.utT = hash2(m.x, m.z, 9.1) * .2;
+      if ((m.utT -= dt) > 0) continue;
+      const l = brainLod(m, q), r = hz.sold[l];
+      if (!r) { m.utT = 1; continue; }
+      m.utT = 1 / r; for (let i = 0; i < ns; i++) H.sold[i](m, q, dt, l);
+    }
+  }
+}
+function brainOld(c, k) { if (S.t - c.t > BRAIN.keep) this.delete(k); }
+addSquad = (g => (...a) => { const q = g(...a); if (brainSim()) brainSq(q); return q; })(addSquad);
+addMan = (g => (...a) => { const m = g(...a); if (brainSim()) brainMan(m); return m; })(addMan);
+step = (g => dt => {
+  g(dt);
+  if (!brainSim() || !S.squads) return;
+  const a = AIB.now(); brainTick(dt); const d = AIB.now() - a;
+  if (BRAIN.S !== S) { BRAIN.S = S; BRAIN.ms = BRAIN.msMax = BRAIN.tot = BRAIN.nf = 0; }
+  AIB.u += d; BRAIN.ms += (d - BRAIN.ms) * BRAIN.ema; if (d > BRAIN.msMax) BRAIN.msMax = d; BRAIN.tot += d; BRAIN.nf++;
+})(step);
+/* the brain's share of the AI's frame, beside the meter's own reading */
+AIB.stat = (g => () => Object.assign(g(), { brain: Math.round((BRAIN.nf ? BRAIN.tot / BRAIN.nf : 0) * 1000) / 1000, brainNow: Math.round(BRAIN.ms * 1000) / 1000, brainMax: Math.round(BRAIN.msMax * 1000) / 1000 }))(AIB.stat);
 /* ---------- CEREBRO: trincheiras-tuneis (TRN, TUN, ABRT; cf-trincheiras-tuneis, NOT TESTED: docs/nao-testado/cf-trincheiras-tuneis.md) ----------
    A producer for the soldier's mind (the research cf-cerebro-pesquisa, 3.3 "cf-trincheiras-tuneis"): it publishes the shelter points of the
    works into P2's registry (ABRT), the corridors and the tunnels as route edges (trRota: exposure about 0; a tunnel's edge out of sight and
@@ -32035,25 +32231,6 @@ genCard = (f => (t, id) => {
   if (n) c.see.splice(2, 0, n + (n === 1 ? ' homem atordoado' : ' homens atordoados') + ' por explosão');
   c.stun = n; return c;
 })(genCard);
-/* ---------- CEREBRO: contrato (P0) ----------
-   The contract between the layers of the soldiers' mind, copied as it stands from the research (cf-cerebro-pesquisa, 2.5) because the P0
-   PR (cf-lideres) is not in main yet. When P0 lands ONE copy stays, P0's, and its fala keeps calling brainSay (P5, the section below).
-   The shapes the packs fill (P0 links them in addSquad and addMan; until then the speech makes the board on first use, flBB):
-   q.bb = { ord: null, cont: Map id→{x,z,c,g,t,de}, est: {by man: ferido, municao, moral}, plano: null {proc, passo, tarefas}, conf: 0 (−2..2), fl: null (linha de frente) }
-   q.lid = m;  q.eq = [{ id:'A', men:[...], tar:null, papel:'seguir' }, { id:'B', ... }]
-   m.rf = { k: null, ate: 0 } (reflexo ativo);  m.mo = { s: 0, m: 1, est: 'firme' } (supressão, moral, estado);  m.tar = null (tarefa da equipe) */
-const BRAIN = { on: 1, voz: 45, sinal: 120, lead: 3 };   // alcance da voz (m), do sinal de mão (m), atraso de sucessão (s)
-// ORDEM: desce (general → pelotão → líder → equipe). Uma por destinatário; a nova substitui, salvo sequência.
-// k: 'mover'|'manter'|'assalto'|'base'|'lance'|'vigiar'|'recuar'|'limpar'|'evacuar'|'seguir'|'cavar'; por: propósito (o "para quê" da intenção)
-const ord = (k, de, a = {}) => ({ id: (S.ordN = (S.ordN || 0) + 1), k, de, t: S.t, por: a.por, area: a.area /*{x,z,r}*/, alvo: a.alvo /*{x,z}*/,
-  setor: a.setor /*{a0,a1} rad*/, apos: a.apos /*id de tarefa que precisa terminar*/, sinal: a.sinal /*'fogo'|'fumaca'|t*/,
-  roe: a.roe, lat: a.lat, tec: a.tec /*técnica de movimento*/ });
-// RELATO: sobe (soldado → líder → pelotão/general). Chega pela voz (≤ BRAIN.voz), sinal (com visada) ou rádio (CN existente).
-// k: 'contato'|'feito'|'nao-da'|'ferido'|'baixa'|'municao'|'moral'|'prisioneiro'|'pos' (cheguei)
-const rel = (k, de, a = {}) => ({ k, de, t: S.t, x: a.x, z: a.z, c: a.c /*classe*/, n: a.n, g: a.g /*degrau*/, conf: a.conf });
-// FALA: cada ordem, relato e reflexo pode falar. A fala é balão + som + canal de informação: quem a ouve (distância, barulho) recebe o
-// relato/aviso: "Granada!" faz o colega reagir sem ter visto a granada.
-const fala = (m, k, dados) => brainSay(m, k, dados);
 /* ---------- CEREBRO: falas (P5) ----------
    What the soldiers say, out of the same data as what they decide (research 2.1, rule 6: a line never lies and always explains), so a line
    never comes without a decision. A decision that may speak records a cb event first (flCb: the man, its kind, the second); brainSay(m, k, d)
@@ -38891,7 +39068,7 @@ function gNet(g, V, P, now) {
     if (!Array.isArray(e) || !fin(e[0], e[1], e[2]) || !gOn(P, e[0], e[1], e[2] * P.s + 30)) continue;
     const x = P.X(e[0]), y = P.Y(e[1]), R = Math.max(10 * k, e[2] * P.s), c = '#ffb347';
     gHatch(g, x, y, R, c, .22); g.setLineDash([8, 5]); gRing(g, x, y, R, c, 1.6); g.setLineDash([]);
-    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); if (GF[e[4]]) gTxt(g, GF[e[4]], x, y - R + 7 * k, 9 * k, c, 'center'); }
+    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); const nt = typeof e[5] === 'string' ? e[5].slice(0, 40) : ''; if (GF[e[4]] || nt) gTxt(g, (GF[e[4]] || '') + (GF[e[4]] && nt ? ' · ' : '') + nt, x, y - R + 7 * k, 9 * k, c, 'center'); }
   }
   for (const j of Array.isArray(N.jam) ? N.jam : []) {
     if (!Array.isArray(j) || !fin(j[0], j[1], j[2]) || !gOn(P, j[0], j[1], j[2] * P.s + 20)) continue;

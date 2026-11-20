@@ -97,7 +97,7 @@ function field(o) {
     const L = a.men.find(m => !m.dead), w = a.ord.wp;
     ok(Math.hypot(w[0].x - L.x, w[0].z - L.z) < 1 && Math.hypot(w[w.length - 1].x - a.fp.x, w[w.length - 1].z - a.fp.z) < 1, '  from where the squad stands to its place in the assembly (' + (w.len / 1000).toFixed(2) + ' km)');
     const far = Math.max(...op.sq.map(q => q.ord.wp.len)), CMD = $('CMD'), CQ = $('CQ');
-    ok(op.formT === Math.min($('AP').form, Math.max(CQ.form, far / $('AP').pace + $('AP').slack)) && op.formT >= CQ.form && op.formT <= $('AP').form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, from ' + CQ.form + ' to AP.form ' + $('AP').form + ' s');
+    ok(op.formT === Math.min($('AP').form, Math.max(CQ.form, far / $('AP').run + $('AP').slack)) && op.formT >= CQ.form && op.formT <= $('AP').form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, from ' + CQ.form + ' to AP.form ' + $('AP').form + ' s');
     ok((op.ap.length === 2) === (a.ape !== b.ape), '  ' + (op.ap.length === 2 ? 'two elements, two approaches (' + op.ap.map(x => x.ang + '°').join(' and ') + ')' : 'one element, one approach (' + op.ap[0].ang + '°)'));
     /* H-hour: along the approach, through the assault position, into the objective */
     op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);

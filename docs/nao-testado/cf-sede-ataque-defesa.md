@@ -37,7 +37,7 @@ Ganchos: `ecoAI`, `cmdSense`, `prisTell`, `cmdAttack`, `gName`, `OPS.atk`, `mbRa
 
 ## O que foi testado
 
-Só a checagem focada do bug, `tests/sede.js` (~30 s, 1944, dois lados): o lado 0 sabe onde fica a sede do lado 1 pelo mapa, sem nenhuma instalação dela; um tanque do lado 0 vê a fábrica e ela passa a ser uma instalação identificada da sede; com os pontos do lado 1 perto da sede tomados pelo lado 0 e quatro esquadras livres a 2 km, o lado 0 (doutrina agressiva) abre um assalto à sede numa campanha, com fogo na fábrica antes da hora H (sabotagem e incursão recusadas, com o motivo no diário: sem sapadores livres, nenhum caminho a pé seguro); três esquadras do lado 0 dentro da sede do lado 1 viram o incidente `seat` de valor 14 e a QRF da base responde. Passou. E o smoke: o script inteiro compila, 30 s de IA × IA em 1944 sem NaN, a guarnição entra nos dois lados.
+Só a checagem focada do bug, `tests/sede.js` (~30 s, 1944, dois lados): o lado 0 sabe onde fica a sede do lado 1 pelo mapa, sem nenhuma instalação dela; um tanque do lado 0 vê a fábrica e ela passa a ser uma instalação identificada da sede; com os pontos do lado 1 perto da sede tomados pelo lado 0 e quatro esquadras livres a 2 km, o lado 0 (doutrina agressiva) abre um assalto à sede numa campanha, com fogo na fábrica e sabotagem contra ela antes da hora H (numa rodada antes do merge com o main a sabotagem e a incursão foram recusadas, e o diário disse o motivo: sem sapadores livres, nenhum caminho a pé seguro); três esquadras do lado 0 dentro da sede do lado 1 viram o incidente `seat` de valor 14 e a QRF da base responde. Passou. E o smoke: o script inteiro compila, 30 s de IA × IA em 1944 sem NaN, a guarnição entra nos dois lados.
 
 `tests/sim-split.js` acusa uma falha que já existe no main (`rtsS`, `rtsBrain` na simulação), não desta mudança.
 
@@ -48,7 +48,7 @@ Só a checagem focada do bug, `tests/sede.js` (~30 s, 1944, dois lados): o lado 
   - antes: 1944 (25 min), moderno dois lados (25 min) e três lados (25 min): nenhuma operação contra uma sede; as incursões só nos três lados, dos Insurgentes contra a usina e a fábrica dos EUA, como alvos comuns;
   - depois: 1944 e moderno com dois lados (20 min): cada general sabe da sede inimiga pelo mapa no início, manda o reconhecimento achar as instalações dela e diz no diário por que ainda não ataca ("longe da nossa linha (nenhum ponto nosso a 4,5 km)", "esquadras livres insuficientes ao alcance"): as frentes ficaram no centro do mapa a partida toda, a 5-8 km das sedes, então o assalto à sede não abriu sozinho em nenhuma delas; três lados (12 min): os Insurgentes escolhem como plano a "Incursão contra a fábrica inimiga na cidade-sede" (nota 8,8; antes 6,5) e a executam (caminhão, depois a pé); a Rússia acha a sede dos Insurgentes por reconhecimento (fábrica identificada) aos 37 s.
   - O assalto à sede só abriu na checagem focada, onde eu dou ao lado os pontos perto dela e esquadras a 2 km.
-- A sabotagem antes do assalto não saiu na checagem (sem sapadores livres, nenhum caminho a pé seguro): o caminho do `sabot`/`man raid` a partir do assalto à sede não rodou com sucesso nenhuma vez.
+- A sabotagem antes do assalto só abriu na checagem; se ela chega e demole, não vi.
 - A demolição no objetivo (`sedeFight`) não chegou a rodar: a checagem para quando o assalto abre.
 - O mapa de três lados (HS2 como ponto e sede) e o moderno de dois lados só nas partidas longas, onde o assalto não chegou a abrir.
 

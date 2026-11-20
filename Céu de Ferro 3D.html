@@ -25229,16 +25229,17 @@ step = (g => dt => { g(dt); if ((!S.net || S.host) && (S.aidT = (S.aidT || 0) - 
    cost, no builder, no way) the vehicle or an operator goes to that site instead, and with no safe site nothing goes. A relay ordered by
    the AI hands its builders back once it is up; a fix not done in T s is given up. CNB: what the net's step and the gap planner cost,
    ms a call (read only). No random number is drawn here.
-   The builder and the site together (cf-radio-general): the AI names its builder itself (cnWho): the free squad nearest the safe site,
-   the engineers when they are no more than engX m farther, never one that gave a relay up in the last ban s; the site is then picked
-   again with the builder's walk to it weighed in (wk a reach of walk against the score), so that the relay goes up where someone can get
-   to. Within walk m of way (way times the straight line) the relay is ordered; farther, the free radio vehicle or an operator goes first
+   The builder and the site together (cf-radio-general): the AI names its builder itself (cnWho): of the cand free squads nearest the
+   safe site and the nearest engineers, never one that gave a relay up in the last ban s, each with the site picked again for its own
+   walk (wk a reach of walk against the score), the one that walks least (the engineers engX m less), so that the relay goes up where
+   someone can get to. Within walk m of way (way times the straight line) the relay is ordered; farther, the free radio vehicle or an operator goes first
    (it covers now) and the relay is ordered only when neither can. A relay's order is given up after T s plus CGN.walkK s a m of the
    builder's walk (it was T s flat, and a builder 3 km off never got there: the general gave it up, the builder walked back, and the
-   general sent it again, for ever). Each gap the AI cannot close says why in the diary (key gapx, as the others), and each gap has a line
+   general sent it again, for ever). Past that deadline the order is kept while its builders still gained gain m on the site in the last
+   stall s (a squad halts where it called a ride, and the road need not go straight there), up to twice the deadline. Each gap the AI cannot close says why in the diary (key gapx, as the others), and each gap has a line
    for the view (note: the builder's walk left or the work's progress, or why nothing goes) */
 const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200],
-  walk: 1800, way: 1.3, engX: 600, wk: 1, ban: 300, pool: 6 };
+  walk: 1800, way: 1.3, engX: 600, wk: 1, ban: 300, pool: 6, cand: 4, gain: 50, stall: 240 };
 const CNB = { look: 0, lookN: 0, lookW: 0, fix: 0, fixN: 0, fixW: 0,
   stat() { const r = v => Math.round(v * 1000) / 1000; return { look: r(CNB.lookN ? CNB.look / CNB.lookN : 0), lookWorst: r(CNB.lookW), lookN: CNB.lookN, fix: r(CNB.fixN ? CNB.fix / CNB.fixN : 0), fixWorst: r(CNB.fixW), fixN: CNB.fixN }; } };
 FORT.rel = { k: 8, name: 'Antena de rádio', obj: 'mast', size: [2.6, 2.6, 7], time: 60, cap: 3, put: [5, 9], pad: .6, road: 9, min: 1, near: 0, back: 0, conceal: 0, pitch: 9, cost: [30, 40], garr: [], cn: 1 };
@@ -25362,8 +25363,10 @@ function cnFixed(C, x) {
       if (x.by === 'ai') { ban(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ': os construtores não puderam erguê-la (' + (op && opLive(op).length ? 'sem lugar para ela ali' : 'perdidos ou desviados') + '); o general procura outro jeito de cobrir a brecha', x, 'relno' + Math.round(x.x / 500) + ',' + Math.round(x.z / 500)); }
       return true;
     }
-    if (S.t - x.T0 > (x.Tm || CNR.T)) {
-      const q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.round(Math.hypot(L.x - x.x, L.z - x.z)) : -1;
+    const q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.round(Math.hypot(L.x - x.x, L.z - x.z)) : -1;
+    if (d >= 0 && !(d > (x.dB === undefined ? Infinity : x.dB - CNR.gain))) { x.dB = d; x.dT = S.t; }   // the builders' best distance yet, and when they last gained on it
+    const late = S.t - x.T0 > (x.Tm || CNR.T), still = !f && x.dT !== undefined && S.t - x.dT < CNR.stall && S.t - x.T0 < (x.Tm || CNR.T) * 2;   // past the deadline but still gaining (a ride waited for, a long road): not yet
+    if (late && !still) {
       ban(); free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo (' + Math.round(S.t - x.T0) + ' s' + (f ? ', obra em ' + Math.round(f.prog * 100) + '%' : d >= 0 ? ', construtores ainda a ' + d + ' m' : '') + '): o general desiste dela', x, null); return true;
     }
     return false;
@@ -25385,7 +25388,7 @@ function cnFix(t) {
     if (genBy(t, 'sup') !== 'ai' || F.length >= CNR.max) return;
     const g = G.find(g => g.w >= CNR.min && !cnFixOf(C, g)); if (!g) return;
     const key = Math.round(g.x / 500) + ',' + Math.round(g.z / 500), at = gNear(g.x, g.z), sq = gSqTxt(g.n) + ' sem ligação', why = 'brecha na rede ' + at + ': ' + sq;
-    const s0 = cnSite(t, g, false), b = s0 ? cnWho(t, s0) : null, s = b ? cnSite(t, g, false, gLead(b)) || s0 : s0, w = b ? hdist(gLead(b), s) * CNR.way : Infinity;   // the builder first, then the site with its walk weighed in
+    const s0 = cnSite(t, g, false), P = s0 ? cnWho(t, g, s0) : null, b = P && P.q, s = P ? P.s : s0, w = P ? P.w : Infinity;   // the builder and its site together: the shortest walk
     const rel = () => {
       const r = genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), ids: [b.id], walk: Math.round(w), why }, 'ai');
       if (r.ok) gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): antena de rádio ordenada ' + gNear(s.x, s.z) + ', ' + sqName(b) + ' a ' + (w / 1000).toFixed(1).replace('.', ',') + ' km de caminhada', s, 'gap' + key);
@@ -25407,12 +25410,19 @@ function cnFix(t) {
     const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms;
   }
 }
-/* the AI's builder of a relay at s: the free squad nearest it (the engineers when no more than engX m farther), none that gave one up lately */
-function cnWho(t, s) {
-  const B = cmdOf(t).cnBan, l = gPick(t, {}, s.x, s.z, CNR.pool).filter(q => !(B && B[q.id] > S.t));
-  if (!l.length) return null;
-  const d = q => hdist(gLead(q), s), n = l[0], e = l.find(q => q.job === 'eng');
-  return e && d(e) <= d(n) + CNR.engX ? e : n;
+/* the AI's builder of a relay for gap g and its site: of the free squads nearest the safe site s0 (the first `cand` of them, and the
+   nearest engineers), none that gave one up lately, each with the site picked again for its own walk (cnSite with from), the one that
+   walks least (engineers engX m less). It used to be the nearest to s0 alone, and the site moved to it afterwards: a squad of the gap
+   that would have walked 200 m lost to one 2.5 km off. { q, s, w (m of way) } or null */
+function cnWho(t, g, s0) {
+  const B = cmdOf(t).cnBan, l = gPick(t, {}, s0.x, s0.z, CNR.pool).filter(q => !(B && B[q.id] > S.t));
+  const e = l.find(q => q.job === 'eng'), C = l.slice(0, CNR.cand); if (e && !C.includes(e)) C.push(e);
+  let best = null, bs = Infinity;
+  for (const q of C) {
+    const L = gLead(q), s = cnSite(t, g, false, L) || s0, w = hdist(L, s) * CNR.way, sc = w - (q.job === 'eng' ? CNR.engX : 0);
+    if (sc < bs || (sc === bs && best && q.id < best.q.id)) { bs = sc; best = { q, s, w }; }
+  }
+  return best;
 }
 /* the view's line for a gap with a fix on its way: the relay's progress or its builders' distance left, the vehicle's */
 function cnNote(C, x) {

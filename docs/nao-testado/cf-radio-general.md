@@ -21,15 +21,24 @@ Uma partida IA × IA de 4 min (moderna, 2 lados, mapa 11, economia, logística e
 
 ## O que mudou (`Céu de Ferro 3D.html`, bloco CNR)
 
-- `cnFix`: o general da IA escolhe ele mesmo o construtor (`cnWho`): a esquadra livre mais perto do lugar seguro, a engenharia quando não está mais de 600 m (`CNR.engX`) mais longe, e nunca uma que desistiu de uma antena nos últimos 300 s (`CNR.ban`, `C.cnBan`). Depois escolhe o lugar de novo, pesando a caminhada do construtor (`cnSite(..., from)`, peso `CNR.wk`).
+- `cnFix`: o general da IA escolhe ele mesmo o construtor e o lugar juntos (`cnWho`, versão do follow-up). Testa as 4 esquadras livres mais perto do lugar seguro e a engenharia mais perto, cada uma com o lugar escolhido de novo pesando a caminhada dela (`cnSite(..., from)`, peso `CNR.wk`), e fica com a que anda menos (a engenharia ganha 600 m de vantagem, `CNR.engX`). Nunca escolhe uma esquadra que desistiu de uma antena nos últimos 300 s (`CNR.ban`, `C.cnBan`).
 - Com o construtor a até 1,8 km de caminhada (`CNR.walk`, a distância reta × `CNR.way` 1,3), ordena a antena com `ids: [construtor]`. Mais longe, manda antes o veículo-rádio livre. Sem ele, manda quem anda menos entre a esquadra com operador mais perto e o construtor. Se nem isso der, ordena a antena mesmo assim, com o prazo da caminhada.
 - Prazo: a antena ordenada pela IA desiste depois de `CNR.T + caminhada × CGN.walkK` (antes eram 420 s fixos). O operador tem a mesma regra (`CNR.T + CNR.hold + caminhada × walkK`). A ordem `fort radio` aceita o campo `walk` (só a IA o passa) e o `req radio` também.
 - Diário (RÁDIO): "antena de rádio ordenada …, Esquadra X a N km de caminhada". Quando a antena desiste, diz quantos segundos passaram e a que distância ainda estavam os construtores ou quanto da obra estava feito. Quando os construtores não conseguem erguê-la, também avisa. E quando a brecha fica aberta, diz o motivo: sem construtor livre, antena recusada (limite, recursos, …), sem veículo-rádio ou operador.
 - Visão de General: cada brecha leva uma nota (`V.cn.gap[i][5]`) ao lado do "ANTENA A CAMINHO": "CONSTRUTORES A 2,7 KM", "EM OBRA · 40%", "A 1,2 KM" (veículo/operador), "SEM CONSTRUTOR LIVRE", "LIMITE DE ANTENAS", "SEM RECURSOS PARA A ANTENA", "SEM LUGAR SEGURO". O `get_state` do MCP traz `note` em `commandNet.gaps`.
-- `tests/radio-general.js` (novo, **nunca executado**, fora do `tests/all.sh`) é a checagem focada do bug.
+- `tests/radio-general.js` é a checagem focada do bug (veja a seção "Testado").
 - README (parágrafo "Antenas de rádio e brechas na rede") e MCP.md.
 
-## O que foi verificado
+## Testado: `tests/radio-general.js` (follow-up, pedido do Firstmate)
+
+Rodado sobre o main com o #140: **falhou** em "não desiste da antena enquanto os construtores ainda andam". A antena só subiu 2021 s depois da ordem, na segunda tentativa. Havia duas causas, e as duas foram corrigidas no follow-up:
+
+1. **Construtor errado.** O general escolhia a esquadra mais perto do lugar seguro e só depois movia o lugar na direção dela. Assim, uma engenharia a 2,5 km ganhava de uma esquadra da própria brecha que andaria 200 m. Agora `cnWho(t, g, s0)` testa as 4 esquadras livres mais perto e a engenharia mais perto, cada uma com o lugar escolhido de novo para a caminhada dela, e fica com a menor caminhada (a engenharia ganha 600 m de vantagem).
+2. **Prazo vencido com o construtor avançando.** O construtor pediu carona (`q.rd`, `call`) e ficou parado esperando no ponto de encontro (160 s nesse caso). Além disso, a estrada não ia reto até o lugar. Agora, passado o prazo, a ordem continua enquanto os construtores ganharam ≥ 50 m (`CNR.gain`) nos últimos 240 s (`CNR.stall`), até o dobro do prazo. A espera da carona em si (#113) não foi mexida.
+
+Depois do follow-up: `node tests/radio-general.js` passa inteiro. A antena sobe e as duas esquadras entram na rede 76 s depois da ordem (antes, 2021 s). A checagem entrou no `tests/all.sh` e no `tests/README.md`. Na partida IA × IA de 3 lados (mapa 11, 10 s), o construtor do lado 0 passou de 2,8 km para 0,2 km e o do lado 2 está a 0 km.
+
+## O que foi verificado (no #140)
 
 Só a fumaça (uns minutos):
 
@@ -40,7 +49,7 @@ Só a fumaça (uns minutos):
 ## O que NÃO foi testado
 
 - Se a antena sai mesmo depois da caminhada longa, numa partida inteira (uns 17 min de jogo para 3 km a pé). Não rodei nenhuma partida até a antena ficar pronta depois da correção.
-- `tests/radio-general.js` (escrito, nunca rodado) e as suítes existentes: `tests/radio.js` (o caso "the AI general orders a relay … within" agora nomeia o construtor: o texto do diário mudou, mas a regex `antena de rádio ordenada` continua casando), `comms`, `forts`, `afp`, `mcp-general`.
+- As suítes existentes: `tests/radio.js` (o caso "the AI general orders a relay … within" agora nomeia o construtor: o texto do diário mudou, mas a regex `antena de rádio ordenada` continua casando), `comms`, `forts`, `afp`, `mcp-general`.
 - O desenho da nota na Visão de General (tamanho, sobreposição com o rótulo da brecha), no navegador.
 - Online: o convidado recebe a nota pela mensagem `gen` (um texto curto a mais por brecha, até 3 brechas). O limite de 8192 bytes não foi medido de novo.
 - Uma pessoa na área Defesa com a IA no Apoio: a ordem `fort` é da área Defesa, então a antena da IA é recusada (`ctl`). Agora o diário mostra a recusa, e o general cai no veículo-rádio ou no operador. O comportamento em si não mudou.
@@ -55,7 +64,7 @@ Só a fumaça (uns minutos):
 
 ## Como testar depois
 
-- `node tests/radio-general.js` (sandbox, rápido): a antena sai com o construtor longe, sem "não ficou pronta a tempo", a nota da visão traz "CONSTRUTORES A" ou "EM OBRA". Se passar, colocar no `tests/all.sh` e no `tests/README.md`.
+- `node tests/radio-general.js` (sandbox, uns minutos): já passa; rodar de novo depois de mexer no rádio, na carona ou no `gPick`.
 - `node tests/radio.js` (`SECS=240`), `node tests/comms.js`, `node tests/forts.js`, `node tests/afp.js`, `node tests/mcp-general.js`, `node tests/frame-budget.js`, `node tests/sides3-start.js`.
 - Partida longa IA × IA (moderna e 1944, 2 e 3 lados, mapa 11, economia): `REPO=$PWD node /home/luiz/firstmate/data/cf-radio-general/probe.js modern 2 1500`. A cada minuto ela mostra, por lado, as esquadras na rede e fora, as brechas, os reforços a caminho e as antenas. Esperado: o lado com brecha ergue ≥ 1 antena, e as esquadras fora da rede caem.
 - No navegador: `npm start`, Assistir (IA × IA), abrir a Visão de General do lado com brechas. Ver o anel âmbar com "ANTENA A CAMINHO · CONSTRUTORES A X KM" e depois "EM OBRA", a antena aparecendo, e as linhas no diário (RÁDIO).

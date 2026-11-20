@@ -40,4 +40,5 @@ ok(/tagAdd\(tags,/.test(fp) && /tagText\(b\)/.test(fp), 'fpMap labels its contac
 ok(/tagAdd\(tags,/.test(bm) && /tagText\(b\)/.test(bm), 'bmDraw (the battle map) too');
 ok(!/txt\(W13\.cls\[cl\]/.test(fp), 'fpMap does not write a class name for every contact');
 ok(!/\? FOE : FRIEND/.test(fp), 'fpMap colours each enemy side with foeCol, as the battle map does (3 sides)');
+ok(/for \(const q of S\.planes\) \{[^\n]*\n[^\n]*spotted\(q, me\)/.test(fp), 'fpMap draws an enemy aircraft only when the side has spotted it (it drew them all)');
 done();

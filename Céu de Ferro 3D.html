@@ -36684,7 +36684,7 @@ const SEAT = {
   eo: { fov: [18, 7, 3], eye: { t: [0, .8, 0] }, filter: 'grayscale(1) contrast(1.25) brightness(1.08)', lift: 104, draw: fpEO }
 };
 /* the seats of what the player is in, in the order C steps through them after the chase view */
-const seatsOf = P => (P.man ? (P.def.mort ? ['inf', 'fcm'] : ['inf']) : P.kind === 'tank' ? [S.modern ? 'gunnerM' : 'gunner', 'cmd'] : P.kind === 'art' ? [S.modern ? 'gunnerM' : 'gunner', 'fcm'] : P.kind === 'aa' ? [S.modern ? 'eo' : 'ring'] : P.def.seat ? [P.def.seat] : P.def.prop ? ['prop'] : ['jet', 'jetc']);
+const seatsOf = P => (P.man ? (P.def.mort ? ['inf', 'fcm'] : ['inf']) : P.kind === 'tank' ? [S.modern ? 'gunnerM' : 'gunner', 'cmd'] : P.kind === 'art' ? [S.modern ? 'gunnerM' : 'gunner', 'fcm'] : P.kind === 'aa' ? [S.modern ? 'eo' : 'ring'] : P.def.seat ? [P.def.seat] : (P.def.prop ? ['prop'] : ['jet', 'jetc']).concat(P.def.strat ? [S.modern ? 'bsightM' : 'bsight'] : []));
 /* M: to the fire-control map and back to the view it was called from */
 function mapKey() { const P = S.my, i = P ? seatsOf(P).indexOf('fcm') + 1 : 0; if (i) camSt.mode = camSt.mode === i ? camSt.back || 0 : ((camSt.back = camSt.mode), i); }
 function curSeat() { const P = S.my; if (!P || S.demo || !camSt.mode) return null; const l = seatsOf(P); return SEAT[l[Math.min(camSt.mode, l.length) - 1]]; }
@@ -36694,6 +36694,77 @@ const HZ = [0, 24, 9, 3.5];   // helicopter sight: field of view per zoom step, 
 const PZ = [0, 30, 14];   // planes: field of view per zoom step, 0 = the ordinary view
 function zoomBy(n) { if (scopeZoom(n)) return; if (S.my && S.my.q && !S.my.heli) { const z = camSt.pz || 0; camSt.pz = n ? clamp(z + n, 0, PZ.length - 1) : (z + 1) % PZ.length; return; } if (S.my && S.my.heli) { const z = camSt.hz || 0; camSt.hz = n ? clamp(z + n, 0, HZ.length - 1) : (z + 1) % HZ.length; return; } const s = curSeat(); if (s && s.fov.length > 1) camSt.zoom = n ? clamp(zoomOf(s) + n, 0, s.fov.length - 1) : (zoomOf(s) + 1) % s.fov.length; }
 
+/* ---------- where the bombs fall (cf-miras-impl: bomber C, and the plane's CCIP) ----------
+   bombFall(P): this frame's fall of the bombs still aboard, or null with none: i the slot, pts the ground points of the stick (the first
+   where a bomb let go now lands, the rest each BSIGHT.cool s of flight further along the track, as a held trigger lays them), r the blast
+   radius. The bomb sight seat (bsight 1944, bsightM today) looks at the first point, so the centre of its reticle is where the stick
+   starts; zoom by the plane's own zoom step (camSt.pz, not touched here) */
+const BSIGHT = { cool: .3, max: 24, down: .8 };
+let bfMemo = { f: -1, P: null, v: null };
+function bombFall(P) {
+  if (bfMemo.f === frameId && bfMemo.P === P) return bfMemo.v;
+  const d = P.def, i = d.ord.findIndex((o, j) => o && o.k === 'bomb' && !o.gd && P.ord[j] > 0);
+  let v = null;
+  if (i >= 0) {
+    let bx = P.x, by = P.y - 1.5, bz = P.z, vy = P.v.y - 2;
+    for (let n = 0; n < 900 && by > hgt(bx, bz); n++) { vy -= GR * .05; bx += P.v.x * .05; by += vy * .05; bz += P.v.z * .05; }
+    const o = d.ord[i], vh = Math.hypot(P.v.x, P.v.z) || 1, ux = P.v.x / vh, uz = P.v.z / vh, step = vh * BSIGHT.cool, pts = [];
+    for (let n = 0; n < Math.min(P.ord[i], d.strat ? BSIGHT.max : 1); n++) { const x = bx + ux * step * n, z = bz + uz * step * n; pts.push({ x, y: hgt(x, z), z }); }
+    v = { i, pts, r: o.r || 30, ux, uz };
+  }
+  bfMemo = { f: frameId, P, v }; return v;
+}
+/* the stick on the ground: an outline of its strip (blast radius either side, from before the first to past the last) and a small ◇ at each bomb */
+function stickMarks(B, col, lw) {
+  const a = B.pts[0], b = B.pts[B.pts.length - 1], r = B.r, nx = -B.uz * r, nz = B.ux * r, ex = B.ux * r, ez = B.uz * r;
+  const c = [[a.x - ex + nx, a.z - ez + nz], [b.x + ex + nx, b.z + ez + nz], [b.x + ex - nx, b.z + ez - nz], [a.x - ex - nx, a.z - ez - nz]].map(([x, z]) => proj(x, hgt(x, z) + 1, z));
+  hx.lineWidth = lw || 1.4; hx.strokeStyle = col;
+  if (c.every(q => q.front)) { hx.beginPath(); c.forEach((q, j) => (j ? hx.lineTo(q.x, q.y) : hx.moveTo(q.x, q.y))); hx.closePath(); hx.setLineDash([6, 5]); hx.stroke(); hx.setLineDash(SOLID); }
+  hx.beginPath();
+  for (const p of B.pts) { const q = proj(p.x, p.y + 1, p.z); if (!q.front) continue; const s = 4; hx.moveTo(q.x, q.y - s); hx.lineTo(q.x + s, q.y); hx.lineTo(q.x, q.y + s); hx.lineTo(q.x - s, q.y); hx.closePath(); }
+  hx.stroke();
+}
+/* the bomb sight: 1944 a stabilized optic (Norden, Lotfe) with a fine cross and the drift wire, lit at night; today the targeting screen.
+   The stick's strip and bombs on it, the target if one is held, the bombs left as pips. No words */
+function fpBomb(P, u, ink, acc, disp, blink) {
+  const cx = cw / 2, cy = ch / 2, B = bombFall(P), d = P.def, o = d.ord.find(q => q && q.k === 'bomb'), oi = d.ord.indexOf(o), left = oi >= 0 ? P.ord[oi] : 0, tot = o ? o.n : 0;
+  if (S.modern) {
+    const G = '#a8ffba', m = Math.min(cw, ch) * .035, L = 26 * u;
+    hx.fillStyle = 'rgba(40,110,70,.12)'; hx.fillRect(0, 0, cw, ch); hx.fillStyle = scanLines(); hx.fillRect(0, 0, cw, ch);
+    hx.strokeStyle = G; hx.lineWidth = 1.5; hx.beginPath();
+    for (const [a, b] of CORN) { const x = cx + a * (cw / 2 - m), y = cy + b * (ch / 2 - m); hx.moveTo(x, y - b * L); hx.lineTo(x, y); hx.lineTo(x - a * L, y); }
+    for (const [i, j] of DIR4) { hx.moveTo(cx + i * 8 * u, cy + j * 8 * u); hx.lineTo(cx + i * 30 * u, cy + j * 30 * u); }
+    hx.stroke();
+    if (B) stickMarks(B, G, 1.5);
+    if (S.lockGnd) { const s = proj(S.lockGnd.x, S.lockGnd.y + 2, S.lockGnd.z); if (s.front) bracket(s.x, s.y, 16, FOE); }
+    for (let i = 0; i < tot; i++) { hx.fillStyle = i < left ? G : 'rgba(168,255,186,.2)'; hx.fillRect(m + 10 * u + (i % 12) * 9 * u, ch - m - 30 * u + ((i / 12) | 0) * 16 * u, 6 * u, 12 * u); }
+    return;
+  }
+  const R = opticR(), lit = retLit(), col = retCol(.92, lit);
+  if (B) stickMarks(B, lit > .3 ? 'rgba(255,186,90,.85)' : 'rgba(20,22,20,.8)', 1.6);
+  hx.beginPath(); hx.moveTo(cx - R, cy); hx.lineTo(cx - 10 * u, cy); hx.moveTo(cx + 10 * u, cy); hx.lineTo(cx + R, cy); hx.moveTo(cx, cy + R); hx.lineTo(cx, cy - R);   // the cross and the drift wire along the track
+  for (let i = -4; i <= 4; i++) if (i) { const y = cy - i * R * .18; hx.moveTo(cx - 5 * u, y); hx.lineTo(cx + 5 * u, y); }
+  retStroke(col, 1.1, lit);
+  hx.beginPath(); hx.arc(cx, cy, 10 * u, 0, TAU); retStroke(col, 1.1, lit);
+  hx.fillStyle = '#040505'; hx.beginPath(); hx.rect(0, 0, cw, ch); hx.arc(cx, cy, R, 0, TAU, true); hx.fill();
+  hx.strokeStyle = 'rgba(0,0,0,.5)'; hx.lineWidth = R * .05; hx.beginPath(); hx.arc(cx, cy, R * .975, 0, TAU); hx.stroke();
+  for (let i = 0; i < tot; i++) { hx.fillStyle = i < left ? acc : 'rgba(158,170,162,.25)'; hx.beginPath(); hx.arc(cx - R * .7 + (i % 12) * 11 * u, cy + R + 14 * u + ((i / 12) | 0) * 11 * u, 3.2 * u, 0, TAU); hx.fill(); }
+}
+SEAT.bsight = { fov: [34, 14, 6], bomb: 1, optic: 1, draw: fpBomb };
+SEAT.bsightM = { fov: [30, 10, 3.5], bomb: 1, filter: 'grayscale(1) contrast(1.25) brightness(1.08)', draw: fpBomb };
+/* the bomb sight's eye: under the nose, stabilized level, looking at where the first bomb falls (or ahead and down with none left) */
+updateCamera = (g => dt => {
+  g(dt);
+  const P = S.my, s = P && !P.dead && !S.demo && !P.kind && !P.man && !P.heli ? curSeat() : null;
+  if (!s || !s.bomb) return;
+  const B = bombFall(P), cp = camera.position, vh = Math.hypot(P.v.x, P.v.z) || 1;
+  cp.set(P.x - P.u.x * 2.5, P.y - P.u.y * 2.5, P.z - P.u.z * 2.5);
+  camera.up.set(P.v.x / vh, 0, P.v.z / vh);
+  if (B) { const a = B.pts[0]; camera.lookAt(a.x, a.y, a.z); } else camera.lookAt(cp.x + P.v.x / vh * 100, cp.y - 100 * BSIGHT.down, cp.z + P.v.z / vh * 100);
+  camera.fov = s.fov[Math.min(camSt.pz || 0, s.fov.length - 1)];
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  sparks.material.uniforms.scale.value = ch * dpr / (2 * Math.tan(camera.fov * Math.PI / 360));
+})(updateCamera);
 /* the player's own instruments, by what they are in: sights first, then the panel on the left and the warnings.
    In a seat the sight and the flight path are the seat's own, and its instruments stand in for the panel when they are big enough to read */
 function hudFly(P, u, ink, acc, disp, blink, seat) {
@@ -36714,11 +36785,11 @@ function hudFly(P, u, ink, acc, disp, blink, seat) {
     }
     const fp = proj(P.x + P.v.x / P.V * 700, P.y + P.v.y / P.V * 700, P.z + P.v.z / P.V * 700);   // where the aircraft is actually going
     if (fp.front && !seat) { hx.strokeStyle = ink; hx.lineWidth = 1.2; hx.beginPath(); hx.arc(fp.x, fp.y, 5, 0, TAU); hx.moveTo(fp.x - 14, fp.y); hx.lineTo(fp.x - 5, fp.y); hx.moveTo(fp.x + 5, fp.y); hx.lineTo(fp.x + 14, fp.y); hx.moveTo(fp.x, fp.y - 5); hx.lineTo(fp.x, fp.y - 10); hx.stroke(); }
-    if (d.ord.some((o, i) => o && o.k === 'bomb' && P.ord[i] > 0)) {   // bomb impact point
-      let bx = P.x, by = P.y - 1.5, bz = P.z, vy = P.v.y - 2;
-      for (let i = 0; i < 900 && by > hgt(bx, bz); i++) { vy -= GR * .05; bx += P.v.x * .05; by += vy * .05; bz += P.v.z * .05; }
-      const s = proj(bx, hgt(bx, bz), bz);
-      if (s.front) { hx.strokeStyle = acc; hx.lineWidth = 1.8; hx.beginPath(); hx.moveTo(s.x - 12, s.y); hx.lineTo(s.x + 12, s.y); hx.moveTo(s.x, s.y - 16); hx.lineTo(s.x, s.y + 4); hx.stroke(); txt('BOMBA', s.x, s.y + 7, 10 * u, acc, 'center'); }
+    const BF = !(seat && seat.bomb) && bombFall(P);   // cf-miras-impl: where the bombs fall, without words; the bomb sight seat draws its own
+    if (BF && d.strat) stickMarks(BF, acc, 1.6);   // a bomber: the strip its stick will lay
+    else if (BF) {   // CCIP: the pipper where a bomb let go now lands, on the fall line from the flight path marker
+      const p0 = BF.pts[0], s = proj(p0.x, p0.y, p0.z), f = proj(P.x + P.v.x / P.V * 700, P.y + P.v.y / P.V * 700, P.z + P.v.z / P.V * 700);
+      if (s.front) { hx.strokeStyle = acc; hx.lineWidth = 1.6; hx.beginPath(); if (f.front) { hx.moveTo(f.x, f.y); hx.lineTo(s.x, s.y - 7); } hx.moveTo(s.x + 6, s.y); hx.arc(s.x, s.y, 6, 0, TAU); hx.moveTo(s.x + 1.5, s.y); hx.arc(s.x, s.y, 1.5, 0, TAU); hx.stroke(); }
     }
     if (S.lockGnd) { const s = proj(S.lockGnd.x, S.lockGnd.y + 3, S.lockGnd.z); if (s.front) { bracket(s.x, s.y, 17, acc, true); txt(S.lockW.name + (S.lockW.gd ? (hdist(S.lockGnd, P) < LO.reach(P, S.lockW) ? ' · NO ALCANCE' : ' · LONGE') : ''), s.x, s.y + 20, 11 * u, acc, 'center'); } }
     let near = null, nd = 900;
@@ -36731,7 +36802,7 @@ function hudFly(P, u, ink, acc, disp, blink, seat) {
   }
   const L = 14; let y = 10 * u;
   txt(d.name, L, y, 17 * u, acc, 'left', disp); y += 23 * u;
-  if (!seat || cw < 620 || ch < 400) {   // in a cockpit the gauges say this, unless the screen is too small to read them
+  if (!seat || !seat.inst || cw < 620 || ch < 400) {   // in a cockpit the gauges say this, unless the screen is too small to read them (a view with no panel, as the clean HUD and the bomb sight, keeps these lines)
     txt('CASCO', L, y, 11 * u, ink); bar(L + 48 * u, y + 2 * u, 110 * u, 7 * u, P.hp / d.hp, P.hp < d.hp * .45 ? FOE : ink); y += 15 * u;
     txt('MOTOR', L, y, 11 * u, ink); bar(L + 48 * u, y + 2 * u, 110 * u, 7 * u, P.ctl.thr, P.ab ? '#ffb347' : acc); if (P.ab) txt('PC', L + 164 * u, y, 11 * u, '#ffb347'); y += 19 * u;
     txt('VEL ' + Math.round(P.V * 3.6) + ' km/h', L, y, 14 * u, ink); y += 17 * u;

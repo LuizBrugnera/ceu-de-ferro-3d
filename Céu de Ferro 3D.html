@@ -12385,11 +12385,16 @@ const Net = {
   ui: { welcome() {}, roster() {}, lost() {}, refused() {} },
   trn: false, sq: false, sn: 0, sacc: 0,
   url: () => (/^https?:$/.test(location.protocol) ? (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host : 'ws://localhost:8080'),
+  /* wait: the s a connection may take to open. A server switched off is not always refused at once: on another computer, or behind some
+     networks, the attempt times out after a minute or more, and all that time the hangar said "Conectando…" with no way to try again
+     (cf-pol-fluxos). Past it the attempt is dropped, and the hangar says why and offers "Tentar de novo" */
+  wait: 10,
   connect(room, name, cls, model) {
     Net.close();
     let ws; try { ws = new WebSocket(Net.url()); } catch (e) { return Net.ui.lost(false); }
-    Net.ws = ws;
-    ws.onopen = () => { Net.send('join', LO.tag(Object.assign({ room, name, cls, model, mv: MAPV, mv1: 1, ns: Net.ns0 || 2 }, Net.fresh && { fresh: 1 }))); Net.fresh = false; };
+    Net.ws = ws; ws.onerror = () => {};
+    const late = setTimeout(() => { if (ws === Net.ws && ws.readyState === 0) ws.close(); }, Net.wait * 1000);
+    ws.onopen = () => { clearTimeout(late); Net.send('join', LO.tag(Object.assign({ room, name, cls, model, mv: MAPV, mv1: 1, ns: Net.ns0 || 2 }, Net.fresh && { fresh: 1 }))); Net.fresh = false; };
     ws.onmessage = e => {
       if (ws !== Net.ws) return;
       let m; try { m = JSON.parse(e.data); } catch (err) { return; }

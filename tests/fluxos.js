@@ -18,7 +18,9 @@
      column with the feed after them, and the radio lines ending above the panel the HUD drew.
    - Partidas anteriores: a match picked from the list opened its review, the item that was clicked went away with the list and the focus fell
      on the page; the review heard Esc only with the focus inside it, so "Fechar (Esc)" did nothing and the review stayed over the hangar.
-     Here: Esc closes it from anywhere, and only it; the focus stays in the dialog when a match opens. */
+     Here: Esc closes it from anywhere, and only it; the focus stays in the dialog when a match opens.
+   - With the server off, "Entrar na sala" said "Conectando…" for over a minute with no "Tentar de novo" (the attempt timed out instead of being
+     refused). Here: a connection that does not open in Net.wait s is dropped and the hangar is told, so it offers the retry. */
 const H = require('./harness'), fs = require('fs'), path = require('path'), vm = require('vm'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8');
 
@@ -103,4 +105,17 @@ console.log('-- the review (Partidas anteriores) closes with Esc wherever the fo
   const it = html.slice(html.indexOf('async function aarPast('), html.indexOf('function aarOpen('));
   ok(/await go\(\); \(\$\('#aarBack'\)\.hidden \? \$\('#aarClose'\) : \$\('#aarBack'\)\)\.focus\(\)/.test(it), 'a match picked from the list: the focus goes to the review\'s own buttons');
 }
-done();
+console.log('-- a connection that never opens is dropped, and the hangar can try again --');
+(async () => {
+  const made = [];
+  class FakeWS { constructor(u) { this.url = u; this.readyState = 0; made.push(this); } close() { if (this.readyState > 1) return; this.readyState = 3; setTimeout(() => this.onclose && this.onclose({ code: 1006 }), 0); } send() {} }
+  const c = H.load({ WebSocket: FakeWS }), Net = c.$('Net'), lost = [];
+  Net.ui.lost = j => lost.push(j); Net.wait = .05;
+  Net.connect('modern', 'Teste', 'tank', 'abrams');
+  await new Promise(r => setTimeout(r, 300));
+  ok(made.length === 1 && made[0].readyState === 3 && lost.length === 1 && lost[0] === false && !Net.ws, 'a socket still connecting after Net.wait is closed: the page is told it could not connect (lost(false), the message with "Tentar de novo")');
+  Net.connect('modern', 'Teste', 'tank', 'abrams'); const w = made[1]; w.readyState = 1; w.onopen();
+  await new Promise(r => setTimeout(r, 300));
+  ok(w.readyState === 1 && lost.length === 1 && Net.ws === w, 'a socket that opened in time is left alone');
+  done();
+})();

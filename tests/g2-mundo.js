@@ -170,8 +170,11 @@ console.log('-- 8. the cost --');
   const { S, $ } = watch('modern', 6), W = S.T.g2w, B = $('G2WB'), c0 = $('cmdOf')(0);
   for (let i = 0; i < 20; i++) $('g2Sense')(c0);
   const P = W.n.filter(o => o.p >= 0); for (let i = 1; i < P.length; i++) $('g2Now')(W, P[0].i, P[i].i);
-  const s = B.stat();
-  console.log('  the ground at the load ' + W.ms.toFixed(1) + ' ms (' + W.N + ' regions); the routes of a pair ' + s.route + ' ms (worst ' + s.routeWorst + '), a piece of ' + $('G2W').rt.pops + ' cells a frame; a look ' + s.sense + ' ms (worst ' + s.senseWorst + '), every ' + $('G2W').bel.every + ' s a side');
-  ok(s.sense < 2 && s.route < 60, 'a look under 2 ms and a pair\'s routes under 60 ms on this machine (' + s.sense + ', ' + s.route + ')');
+  const s = B.stat(), n = W.pass.length, D = new Float32Array(n), via = new Int32Array(n), u = [];
+  for (let i = 0; i < 5; i++) { const t0 = performance.now(); $('aiDrain')($('g2Dij')(W, P[i].q, false, null, Infinity, D, via)); u.push(performance.now() - t0); }
+  const unit = med(u);   // one plain search over the whole map, on this machine now: the yardstick (a loaded machine slows both)
+  console.log('  the ground at the load ' + W.ms.toFixed(1) + ' ms (' + W.N + ' regions); the routes of a pair ' + s.route + ' ms (worst ' + s.routeWorst + '), a piece of ' + $('G2W').rt.pops + ' cells a frame; a look ' + s.sense + ' ms (worst ' + s.senseWorst + '), every ' + $('G2W').bel.every + ' s a side; one search over the whole map ' + unit.toFixed(1) + ' ms');
+  ok(s.sense < 2, 'a look under 2 ms (' + s.sense + ')');
+  ok(s.route < 8 * unit, 'a pair\'s routes cost under 8 searches over the whole map (' + (s.route / unit).toFixed(1) + ')');
 }
 done();

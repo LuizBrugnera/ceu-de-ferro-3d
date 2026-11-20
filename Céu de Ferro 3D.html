@@ -34264,6 +34264,365 @@ genCard = (f => (t, id) => {
   const u = q.men.filter(m => !m.dead && m.ut && m.ut.k !== 'cumprir').map(m => m.ut.k); if (u.length) c.decide.push('Homens por conta própria: ' + u.join(', '));
   c.mo = n; return c;
 })(genCard);
+/* ---------- ENGENHARIA DOS PONTOS (ENP, cf-engenharia-pontos, não testado) ----------
+   The captain: "eles ainda não constroem bases em volta dos pontos": high walls (HESCO) and a unit of engineers whose work is to fortify the
+   points, the supply bases and the forward bases. Its own section; the old code only through hooks (wrappers).
+   Works (FORT kinds 11-13, every era, named by era): 11 a tall wall (HESCO today, a high sandbag wall in 1944), 12 a low one (low HESCO; an
+   earth bank faced with logs), 13 a concrete T-wall (a log palisade in 1944). Each is a module ENP's ring fits end to end. They stop a rifle and
+   a .50 by their face (they are objects on the grid: a round that meets one ends there, OBJ take[0] tiny), a burst behind them leaves shield of
+   it to the men beside them (fortHit), they cut a line of sight below their top (ray, mode 1: the walls of the clusters near the line, enpRay),
+   heavy guns and explosives bring them down (take[1], take[2], their hp), a tank does not crush them. P2's shelter registry gets the places
+   behind each by sector and stance (ABRT: abrPub, the protection of their height for each stance, in the sectors within ABRT.wall of the face;
+   the low wall also a sector of fire). Their caps grow with the economy and the points as the posts' (fortCap x bmrMul). Paid as any work.
+   Online only with a server that says hsc: 1 (FKINDS 13).
+   The unit: a squad of job 'fen' (Pioniere, Combat Engineers, Sapyory; the insurgents' militia sappers), sappers first in its kits, one a side
+   (RN.postN.fen a road: more on a map of more roads), kept and reinforced as any post. Its post is behind the line; it is the AI's first pick for
+   any fortify order (gPick's pref), never pulled into an attack (avoid), never a manoeuvre's (FREE).
+   Orders, through genCmd for the person, the MCP and the AI alike (W21 fort):
+     hesco / hescob / twall: one piece, as a trench or a post (fortPlan digs it where the builder stands);
+     perim {x z, ids?}: a fortified perimeter round that place (enpLayout): a ring of ENP.seg m modules R m out (a point ENP.R.pt, a supply base
+       ENP.R.sup, a forward base ENP.R.fob), the face toward the known threat (else the enemy's base nearest) of T-walls and tall walls, the
+       flanks tall, the shoulders low, the rear (ENP.gap rad) left open and every road through it an entry; a machine-gun nest set in the ring
+       beside the face, an anti-tank post on the other side while the side knows enemy armour (else a wall), a nest inside the most exposed road
+       entry, and a trench behind the face (TRN joins trenches that meet). Insurgents: sandbags and trenches instead of walls. Pieces that the
+       ground refuses (a house, a road, water, too steep) are tried a little out and in, then left out: the layout is the terrain's.
+       The builders hold at the middle; each takes the next piece (the face first), stands by it as CGN has a builder do (O.wk) and starts the
+       next once it is up. No piece is begun with an enemy within ENP.foe m of the builder; an AI order pays each piece when ENP.keep is left after it
+       (enpPay: the engineers are the side's priority for works, so neither the economy's whole reserve nor BMR's budget of the minute holds them), a person's as the economy lets it. It ends when every piece stands (or was left out), after ENP.T s plus the walk, or with
+       no builder; the builders go back to their post.
+     fob {x z, ids?}: a forward base at a key position: a squad of the line holds it (its own trenches, fortPlan) while the engineers raise the
+       perimeter; then a supply base there (GC.sup, where the logistics and the caps allow) and a radio relay where the command net does not reach.
+   The AI general (enpPlan, from fortPlan, a side whose defence the AI leads, ENP.every s, after ENP.start s):
+     - forward bases (enpFob, every ENP.fob.every s): key positions ahead from the tactical map (M1: k the choke points, bridges, junctions, the
+       ways out of a town; a crest; l the front, near it on our side; v where the enemy sees, worse; f the enemy's strength, none) within
+       ENP.fob.dep m of the line, ENP.fob.apart m from every own base, held point and forward base, near a road; one under way at a time, up to
+       ENP.fob.max[tier] (AFP's tier); as the line goes forward the next ones are further forward;
+     - the sites by value: held points (a point just taken and a threatened one first: the threat board, cmdKnown), the forward bases, the
+       supply bases; a site with known enemy within ENP.quiet m worth ENP.hot is left for later; a site whose ring stands is looked at again
+       ENP.redo s later (what was lost is built again: the repair);
+     - the builder: the nearest free engineers (fen), else the plain engineers (eng).
+   Every decision goes to the general's log (eng) and C.enp.fl; the General View draws the perimeters under way (genVM V.enp, layer Engenharia).
+   No random number is drawn here */
+const ENP = { on: 1, every: 8, start: 40, seg: 12, R: { pt: 26, sup: 20, fob: 22 }, gap: 2.1, front: .75, side: 1.9, foe: 120, quiet: 300, hot: 3,
+  keep: [20, 30], near: [4, 10], tries: [0, 4, -4, 8], fail: 3, T: 900, walkK: .45, redo: 150, again: 60, wait: 240, shield: .15, reach: 4000, log: 40,
+  fob: { every: 30, max: [1, 2, 3], apart: 700, dep: [-650, 300], v: .7, road: 260, choke: .3, crest: 8, T: 1500 },
+  nm: { ww2: ['Pioniere', 'Combat Engineers'], modern: ['Combat Engineers', 'Sapyory', 'Sapadores da milícia'] } };
+const enpPay = (t, c) => { const d = S.eco && S.eco.d[t]; return !d || (d.en >= c[0] + ENP.keep[0] && d.mt >= c[1] + ENP.keep[1]); };
+const enpEra = () => (typeof S !== 'undefined' && S && S.era === 'ww2' ? 'ww2' : 'modern');
+OBJ.hesco = { hp: [520, 0], take: [.04, .45, .5], wall: 1 };
+OBJ.hescob = { hp: [320, 0], take: [.05, .5, .55], wall: 1 };
+OBJ.twall = { hp: [800, 0], take: [.02, .35, .35], wall: 1 };
+FORT.hsc = { k: 11, nm: { ww2: 'Muro alto de sacos de areia', modern: 'Barreira HESCO' }, obj: 'hesco', size: [12, 1.1, 2.1], time: 90, cap: 10, put: [6, 10], pad: .4, road: 8, min: .5, near: 2.6, back: 1, conceal: .7, pitch: 2.4, cost: [6, 14], garr: [], enp: 1 };
+FORT.hlo = { k: 12, nm: { ww2: 'Terrapleno com troncos', modern: 'Barreira HESCO baixa' }, obj: 'hescob', size: [12, 1.1, 1.2], time: 55, cap: 10, put: [6, 10], pad: .4, road: 8, min: .5, near: 2.6, back: 1, conceal: .5, pitch: 2.2, cost: [4, 9], garr: [], enp: 1 };
+FORT.wal = { k: 13, nm: { ww2: 'Paliçada de troncos', modern: 'Muro de concreto (T-wall)' }, obj: 'twall', size: [12, .8, 3.4], time: 110, cap: 6, put: [6, 10], pad: .4, road: 8, min: .5, near: 2.6, back: 1, conceal: .8, pitch: 2.4, cost: [10, 24], garr: [], enp: 1 };
+FORT.slots = 320;   // 64 more ids for the rings (a match's dynamic works: 208); the buildings' ids move by 64, as BMR's did
+for (const F of [FORT.hsc, FORT.hlo, FORT.wal]) { Object.defineProperty(F, 'name', { get: () => F.nm[enpEra()], enumerable: true }); FORT.K[F.k] = F; }
+const enpK = k => !!(FORT.K[k] && FORT.K[k].enp);
+Object.assign(W21.fort, { hesco: 'barreira HESCO (1944: muro alto de sacos de areia)', hescob: 'barreira baixa (HESCO baixa; 1944: terrapleno com troncos)', twall: 'muro de concreto T-wall (1944: paliçada de troncos)',
+  perim: 'perímetro fortificado (engenharia)', fob: 'base avançada numa posição-chave' });
+Object.assign(W21.dig, { hesco: 11, hescob: 12, twall: 13 });
+W21.jobs.fen = 1;
+Object.assign(GEN.no, { hsc: 'O servidor desta sala é antigo: sem HESCO nem perímetros da engenharia', done: 'O perímetro desse lugar já está de pé', enp: 'Engenharia desligada' });
+Object.assign(GEN.job, { fen: 'Engenharia de fortificação' }); Object.assign(GEN.tag, { fen: 'FRT' });
+AFP.by.fen = 150;   // the fortification plan may take the engineers when they are free
+Net.hsc = false;
+Net.rx.welcome = (old => m => { Net.hsc = m.hsc === 1; old(m); })(Net.rx.welcome);
+/* the works themselves: online only with a server that knows them; their caps grow with the economy and the points as the posts' */
+fortWhy = (g => (k, t, x, z, a, pre) => (!pre && enpK(k) && S.net && !Net.hsc ? 'server' : g(k, t, x, z, a, pre)))(fortWhy);
+fortCap = (g => (t, k) => (enpK(k) ? Math.round(FORT.K[k].cap * bmrMul(t)) : g(t, k)))(fortCap);
+/* the places of its men: behind the low wall, kneeling to fire over it; none at a tall one (P2's points shelter there) */
+fortSlots = (g => f => {
+  if (!f.F.enp) return g(f);
+  if (f.pts) return f.pts;
+  const F = f.F; f.pts = [];
+  if (f.k !== 12) return f.pts;
+  const n = Math.max(1, Math.floor(F.size[0] / F.pitch)), ux = -Math.sin(f.a), uz = -Math.cos(f.a), b = F.size[1] / 2 + F.back;
+  for (let i = 0; i < n; i++) { const e = (i - (n - 1) / 2) * F.pitch; f.pts.push({ x: f.x + ux * e - Math.cos(f.a) * b, z: f.z + uz * e + Math.sin(f.a) * b, f, by: null, T: 0 }); }
+  return f.pts;
+})(fortSlots);
+/* P2's shelter registry (ABRT): every 2.2 m behind the wall, the protection of its height for each stance, from the sectors its face covers */
+function enpAbr(f) {
+  const src = 'f' + f.id;
+  if (f.gone || f.dead || f.prog < f.F.min || S.os[f.id] > 1) return abrPub(src, null);
+  const F = f.F, h = F.size[2] * (.25 + .75 * f.prog), lv = STANCE.map(s => abrLvl(h / (s.h * MAN.sc))), fa = wrap(f.a);
+  const p = Array.from({ length: ABRT.sec }, (_, i) => (Math.abs(wrap(i * TAU / ABRT.sec - fa)) <= ABRT.wall ? lv.slice() : [0, 0, 0]));
+  const set = f.k === 12 ? { a0: wrap(fa - ABRT.wall), a1: wrap(fa + ABRT.wall) } : null, out = [];
+  const n = Math.max(1, Math.floor(F.size[0] / 2.2)), ux = -Math.sin(f.a), uz = -Math.cos(f.a), b = F.size[1] / 2 + 1.1;
+  for (let i = 0; i < n; i++) {
+    const e = (i - (n - 1) / 2) * 2.2, x = f.x + ux * e - Math.cos(f.a) * b, z = f.z + uz * e + Math.sin(f.a) * b;
+    out.push({ x, z, k: 'muro', p, incl: null, cap: 1, dono: f.team, set, ind: .3, y: hgt(x, z), src, f, slot: { x, z, f, by: null, T: 0 } });
+  }
+  f.abrK = lv.join(); abrPub(src, out);
+}
+fortAt = (g => (f, prog) => { g(f, prog); if (f.F.enp) { const k = (f.prog >= f.F.min ? 1 : 0) + ':' + Math.round(f.prog * 4); if (k !== f.enpA) { f.enpA = k; enpAbr(f); } } })(fortAt);
+/* P2 reads a wall's height from the work (its own rule knows only the trench and the sandbags) */
+tpsAbr = (g => o => { const q = g(o); if (q && o.f && o.f.F && o.f.F.enp) q.h = o.f.F.size[2] * (.25 + .75 * o.f.prog); return q; })(tpsAbr);
+/* a burst on the other side of the wall leaves shield of it */
+fortHit = (g => (m, k, dmg, by, x, y, z, dx, dy, dz) => {
+  const f = m.fc;
+  if (!f || !f.F.enp || k !== HK.blast) return g(m, k, dmg, by, x, y, z, dx, dy, dz);
+  return ray(x, y, z, m.x, bodyY(m), m.z, 0) && RAY.o && RAY.o.ft && RAY.o.ft.F.enp ? dmg * ENP.shield : dmg;
+})(fortHit);
+/* the walls cut a line of sight below their top: the works are not in the sight grid (ray mode 1 walks only the terrain's), so the walls are kept
+   in clusters (96 m cells, made again when a work comes or goes: S.fn) and a line looks only at the clusters it passes near */
+function enpWalls() {
+  if (S.enpWk === S.fn && S.enpWl) return S.enpWl;
+  const M = new Map();
+  for (const f of S.forts) if (f.F.enp && !f.gone) { const k = Math.floor(f.x / 96) * 8192 + Math.floor((f.z + 4e5) / 96); let c = M.get(k); if (!c) M.set(k, (c = { x: 0, z: 0, r: 0, l: [] })); c.l.push(f.o); }
+  for (const c of M.values()) { for (const o of c.l) { c.x += o.x / c.l.length; c.z += o.z / c.l.length; } for (const o of c.l) c.r = Math.max(c.r, Math.hypot(o.x - c.x, o.z - c.z) + o.r + 1); }
+  S.enpWk = S.fn; S.enpWl = [...M.values()]; return S.enpWl;
+}
+function enpRay(ax, ay, az, bx, by, bz, W) {
+  const wx = bx - ax, wz = bz - az, dy = by - ay, L2 = wx * wx + wz * wz || 1e-9;
+  for (const c of W) {
+    const t = clamp(((c.x - ax) * wx + (c.z - az) * wz) / L2, 0, 1), px = ax + wx * t - c.x, pz = az + wz * t - c.z;
+    if (px * px + pz * pz > c.r * c.r) continue;
+    for (const o of c.l) if (S.os[o.id] < 2) rayObj(o, ax, ay, az, wx, dy, wz, false);
+  }
+  return RAY.o;
+}
+ray = (g => (ax, ay, az, bx, by, bz, mode) => {
+  const o = g(ax, ay, az, bx, by, bz, mode); if (o || mode !== 1 || !S.forts) return o;
+  const W = enpWalls(); return W.length ? enpRay(ax, ay, az, bx, by, bz, W) : o;
+})(ray);
+/* ===== the unit ===== */
+const enpNm = t => { const l = ENP.nm[enpEra()]; return l[(S.fac && S.fac[t]) || 0] || l[0]; };
+RN.postN.fen = .5;   // one a side on two roads, two on three or four
+FIELD.posts.push(['fen', 1]);
+function enpPost(t, k) {
+  const M = myRoutes(t), fr = frontR(t), ri = M.length ? M[(Math.max(0, M.indexOf(fr)) + k) % M.length] : fr, r = S.T.routes[ri], ds = dsOf(t, ri);
+  const s = clamp(lineS(t, ri) - ds * (BLD.ai.back + 150), 0, r.len), p = routeAt(r, s), off = (k % 2 ? -1 : 1) * 45 * ds, c = clearOf(p.x - p.dz * off, p.z + p.dx * off, 2, {});
+  return { k: 'hold', ri, s, x: c.x, z: c.z, R: 10 };
+}
+post = (g => (t, job, k) => (job === 'fen' ? enpPost(t, k) : g(t, job, k)))(post);
+jobKits = (g => (t, job) => (job === 'fen' ? (typeof aidSapKits === 'function' ? aidSapKits(t) : undefined) || g(t, 'eng') : g(t, job)))(jobKits);
+/* the general's pick: the engineers of fortification first for a work, never for anything else while others are free */
+gPick = (g => (t, c, x, z, n, pref, avoid) => (pref && pref.eng ? g(t, c, x, z, n, Object.assign({ fen: 1 }, pref), avoid) : g(t, c, x, z, n, pref, Object.assign({ fen: 1 }, avoid))))(gPick);
+/* ===== the layout ===== */
+/* where the danger lies for a place: the known enemy within 1.2 km, else the enemy base nearest */
+function enpThreat(C, x, z) { if (cmdKnown(C, x, z, 1200) > 0 && KN.n) return { x: KN.x, z: KN.z }; const e = mnBase(C.t, x, z); return { x: e.x, z: e.z }; }
+/* the pieces of a perimeter round s { x, z, R }: [{ k, x, z, a (its face), b (its bearing from the middle), pri }] */
+function enpLayout(t, s) {
+  const C = cmdOf(t), e = enpThreat(C, s.x, s.z), ae = headTo(s.x, s.z, e.x, e.z), R = s.R, N = Math.max(8, Math.ceil(TAU * R / ENP.seg)), ins = insT(t), mod = S.era === 'modern', out = [], ent = [];
+  const at = (b, r) => ({ x: s.x + Math.cos(b) * r, z: s.z - Math.sin(b) * r });
+  const arm = aidArmour(C);
+  for (let i = 0; i < N; i++) {
+    const b = ae + i * TAU / N, rel = Math.abs(wrap(b - ae)), p = at(b, R);
+    if (rel > Math.PI - ENP.gap / 2) continue;   // the rear: open, the way in
+    if (routeDist(S.T, p.x, p.z) < 11) { ent.push({ b, rel, x: p.x, z: p.z }); continue; }   // a road through the ring: an entry
+    let k = rel <= ENP.front ? (i === 0 && mod ? 13 : 11) : rel <= ENP.side ? 11 : 12;
+    if (i === 1) k = 4;   // the nest set in the ring beside the face
+    else if (i === N - 1 && arm) k = 3;   // and the anti-tank post on the other side, while enemy armour is known
+    if (ins && k >= 11) k = rel <= ENP.side ? 2 : 1;   // the insurgents: barricades of sandbags and trenches
+    out.push({ k, x: p.x, z: p.z, a: b, b, pri: k === 4 || k === 3 ? rel - .3 : rel });
+  }
+  ent.sort((u, v) => u.rel - v.rel);
+  if (ent.length && ent[0].rel < 1.75) { const p = at(ent[0].b, R - 7); out.push({ k: 4, x: p.x, z: p.z, a: ent[0].b, b: ent[0].b, pri: ent[0].rel - .2, ent: 1 }); }   // the most exposed road in
+  { const p = at(ae, R - 11); out.push({ k: 1, x: p.x, z: p.z, a: ae, b: ae, pri: 1.2 }); }   // the trench behind the face
+  return out.sort((u, v) => u.pri - v.pri);
+}
+/* the work that stands for piece p (begun or up): the one it started, else one of its kind on its line, ENP.near [across, along the bearing] */
+function enpAt(t, p) {
+  if (p.f && !p.f.gone && S.os[p.f.id] < 2) return p.f;
+  const cb = Math.cos(p.b), sb = Math.sin(p.b);
+  for (const f of S.forts) { if (f.team !== t || f.k !== p.k || f.gone) continue; const dx = f.x - p.x, dz = f.z - p.z, rad = dx * cb - dz * sb, tan = dx * sb + dz * cb; if (Math.abs(tan) < ENP.near[0] && Math.abs(rad) < ENP.near[1]) return (p.f = f); }
+  return null;
+}
+const enpMissing = (t, plan) => plan.filter(p => !p.skip && !enpAt(t, p)).length;
+/* a piece begun: where it was laid out, else a little out or in */
+function enpStart(t, p) {
+  for (const dr of ENP.tries) { const f = fortStart(p.k, t, p.x + Math.cos(p.b) * dr, p.z - Math.sin(p.b) * dr, p.a); if (f) return f; }
+  return null;
+}
+/* ===== the orders: perim and fob ===== */
+const enpOf = C => C.enp || (C.enp = { T: 0, fobT: 0, done: {}, fobs: [], fl: [] });
+function enpSay(t, s, at, key) {
+  const A = enpOf(cmdOf(t)), K = A.k || (A.k = {});
+  if (key) { if (K[key] !== undefined && S.t - K[key] < GEN.dup) return; K[key] = S.t; }
+  A.fl.push({ t: Math.round(S.t), s }); if (A.fl.length > ENP.log) A.fl.shift();
+  gLog(t, 'eng', s, at, key);
+}
+/* the site of an order at x z: a held point, a supply base or a forward base within 200 m, else the place itself */
+function enpSite(t, x, z, fob) {
+  if (!fob) {
+    for (const p of S.cq ? S.cq.p : []) if (p.base < 0 && Math.hypot(p.x - x, p.z - z) < 200) return { x: p.x, z: p.z, R: ENP.R.pt, k: 'pt', nm: gName(p), key: 'p' + (p.L || Math.round(p.x)) };
+    for (const b of S.sup) if (b.team === t && !b.dead && Math.hypot(b.x - x, b.z - z) < 200) return { x: b.x, z: b.z, R: ENP.R.sup, k: 'sup', nm: 'a base de suprimento da rota ' + (b.ri + 1), key: 's' + b.id };
+  }
+  return { x, z, R: fob ? ENP.R.fob : ENP.R.pt, k: fob ? 'fob' : 'at', nm: fob ? 'a base avançada ' + gNear(x, z) : ecoNear(x, z), key: 'x' + Math.round(x / 50) + ',' + Math.round(z / 50) };
+}
+/* the builders: the free engineers of fortification nearest, else the plain engineers */
+function enpBuilders(t, x, z) {
+  const free = q => q.team === t && !q.net && q.live >= 2 && !q.state && !q.op && !q.lift && !q.rd && !(typeof aidRide === 'function' && aidRide(q)) && q.ord && q.ord.k !== 'supply' && q.ord.k !== 'build' && !q.ord.b && gLead(q);
+  const d = q => hdist(gLead(q), { x, z });
+  for (const job of ['fen', 'eng']) { const l = S.squads.filter(q => q.job === job && free(q) && d(q) < ENP.reach).sort((a, b) => d(a) - d(b)); if (l.length) return [l[0]]; }
+  return [];
+}
+function enpOrder(t, c, by) {
+  if (!ENP.on) return gBad('enp');
+  if (!(S.T.mv >= 4)) return gBad('mv');
+  if (!gMapOk(c.x, c.z)) return gBad('map');
+  if (S.net && !Net.hsc) return gBad('hsc');
+  const rt = gRt(c); if (rt === null) return gBad('rt');
+  const fob = c.k === 'fob', site = enpSite(t, c.x, c.z, fob), plan = enpLayout(t, site);
+  if (!enpMissing(t, plan) && !fob) return gBad('done');
+  const C = cmdOf(t); if (C.ops.some(o => !o.over && o.enp && Math.hypot(o.enp.site.x - site.x, o.enp.site.z - site.z) < 60)) return gBad('done');
+  const named = Array.isArray(c.ids) && c.ids.length > 0, qs = named ? gSqs(t, c.ids) : enpBuilders(t, site.x, site.z); if (!qs.length) return gBad('sq');
+  const p = railOf(site.x, site.z);
+  const r = gSend(t, 'work', site.x, site.z, qs, named ? 2 : 1, rt || [], () => ({ x: site.x, z: site.z, O: { k: 'hold', ri: p.ri, s: p.s, x: site.x, z: site.z, R: 10, mk: 'build', fast: 1, enp: 1 } }));
+  if (!r) return gBad('way');
+  const L = gLead(r.qs[0]), walk = L ? hdist(L, site) : 0;
+  r.op.v = 'fort';
+  r.op.enp = { site, plan, by, fob, T0: S.t, Tm: (fob ? ENP.fob.T : ENP.T) + walk * ENP.walkK, st: 'a caminho', n0: plan.length - enpMissing(t, plan), wT: 0, gd: null, bq: r.qs.slice() };   // its builders (a ride on the way changes their order for a while)
+  if (fob) {   // a squad of the line holds it while the engineers build
+    const g = gPick(t, {}, site.x, site.z, 1, { held: 1, line: 1, road: 1, push: 1 }, { fen: 1, eng: 1 }).find(q => !r.qs.includes(q) && hdist(gLead(q), site) < ENP.reach);
+    const w = g && gWay(g, rt || [], site.x, site.z);
+    if (w) { gTake(r.op, g, { k: 'hold', ri: p.ri, s: p.s, x: site.x, z: site.z, R: site.R + 12, mk: 'defend', fast: 1, wp: w }); r.op.enp.gd = g; }
+  }
+  const who = r.qs.map(q => (q.job === 'fen' ? enpNm(t) + ' (' + sqName(q) + ')' : sqName(q))).join(', ');
+  const s = (fob ? 'Base avançada ' : 'Perímetro fortificado em ') + (fob ? gNear(site.x, site.z) : site.nm) + ': ' + who + ' a ' + Math.round(walk) + ' m, ' + plan.length + ' peças' + (r.op.enp.gd ? '; ' + sqName(r.op.enp.gd) + ' garante a posição' : '');
+  gWhy(r.qs, c.why || s); enpSay(t, s + (c.why && by === 'ai' ? ' (' + c.why + ')' : ''), site, null);
+  return gYes(r.op.id);
+}
+GC.fort = (G => ({ d: G.d, r: G.r, f(t, c, by, R) {
+  if (c && (c.k === 'perim' || c.k === 'fob')) return enpOrder(t, c, by);
+  if (c && enpK(W21.dig[c.k]) && S.net && !Net.hsc) return gBad('hsc');
+  return G.f(t, c, by, R);
+} }))(GC.fort);
+/* the builders of a perimeter do not dig their own trench on the side (fortPlan's own work for a squad holding) */
+fortPlan = (g => (t, sq) => { g(t, sq.filter(q => !(q.ord && q.ord.enp))); enpPlan(t, sq); })(fortPlan);
+/* the order under way, each plan of its side (OPS.usr) */
+function enpTick(C, op) {
+  const t = C.t, E = op.enp, l = opLive(op).filter(q => E.bq.includes(q)), s = E.site;
+  if (!l.length) return enpEnd(C, op, 'sem construtores');
+  if (S.t - E.T0 > E.Tm) return enpEnd(C, op, 'tempo esgotado');
+  const busy = new Set(l.map(q => q.ord.wk).filter(Boolean)), cand = E.plan.filter(p => !p.skip && (() => { const f = enpAt(t, p); return !f || (f.prog < 1 && !busy.has(f)); })());
+  let any = false;
+  for (const q of l) {
+    const O = q.ord, L = gLead(q); if (!L) continue;
+    if (!O || !O.enp) { E.st = 'a caminho'; continue; }   // on a ride
+    const w = O.wk; if (w && !w.gone && w.prog < 1 && S.os[w.id] < 2) { any = true; E.st = 'construindo'; continue; }
+    if (w) { O.wk = null; q.cgP = null; }
+    if (hdist(L, s) > s.R + 45) { E.st = 'a caminho'; continue; }
+    if (foeIn(t, L.x, L.z, ENP.foe)) { E.st = 'parada: inimigo perto'; enpSay(t, 'Perímetro em ' + s.nm + ': a obra para, inimigo perto', s, 'enpf' + s.key); continue; }
+    const p = cand.filter(p => !p.q || p.q === q).sort((u, v) => u.pri - v.pri || Math.hypot(u.x - L.x, u.z - L.z) - Math.hypot(v.x - L.x, v.z - L.z))[0];
+    if (!p) continue;
+    const f0 = enpAt(t, p); if (f0) { O.wk = f0; q.pts = null; q.cgP = null; p.q = q; cand.splice(cand.indexOf(p), 1); any = true; continue; }   // begun and left: taken up again
+    const F = FORT.K[p.k];
+    if (F.cost && ecoSim() && S.eco.d[t] && (E.by === 'ai' ? !enpPay(t, F.cost) : cgnShort(t, F.cost))) {   // short of money: it waits (an AI order keeps the engineers' small reserve ENP.keep; not held to the economy's whole reserve nor to the works' budget of the minute, BMR)
+      E.st = 'aguarda recursos'; if (!E.wT) E.wT = S.t; any = true;
+      enpSay(t, 'Perímetro em ' + s.nm + ': aguarda energia e metal para ' + F.name.toLowerCase(), s, 'enpc' + s.key);
+      if (S.t - E.wT > ENP.wait) return enpEnd(C, op, 'sem recursos');
+      continue;
+    }
+    E.wT = 0;
+    const f = enpStart(t, p);
+    if (f) { O.wk = f; q.pts = null; q.cgP = null; p.f = f; p.q = q; cand.splice(cand.indexOf(p), 1); any = true; E.st = 'construindo'; }
+    else { p.fl = (p.fl || 0) + 1; if (p.fl >= ENP.fail) p.skip = 1; }   // the ground refuses it: left out after a few tries
+  }
+  const left = enpMissing(t, E.plan), up = E.plan.filter(p => !p.skip && enpAt(t, p) && enpAt(t, p).prog >= 1).length, todo = E.plan.filter(p => !p.skip).length;
+  E.n = up; E.N = todo;
+  if (!left && up >= todo && !any) {
+    enpSay(t, (E.fob ? 'Base avançada ' + gNear(s.x, s.z) : 'Perímetro fortificado em ' + s.nm) + ' pronto: ' + up + ' peças' + (E.plan.length > todo ? ' (' + (E.plan.length - todo) + ' que o terreno não deixou)' : ''), s, null);
+    enpOf(C).done[s.key] = S.t;
+    if (E.fob) enpFobNext(t, C, E);
+    return enpEnd(C, op, '');
+  }
+}
+function enpEnd(C, op, why) {
+  const E = op.enp, l = opLive(op);
+  if (why) enpSay(C.t, (E.fob ? 'Base avançada ' + gNear(E.site.x, E.site.z) : 'Perímetro em ' + E.site.nm) + ': desiste, ' + why, E.site, null);
+  for (const q of l) if (E.bq.includes(q) && q.ord && q.ord.enp && q.ord.wk) q.ord.wk = null;
+  if (E.fob && E.gd && E.gd.op === op && E.gd.live > 0) { E.gd.op = null; E.gd.back = null; }   // the guard stays and holds the forward base
+  if (!op.over) opEnd(C, op);
+}
+OPS.usr = (g => (C, op) => { g(C, op); if (!op.over && op.enp) enpTick(C, op); })(OPS.usr);
+/* a forward base up: a supply base there where the logistics and the caps allow, and a radio relay where the command net does not reach */
+function enpFobNext(t, C, E) {
+  const s = E.site, e = enpThreat(C, s.x, s.z), d = Math.hypot(e.x - s.x, e.z - s.z) || 1, bx = s.x - (e.x - s.x) / d * 6, bz = s.z - (e.z - s.z) / d * 6;
+  if (!S.sup.some(b => b.team === t && !b.dead && Math.hypot(b.x - s.x, b.z - s.z) < 400)) {
+    const r = genCmd(t, { c: 'fort', k: 'sup', x: Math.round(bx), z: Math.round(bz), why: 'base de suprimento na base avançada' }, 'ai');
+    enpSay(t, 'Base avançada ' + gNear(s.x, s.z) + ': base de suprimento ' + (r.ok ? 'ordenada' : 'recusada (' + (GEN.no[r.why] || r.why) + ')'), s, null);
+  }
+  if (typeof cnRelR === 'function' && FORT.rel && S.forts && !(S.net && !Net.crl)) {
+    const R = cnRelR(), b = S.base[t], cov = (b && Math.hypot(b.x - s.x, b.z - s.z) < R) || S.forts.some(f => f.team === t && f.F.cn && !f.gone && Math.hypot(f.x - s.x, f.z - s.z) < R);
+    if (!cov) { const r = genCmd(t, { c: 'fort', k: 'radio', x: Math.round(bx + 8), z: Math.round(bz), why: 'antena na base avançada' }, 'ai'); enpSay(t, 'Base avançada ' + gNear(s.x, s.z) + ': antena de rádio ' + (r.ok ? 'ordenada' : 'recusada (' + (GEN.no[r.why] || r.why) + ')'), s, null); }
+  }
+}
+/* ===== the AI general ===== */
+const enpOn = t => !!ENP.on && !!S.cmd && !S.over && !(S.demo && !S.watch) && (!S.net || (S.host && Net.ft && Net.hsc)) && S.T.mv >= 4 && genBy(t, 'def') === 'ai';
+/* a key position ahead (M1): the choke points, a crest, near the front on our side, out of the enemy's sight, near a road, away from what we have */
+function enpFobPick(t, C, A) {
+  const M = C.tm, F = ENP.fob; if (!M || !M.k || !M.l) return null;
+  const mine = S.sup.filter(b => b.team === t && !b.dead).map(b => ({ x: b.x, z: b.z })).concat(S.cq ? S.cq.p.filter(p => p.hold === t).map(p => ({ x: p.x, z: p.z })) : [], A.fobs, S.base[t] ? [S.base[t]] : []);
+  let best = null, bs = 0;
+  for (let q = 0; q < M.k.length; q++) {
+    const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
+    if (!gMapOk(x, z) || M.l[q] < -.25 || (M.f && M.f[q] > 3)) continue;
+    const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
+    const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
+    const sc = (M.k[q] >= F.choke ? 1 + M.k[q] : 0) + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
+    const r = railOf(x, z); if (r.d > F.road) continue;
+    if (mine.some(o => Math.hypot(o.x - x, o.z - z) < F.apart)) continue;
+    const v = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5) - Math.min(2, cmdKnown(C, x, z, 600) / 3);
+    if (v > bs) { bs = v; best = { x, z, why: (M.k[q] >= F.choke ? 'gargalo' : 'crista') + (crest > F.crest && M.k[q] >= F.choke ? ' numa crista' : ''), sc: v }; }
+  }
+  if (!best) return null;
+  const r = railOf(best.x, best.z), rr = S.T.routes[r.ri], o = routeAt(rr, r.s), dx = best.x - o.x, dz = best.z - o.z, d = Math.hypot(dx, dz);   // by the road: within 60 m of it, toward where it was
+  if (d > 60) { best.x = o.x + dx / d * 60; best.z = o.z + dz / d * 60; }
+  const c = clearOf(best.x, best.z, 3, {}); best.x = Math.round(c.x); best.z = Math.round(c.z);
+  return best;
+}
+function enpPlan(t, sq) {
+  if (!enpOn(t)) return;
+  const C = cmdOf(t), A = enpOf(C);
+  if (S.t < Math.max(A.T, ENP.start)) return;
+  A.T = S.t + ENP.every;
+  const ops = C.ops.filter(o => !o.over && o.enp), tier = (C.afp && C.afp.tier) || 0;
+  A.fobs = A.fobs.filter(f => !(S.cq && S.cq.p.some(p => p.hold !== t && p.hold >= 0 && Math.hypot(p.x - f.x, p.z - f.z) < 300)) && cmdKnown(C, f.x, f.z, 250) < 6);   // a forward base the enemy overran is let go
+  if (!S.squads.some(q => q.team === t && (q.job === 'fen' || q.job === 'eng') && !q.op && !q.state && q.live >= 2)) return;   // no engineer free
+  /* a new forward base: one under way at a time, up to max[tier] */
+  if (S.t >= A.fobT && !ops.some(o => o.enp.fob) && A.fobs.length < ENP.fob.max[clamp(tier, 0, 2)]) {
+    A.fobT = S.t + ENP.fob.every;
+    const P = enpFobPick(t, C, A);
+    if (P) {
+      const b = enpBuilders(t, P.x, P.z)[0];
+      if (b) {
+        const r = genCmd(t, { c: 'fort', k: 'fob', x: P.x, z: P.z, ids: [b.id], why: 'posição-chave à frente (' + P.why + ')' }, 'ai');
+        if (r.ok) { A.fobs.push({ x: P.x, z: P.z, T: S.t }); return; }
+        enpSay(t, 'Base avançada ' + gNear(P.x, P.z) + ': recusada (' + (GEN.no[r.why] || r.why) + ')', P, 'enpfr');
+      }
+    }
+  }
+  /* the sites by value */
+  const sites = [], e0 = mnBase(t);
+  for (const p of S.cq ? S.cq.p : []) if (p.base < 0 && p.hold === t) sites.push(Object.assign(enpSite(t, p.x, p.z, false), { v: 3 + (p.own !== t ? 1 : 0) }));
+  for (const f of A.fobs) sites.push(Object.assign(enpSite(t, f.x, f.z, true), { v: 2.5, key: 'f' + Math.round(f.x) + ',' + Math.round(f.z) }));
+  for (const b of S.sup) if (b.team === t && !b.dead && b.prog >= 1) sites.push(Object.assign(enpSite(t, b.x, b.z, false), { v: 2 }));
+  let best = null, bv = -1e9;
+  const far = Math.hypot(S.W, 2 * S.HW);
+  for (const s of sites) {
+    if (ops.some(o => Math.hypot(o.enp.site.x - s.x, o.enp.site.z - s.z) < 60)) continue;
+    const hot = cmdKnown(C, s.x, s.z, ENP.quiet); if (hot >= ENP.hot) continue;
+    if (A.done[s.key] !== undefined && S.t - A.done[s.key] < ENP.redo) continue;
+    if (A.done['n' + s.key] !== undefined && S.t - A.done['n' + s.key] < ENP.again) continue;
+    const thr = Math.min(3, cmdKnown(C, s.x, s.z, 1200) / 3) + ((C.thb || []).some(I => !I.over && Math.hypot(I.x - s.x, I.z - s.z) < 900) ? 1 : 0);
+    const pl = enpLayout(t, s), miss = enpMissing(t, pl); if (!miss) { A.done[s.key] = S.t; continue; }
+    const v = s.v + thr + (1 - Math.hypot(e0.x - s.x, e0.z - s.z) / far) + miss / pl.length;
+    if (v > bv) { bv = v; best = s; }
+  }
+  if (!best) return;
+  const b = enpBuilders(t, best.x, best.z)[0]; if (!b) return;
+  const r = genCmd(t, { c: 'fort', k: 'perim', x: Math.round(best.x), z: Math.round(best.z), ids: [b.id], why: best.k === 'pt' ? 'fortificar o ponto tomado' : best.k === 'sup' ? 'fortificar a base de suprimento' : 'fortificar a base avançada' }, 'ai');
+  if (!r.ok) { A.done['n' + best.key] = S.t; enpSay(t, 'Perímetro em ' + best.nm + ': recusado (' + (GEN.no[r.why] || r.why) + ')', best, 'enpr' + best.key); }
+}
+/* ===== the General View: the perimeters under way and the free engineers (V.enp, own side; the host's and solo) ===== */
+function enpView(t) {
+  if (!S.cmd || !S.cmd[t]) return [];
+  const out = [];
+  for (const op of S.cmd[t].ops) if (!op.over && op.enp) { const E = op.enp; out.push({ x: Math.round(E.site.x), z: Math.round(E.site.z), R: E.site.R, n: E.n || 0, N: E.N || E.plan.length, st: E.st, nm: E.site.nm, fob: E.fob ? 1 : 0 }); }
+  return out;
+}
+genVM = (g => (t, all) => { const V = g(t, all); if (V && isSide(t) && (!S.net || S.host)) V.enp = enpView(t); return V; })(genVM);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -42502,6 +42861,66 @@ function gTun(g, V, P) {
   g.restore();
 }
 GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'eng') + 1), 0, { id: 'tun', nm: 'Túneis', on: 1, draw: gTun });
+/* ---------- ENGENHARIA DOS PONTOS: what is seen of the walls and of the perimeters under way (ENP, não testado) ----------
+   ELOOK: the walls are boxes of the works' instanced mesh (postBoxes), each basket of a HESCO, each course of a high sandbag wall, each T-wall
+   section and each log of a palisade within near m of the camera; beyond it one box a piece (the level of detail, set again with the works,
+   every FLOOK.every frames). The General View: the walls as bold strokes (gWorks), and a layer Engenharia: each perimeter under way, its ring,
+   how many of its pieces stand and what its builders do (V.enp) */
+const ELOOK = { near: 160, hesco: [0xb9a678, 0xa8966a], fill: 0x6a593f, conc: [0x9d998e, 0x8e8a80], log: [0x6f5b3c, 0x5d4c33], bag: FLOOK.bag };
+function enpBoxes(f, box, p, st) {
+  const F = f.F, hw = f.o.hw, hd = f.o.hd, H = F.size[2] * (st ? .6 : .25 + .75 * p), ww2 = S.era === 'ww2', cam = camera ? camera.position : null;
+  const col = f.k === 13 ? (ww2 ? ELOOK.log[0] : ELOOK.conc[0]) : ww2 ? (f.k === 11 ? ELOOK.bag[0] : ELOOK.fill) : ELOOK.hesco[0];
+  if (cam && Math.hypot(cam.x - f.x, cam.z - f.z) > ELOOK.near) return box(0, H / 2, 0, hw * 2, H, hd * 2, col);
+  if (f.k === 13 && ww2) {   // the palisade: logs side by side, two rails behind
+    const n = Math.max(1, Math.round(hw * 2 / .34));
+    for (let i = 0; i < n; i++) { const h = H * (1 + (i % 3) * .04); box((i - (n - 1) / 2) * hw * 2 / n, h / 2, 0, hw * 2 / n - .03, h, hd * .8, ELOOK.log[i & 1]); }
+    for (const y of [.35, .75]) box(0, H * y, -hd * .6, hw * 2, .18, .18, ELOOK.log[1]);
+    return;
+  }
+  if (f.k === 13) {   // the T-walls: a footing and the slabs, a hand's width apart
+    const n = Math.max(1, Math.round(hw * 2 / 1.5));
+    box(0, .25, 0, hw * 2, .5, hd * 2.2, ELOOK.conc[1]);
+    for (let i = 0; i < n; i++) box((i - (n - 1) / 2) * hw * 2 / n, H / 2, 0, hw * 2 / n - .06, H, hd * .45, ELOOK.conc[i & 1]);
+    return;
+  }
+  if (ww2 && f.k === 11) {   // the high sandbag wall: courses of bags, each a little narrower, every other one offset
+    const rows = Math.max(1, Math.round(H / .35));
+    for (let r = 0; r < rows; r++) box((r & 1) * .2, (r + .5) * H / rows, 0, hw * 2 - .3, H / rows - .04, hd * 2 * (1 - .12 * r / rows), ELOOK.bag[r & 1]);
+    return;
+  }
+  if (ww2) {   // the earth bank faced with logs toward the enemy
+    box(0, H * .45, 0, hw * 2, H * .9, hd * 2 + .6, ELOOK.fill);
+    for (const y of [.25, .6, .9]) box(0, H * y, hd + .2, hw * 2, .22, .22, ELOOK.log[1]);
+    return;
+  }
+  const n = Math.max(1, Math.round(hw * 2 / 1.1));   // the HESCO baskets and the earth in them
+  for (let i = 0; i < n; i++) box((i - (n - 1) / 2) * hw * 2 / n, H / 2, 0, hw * 2 / n - .06, H, hd * 2, ELOOK.hesco[i & 1]);
+  box(0, H + .03, 0, hw * 2 - .1, .08, hd * 2 - .1, ELOOK.fill);
+}
+postBoxes = (g => (f, box, p, st) => (f.F && f.F.enp ? enpBoxes(f, box, p, st) : g(f, box, p, st)))(postBoxes);
+/* the General View */
+gWorks = (g => (G, V, P) => {
+  const all = V.forts || [], mine = all.filter(f => enpK(f.k)); V.forts = all.filter(f => !enpK(f.k));
+  try { g(G, V, P); } finally { V.forts = all; }
+  for (const f of mine) {
+    if (!gOn(P, f.x, f.z, 30)) continue;
+    const L = FORT.K[f.k].size[0] / 2, ux = -Math.sin(f.a), uz = -Math.cos(f.a);
+    G.beginPath(); G.moveTo(P.X(f.x - ux * L), P.Y(f.z - uz * L)); G.lineTo(P.X(f.x + ux * L), P.Y(f.z + uz * L));
+    G.strokeStyle = gCol(V, f.t); G.lineWidth = f.k === 12 ? 2 : 3.4; if (f.prog < 1) G.setLineDash([3, 3]); G.stroke(); G.setLineDash([]);
+  }
+})(gWorks);
+{ const L = GLAY.find(L => L.id === 'eng'); if (L) L.draw = gWorks; }
+function gEnp(G, V, P) {
+  const k = P.k;
+  for (const e of V.enp || []) {
+    if (!gOn(P, e.x, e.z, 200)) continue;
+    const x = P.X(e.x), y = P.Y(e.z), r = Math.max(7 * k, Math.abs(P.X(e.x + e.R) - x)), c = gCol(V, V.t);
+    G.beginPath(); G.arc(x, y, r, 0, TAU); G.setLineDash([4, 3]); G.strokeStyle = c; G.lineWidth = 1.4; G.stroke(); G.setLineDash([]);
+    G.beginPath(); G.arc(x, y, r + 3 * k, -Math.PI / 2, -Math.PI / 2 + TAU * clamp(e.N ? e.n / e.N : 0, 0, 1)); G.lineWidth = 2.2; G.stroke();
+    if (GV.lab) gTxt(G, (e.fob ? 'FOB ' : 'ENG ') + e.n + '/' + e.N + ' · ' + e.st, x, y - r - 6 * k, 10 * k, c, 'center');
+  }
+}
+GLAY.splice(Math.max(0, GLAY.findIndex(L => L.id === 'eng') + 1), 0, { id: 'enp', nm: 'Engenharia', on: 1, draw: gEnp });
 /* the General's hand on a tunnel (O, the kind Túnel): a click near one of the side's tunnel mouths sends the selection (or those the general
    picks) through it; elsewhere the first click is the way in and the second the way out (Shift: the general picks the way out) */
 gorTarget = (g => (px, py, shift) => {

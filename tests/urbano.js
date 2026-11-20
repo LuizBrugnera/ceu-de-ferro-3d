@@ -8,7 +8,7 @@
    3. the garrison of a town: a squad holding a town point by the defence plan (DFP): its places in buildings;
    4. clearing a town: a squad assaulting a town point nobody holds goes building by building: buildings cleared, men inside them;
    5. the switch: with URB.on 0 the battle is the one before (the same squads, the same steps, the same fingerprint); and PARITY=<an older
-      page> plays SECS s of the same AI × AI match on both (URB.on 0 on this one): the same fingerprint every 15 s (the meters do not change it).
+      page> plays SECS s of the same AI × AI match on both (URB.on 0 on this one; map 11, the game's, or MAPV): the same fingerprint every 15 s (the meters do not change it).
    SEEDS=3 seeds each (default 3), ERA ww2|modern (default both for 1), ONLY=1,3 some of them, ATD and ATV the squad's distance off the road
    and the tank's speed in 1. Prints the numbers; fails only when on is not better than off. */
 const H = require('./harness'), { ok, done } = H, crypto = require('crypto');
@@ -112,7 +112,7 @@ if (run(5)) {
   console.log('-- 5. the switch --');
   const fp = S => { const h = crypto.createHash('md5'); for (const m of S.men) h.update(m.x.toFixed(3) + ',' + m.z.toFixed(3) + ',' + (m.dead ? 1 : 0)); for (const u of S.units) h.update(u.x.toFixed(3) + ',' + u.z.toFixed(3) + ',' + u.hp); h.update(JSON.stringify(S.cq ? S.cq.tk : 0)); return h.digest('hex').slice(0, 12); };
   const play = (page, on, secs) => {
-    const C = H.load({ seed: 3, eco: 1, lg: 1, rec: 1, mapv: 6, ana: true, page }), $ = C.$; $('AIB').now = () => 0;
+    const C = H.load({ seed: 3, eco: 1, lg: 1, rec: 1, mapv: +process.env.MAPV || 11, ana: true, page }), $ = C.$; $('AIB').now = () => 0;
     if (on !== null) $('URB.on = ' + on);
     const S = C.watch('ww2', { doc: ['balanced', 'aggressive'], len: 0 }), l = []; let nx = 15;
     C.run(secs, () => { if (S.t >= nx) { nx += 15; l.push(fp(S)); } return !S.over; });

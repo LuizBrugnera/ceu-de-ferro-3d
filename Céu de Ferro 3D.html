@@ -36927,6 +36927,9 @@ genCard = (f => (t, id) => {
      the squad's hunter. The exercise in a match showed what held him: the leader's 'reagir' had begun on the first contact and kept him as
      one of the base of fire (aguentar: in cover where he was, drGo), so the 'anticarro' method never came and a Panzerfaust of 70 m never got
      in range. Now the squad's drills that hold a man as one of the rest (at.free: reagir, fixar, lances...) leave him be while he hunts;
+     armour his squad knows of (its beliefs, recognised, fresh within at.bel s, within at.k of his range and at.far m) but he does not see
+     he goes toward, to at.lat of his range from it in cover, unless an enemy soldier is within at.man m of him (the exercise in a match:
+     most of the time near armour the anti-tank man had no sight of it, and none was ever in his range); once he sees it,
      a tank that stands he works round as before (stalk); one that moves he meets on its way: ahead of it, at.lat of his range off its track
      on his side, when that is within at.reach m of him and he runs there (at.run m/s) before it comes (at.slack s), else he waits in
      cover by his place. Within at.fire of his
@@ -36944,7 +36947,7 @@ genCard = (f => (t, id) => {
      snp.turn rad to one side of the threat, then to the other, then keeps his slot for snp.keep s. The post is his place in the squad
      (q.bg, read by slot) for snp.keep s; after his shots (the old shoot and move) he takes another snp.zone m or more from the one he left.
      When the squad moves on, his slot again. A garrison's sniper was put at a window by the defence plan, where he may not lie down and so
-     never fired.
+     never fired. A post's garrison (a sniper's tower, an anti-tank post: q.wpost) keeps the work's own places, and its men are no hunters.
    - The garrison of a town (URB.gar; LAMBS's taskGarrison): a post of the defence plan (CEREBRO: defesa) of a town point its squads hold
      takes the windows of the gar.n nearest buildings of the town within gar.bld m that look toward its kill zone, every storey, gar.wins a
      building, before the works, the cover points and the line in the open that the plan gives elsewhere; its reserve, when the plan found
@@ -36959,7 +36962,7 @@ genCard = (f => (t, id) => {
    Honest: the man's target and his squad's board and beliefs, the side's knowledge (ptThreat), the map's roads and buildings. Draws no
    random number of its own (ffHeld and coverSpot, which it calls, may), and changes the battle only where URB.on. */
 const URB = { on: 1,
-  at: { fire: .92, close: .55, wait: 10, mov: 1.5, lat: .6, run: 4, slack: 4, reach: 150, free: ['reagir', 'fixar', 'lances', 'contato', 'tanque', 'fogo-distante', 'perimetro'] },
+  at: { fire: .92, close: .55, wait: 10, mov: 1.5, lat: .6, run: 4, slack: 4, reach: 150, bel: 8, far: 300, k: 3, man: 60, free: ['reagir', 'fixar', 'lances', 'contato', 'tanque', 'fogo-distante', 'perimetro'] },
   snp: { r: 110, back: 40, edge: .7, turn: .9, aim: 250, ovw: [220, 650], keep: 120, zone: 25, again: 6 },
   gar: { bld: 60, n: 3, wins: 4, res: 90 },
   cqb: { near: 140, clr: 6, max: 50, keep: 600, hot: 8 } };
@@ -36971,12 +36974,24 @@ const urbBusy = (m, q) => (q && (q.state === 1 || q.hf)) || (m.rf && m.rf.k && S
 /* ---- the anti-tank man ---- */
 /* he hunts armour: a rocket launcher with rounds in hand, his own target (manThink's, from what he perceives) a tank or light armour */
 const urbHunt = m => { const t = m.ai && m.ai.tgt; return !!t && !t.dead && !!URBA[t.kind] && m.ctl.w === 1 && !!urbHeat(m) && !(m.pa && m.fc && m.fc.gm === m) && !(m.sq && m.sq.wpost); };   // a gun's crew and a post's garrison are POSTS'
-/* the squad's drills that would hold him as one of the rest (a base of fire, a bound, cover): not while he hunts */
-for (const D of DRILLS) if (D.cls === 'inf' && URB.at.free.includes(D.id) && typeof D.man === 'function') D.man = (f => (q, d, m, A, best) => (urbOn() && urbHunt(m) ? undefined : f(q, d, m, A, best)))(D.man);
+/* the armour his squad knows of (its beliefs: what its men made out and told) near enough for his launcher, recognised and fresh */
+const urbBel = (m, q, rng) => (q && q.bel ? belTop(q, b => drArm(b) && b.g >= 2 && drFresh(b, URB.at.bel) && Math.hypot(b.x - m.x, b.z - m.z) < Math.min(URB.at.far, rng * URB.at.k)) : null);
+/* the squad's drills that would hold him as one of the rest (a base of fire, a bound, cover): not while he hunts (in sight, or his squad's) */
+const urbHunting = m => urbHunt(m) || (!!m.ai && S.t - (m.ai.urbH || -9) < 1.5);
+for (const D of DRILLS) if (D.cls === 'inf' && URB.at.free.includes(D.id) && typeof D.man === 'function') D.man = (f => (q, d, m, A, best) => (urbOn() && urbHunting(m) ? undefined : f(q, d, m, A, best)))(D.man);
 /* where he goes: kneeling where he is in range; a tank that stands, worked round as before (stalk); one that moves, met on its way */
 manThink = (g => m => {
   g(m);
-  const A = m.ai; if (!A || !urbOn() || m.net || !urbHunt(m) || urbBusy(m, m.sq) || A.dsc > S.t) return;   // the anticarro drill's move after a shot is its own
+  const A = m.ai; if (!A || !urbOn() || m.net) return;
+  if (!urbHunt(m)) {   // no armour of his own in sight: the armour his squad knows of, toward it in cover until he sees it (no enemy soldier close to him first)
+    const sp = urbHeat(m), q = m.sq, t0 = A.tgt; A.urbH = 0;
+    if (!sp || !q || q.wpost || urbBusy(m, q) || A.dsc > S.t || (m.pa && m.fc && m.fc.gm === m) || (t0 && t0.man && !t0.dead && hdist(t0, m) < URB.at.man)) return;
+    const b = urbBel(m, q, sp.d.rng); if (!b) return;
+    const d = Math.hypot(b.x - m.x, b.z - m.z) || 1, R = sp.d.rng * URB.at.lat, p = d > R ? covBest(b.x + (m.x - b.x) / d * R, b.z + (m.z - b.z) / d * R, 10, b) : covBest(m.x, m.z, 8, b);
+    A.gx = p.x; A.gz = p.z; A.run = hdist(m, p) > 6; A.mv = false; A.st = A.run ? 0 : 1; A.urbH = S.t;
+    return;
+  }
+  if (urbBusy(m, m.sq) || A.dsc > S.t) return;   // the anticarro drill's move after a shot is its own
   const t = A.tgt, q = m.sq, rng = m.arms[1].d.rng, U = URB.at, r = hdist(m, t);
   if (r < rng * U.fire && A.los) { A.gx = m.x; A.gz = m.z; A.run = A.mv = false; if (A.st !== 2) A.st = 1; return; }   // in range with a line of fire: here (without one, stalk's way round)
   const v = vel(t), sv = Math.hypot(v.x, v.z); if (sv <= U.mov) return;

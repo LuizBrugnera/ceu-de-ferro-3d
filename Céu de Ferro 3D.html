@@ -5524,8 +5524,8 @@ const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const pick = arr => arr[(Math.random() * arr.length) | 0];
 const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
 const vlen = a => Math.hypot(a.x, a.y, a.z);
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-const hdist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+const dist = (a, b) => { const x = a.x - b.x, y = a.y - b.y, z = a.z - b.z; return Math.sqrt(x * x + y * y + z * z); };   // not Math.hypot: 3x dearer in V8, and these two run millions of times a second (cf-lag)
+const hdist = (a, b) => { const x = a.x - b.x, z = a.z - b.z; return Math.sqrt(x * x + z * z); };
 function vnorm(a) { const l = Math.hypot(a.x, a.y, a.z) || 1; return { x: a.x / l, y: a.y / l, z: a.z / l }; }
 /* body axes from the attitude quaternion: f = nose, u = up, r = right wing */
 function axes(p) {
@@ -6969,12 +6969,14 @@ function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
 /* the nearest road to a point: route ri, distance s along it and the signed offset to its side */
 function railOf(x, z) {
   let b = { d: 1e9 };
-  S.T.routes.forEach((r, ri) => {
+  const R = S.T.routes;
+  for (let ri = 0; ri < R.length; ri++) {
+    const r = R[ri];
     for (let i = 1; i < r.length; i++) {
-      const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.hypot(ox, oz);
+      const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.sqrt(ex * ex + ez * ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.sqrt(ox * ox + oz * oz);   // sqrt, not Math.hypot: 3x dearer (cf-lag)
       if (d < b.d) b = { d, ri, s: a.s + L * t, off: (oz * ex - ox * ez) / L };
     }
-  });
+  }
   return b;
 }
 /* ---------- path-finding on the road network (map version 2; nothing in the game calls it yet) ----------
@@ -9798,6 +9800,25 @@ function ranOver(m) {
    battle with the time since its last run, not every step: at 60 steps a second every other one, and half the soldiers on each (at, the
    time each new one starts with, so the two halves take turns). His body (the move, the turn, the stance, the arms) still steps every step */
 const MANB = { dt: 1 / 30, k: 0, at: () => ((MANB.k ^= 1) ? MANB.dt / 2 : 0) };
+/* MGR (cf-lag): the soldiers by squares of c m, for a scan that looks at every soldier for the ones within r m (a soldier's target,
+   manThink's): mgrNear(x, z, r) hands back, in the order of S.men, every soldier that may be within r m of x z, a few more too, so a scan
+   over them makes the same tests on the same soldiers in the same order as one over S.men (they test the distance first). Made again each
+   step (S.t) or when S.men is another list; a soldier added since is always in it, and pad m covers a step's walk or ride */
+const MGR = { c: 250, pad: 100, L: null, S: null, t: NaN, n: 0, g: new Map(), idx: [] };
+function mgrNear(x, z, r) {
+  const M = MGR, L = S.men;
+  if (M.L !== L || M.t !== S.t || M.S !== S) {
+    M.L = L; M.t = S.t; M.S = S; M.n = L.length; M.g.clear();
+    for (let i = 0; i < L.length; i++) { const o = L[i], k = Math.floor(o.x / M.c) * 4096 + Math.floor(o.z / M.c); let a = M.g.get(k); if (!a) M.g.set(k, (a = [])); a.push(i); }
+  }
+  const R = r + M.pad, i0 = Math.floor((x - R) / M.c), i1 = Math.floor((x + R) / M.c), j0 = Math.floor((z - R) / M.c), j1 = Math.floor((z + R) / M.c), I = M.idx; I.length = 0;
+  if (!Number.isFinite(i0 + i1 + j0 + j1) || (i1 - i0 + 1) * (j1 - j0 + 1) > 400) return L.slice();   // a point off the map or a wide look: all of them
+  for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) { const a = M.g.get(i * 4096 + j); if (a) for (const n of a) I.push(n); }
+  I.sort((a, b) => a - b);
+  const out = []; for (const n of I) out.push(L[n]);
+  for (let n = M.n; n < L.length; n++) out.push(L[n]);
+  return out;
+}
 function stepMan(m, dt) {
   m.inv -= dt;
   if (m.in) return inSeat(m, dt);
@@ -10213,7 +10234,7 @@ function manThink(m) {
   }
   c.w = best ? 1 : 0;
   if (!best) {
-    for (const o of S.men) { const d = hdist(o, m); if (!o.dead && !o.down && d < IAI.see && d < bs && foe(m, o) && known(A, m, o)) { bs = d; best = o; } }
+    for (const o of mgrNear(m.x, m.z, IAI.see)) { const d = hdist(o, m); if (!o.dead && !o.down && d < IAI.see && d < bs && foe(m, o) && known(A, m, o)) { bs = d; best = o; } }   // MGR: those that may be within IAI.see m, in the order of S.men
     for (const u of S.units) { const d = hdist(u, m) + 150; if (!u.dead && u.team !== m.team && soft(u) && d < IAI.soft + 150 && d < bs && known(A, m, u)) { bs = d; best = u; } }
   }
   A.tgt = best;
@@ -10237,7 +10258,7 @@ function aiMan(m, dt) {
   if (A.rsc && rescue(m, A, c)) return;
   if (m.def.snp) return aiSniper(m, dt);
   if (m.def.mort && !(m.sq && (m.sq.state === 1 || m.sq.fd < CMD.mort.self))) return aiMortar(m, dt);
-  if ((A.think -= dt) <= 0) { A.think = lodThink(m) + Math.max(A.think, -MANB.dt); manThink(m); }   // the time over is carried (a mind's beat at most), so he thinks every IAI.think s at a beat of MANB.dt as he did every step
+  if ((A.think -= dt) <= 0) { A.think = lodThink(m) + Math.max(A.think, -dt); manThink(m); }   // the time over is carried (this beat's at most), so he thinks every IAI.think s at a beat of MANB.dt as he did every step. Not -MANB.dt (cf-lag): when CLK lengthens the steps a beat is up to 2/30 s, the cut lined every soldier's thought up with the others' and 160-240 of them thought in one step, twice a second
   const t = sight(A, m, A.tgt), pin = m.sup > S.t && !A.mv && !(A.brk > S.t), rout = !!m.sq && m.sq.state === 1, dx = A.gx - m.x, dz = A.gz - m.z, d = Math.hypot(dx, dz), w = (m.arms[c.w] || m.arms[0]).d;
   if (!t) A.tgt = null;
   if (d > 1.5 && (rout || !pin)) {
@@ -11576,12 +11597,15 @@ const SLICE = { spot: 1.25, min: 60, plan: 1 };
    to hmax s: a step costs much the same however long it is, so the battle keeps more of the clock for the same time a frame. Never fewer
    than pay least s of the debt (the .05 s a frame of before, in fewer steps than before): no frame gives the battle less than it did. Only
    when even that does not pay the debt does the battle slow down (before: below 20 frames a second, whatever a step cost). With cheap steps
-   nothing changes: the same steps of the same length as before. plan(r, k) is the frame's: n steps of d s, g s of battle in all; cost(ms, n)
-   tells it what the n steps took */
-const CLK = { h: .017, hmax: 1 / 30, catch: .25, least: .05, budget: 100, ema: .2, c: 0,
+   nothing changes: the same steps of the same length as before. frame, share (cf-lag): the steps of h s that do not fit in frame ms, nor in
+   share of the frame's real time (a frame slow for its drawing keeps its short steps), are not taken while fewer, longer ones (fin, up to
+   hmax s each) pay the whole debt: before, a costly step (18 ms) filled every frame up to the budget with steps of h s, 100 ms a frame,
+   10 frames a second, for the same battle that 2 longer steps pay at 23 frames a second.
+   plan(r, k) is the frame's: n steps of d s, g s of battle in all; cost(ms, n) tells it what the n steps took */
+const CLK = { h: .017, hmax: 1 / 30, catch: .25, least: .05, budget: 100, frame: 20, share: .5, ema: .2, c: 0,
   plan(r, k) {
-    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), hi = Math.ceil(g / CLK.h - 1e-9), lo = Math.ceil(Math.min(g, CLK.least * (k || 1)) / CLK.hmax - 1e-9);
-    const n = CLK.c > 0 ? Math.max(1, lo, Math.min(hi, Math.floor(CLK.budget / CLK.c))) : hi, d = Math.min(g / n, CLK.hmax);
+    const g = Math.min(CLK.catch, r > 0 ? r : .016) * (k || 1), hi = Math.ceil(g / CLK.h - 1e-9), lo = Math.ceil(Math.min(g, CLK.least * (k || 1)) / CLK.hmax - 1e-9), fin = Math.ceil(g / CLK.hmax - 1e-9);
+    const n = CLK.c > 0 ? Math.max(1, lo, Math.min(hi, Math.floor(CLK.budget / CLK.c), Math.max(fin, Math.floor(Math.max(CLK.frame, Math.min(CLK.catch, r > 0 ? r : .016) * 1000 * CLK.share) / CLK.c)))) : hi, d = Math.min(g / n, CLK.hmax);
     return { n, d, g: n * d };
   },
   cost(ms, n) { if (n > 0 && ms >= 0) { const c = ms / n; CLK.c = CLK.c ? CLK.c + (c - CLK.c) * CLK.ema : c; } } };
@@ -36261,12 +36285,13 @@ function enpFobPick(t, C, A) {
   for (let q = 0; q < M.k.length; q++) {
     const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
     if (!gMapOk(x, z) || M.l[q] < -.25 || (M.f && M.f[q] > 3)) continue;
-    const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
     const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
     const sc = (M.k[q] >= F.choke ? 1 + M.k[q] : 0) + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
+    const v0 = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5); if (v0 <= bs) continue;   // the known enemy only takes from it: it cannot beat the best, so the dear tests below are not made (cf-lag: 2-4 s a call before)
+    const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
     const r = railOf(x, z); if (r.d > F.road) continue;
     if (mine.some(o => Math.hypot(o.x - x, o.z - z) < o.r)) continue;
-    const v = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5) - Math.min(2, cmdKnown(C, x, z, 600) / 3);
+    const v = v0 - Math.min(2, cmdKnown(C, x, z, 600) / 3);
     if (v > bs) { bs = v; best = { x, z, why: (M.k[q] >= F.choke ? 'gargalo' : 'crista') + (crest > F.crest && M.k[q] >= F.choke ? ' numa crista' : ''), sc: v }; }
   }
   if (!best) return null;

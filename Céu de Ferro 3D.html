@@ -9843,6 +9843,7 @@ function orgPoly(p) {
    perimeter was formed for (q.drPer: the end of a walk, its order, or the meeting place for its ride), his place in the ring */
 const slot = (q, i) => {
   const O = q.ord, X = q.bg && !q.state ? q.bg[i] : null; if (X) return X;
+  const W = q.at && !q.state && O ? cgnWork(q, O) : null; if (W) { const l = cgnPts(q, W); return l[i % l.length]; }   // at a work it builds: by the work, not in the houses or the trenches near (CGN)
   const P = q.drPer; if (P && !q.state && P.p[i] && (P.h === O ? q.at : P.h === q.rd && q.halt && q.rd.st !== 'ride')) return P.p[i];
   if (q.at && !q.state && O && O.x !== undefined) { const P = q.pts || (q.pts = ptPts(q, O) || postPts(q.team, O.x, O.z, Math.max(q.n0, 1), O.R, O.k)); return P[i % P.length]; }
   if (ORG.on) return orgSlot(q, i);   // on the move: the formation of the situation (ORG)
@@ -10388,7 +10389,7 @@ function cmdPoints(C, sq) {
     if (p.hold !== t || p.base >= 0 || cmdKnown(C, p.x, p.z, CMD.thr) <= 2 || sq.filter(q => q.ord.tw === p && (q.ord.k === 'hold' || q.ord.k === 'withdraw')).length >= D.need) continue;
     let best = null, bd = 2500;
     for (const q of sq) {
-      if (q.op || q.live < 3 || q.state || q.lift || q.ord.b || !(FREE[q.job] || (q.job === 'eng' && q.ord.k === 'hold')) || q.ri !== p.ri || (q.ord.tw && q.ord.tw.hold === t) || q.ord.k === 'supply') continue;
+      if (q.op || q.live < 3 || q.state || q.lift || q.ord.b || !(FREE[q.job] || (q.job === 'eng' && q.ord.k === 'hold')) || q.ri !== p.ri || (q.ord.tw && q.ord.tw.hold === t) || q.ord.k === 'supply' || q.ord.k === 'build') continue;   // nor one on its way to build a base (CGN)
       const L = q.men.find(m => !m.dead), d = L ? hdist(L, p) - (q.job === 'eng' ? 1000 : 0) : 1e9; if (d < bd) { bd = d; best = q; }   // the engineers first, to dig it in
     }
     if (best) { genCmd(t, { c: 'hold', pi: S.cq.p.indexOf(p), ids: [best.id] }, 'ai', { p, q: best }); return; }
@@ -10720,22 +10721,27 @@ function aiSite(t) {
 /* the planner's hand on the bases of side t: a squad to build each unfinished site and to guard each finished one, a new site while the
    side is short of them, the charge of an assault squad that has reached an enemy base, and the squads that fall back to resupply */
 function planSup(t, sq, F) {
-  const A = BLD.ai, mine = S.sup.filter(b => b.team === t && !b.dead), free = q => q.ord.k === 'hold' && !q.ord.b && !q.halt && !q.lift && !(q.op && q.op.k === 'usr') && (q.job === 'eng' || q.job === 'line' || q.job === 'held');   // a squad the general ordered by hand is his
+  const A = BLD.ai, mine = S.sup.filter(b => b.team === t && !b.dead), free = q => q.ord.k === 'hold' && !q.ord.b && !q.halt && !q.lift && !q.op && (q.job === 'eng' || q.job === 'line' || q.job === 'held');   // a squad the general ordered by hand is his, and one in a manoeuvre or an ambush is its operation's (CGN)
   const whole = m => m.dead || (m.hp >= m.max * .9 && m.arms[0].res >= m.arms[0].d.mags - 1 && !(m.def.mort && m.arms[1].res < m.arms[1].d.n - 2)), low = m => !m.dead && (m.hp < m.max * A.hp || m.arms[0].res <= 0 || (!!m.def.mort && m.arms[1].mag + m.arms[1].res <= 2));
   if (S.net && !Net.sb) return;
   for (const b of mine) {
-    const q = sq.find(q => q.ord.b === b) || sq.filter(q => free(q) && q.ri === b.ri && Math.abs(q.s - b.s) < A.fall).sort((x, y) => (x.job === 'eng' ? 0 : 1) - (y.job === 'eng' ? 0 : 1) || Math.abs(x.s - b.s) - Math.abs(y.s - b.s))[0];
+    if (b.prog >= 1 && b.upT === undefined) b.upT = S.t;
+    { const on = sq.filter(q => q.ord.b === b), gd = on.some(q => q.job === 'guard');   // its builders go back to their own work once it is up and guarded, the engineers after CGN.rel s anyway (CGN)
+      for (const q of on) if (b.prog >= 1 && q.job !== 'guard' && !q.op && (gd || (q.job === 'eng' && S.t - b.upT > CGN.rel))) { cgnHome(t, q); gLog(t, 'sup', 'Base de suprimento pronta na rota ' + (b.ri + 1) + ': ' + sqName(q) + ' volta ao seu trabalho', b, 'cgnb' + b.id + q.id); } }
+    const q = sq.find(q => q.ord.b === b) || sq.filter(q => free(q) && (b.prog < 1 || q.job !== 'eng') && q.ri === b.ri && Math.abs(q.s - b.s) < A.fall).sort((x, y) => (x.job === 'eng' ? 0 : 1) - (y.job === 'eng' ? 0 : 1) || Math.abs(x.s - b.s) - Math.abs(y.s - b.s))[0];
     if (q && q.ord.b !== b) setOrd(q, { k: b.prog < 1 ? 'build' : 'hold', ri: b.ri, s: b.s, x: b.x, z: b.z, a: b.a, R: b.prog < 1 ? 9 : A.guard, b });
     else if (q && q.ord.k === 'build' && b.prog >= 1) setOrd(q, Object.assign({}, q.ord, { k: 'hold', R: A.guard }));
   }
   if (S.t >= F.bT && genBy(t, 'sup') === 'ai' && !sq.some(q => q.ord.k === 'build' && !q.ord.b) && bmrPay(t, BLD.cost, 'sup')) {   // within the works' budget (BMR)
-    const O = aiSite(t), q = O && sq.filter(q => free(q) && q.ri === O.ri && q.fd > BMR.sup.quiet && Math.abs(q.s - O.s) < A.fall).sort((x, y) => bmrKitOf(y) - bmrKitOf(x) || Math.abs(x.s - O.s) - Math.abs(y.s - O.s))[0];   // a squad with a build kit first
+    const O = aiSite(t), q = O && cgnSupBy(sq, O, free);   // a squad with a build kit first, the engineers next, from any road it can walk from (CGN)
     if (q) genCmd(t, { c: 'sup', ri: O.ri, s: O.s, x: O.x, z: O.z, a: O.a, ids: [q.id] }, 'ai', { O, q });
+    else F.bT = S.t + CGN.look;   // nobody to send: look again in a while
   }
   for (const q of sq) {
     const O = q.ord, L = q.men.find(m => !m.dead);
     if (q.op && !(q.op.k === 'amb' && !q.op.sprung)) continue;   // on an operation of the commander's
     if (q.lift) continue;
+    if (O.k === 'build' && !O.b && S.t - (O.cgT || (O.cgT = S.t)) > CGN.walk) { gLog(t, 'sup', sqName(q) + ' não chegou ao lugar da base de suprimento na rota ' + (O.ri + 1) + ': desiste', O, 'cgnw' + q.id); cgnHome(t, q); continue; }   // never there: the next site is not held up by it (CGN)
     if (O.k === 'build' && !O.b && q.at && L && hdist(L, O) < 30) { const b = startSite(t, O.x, O.z, O.a); if (b) { O.b = b; bmrKitUse(q); } else setOrd(q, { k: 'hold', ri: O.ri, s: O.s, x: O.x, z: O.z }); }
     else if ((O.b && O.b.dead) || (O.raid && O.raid.dead)) setOrd(q, O.back || (O.raid ? (q.job === 'push' && post(t, 'push', q.jk)) || pushOrd(t) : { k: 'hold', ri: q.ri, s: q.s, x: O.x, z: O.z }));
     else if (O.raid) { if (q.at) for (const m of q.men) if (!m.dead && plant(m, O.raid)) break; }
@@ -16381,7 +16387,13 @@ function fortPlan(t, sq) {
     if (k !== ks[0] && S.forts.some(f => f.k === ks[0] && f.prog < 1 && Math.abs(f.x - O.x) < A.post && Math.abs(f.z - O.z) < A.post)) continue;   // the second only once the first is up
     q.digT = S.t + A.again;
     if (!O.dig && !bmrPay(t, FORT.K[k].cost, 'dig')) continue;   // its own work within the side's budget (BMR); an ordered one was budgeted when it was given
-    for (const s of [0, 1, -1, 2, -2]) { const x = O.x + Math.cos(a) * (k === 2 && ks[0] === 1 ? R + 3 : R) + ux * s * 9, z = O.z - Math.sin(a) * (k === 2 && ks[0] === 1 ? R + 3 : R) + uz * s * 9; if (fortStart(k, t, x, z, a)) { if (k <= 2) n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
+    let f = null;
+    for (const dr of O.dig ? CGN.dr : [0]) {   // an ordered work looks a little nearer and farther too before it gives up (CGN)
+      for (const s of [0, 1, -1, 2, -2]) { const D = (k === 2 && ks[0] === 1 ? R + 3 : R) + dr, x = O.x + Math.cos(a) * D + ux * s * 9, z = O.z - Math.sin(a) * D + uz * s * 9; if ((f = fortStart(k, t, x, z, a))) { if (k <= 2) n++; gLog(t, 'eng', 'Obra de campanha iniciada: ' + (k === 2 ? 'parapeito de sacos de areia' : k === 1 ? 'trincheira' : FORT.K[k].name.toLowerCase()), { x, z }, 'fort'); break; } }
+      if (f) break;
+    }
+    if (f) { O.wk = f; q.pts = null; }   // its men stand by the work until it is up (slot, CGN)
+    else if (O.dig && !cgnShort(t, FORT.K[k].cost) && (O.cgF = (O.cgF || 0) + 1) >= CGN.fail) cgnNoRoom(t, q, O);   // no room for it there, again and again: the order ends instead of holding the squad for ever
   }
 }
 /* a battery's list: each trench with enemy soldiers in it that have been spotted */
@@ -18181,7 +18193,7 @@ function manRides(C) {
    wave (push: the assaults keep it), and the line's posts (line, wood), which stand nearest the enemy: a manoeuvre is mostly the work of the troops at the front (the
    others are kilometres back), and its op gives the squad back to its post when it ends (opFree) */
 const MANJ = { held: 1, road: 1, line: 1, wood: 1 };
-const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw');
+const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw' && q.ord.k !== 'build');   // nor a squad on its way to build a supply base (CGN)
 /* the men of a squad still standing, counted now (q.live is brought up to date by the squad's own think, half a second late): every kind measures its losses by it */
 const manLive = q => q.men.reduce((a, m) => a + (m.dead ? 0 : 1), 0);
 /* 'Flanqueio encerrado', 'Finta encerrada': the generic words of an op's end agree with the kind's name */
@@ -19371,7 +19383,7 @@ function cmdPosts(C, sq, have) {
   { const n = postN('push', FIELD.posts.find(p => p[0] === 'push')[1]); P.push(['push', C.pn && C.pn.push !== undefined ? C.pn.push : Math.max(n, C.want ? C.want.n : 0, D.push - 1)]); }   // the assault squads before every other post but a threatened town's (cf-manobra-fix: last in the list, they never came, and the side had no squad free to attack)
   for (const b of S.sup) {   // a guard for each base, two for one the enemy is near
     if (b.team !== t || b.dead || (S.net && !Net.sb)) continue;
-    let n = sq.reduce((a, q) => a + (q.ord.b === b ? 1 : 0), 0); const want = cmdKnown(C, b.x, b.z, 900) > 2 ? 2 : 1;
+    let n = sq.reduce((a, q) => a + (q.ord.b === b && q.job === 'guard' ? 1 : 0), 0); const want = cmdKnown(C, b.x, b.z, 900) > 2 ? 2 : 1;   // the builders are not its guards: they go back to their work once it is up (CGN)
     for (let i = 0; i < 2 && n < want; i++) { const k = b.id * 2 + i; if (!G.includes(k)) P.push(['guard', 1, k]); if (!sq.some(q => q.job === 'guard' && q.jk === k && q.ord.b === b)) n++; }
   }
   for (const e of S.eco ? S.eco.l : []) {   // a guard for each site the economy's def command asks one for
@@ -28736,9 +28748,10 @@ function afpBuilder(t, x, z, mine) {
   let best = null, bd = AFP.reach;
   for (const q of S.squads) {
     if (q.team !== t || q.net || !(q.live >= W21.live) || q.state || q.op || q.lift || q.rd || q.qrf || q.sapT || q.dome || (q.aidP && !q.aidP.gone && q.aidP.prog < 1) || aidRide(q)) continue;
-    const pen = mine && q.job === 'sap' ? 0 : AFP.by[q.job]; if (pen === undefined || (q.job === 'sap' && !mine)) continue;
-    const O = q.ord, L = gLead(q); if (!O || !L || O.k === 'supply' || O.k === 'build' || O.b || O.T || O.tw) continue;
-    const d = hdist(L, { x, z }) + pen; if (d < bd) { bd = d; best = q; }
+    const pen = q.job === 'sap' ? (mine ? 0 : CGN.sap) : AFP.by[q.job]; if (pen === undefined) continue;   // the sappers build a post too, after the engineers (CGN)
+    const O = q.ord, L = gLead(q); if (!O || !L || O.k === 'supply' || O.k === 'build' || O.b || O.T) continue;
+    const dd = hdist(L, { x, z }); if (O.tw && (dd > CGN.tw || q.fd < CGN.twq)) continue;   // a garrison or a squad holding a point builds only near its post, with no enemy near (CGN: AFP.by.garr was never reached)
+    const d = dd + pen; if (d < bd) { bd = d; best = q; }
   }
   return best;
 }
@@ -28765,7 +28778,7 @@ function afpTry(C, A, it) {
   const mw = q.mis ? q.mis.why : undefined, r = genCmd(t, { c: 'fort', k: it.k, x: sp.x, z: sp.z, a: it.a, ids: [q.id], why: 'plano de fortificação: ' + it.why }, 'ai');
   if (!r.ok) return no('recusado, ' + gNo(r.why).toLowerCase());
   const op = C.ops.find(o => o.k === 'usr' && o.id === r.id) || null;
-  A.fo.push({ op, key: it.key, k: it.k, x: sp.x, z: sp.z, cx: it.cx, cz: it.cz, T0: S.t, q, mw, it });
+  A.fo.push({ op, key: it.key, k: it.k, x: sp.x, z: sp.z, cx: it.cx, cz: it.cz, T0: S.t, q, mw, it, Tm: AFP.T + hdist(gLead(q), sp) * CGN.walkK });   // the walk there on top of the work's time (CGN)
   if (A.save && A.save.key === it.key) A.save = null;
   afpSay(C, A, it, 1, 'ordenado (' + (GEN.job[q.job] || q.job).toLowerCase() + ' a ' + Math.round(hdist(gLead(q), sp)) + ' m)');
   return true;
@@ -28776,7 +28789,7 @@ function afpKeep(C, A) {
   for (const o of A.fo.slice()) {
     const op = o.op, at = { k: o.k, x: o.x, z: o.z, cx: o.cx, cz: o.cz }, has = afpHas(t, at), K = W21.dig[o.k];
     const up = has && (!K || S.forts.some(f => f.team === t && f.k === K && !f.gone && f.prog >= 1 && Math.hypot(f.x - o.x, f.z - o.z) < AFP.near));
-    const end = !op || op.over ? 'sem construtores' : up && (K || !op.bk) ? 'done' : !K && !op.bk ? 'não foi possível' : S.t - o.T0 > AFP.T ? 'tempo esgotado' : '';
+    const end = !op || op.over ? 'sem construtores' : up && (K || !op.bk) ? 'done' : !K && !op.bk ? 'não foi possível' : S.t - o.T0 > (o.Tm || AFP.T) ? 'tempo esgotado' : '';
     if (!end) continue;
     if (op && !op.over) opEnd(C, op);
     if (o.q && o.q.mis && o.mw !== undefined && o.q.live > 0 && !o.q.op) o.q.mis.why = o.mw;
@@ -28975,6 +28988,85 @@ function bmrHud(t, R, y, u, ink) {
   txt('METAL ' + n(d.mt) + '  +' + n(inc.mt) + ' −' + n(use.mt + s.mt) + '/min', R, y, 12.5 * u, d.mt < 60 ? FOE : ink, 'right'); y += 15 * u;
   txt((w.crates >= 0 ? 'CAIXAS ' + w.crates + ' · ' : '') + 'OBRAS −' + n(s.en) + ' E −' + n(s.mt) + ' M/min', R, y, 11 * u, ink, 'right'); y += 15 * u;
   return y;
+}
+/* ---------- the general's builders (CGN, não testado): why the AI's works were ordered and never built, and the fixes ----------
+   What went wrong (read in the code, cf-construir-general):
+   - a squad sent to build stood in the houses or the trenches near the place (postPts: windows within R + CITY.ai.near m, a finished work
+     within FORT.ai.post m, the perimeter of the end of its walk), not by the work: the leader could stay over 30 m from the place, so the
+     work never began, or only the men who happened to stand near it built and it decayed. Now a squad at its place with a work to build
+     (cgnWork: the supply base of its build order, the work fortPlan began for its order (O.wk), its own post (q.aidP), or the place of an
+     ordered work not begun yet) stands by it (cgnPts, from slot): along the side of the work away from the enemy, every man in reach;
+   - the squad that built a supply base stayed its guard for good (planSup gave it the hold with O.b, and cmdPosts counted it as the base's
+     guard, so no guard came): the side's one engineer squad built one base and no other, and the plan's builder (afpBuilder skips O.b)
+     lost it too. Now only guard squads count as guards, a guard comes while the site is up, and the builders go back to their own work
+     (cgnHome) once it is up and guarded, the engineers after rel s anyway;
+   - a new supply site needed a free squad on its own road within BLD.ai.fall m of it (aiSite picks the place first): with none there the
+     side never built again. Now the builder may come from any road it can walk from (as setOrd moves it: the same road, a switch, a trip
+     of the network or near a road's end), within reach m, the kit first, the engineers next, the nearest (cgnSupBy); with none, it looks
+     again after look s;
+   - a squad that never reached its site (halted, lost its way) held up every new site (planSup waits while one build order is open). Now
+     a build order not begun after walk s is given up;
+   - a manoeuvre could take a squad on its way to build (manFree), and planSup could take a squad of an operation (free took any op but
+     the person's);
+   - the fortification plan's builder skipped every squad with a town or a point (O.tw), so its garrisons (AFP.by.garr) were never
+     picked, nor the sappers for anything but a minefield: "nenhuma esquadra livre". Now a squad holding a town or a point builds within
+     tw m of its post with no enemy within twq m, and the sappers build after the engineers (sap, their weight);
+   - an order was given up after AFP.T s even when the builder had kilometres to walk: now AFP.T plus walkK s a m of the walk;
+   - an ordered work with no room where it was asked for kept its squad holding there for ever: it now also looks dr m nearer and farther,
+     and after fail tries (not for want of money) the order ends (cgnNoRoom).
+   No random number is drawn here */
+const CGN = { rel: 90, look: 15, walk: 600, reach: 3000, tw: 600, twq: 600, sap: 300, walkK: .45, dr: [0, 6, -3, 12], fail: 3, row: [1.3, 2.9] };
+/* what a squad at its place builds (null: nothing, it stands as it would) */
+function cgnWork(q, O) {
+  if (O.k === 'build') return O.b ? (O.b.dead || O.b.prog >= 1 ? null : O.b) : O.x !== undefined ? O : null;
+  if (O.k !== 'hold' && O.k !== 'move') return null;
+  const w = O.wk; if (w) return w.gone || w.prog >= 1 ? null : w;
+  if (O.dig && O.x !== undefined) return O;   // an ordered work not begun yet: around its place, so that the leader is there
+  const P = q.aidP; return P && !P.gone && P.prog < 1 ? P : null;
+}
+/* the men's places by it: a work or a base along its side away from the enemy, in two rows; a place not built on yet, a ring round it */
+function cgnPts(q, w) {
+  const c = q.cgP; if (c && c.w === w && c.n === q.n0) return c.p;
+  const n = Math.max(q.n0, 1), p = [], o = w.o;
+  if (!o) { const r = w.k === 'build' ? 9 : 6; for (let i = 0; i < n; i++) { const a = i * TAU / n; p.push(clearOf(w.x + Math.cos(a) * r, w.z + Math.sin(a) * r, 1, {})); } }
+  else {
+    const e = mnBase(q.team, o.x, o.z), back = (e.x - o.x) * o.s + (e.z - o.z) * o.c > 0 ? -1 : 1, m = Math.ceil(n / 2), hw = Math.max(o.hw, 1.5);
+    for (let i = 0; i < n; i++) {
+      const row = i % 2, j = i >> 1, lx = ((j + .5) / m - .5) * 2 * hw, lz = back * (o.hd + CGN.row[row]);
+      p.push(clearOf(o.x + lx * o.c + lz * o.s, o.z - lx * o.s + lz * o.c, 1, {}));
+    }
+  }
+  q.cgP = { w, n: q.n0, p }; return p;
+}
+/* a builder's own work again: the engineers back to their place behind the front road's line, any other its job's post, else a hold where it is */
+function cgnHome(t, q) {
+  const R = S.T.routes, L = q.men.find(m => !m.dead); let O = null;
+  if (q.job === 'eng') { const fr = frontR(t), r = R[fr], s = clamp(lineS(t, fr) - dsOf(t, fr) * BLD.ai.back, 0, r.len), p = routeAt(r, s); O = { k: 'hold', ri: fr, s, x: p.x - p.dz * 34, z: p.z + p.dx * 34 }; }
+  else if (FIELD.posts.some(p => p[0] === q.job) && q.job !== 'amb') O = post(t, q.job, q.jk);
+  if (!O || O.b || O.k === 'build') O = L ? { k: 'hold', ri: q.ri, s: q.s, x: L.x, z: L.z } : { k: 'hold', ri: q.ri, s: q.s };
+  setOrd(q, O);
+}
+/* can a squad get to O as setOrd moves it (pushFrom's rule): on that road, by a switch, by a walk of the network, or near a road's end */
+function cgnGo(q, O) {
+  const R = S.T.routes, e = Math.min(q.s, R[q.ri].len - q.s);
+  return O.ri === q.ri || (S.T.mv >= 4 && (!!swNear(q.ri, q.s, O.ri) || !!tripSq(q, O))) || e < 2000;
+}
+/* the builder of a new supply site O: free (planSup's), quiet, within reach; the kit first, the engineers next, the nearest. The walk is
+   looked for in the first few only */
+function cgnSupBy(sq, O, free) {
+  const A = BLD.ai, d = q => { const L = q.men.find(m => !m.dead); return L ? hdist(L, O) : 1e9; };
+  const l = sq.filter(q => free(q) && q.fd > BMR.sup.quiet && (q.ri === O.ri ? Math.abs(q.s - O.s) < A.fall : d(q) < CGN.reach));
+  l.sort((x, y) => bmrKitOf(y) - bmrKitOf(x) || (x.job === 'eng' ? 0 : 1) - (y.job === 'eng' ? 0 : 1) || d(x) - d(y));
+  for (const q of l.slice(0, 4)) if (cgnGo(q, O)) return q;
+  return null;
+}
+/* is side t short of c now (a work that cannot begin for want of money is not a place without room) */
+const cgnShort = (t, c) => !!c && ecoSim() && !!S.eco.d[t] && (S.eco.d[t].en < c[0] || S.eco.d[t].mt < c[1]);
+/* an ordered work with no room where it was asked for: the order ends (the plan's op ends, and its builder goes back) */
+function cgnNoRoom(t, q, O) {
+  gLog(t, 'eng', 'Obra ordenada sem lugar livre ' + ecoNear(O.x, O.z) + ': ' + sqName(q) + ' desiste', { x: O.x, z: O.z }, 'cgnr' + q.id);
+  if (q.op && q.op.k === 'usr' && !q.op.over) return opEnd(cmdOf(t), q.op);
+  const o = Object.assign({}, O); delete o.dig; delete o.wk; setOrd(q, o);
 }
 /* ---------- M8 of the general's manoeuvre: the operation-level strategies (the captain's 22, cf-estrategias), above the procedures (M3) ----------
    Every STG.every s of plan (stgTick, from cmdSense), a side whose AI holds the attack or the defence weighs the 22 strategies from what it knows (stgSit:

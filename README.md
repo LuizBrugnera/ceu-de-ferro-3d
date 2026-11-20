@@ -309,7 +309,8 @@ Homem-bomba e carro-bomba: armam 2 s depois de entrar em campo e explodem perto 
 | Mouse, W / S / A / D | Apontar e andar |
 | Shift, Z | Correr; postura (em pé, agachado, deitado) |
 | Botão esquerdo ou Espaço, botão direito | Atirar; mirar pela alça ou pela luneta |
-| Q, R | Trocar de arma; recarregar |
+| Q, R | Trocar de arma (ou voltar à arma); recarregar |
+| 1 a 5 | Compartimentos, a pé e fora dos menus: 1 arma principal, 2 secundária (lançador, míssil, morteiro, pistola), 3 granadas (de mão, de fumaça), 4 o que se planta (carga de demolição; o sapador, minas anticarro e antipessoal; o Plantador de IED, IED de pressão, antipessoal e de comando), 5 o que se detona (o celular dos IEDs de comando, o colete do homem-bomba). A mesma tecla de novo passa ao próximo item; o contorno ou o alvo aparece e o clique usa; botão direito, Q, 1 ou 2 voltam à arma. N, F e G continuam valendo |
 | F, G | Granada de mão; granada de fumaça |
 | E | Entrar no transporte aliado ao lado; a bordo, descer |
 | N | Obras e cargas (veja "Obras") |

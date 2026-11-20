@@ -37526,6 +37526,93 @@ buildUnit = (f => (u, wreck) => {
   return g;
 })(buildUnit);
 
+/* ---------- the planes drawn from their numbers (cf-pol-modelos): the propellers get their blades, which turn with the engine and blur into
+   the disc as it runs up (PROP: blades by plane, how fast they turn, the throttle over which they fade into the disc), and the national
+   markings go on the wings, over and under, and on the fuselage's sides (INSIG: which plane wears which: the Balkenkreuz, the RAF's
+   roundel, the USAAF's star and bars, the red star; drawn once on a canvas); a helicopter's on both sides of its tail boom. A wing's marking is a child of that wing's mesh, so it goes
+   with the wing when the wing is lost or cut short; the blades of a propeller are one mesh. A burnt plane darkens them with the rest.
+   The textured models (mdl.glb) keep their own look; the stealth bomber wears none ---------- */
+const PROP = { blades: { stuka: 3, bf109: 3, spit: 4, p47: 4, he177: 4, b17: 3 }, chord: .24, col: 0x1f2122, spin: 40, blur: [.3, .8] };
+const INSIG = { kind: { stuka: 'balk', bf109: 'balk', he177: 'balk', spit: 'raf', p47: 'us', b17: 'us', su57: 'ru', su25: 'ru', tu160: 'ru', ah64: 'us', uh60: 'us', mi28: 'ru', mi8: 'ru' }, at: .62, size: [.72, 2.4], fus: .52, boom: .22, tex: {} };
+function insigTex(k) {
+  if (INSIG.tex[k]) return INSIG.tex[k];
+  const w = k === 'us' ? 128 : 64, cv = document.createElement('canvas'); cv.width = w; cv.height = 64;
+  const g = cv.getContext('2d'), cx = w / 2, cy = 32;
+  const star = (R, fill) => { g.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? R * .382 : R, a = -Math.PI / 2 + i * Math.PI / 5; g.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); } g.closePath(); g.fillStyle = fill; g.fill(); };
+  const disc = (r, fill) => { g.beginPath(); g.arc(cx, cy, r, 0, TAU); g.fillStyle = fill; g.fill(); };
+  if (k === 'balk') { g.fillStyle = '#f2f2ee'; g.fillRect(6, 22, 52, 20); g.fillRect(22, 6, 20, 52); g.fillStyle = '#111'; g.fillRect(10, 26, 44, 12); g.fillRect(26, 10, 12, 44); }
+  else if (k === 'raf') { disc(30, '#283a66'); disc(19, '#efefe8'); disc(11, '#a8232a'); }
+  else if (k === 'us') { g.fillStyle = '#20356b'; g.fillRect(6, 19, 116, 26); g.fillStyle = '#efefe8'; g.fillRect(10, 23, 108, 18); disc(30, '#20356b'); star(27, '#efefe8'); }
+  else if (k === 'ru') { star(31, '#efefe8'); star(29, '#a8232a'); star(22, '#efefe8'); star(19, '#b8262c'); }
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4;
+  return (INSIG.tex[k] = { t, ar: w / 64 });
+}
+/* two quads, over and under (y up and down), w along the span, h along the chord */
+function insigQuads(w, h, y) {
+  const a = new THREE.PlaneGeometry(w, h); a.rotateX(-Math.PI / 2); a.rotateY(Math.PI / 2); a.translate(0, y, 0);
+  const b = new THREE.PlaneGeometry(w, h); b.rotateX(Math.PI / 2); b.rotateY(Math.PI / 2); b.translate(0, -y, 0);
+  const g = new THREE.BufferGeometry(), P = new Float32Array(24), N = new Float32Array(24), U = new Float32Array(16);
+  P.set(a.attributes.position.array); P.set(b.attributes.position.array, 12); N.set(a.attributes.normal.array); N.set(b.attributes.normal.array, 12); U.set(a.attributes.uv.array); U.set(b.attributes.uv.array, 8);
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.BufferAttribute(U, 2)); g.setIndex([0, 2, 1, 2, 3, 1, 4, 6, 5, 6, 7, 5]);
+  a.dispose(); b.dispose(); return g;
+}
+/* two quads on the two sides (z out and z in), w long and h high, z from the middle */
+function sideQuads(w, h, z) {
+  const a = new THREE.PlaneGeometry(w, h); a.translate(0, 0, z); const b = new THREE.PlaneGeometry(w, h); b.rotateY(Math.PI); b.translate(0, 0, -z);
+  const g = new THREE.BufferGeometry(), P = new Float32Array(24), N = new Float32Array(24), U = new Float32Array(16);
+  P.set(a.attributes.position.array); P.set(b.attributes.position.array, 12); N.set(a.attributes.normal.array); N.set(b.attributes.normal.array, 12); U.set(a.attributes.uv.array); U.set(b.attributes.uv.array, 8);
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N, 3)); g.setAttribute('uv', new THREE.BufferAttribute(U, 2)); g.setIndex([0, 2, 1, 2, 3, 1, 4, 6, 5, 6, 7, 5]);
+  a.dispose(); b.dispose(); return g;
+}
+const insigMat = T => { const m = mat(0xffffff, { map: T.t, transparent: true, alphaTest: .45, flatShading: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }); m.userData.c = 0xffffff; return m; };
+/* the fuselage's radius at x, from the profile */
+function fusR(fus, x) { for (let i = 0; i < fus.length - 1; i++) { const a = fus[i], b = fus[i + 1]; if (x >= a[0] && x <= b[0]) return a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); } return fus[0][1]; }
+/* a helicopter (the hangar's card and the match both build it here): its marking on both sides of the tail boom, near its root */
+buildHeli = (f => id => {
+  const g = f(id), k = INSIG.kind[id], B = HELIS[id] && HELIS[id].mdl.boom; if (!k || !B) return g;
+  const t = INSIG.boom, r = B[2] + (B[3] - B[2]) * t, T = insigTex(k), D = clamp(r * 2.1, .5, 1.6), mt = insigMat(T); (g.userData.mats || (g.userData.mats = [])).push(mt);
+  const q = new THREE.Mesh(sideQuads(D * T.ar, D, r + .02), mt); q.position.set(B[0] - (B[0] - B[1]) * t, B[4], 0); g.add(q); return g;
+})(buildHeli);
+buildPlane = (f => id => {
+  const g = f(id), d = PLANES[id];
+  if (HELIS[id] || !d || (d.mdl.glb && glbModel(d.mdl.glb))) return g;
+  const m = d.mdl, U = g.userData, mats = U.mats || (U.mats = []), k = INSIG.kind[id];
+  /* the blades: one mesh a propeller, about x */
+  U.props = [];
+  const blades = (x, y, z, R) => {
+    const n = PROP.blades[id] || 3, l = [];
+    for (let i = 0; i < n; i++) { const b = new THREE.BoxGeometry(.07, R * .94, PROP.chord * Math.min(1.4, R / 1.6)); b.translate(0, R * .47, 0); b.rotateX(i * TAU / n + .3); l.push(b); }
+    const mt = mat(PROP.col, { transparent: true }); mt.userData.c = PROP.col; mats.push(mt);
+    const me = new THREE.Mesh(vkGeo(l), mt); me.position.set(x, y, z); g.add(me); U.props.push(me);
+  };
+  if (m.prop) blades(m.prop[0] + .18, 0, 0, m.prop[1]);
+  if (m.nac) for (const n of m.nac) if (n[5]) for (const s of [1, -1]) blades(n[0] + n[4] / 2 + .2, n[1], s * n[2], n[5]);
+  U.discs = []; g.traverse(c => { if (c.isMesh && c.material && c.material.isMeshBasicMaterial && c.material.transparent && c.geometry && c.geometry.type === 'CircleGeometry') { U.discs.push(c); c.userData.o = c.material.opacity; } });
+  if (!k) return g;
+  /* the markings: on the widest wing (not the tailplane), over and under, a child of each side's mesh; and on each side of the fuselage */
+  const T = insigTex(k), W = m.wings.slice(0, -1), wi = W.indexOf(W.slice().sort((a, b) => b.span - a.span)[0]), w = m.wings[wi];
+  if (w) for (const [pid, s] of [['wingR', 1], ['wingL', -1]]) {
+    const me = (U.pm[pid] || [])[wi]; if (!me) continue;
+    const t = INSIG.at, x = (w.a[0] + w.a[1]) / 2 + ((w.a[2] + w.a[3]) / 2 - (w.a[0] + w.a[1]) / 2) * t, ch = Math.abs(w.a[1] - w.a[0]) + (Math.abs(w.a[3] - w.a[2]) - Math.abs(w.a[1] - w.a[0])) * t;
+    const D = clamp(ch * INSIG.size[0], .5, INSIG.size[1]), mt = insigMat(T); mats.push(mt);
+    const q = new THREE.Mesh(insigQuads(D * T.ar, D, (w.t || .18) / 2 + .015), mt); q.position.set(x, 0, s * w.span * t); me.add(q);
+  }
+  const fx = m.fus[0][0] * INSIG.fus, r = fusR(m.fus, fx), D = clamp(r * m.sy * 1.5, .5, 2.2);
+  if (m.sy > .7) { const mt = insigMat(T); mats.push(mt); const q = new THREE.Mesh(sideQuads(D * T.ar, D, r * m.sz + .02), mt); q.position.x = fx; g.add(q); }
+  return g;
+})(buildPlane);
+/* each frame: the blades turn with the throttle (and run down when the plane is lost), fading into the disc as they speed up */
+syncScene = (g0 => dt => {
+  g0(dt);
+  for (const p of S.planes) {
+    const m = p.m, U = m && m.userData; if (!U || !U.props || !U.props.length) continue;
+    const c = p.ctl, thr = c && Number.isFinite(c.thr) ? c.thr : 1, k = U.pk = p.dead ? Math.max(0, (U.pk === undefined ? 1 : U.pk) - (dt || 0) * .5) : .35 + .65 * clamp(thr, 0, 1);
+    const b = clamp((k - PROP.blur[0]) / (PROP.blur[1] - PROP.blur[0]), 0, 1);
+    for (const me of U.props) { me.rotation.x += (dt || 0) * PROP.spin * k; me.material.opacity = 1 - .82 * b; }
+    for (const dc of U.discs) dc.material.opacity = dc.userData.o * (.25 + 1.1 * b);
+  }
+})(syncScene);
+
 const PAL = {
   ww2: { sand: 0xb3a67c, forest: 0x3f5a30, fields: [0xb9a655, 0x7f9247, 0x8a6f4a], snow: 0xe9ebe8, water: 0x3f6f8c, road: 0x8a7d62, wall: 0xc4b89f, roof: 0x8a4b3a, rock: 0x6f6b62, bush: 0x445e2c, leaf: 0x3e5a2a },
   modern: { sand: 0xbcae84, forest: 0x55633a, fields: [0xa89c62, 0x8f8a52, 0x7a6a4c], snow: 0xe4e2dc, water: 0x3b6d86, road: 0x4c4c4a, wall: 0xb4aea2, roof: 0, rock: 0x74706a, bush: 0x56683a, leaf: 0x4f6634 }

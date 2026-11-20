@@ -40919,7 +40919,7 @@ gUnitsL = (g0 => (g, V, P, now) => {
 gLabels = (g0 => (g, V, P) => {
   g0(g, V, P);
   if (P.k < VETUI.name) return;
-  for (const u of V.u) if (u.nm && gOn(P, u.x, u.z, 20)) gTxt(g, u.nm.replace(/^Esquadra /, ''), P.X(u.x), P.Y(u.z) + (u.tag ? 30 : 20) * P.k, 9 * P.k, gCol(V, u.t), 'center');
+  for (const u of V.u) if (u.nm && gOn(P, u.x, u.z, 20)) gPut(g, u.nm.replace(/^Esquadra /, ''), P.X(u.x), P.Y(u.z) + (u.tag ? 30 : 20) * P.k, 9 * P.k, gCol(V, u.t));
 })(gLabels);
 genPanels = (g0 => V => {
   g0(V);
@@ -41551,7 +41551,7 @@ $('#btnSound').addEventListener('click', () => {
    the panels are rebuilt twice a second, and only when their text changed; closed, it costs one test a frame. GLAY: the layers, drawn in
    order, a row more is a layer more (res is reserved for the economy: V.eco). Text goes in by textContent only. No random numbers here */
 const GV = { on: false, t: 0, all: false, inf: false, lab: true, spd: 1, S: null, T: null, img: null, cx: 0, cz: 0, sc: 0, fit: 0,
-  V: null, drawT: 0, vmT: 0, panT: 0, drag: null, ping: null, cv: $('#genMap'), g: null, w: 0, h: 0, d: 1, sig: {}, seen: 0, tmk: '', tmR: null, tmQ: 0, tmP: 0, tmC: null, tmKey: '' };
+  V: null, drawT: 0, vmT: 0, panT: 0, lr: [], drag: null, ping: null, cv: $('#genMap'), g: null, w: 0, h: 0, d: 1, sig: {}, seen: 0, tmk: '', tmR: null, tmQ: 0, tmP: 0, tmC: null, tmKey: '' };
 GV.g = GV.cv.getContext('2d');
 const GLAY = [
   { id: 'ter', nm: 'Terreno', on: 1, draw: gTerrain },
@@ -41690,11 +41690,19 @@ function genDraw(V, now) {
   const g = GV.g, P = genProj();
   g.setTransform(GV.d, 0, 0, GV.d, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.setLineDash([]); g.lineJoin = 'round'; g.lineCap = 'round';
   g.fillStyle = '#0b1112'; g.fillRect(0, 0, GV.w, GV.h);
-  for (const L of GLAY) if (L.on && L.draw) { g.save(); L.draw(g, V, P, now); g.restore(); g.setLineDash([]); g.globalAlpha = 1; }
+  GV.lr = []; for (const L of GLAY) if (L.on && L.draw) { g.save(); L.draw(g, V, P, now); g.restore(); g.setLineDash([]); g.globalAlpha = 1; }
 }
 /* small drawing tools, in screen pixels */
 const gOn = (P, x, z, m) => { const a = P.X(x), b = P.Y(z); return a > -m && a < GV.w + m && b > -m && b < GV.h + m; };
-function gTxt(g, s, x, y, size, col, al) { g.font = gMono(size); g.textAlign = al || 'left'; g.fillStyle = 'rgba(8,12,13,.85)'; g.fillText(s, x + 1, y + 1); g.fillStyle = col; g.fillText(s, x, y); }
+function gTxt(g, s, x, y, size, col, al) {
+  g.font = gMono(size); g.textAlign = al || 'left'; g.fillStyle = 'rgba(8,12,13,.85)'; g.fillText(s, x + 1, y + 1); g.fillStyle = col; g.fillText(s, x, y);
+  if (g === GV.g && GV.lr.length < 800) { const w = g.measureText(s).width + 4; GV.lr.push([(al === 'center' ? x - w / 2 : al === 'right' ? x - w : x) - 2, y - size, w, size + 3]); }   // where it went, for gPut (at most 800: the commander's camera writes here too and never empties it)
+}
+/* a label that gives way (a unit's tag or name): written only where no text of this frame of the map is yet (GV.lr, emptied before the layers) */
+function gPut(g, s, x, y, size, col) {
+  g.font = gMono(size); const w = g.measureText(s).width + 4, x0 = x - w / 2 - 2, y0 = y - size;
+  if (!GV.lr.some(r => x0 < r[0] + r[2] && x0 + w > r[0] && y0 < r[1] + r[3] && y0 + size + 3 > r[1])) gTxt(g, s, x, y, size, col, 'center');
+}
 function gRing(g, x, y, r, col, w) { g.beginPath(); g.arc(x, y, r, 0, TAU); g.strokeStyle = col; g.lineWidth = w || 1.5; g.stroke(); }
 function gLine(g, x1, y1, x2, y2, col, w) { g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.strokeStyle = col; g.lineWidth = w || 1.5; g.stroke(); }
 function gHeadAt(g, x1, y1, x2, y2, s, col) {
@@ -42065,16 +42073,11 @@ function gUnitsL(g, V, P, now) {
   }
   if (V.me && !V.u.some(u => u.me)) { gStar(g, P.X(V.me.x), P.Y(V.me.z) - 12, 6 * k, '#ffffff'); }
 }
-/* the place names always, then the units' tags where they sit on no name nor on another tag (cf-pol-hud: a town full of squads was a blot) */
+/* the place names always, then the units' tags where they sit on no other text of the map (gPut; cf-pol-hud: a town full of squads was a blot) */
 function gLabels(g, V, P) {
-  const R = [], put = (s, x, y, k, col, keep) => {
-    g.font = gMono(k); const w = g.measureText(s).width + 4, x0 = x - w / 2, y0 = y - k;
-    if (!keep && R.some(r => x0 < r[0] + r[2] && x0 + w > r[0] && y0 < r[1] + r[3] && y0 + k + 3 > r[1])) return;
-    R.push([x0, y0, w, k + 3]); gTxt(g, s, x, y, k, col, 'center');
-  };
-  for (const p of V.pts) if (p.name && gOn(P, p.x, p.z, 80)) put(p.name, P.X(p.x), P.Y(p.z) + Math.max(9 * P.k, (p.r || 60) * P.s) + 13 * P.k, 11 * P.k, '#ece6d6', true);
+  for (const p of V.pts) if (p.name && gOn(P, p.x, p.z, 80)) gTxt(g, p.name, P.X(p.x), P.Y(p.z) + Math.max(9 * P.k, (p.r || 60) * P.s) + 13 * P.k, 11 * P.k, '#ece6d6', 'center');
   if (GV.sc < GV.fit * 1.2 && V.u.length > 60) return;
-  for (const u of V.u) { if (!u.tag || !gOn(P, u.x, u.z, 20)) continue; put(u.tag, P.X(u.x), P.Y(u.z) + 20 * P.k, 9.5 * P.k, gCol(V, u.t)); }
+  for (const u of V.u) { if (!u.tag || !gOn(P, u.x, u.z, 20)) continue; gPut(g, u.tag, P.X(u.x), P.Y(u.z) + 20 * P.k, 9.5 * P.k, gCol(V, u.t)); }
 }
 function gFx(g, V, P, now) {
   if (GV.ping) {

@@ -75,7 +75,7 @@ console.log('-- p1\'s gate (cf-manobra-fix): 45° off the axis, exposure up to .
   ok(ev && ev.some(x => x.k === 'p1') && !ev.some(x => x.k === 'p6'), 'prPick: the 50° flank of a short map makes fix and flank a candidate, no "sem abordagem de flanco" frontal (' + (ev || []).map(x => x.k).join(', ') + ')');
 }
 
-/* the 1944 map, side 0 holding Travessia, three free squads of another road 1.5 to 2.6 km from Vila do Moinho (as tests/approaches.js) */
+/* the 1944 map, side 0 holding Travessia, three free squads of another road within AP.pool m of an assembly of Vila do Moinho (as tests/approaches.js) */
 function field() {
   const C = H.load({ seed: 9, eco: 1, mapv: 6 }), $ = C.$; C.$('globalThis').performance = performance;
   const S = C.watch('ww2', { len: 0 }), nm = p => $('gName')(p), tg = S.cq.p.find(p => /Moinho/.test(nm(p))), st = S.cq.p.find(p => /Travessia/.test(nm(p))); st.hold = 0;

@@ -62,7 +62,7 @@ console.log('-- water and bridges --');
 }
 
 console.log('-- the assault freed from the axis, its assembly out of sight --');
-/* side 0's own squads replaced by three free ones on another road 1.5 to 2.6 km from Vila do Moinho (within AP.pool of an assembly); no squad on the objective's road */
+/* side 0's own squads replaced by three free ones of another road, within AP.pool m of an assembly of Vila do Moinho; no squad on the objective's road */
 function field(o) {
   const E = setup(o), { $, S, Cm, tg } = E, R = S.T.routes;
   for (const q of S.squads.filter(q => q.team === 0)) for (const m of q.men) m.dead = true;

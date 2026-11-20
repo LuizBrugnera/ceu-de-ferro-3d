@@ -63,7 +63,7 @@ console.log('-- camp: one H-hour for every operation in it --');
   ok(K.st === 'go' && logs(S, t, /HORA H DA CAMPANHA: 2 operações ao mesmo tempo/).length === 1, 'past the slip the campaign goes: HORA H DA CAMPANHA, two operations at once');
   /* a secondary front: half the preparation */
   Cm.known = []; Cm.fm = [];
-  for (const o of [o1, o2]) { o.st = 'prep'; o.walk = false; o.n0 = 1; $('OPS').atk(Cm, o); }
+  for (const o of [o1, o2]) { o.st = 'prep'; o.walk = false; o.n0 = 1; o.fntD = 1; $('OPS').atk(Cm, o); }   // fntD: a fix and flank's feint (M3) already fired, its rounds are no preparation
   const he = o => Cm.fm.filter(M => M.op === o && M.k === 'he').reduce((a, M) => a + M.n, 0), D = Cm.doc;
   ok(he(o1) === D.prep && he(o2) === Math.ceil(D.prep / 2), 'the preparation: ' + he(o1) + ' rounds on the main effort, ' + he(o2) + ' on the secondary front');
   const e = cmd({ c: 'camp', id: K.id, k: 'end' });
@@ -79,7 +79,8 @@ console.log('-- the AI\'s campaign: two fronts with the force for it in one turn
   ok(P.length === 2 && free.length === 6, 'two enemy points on two roads and six squads to put in front of them');
   P.forEach((p, k) => {   // three squads 600 m short of each, on its road, and one enemy known there (an assault, not a walk into an empty point)
     const O = $('cqObj')(p), s = O.s >= 700 ? O.s - 600 : O.s + 600;
-    for (const q of free.slice(k * 3, k * 3 + 3)) { q.job = 'held'; q.jk = 0; q.ri = O.ri; q.s = s; q.ord = { k: 'hold', ri: O.ri, s }; q.back = null; }
+    const at = $('routeAt')(R[O.ri], s);   // the men there too: an assault takes squads within AP.pool m of an assembly (M2)
+    for (const q of free.slice(k * 3, k * 3 + 3)) { q.job = 'held'; q.jk = 0; q.ri = O.ri; q.s = s; q.ord = { k: 'hold', ri: O.ri, s }; q.back = null; for (const m of q.men) { m.x = at.x + (m.x % 7); m.z = at.z + (m.z % 7); } }
     Cm.post[O.ri] = 'atk'; Cm.known.push({ man: 1, dead: false, sx: p.x, sz: p.z, x: p.x, z: p.z, moveT: -99 });
   });
   const sqs = () => S.squads.filter(q => q.team === t && q.live > 0 && !q.state && !q.net);
@@ -105,12 +106,15 @@ console.log('-- the threat board: incidents, triage, the response --');
   const P = S.cq.p, foeAt = (x, z, n) => { for (let i = 0; i < n; i++) Cm.known.push({ man: 1, dead: false, sx: x + i, sz: z, x: x + i, z, moveT: -99 }); };
   const tick = () => $('thbTick')(Cm), keep = [];   // the known enemy is put back before every look: the plan is not run here
   const look = () => { Cm.known = keep.slice(); tick(); };
-  for (const op of Cm.ops.slice()) if (op.k === 'qrf') $('opEnd')(Cm, op);
-  Cm.thb = []; S.gj = [];
+  for (const op of Cm.ops.slice()) if (op.k === 'qrf' || op.k === 'atk' || op.k === 'usr') $('opEnd')(Cm, op);   // its own assaults and unit orders too: by 120 s the base's reserve may be out on one (cf-manobra-fix)
+  Cm.ops = Cm.ops.filter(o => !o.over); Cm.atkT = 1e9; Cm.thb = []; S.gj = [];
   const pi = P.findIndex(p => p.hold === t && p.base < 0 && !p.tw), p = P[pi], dx = S.base[0].x < p.x ? -1 : 1;
-  foeAt(p.x + dx * 150, p.z, 20); keep.push(...Cm.known.slice(-20)); look();
+  for (const q of S.squads.filter(q => q.team === t && q.live >= 3 && !q.state && !q.op && !q.net && !q.lift && q.job !== 'base').slice(0, 1)) {   // a free squad 900 m behind it, as below: where the side's squads stand at 120 s is the match's
+    q.job = 'road'; q.ord = { k: 'hold', ri: q.ri, s: q.s }; for (const m of q.men) { m.x = p.x - dx * 900 + (m.x % 7); m.z = p.z + (m.z % 7); }
+  }
+  foeAt(p.x + dx * 150, p.z, 45); keep.push(...Cm.known.slice(-45)); look();   // well over the local guard: urgent enough to answer whoever stands near the point
   const I = Cm.thb.find(I => I.key === 'p' + pi);
-  ok(I && I.k === 'pt' && I.foe === 20 && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + 9.5)) < 1, 'twenty known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
+  ok(I && I.k === 'pt' && I.foe === 45 && I.val === THB.val.pt && Math.abs(I.kx - (p.x + dx * 150 + 22)) < 1, 'forty-five known enemies by ' + p.L + ': an incident at a point, value ' + (I && I.val) + ', known strength ' + (I && I.foe) + ', urgency ' + (I && I.urg.toFixed(2)));
   const op = I && I.op;
   ok(I && I.st === 'resp' && op && op.k === 'qrf' && !op.over, 'triage answers it: a response operation (qrf)');
   if (op) {

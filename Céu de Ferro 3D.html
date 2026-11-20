@@ -34994,6 +34994,280 @@ genVM = (g => (t, all) => { const V = g(t, all); if (V && typeof V === 'object' 
 GENK.push('dfp');   // a guest's general sees the host's defence plans (the layer and the Defesa tab)
 if (typeof rtsBrain === 'function') rtsBrain = (g => q => { const L = g(q); if (q.dfpR && q.pts && q.pts.dfp) L.push('Defesa: ' + q.dfpR); return L; })(rtsBrain);
 /* ---------- end of CEREBRO: defesa ---------- */
+/* ---------- infantry rides (EMB, cf-infantaria-veiculos; NÃO TESTADO, see docs/nao-testado/cf-infantaria-veiculos.md): the commander puts its infantry in vehicles ----------
+   The captain: "as infantarias devem pegar veiculos para locomoção tambem", and of the Insurgents: "tem muitos veiculos legais de infantaria
+   capturados e tal, e não vejo eles usarem". Why the AI's infantry hardly rode (read from the code; not measured, by the captain's rule):
+   - the manoeuvres' ride (MAN.ride, manRides) looks only at the squads of a manoeuvre or of an abstract order (op.man, op.ride) that walk a way
+     of their own (O.wp) at a run: an assault's squads (atkOpen: hold at the forming-up place, no way of their own), a point's reinforcement,
+     a post's relief and every order of the planner never ask for one;
+   - the planner's ride (trnPlan, fetch) is one errand a side at a time (two with points, CMD.rq.ride), one every RUNS.again s, only along the
+     squad's own axis and only for 1.5 x FIELD.ride m or more along it;
+   - the vehicles a ride may take (rideFind) are trucks and wheeled armour on their axis: never a car (the Insurgents' technicals carry their
+     men in the back), never a vehicle left or captured (u.left: parked off the rail, u.rail false), so the captured ones stood there until
+     trnSlow took them away;
+   - nothing armed stayed with the squad it carried: the vehicle always went home.
+   What this section does, on top of that (hooks only: rideFind, rideBoard, rideCheck, rideEv, tripAI, setOrd, manRides, genQuery):
+   - embRides(C), after the manoeuvres' rides each plan of side C: a squad of an AI side (on the host) whose way to its order's place still has
+     EMB.far m or more, with no enemy within FIELD.dbl (in contact on foot it never boards), whose leader is not bounding (q.tec lances, P3),
+     whose order is not one done on foot by its nature (EMB.foot, EMB.footOp: ambush, observation, infiltration...) and not just off a ride
+     (q.rdT), is given a ride (embGo): a vehicle (rideFind, and embFind after it: trucks, wheeled armour and cars with room for the whole
+     squad, idle on their axis, parked ones of the pool, and left and captured ones too, within EMB.near m) comes by the side's safe way
+     (tripOf with the side's costs) to a meeting place: on the squad's own trip (q.tp) ahead of it, as a manoeuvre's ride does, or, for a
+     squad walking its axis, where it stands (it halts there; at most EMB.wait s for the vehicle). The whole squad goes aboard (all within
+     MAN.ride.board m: it stays one squad) and gets out at a drop point (embDrop) on its way, keep m short of the order's place (by the
+     leader's technique, P3: vig farther, desloc the plain; the Insurgents nearer: they arrive fast, get out and vanish), never within
+     MAN.ride.safe m of known enemy nor in closed ground (a wood, thick undergrowth, among houses: it gets out before it), then walks on with
+     the same order. A contact or a new order on the way lets it off where the vehicle is (rideCheck, as before);
+   - the vehicle then goes home; one that was left or captured stays parked at the drop point (left again: whoever comes takes it);
+   - fire support: an armed car or armoured car that carried the squad stays at the drop point for EMB.sup.T s (the Insurgents EMB.sup.ins:
+     hit and run), its gun on what it sees, and leaves when the time is up, the squad is gone or EMB.sup.r m away, it is hurt below
+     EMB.sup.hp, or a short while after it is hit; and an Insurgent side sends a free armed technical (embEsc: DShK, SPG-9, ZU-23...) along
+     with an unarmed truck to the same drop point, to cover the squad the same way and go;
+   - with no free vehicle for a long walk (EMB.rq.far m or more) an AI side with points asks for a truck through its own requisition order
+     (genCmd req, as cmdReq does) once every EMB.rq.every s, while it has fewer than EMB.rq.max requisitioned ones;
+   - the measure (S.emb, embView, the gask question emb): per side the long walks begun (an order EMB.far m or more from the squad), how many
+     were ridden (any ride, the manoeuvres' too), the squad-seconds spent halted waiting for a vehicle, the rides given up and the rides
+     given; per side and vehicle model the seconds alive and in use (on an errand or a trip, carrying, escorting, driven), the rides and the
+     men carried: the task's "% of the long moves made aboard", with EMB.ride 0 (the measure kept, the new rides left out: today's game) as the A
+     and EMB.ride 1 as the B of a comparison. EMB.on 0 leaves it all out, the measure too.
+   Only the host (or solo) runs any of it: it moves AI squads and vehicles (no q.net, no u.net) */
+const EMB = { on: 1, ride: 1, far: 1500, near: 6000, cd: 45, per: 2, wait: 240,
+  keep: { desloc: 900, vig: 1300, ins: 600 }, closed: { ug: .5, bld: 3, r: 80 },
+  foot: { ambush: 1, observe: 1, patrol: 1, escort: 1, supply: 1, withdraw: 1, mortar: 1, flank: 1 }, footOp: { inf: 1, amb: 1, emb: 1, itd: 1 },
+  kinds: { truck: 1, lav: 1, car: 1 }, hp: .5,
+  sup: { T: 150, ins: 60, hp: .5, hit: 2.5, r: 900 }, esc: { near: 3500, spd: 15, all: 0 },
+  rq: { far: 2500, every: 90, max: 2 } };
+const embSim = () => !S.net || !!S.host;
+const embOn = () => EMB.on && embSim() && S.T && S.T.mv >= 4;
+/* the measure, per side */
+function embM() {
+  if (S.emb && S.emb.n === SIDES().length) return S.emb;
+  const z = () => bySide(() => 0);
+  return (S.emb = { n: SIDES().length, legs: z(), rode: z(), wait: z(), off: z(), go: z(), rq: z(), esc: z(), veh: bySide(() => ({})), T: z(), rqT: z() });
+}
+const embName = u => (u.def && (u.def.id || u.def.name)) || u.id || u.kind;
+const embArmed = u => !!u.arms && !!u.arms[0] && u.arms[0].d.dmg > 0 && !u.def.bomb;
+/* a man of the squad's who leads it now */
+const embLead = q => q.men.find(m => !m.dead && !m.gone && !m.down) || null;
+/* the squad is one the AI may put in a vehicle at all (its order's kind and its op aside) */
+function embFit(q) {
+  if (!q || q.net || q.team < 0 || q.mil || q.civ || q.col || q.lift || q.rd || q.state || q.cnP || !q.live || !q.ord) return false;
+  if (S.my && q.men.includes(S.my)) return false;
+  if (q.men.some(m => !m.dead && m.def && (m.def.bomb || m.def.mort))) return false;   // a bomber walks to his target; a mortar team sets up where it is
+  if (q.op && (q.op.man || q.op.ride || EMB.footOp[q.op.k])) return false;   // a manoeuvre's own ride (manRides), or one done on foot by its nature
+  return !EMB.foot[q.ord.k];
+}
+/* the vehicles a ride may take beyond the manoeuvres' (rideFind): cars with room for the whole squad, left and captured ones, the
+   requisitioned transports standing idle; whole enough, not lately hit, no enemy near it */
+function embFind(t, q, P) {
+  const K = MAN.ride, n = manLive(q); let best = null, bd = EMB.near;
+  for (const u of S.units) {
+    if (u.team !== t || u.dead || u.gone || u.net || !u.ai || u.fixed || u.trip || u.mr || u.run || u.me || u.pid || u.res || u.lim || u.svb || u === S.my || !u.occ || !EMB.kinds[u.kind]) continue;
+    if (u.def.bomb || u.def.rad || u.def.svc || u.lgp || u.gp || (u.cargo && u.cargo.length) || u.occ.some(Boolean)) continue;
+    if (!u.rail && !u.left) continue;   // off its axis: a tank's brain drives it, or it is not a transport's
+    if (u.fld && !u.ai.park && !u.left) continue;   // an errand's vehicle
+    if (S.t - u.hitT < 15 || u.ai.fd < K.safe || roomIn(u) < n || u.hp < u.max * EMB.hp || (u.kind === 'lav' && u.ai.tgt && !u.ai.tgt.dead)) continue;
+    const d = hdist(u, P); if (d < bd) { bd = d; best = u; }
+  }
+  return best;
+}
+rideFind = (g => (t, q, P) => g(t, q, P) || (embOn() ? embFind(t, q, P) : null))(rideFind);
+/* a left (or captured) vehicle put to drive again: on the rail the trips need (tripAI drops a trip of a vehicle off it) */
+function embWake(u) {
+  const p = railOf(u.x, u.z), was = u.left;
+  Object.assign(u, { left: 0, bye: false, rail: true, ri: p.ri, s: p.s, lane: clamp(p.off, -30, 30), ds: u.ds || (u.team ? 1 : -1), fld: 1 });
+  u.ai.park = 1; u.embL = was || u.embL || 0;
+}
+/* parked where it stands, left again: no trip, off the rail (as crewPark leaves one), for whoever comes */
+function embPark(u) {
+  u.trip = null; u.rail = false; u.sp = 0; u.ai.park = 1; u.fld = 1; u.left = Math.max(S.t, .01); u.embL = 0; u.embS = null;
+}
+/* the squad's way still to go: its own trip (q.tp from q.ts), or along its axis to its order's place (a way made for it, from its leader) */
+function embWay(q, L) {
+  const O = q.ord;
+  if (q.tp && q.tp.len) return { W: q.tp, s0: q.ts || 0, here: 0 };
+  if (O.ri === undefined || O.ri !== q.ri || O.s === undefined) return null;
+  const r = S.T.routes[q.ri], s1 = clamp(O.s, 0, r.len), n = Math.min(120, Math.ceil(Math.abs(s1 - q.s) / 60)), pts = [{ x: L.x, z: L.z }];
+  for (let i = 1; i <= n; i++) { const p = routeAt(r, q.s + (s1 - q.s) * i / n); pts.push({ x: p.x, z: p.z }); }
+  if (O.x !== undefined) pts.push({ x: O.x, z: O.z });
+  return pts.length > 1 ? { W: polyOf(pts), s0: 0, here: 1 } : null;
+}
+/* how far short of the end it gets out: the leader's technique (P3), the Insurgents nearer */
+const embKeep = q => (insT(q.team) ? EMB.keep.ins : q.tec === 'vig' ? EMB.keep.vig : EMB.keep.desloc);
+/* closed ground at x z, where the squad must already be on foot: a wood, thick undergrowth, among standing houses */
+function embClosed(x, z) {
+  const K = EMB.closed;
+  if (kindAt(x, z) === 1 || ugAt(x, z) > K.ug) return true;
+  let n = 0; for (const o of near(x, z, K.r)) if (o.K && o.K.sight && !o.K.rock && S.os[o.id] < 2 && ++n >= K.bld) return true;
+  return false;
+}
+/* rideDrop with the squad's own keep, and out of closed ground: { D, s, p2 } or null */
+function embDrop(C, q, W, P, sP, keep) {
+  const K = MAN.ride; let tries = 0;
+  for (let s = W.len - keep; s >= sP + K.far * .5 && tries < K.tries; s -= K.step) {
+    const D = routeAt(W, s), nn = netNear(D.x, D.z);
+    if (nn.d > K.stub || !rideDry(nn, D)) { mrw('stub'); continue; }
+    if (cmdKnown(C, D.x, D.z, K.safe) > 0 || mbThr(C, D.x, D.z) > K.thr) { mrw('known'); continue; }
+    if (embClosed(D.x, D.z)) { mrw('closed'); continue; }
+    tries++;
+    const p2 = tripOf(P.x, P.z, D.x, D.z, { mode: 'veh', team: q.team }); if (!p2) { mrw('p2'); continue; }
+    if (p2.len > K.detour * (s - sP) + 300) { mrw('detour'); continue; }
+    if (mbMeanThr(C, p2) > K.pthr) { mrw('pthr'); continue; }
+    return { D: { x: D.x, z: D.z }, s, p2 };
+  }
+  return null;
+}
+/* a ride for squad q along way W (from s0; here: the meeting place is where it stands): true when one is on its way */
+function embGo(C, q, w) {
+  const K = MAN.ride, { W, s0, here } = w, M = embM(), t = q.team, u = rideFind(t, q, routeAt(W, s0));
+  if (!u) { embAsk(C, q, W.len - s0); return mrw('vehicle'); }
+  const spd = u.def.spd * GSPD * K.spd, keep = embKeep(q); let n = 0;
+  for (let sP = here ? s0 : s0 + K.lead; sP <= W.len - keep - K.far * .5 && n < K.tries; sP += K.step) {
+    const P = routeAt(W, sP), nn = netNear(P.x, P.z), stop = () => (here ? 'stop' : 0);
+    if (nn.d > K.pick || !rideDry(nn, P)) { mrw('pick'); if (stop()) break; continue; }
+    n++;
+    const p1 = tripOf(u.x, u.z, P.x, P.z, { mode: 'veh', team: t }); if (!p1) { mrw('p1'); if (stop()) break; continue; }
+    const tu = p1.len / spd, ts = (sP - s0) / MAN.pace; if (tu - ts > (here ? EMB.wait : K.waitMax)) { mrw('wait'); if (stop()) break; continue; }
+    const d = embDrop(C, q, W, P, sP, keep); if (!d) { mrw('drop'); if (stop()) break; continue; }
+    if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - s0) / MAN.pace * K.gain)) { mrw('gain'); if (stop()) break; continue; }
+    const lf = !!u.left || !u.rail, home = { x: u.x, z: u.z }, p3 = lf ? null : tripOf(d.D.x, d.D.z, home.x, home.z, { mode: 'veh', team: t }); if (!lf && !p3) return false;
+    if (lf) embWake(u);
+    const sup = embArmed(u) && !lf, Ts = sup ? (insT(t) ? EMB.sup.ins : EMB.sup.T) : 0;
+    const p = polyOf(lf ? [...p1, ...d.p2] : [...p1, ...d.p2, ...p3]), T = S.t + 1.6 * p.len / spd + K.wait + Ts;
+    q.rd = { u, st: 'call', wp: W, sP, D: d.D, sD: d.s, T, home, eta: S.t + Math.max(tu, ts), emb: 1, O: q.ord, here };
+    mrd().go++; M.go[t]++;
+    const ev = [{ s: p1.len, k: 'pick' }, { s: p1.len + d.p2.len, k: 'drop' }];
+    if (sup) ev.push({ s: p1.len + d.p2.len, k: 'sup', q, T: 0 });
+    u.trip = { p, s: 0, ri: lf ? undefined : p3.ri, s1: lf ? undefined : p3.s1, T, drop: false, back: null, gone: false, why: 'ride', rq: q, ev };
+    if (lf) u.embP = 1;   // left or captured: it stays at the drop point
+    if (!sup && (insT(t) || EMB.esc.all)) embEsc(q, d.D, P);
+    gLog(t, 'atk', 'Transporte: ' + (u.def.name || GEN.kind[u.kind] || u.kind) + (captured(u) ? ' capturado' : '') + ' vai buscar esquadra para ' + gN((d.s - sP) / 1000) + ' km de estrada', P);
+    return true;
+  }
+  return mrw('none');
+}
+/* no vehicle for a long walk: the side asks for a truck by its own requisition order, now and then */
+function embAsk(C, q, rem) {
+  const t = C.t, M = embM(), G = EMB.rq;
+  if (!S.cq || rem < G.far || S.t < M.rqT[t] || genBy(t, 'sup') !== 'ai') return;
+  M.rqT[t] = S.t + G.every;
+  if (S.units.reduce((n, u) => n + (u.team === t && !u.dead && u.rqa && (u.kind === 'truck' || u.kind === 'car') ? 1 : 0), 0) >= G.max) return;
+  if (genCmd(t, { c: 'req', k: 'truck', ri: q.ri }, 'ai', { id: null }).ok) M.rq[t]++;
+}
+/* the Insurgents' escort: a free armed technical drives to the drop point by the safe way, covers the squad there and goes home */
+function embEsc(q, D, P) {
+  const t = q.team, M = embM(); let best = null, bd = EMB.esc.near;
+  for (const u of S.units) {
+    if (u.team !== t || u.kind !== 'car' || u.dead || u.gone || u.net || !u.ai || u.fixed || u.trip || u.mr || u.run || u.me || u.pid || u.res || u.lim || u.svb || u === S.my) continue;
+    if (!embArmed(u) || u.def.spd < EMB.esc.spd || u.gp || u.occ.some(Boolean) || u.left || !u.rail || (u.fld && !u.ai.park) || u.hp < u.max * EMB.sup.hp || S.t - u.hitT < 15 || u.ai.fd < MAN.ride.safe) continue;
+    const d = hdist(u, P); if (d < bd) { bd = d; best = u; }
+  }
+  const u = best; if (!u) return null;
+  const home = { x: u.x, z: u.z }, a = tripOf(u.x, u.z, D.x, D.z, { mode: 'veh', team: t }), b = a && tripOf(D.x, D.z, home.x, home.z, { mode: 'veh', team: t });
+  if (!a || !b) return null;
+  const spd = u.def.spd * GSPD * MAN.ride.spd, p = polyOf([...a, ...b]);
+  u.trip = { p, s: 0, ri: b.ri, s1: b.s1, T: S.t + 1.6 * p.len / spd + MAN.ride.wait + Math.max(EMB.sup.T, EMB.sup.ins) + 120, drop: false, back: null, gone: false, why: 'emb-esc', ev: [{ s: a.len, k: 'sup', q, T: 0, esc: 1, R: q.rd }] };
+  M.esc[t]++;
+  gLog(t, 'atk', 'Transporte: ' + (u.def.name || 'técnica') + ' acompanha a esquadra como apoio de fogo', D);
+  return u;
+}
+/* the support at the drop point (the trip's sup event): the vehicle waits there, firing (the tripAI hook below), until it goes */
+function embSupEv(u, E) {
+  const K = EMB.sup, q = E.q, L = q && embLead(q), ins = insT(u.team);
+  if (E.esc && q && q.rd === E.R && q.rd && !E.T) {   // the escort is there before the squad: it waits for it to get out (EMB.wait s at most), firing
+    E.W = E.W || S.t + EMB.wait; E.h = u.hitT;
+    if (S.t < E.W && !(u.hp < u.max * K.hp)) { u.embS = E; u.trip.ev.unshift(E); return; }
+    u.embS = null; return;
+  }
+  if (!E.T) { E.T = S.t + (ins ? K.ins : K.T); E.h = u.hitT; }
+  if (u.hitT > E.h) { E.h = u.hitT; E.T = Math.min(E.T, S.t + K.hit); }   // hit: a burst more, and away (bate e foge)
+  const go = S.t > E.T || !L || q.rd || hdist(L, u) > K.r || u.hp < u.max * K.hp || u.mr;
+  if (!go) { u.embS = E; u.trip.ev.unshift(E); return; }
+  u.embS = null;
+  if (u.embP) { u.embP = 0; embPark(u); }
+}
+rideEv = (g => (u, E) => {
+  if (E.k === 'sup') return embSupEv(u, E);
+  g(u, E);
+  if (E.k === 'drop' && u.embP && u.trip && !(u.trip.ev && u.trip.ev.length)) { u.embP = 0; embPark(u); }   // left or captured: parked at the drop point
+})(rideEv);
+/* a vehicle on its trip: one at its support place fires and holds (no stop for a fight: it is there for it); a left one put to a ride drives */
+tripAI = (g => (u, dt) => {
+  if (u.trip && !u.rail && !u.dead && (u.trip.rq || u.trip.why === 'emb-esc') && (u.left || u.embL)) embWake(u);
+  const E = u.embS, T = u.trip;
+  if (!E || !T || !T.ev || T.ev[0] !== E || u.dead || !u.rail) return g(u, dt);
+  const A = u.ai, c = u.ctl;
+  if ((A.think -= dt) <= 0) { A.think = GAI.think; looks(u, TCOL.gun); }
+  c.drive = 0; c.turn = 0; c.brake = true; gunner(u, u.kind === 'lav' ? TCOL.inf : TCOL.gun);
+  return true;
+})(tripAI);
+/* boarding: an EMB ride is checked by its own order (it has no op); either kind counted */
+function embBoard(u, q) {
+  const R = q.rd, men = q.men.filter(m => !m.dead && !m.gone);
+  if (!men.length || q.state || q.ord !== R.O || men.length > roomIn(u) || q.fd < FIELD.dbl) { embM().off[q.team]++; mrd().off++; return manRideEnd(q); }
+  if (men.some(m => hdist(m, u) > MAN.ride.board)) return 'wait';
+  const E = INF[S.era][S.fac[q.team]];
+  for (const m of men) { (u.cargo || (u.cargo = [])).push(Math.max(0, E.indexOf(m.id))); m.gone = true; }
+  u.mr = q; R.st = 'ride'; q.live = men.length; q.at = false; mrd().boarded++;
+  gLog(q.team, 'atk', 'Transporte: esquadra embarca em ' + (u.def.name || (u.kind === 'lav' ? 'blindado leve' : 'caminhão')) + ' e segue ' + gN((R.sD - R.sP) / 1000) + ' km antes de continuar a pé', u);
+}
+function embCount(u, q) {
+  const M = embM(), t = q.team, V = M.veh[t], k = embName(u), r = V[k] || (V[k] = { nm: u.def.name || k, t: 0, use: 0, rides: 0, men: 0 });
+  r.rides++; r.men += u.cargo ? u.cargo.length : 0;
+  if (q.embL && !q.embL.r) { q.embL.r = 1; M.rode[t]++; }
+}
+rideBoard = (g => (u, q) => {
+  const R = q.rd, r = R && R.emb ? embBoard(u, q) : g(u, q);
+  if (EMB.on && q.rd && q.rd.st === 'ride' && !q.rd.cnt) { q.rd.cnt = 1; embCount(u, q); }
+  return r;
+})(rideBoard);
+function embCheck(q) {
+  const R = q.rd, u = R.u, gone = u.dead || u.gone, away = q.ord !== R.O || S.t > R.T;
+  if (R.st === 'call') { if (gone || !u.trip || u.trip.rq !== q || away || q.state || q.fd < FIELD.dbl) { embM().off[q.team]++; manRideEnd(q); } }
+  else if (gone || !u.mr || !u.trip || u.trip.rq !== q || away) manRideEnd(q);
+}
+rideCheck = (g => q => (q.rd && q.rd.emb ? embCheck(q) : g(q)))(rideCheck);
+/* the long walks: an order EMB.far m or more from the squad's leader, counted once an order (the AI's sides) */
+setOrd = (g => (q, O) => {
+  g(q, O);
+  if (!EMB.on || !embSim() || !q || !O || q.net || !(q.team >= 0) || !S.T || !(S.T.mv >= 4) || genBy(q.team, 'atk') !== 'ai' || (q.embL && q.embL.O === O) || EMB.foot[O.k]) return;
+  const L = embLead(q); if (!L || (S.my && q.men.includes(S.my))) return;
+  const r = S.T.routes[O.ri], to = O.x !== undefined ? O : r && O.s !== undefined ? routeAt(r, clamp(O.s, 0, r.len)) : null;
+  if (!to || hdist(L, to) < EMB.far) return;
+  q.embL = { O, r: 0 }; embM().legs[q.team]++;
+})(setOrd);
+/* every plan of side C: the measure, and rides for the long walks the manoeuvres' ride does not look at */
+function embRides(C) {
+  if (!embOn()) return;
+  const t = C.t, M = embM(), dt = M.T[t] ? Math.min(30, S.t - M.T[t]) : 0; M.T[t] = S.t;
+  for (const q of S.squads) if (q.team === t && q.rd && q.rd.st === 'call' && q.halt) M.wait[t] += dt;
+  const V = M.veh[t];
+  for (const u of S.units) {
+    if (u.team !== t || u.dead || u.gone || !u.occ || !EMB.kinds[u.kind]) continue;
+    const k = embName(u), r = V[k] || (V[k] = { nm: u.def.name || k, t: 0, use: 0, rides: 0, men: 0 });
+    r.t += dt; if (u.trip || u.run || u.mr || u.embS || u.gp || u.me || (u.cargo && u.cargo.length) || u.occ.some(Boolean)) r.use += dt;
+  }
+  if (!EMB.ride || genBy(t, 'atk') !== 'ai') return;
+  let n = 0;
+  for (const q of S.squads) {
+    if (n >= EMB.per) break;
+    if (q.team !== t || !embFit(q) || S.t < (q.rdT || 0) || S.t < (q.embT || 0) || q.fd < FIELD.dbl || q.tec === 'lances' || q.hf || q.at) continue;   // q.hf: a picket holding its fire
+    const L = embLead(q); if (!L) continue;
+    const w = embWay(q, L); if (!w || w.W.len - w.s0 < EMB.far) continue;
+    q.embT = S.t + EMB.cd; n++;
+    embGo(C, q, w);
+  }
+}
+manRides = (g => C => { g(C); embRides(C); })(manRides);
+/* what the side's rides were (gask emb; the probe tests/embarque.js reads it) */
+function embView(t) {
+  const M = embM(), R = mrd(), r = v => Math.round(v);
+  return { ok: true, why: '', on: EMB.on ? 1 : 0, ride: EMB.ride ? 1 : 0, legs: M.legs[t], rode: M.rode[t], pct: M.legs[t] ? r(100 * M.rode[t] / M.legs[t]) : 0, wait: r(M.wait[t]), off: M.off[t], go: M.go[t], rq: M.rq[t], esc: M.esc[t],
+    all: { go: R.go, boarded: R.boarded, landed: R.landed, lost: R.lost, off: R.off, why: Object.assign({}, R.why) },
+    veh: Object.entries(M.veh[t]).map(([k, v]) => ({ id: k, nm: v.nm, t: r(v.t), use: r(v.use), pct: v.t ? r(100 * v.use / v.t) : 0, rides: v.rides, men: v.men })) };
+}
+genQuery = (f => (t, q) => (q && q.q === 'emb' && lsSide(t) ? (embSim() ? embView(t) : gBad('off')) : f(t, q)))(genQuery);
+/* ---------- end of the infantry rides (EMB) ---------- */
 /* ---------- the soldier's stimuli (P1): what he perceives that his reflexes answer ----------
    The one place of the soldier's brain that looks at the world, each by what a man can see or hear: a round cracking past or striking him
    (drInc), a blast (heard within hear m, its weight k by distance and size), a grenade (seen in flight or on the ground within see m in

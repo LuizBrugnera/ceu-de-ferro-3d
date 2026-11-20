@@ -58,6 +58,8 @@ Tudo numa seção nova do `Céu de Ferro 3D.html`, `ENGENHARIA DOS PONTOS (ENP)`
 - O nome por época é um getter (`F.name`); código que copia `FORT.K[k]` com `Object.assign` perde o getter (não achei nenhum).
 - MCP: `JOBS` do `mcp-general.js` ganhou `egd`, `sap` e `fen` na ordem de `Object.keys(GEN.tag)` vista no harness; se outra tarefa acrescentar um job antes, os nomes andam.
 - Online: `V.enp` não vai ao convidado.
+- **Com o `cf-defesa-posicoes` (DFP, entrou no main junto)**: o DFP põe as esquadras em postos nas entradas do ponto (fora do anel, até 105 m); o anel de muros é de 26 m. Os dois não se conhecem: os postos do DFP podem cair do lado de fora dos muros, ou um muro pode tapar a visada de um posto. Os construtores não são afetados (o `slot` olha a obra antes do `ptPts`).
+- Depois do merge com o `origin/main` (P4 prisioneiros, médico, DFP etc.) só rodei 40 s de IA × IA nas duas épocas no harness: sem erro, a engenharia sai para os pontos.
 
 ## Como testar depois
 

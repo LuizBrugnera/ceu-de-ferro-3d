@@ -44,7 +44,7 @@ Tudo no `Céu de Ferro 3D.html`, numa seção nova, `CEREBRO: lider (P3, cf-lide
 - **Cartão da unidade e MCP** (`get_unit`, campo `lid`): o líder, a patente, a vaga, a confiança, a técnica, o que decidiu e por quê, as equipes e as tarefas, e a frente. As frases vão no topo do "decide".
 - **Conserto de um bug antigo** (desde o #59): em `drInfo`, a linha que marca `K.first` e `q.drCt` estava dentro de um comentário. O procedimento `contato` nunca disparava. Ela voltou a ser código. Isso muda o comportamento de todas as esquadras no primeiro contato.
 - **P0**: um líder caído sem sucessão em curso (P3 desligado) é trocado no mesmo passo, como antes.
-- **Ganchos no código antigo** (embrulho): `belief`, `mindThink`, `squadThink`, `killMan`, `manDown` e `genCard`; o `when` de `romper`, `recuo`, `fixar`, `lances` e `contato`; o `man` de `anticarro`. Também `brainHook` `lid` e `eq` (P0) e falas novas em `FALAS` (P5).
+- **Ganchos no código antigo** (embrulho): `belief`, `mindThink`, `squadThink`, `killMan`, `manDown`, `genCard` e `rtsBrain` (a câmera de comandante, #141, mostra o líder); o `when` de `romper`, `recuo`, `fixar`, `lances` e `contato`; o `man` de `anticarro`. Também `brainHook` `lid` e `eq` (P0) e falas novas em `FALAS` (P5).
 - `tests/brain-lider.js` é novo e está na lista do `tests/all.sh`.
 
 ## O que rodou (exercícios curtos, exceção da regra)

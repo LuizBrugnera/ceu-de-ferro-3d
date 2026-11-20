@@ -23875,7 +23875,7 @@ genState = (g => t => {
   const L = new Map(V.sq.map(e => [e[0], e]));
   for (const q of o.sq) { const e = L.get(q.id); q.link = e ? e[1] : 2; if (e && e[2] !== -2) q.eta = e[2]; }
   o.cn = { hq: V.hq, left: V.left, every: V.every, nodes: V.nodes.map(n => ({ k: n[3], x: n[0], z: n[1], r: n[2] })), inNet: V.n[0], outNet: V.n[1], cut: V.n[2], sent: V.sent, lost: V.lost, df: V.df,
-    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null })) };   // the gaps (CNR) and the fix on its way to each
+    gaps: (V.gap || []).map(e => ({ x: e[0], z: e[1], r: e[2], squads: e[3], fix: [null, 'relay', 'vehicle', 'operator'][e[4]] || null, note: e[5] || '' })) };   // the gaps (CNR) and the fix on its way to each
   return o;
 })(genState);
 /* ---------- abstract orders and routes (W21) ----------
@@ -25229,8 +25229,18 @@ step = (g => dt => { g(dt); if ((!S.net || S.host) && (S.aidT = (S.aidT || 0) - 
    the enemy watches more than vis (the tactical map's v) and with no enemy it knows of within foe m; when no relay can be had there (cap,
    cost, no builder, no way) the vehicle or an operator goes to that site instead, and with no safe site nothing goes. A relay ordered by
    the AI hands its builders back once it is up; a fix not done in T s is given up. CNB: what the net's step and the gap planner cost,
-   ms a call (read only). No random number is drawn here */
-const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200] };
+   ms a call (read only). No random number is drawn here.
+   The builder and the site together (cf-radio-general): the AI names its builder itself (cnWho): of the cand free squads nearest the
+   safe site and the nearest engineers, never one that gave a relay up in the last ban s, each with the site picked again for its own
+   walk (wk a reach of walk against the score), the one that walks least (the engineers engX m less), so that the relay goes up where
+   someone can get to. Within walk m of way (way times the straight line) the relay is ordered; farther, the free radio vehicle or an operator goes first
+   (it covers now) and the relay is ordered only when neither can. A relay's order is given up after T s plus CGN.walkK s a m of the
+   builder's walk (it was T s flat, and a builder 3 km off never got there: the general gave it up, the builder walked back, and the
+   general sent it again, for ever). Past that deadline the order is kept while its builders still gained gain m on the site in the last
+   stall s (a squad halts where it called a ride, and the road need not go straight there), up to twice the deadline. Each gap the AI cannot close says why in the diary (key gapx, as the others), and each gap has a line
+   for the view (note: the builder's walk left or the work's progress, or why nothing goes) */
+const CNR = { every: 5, keep: .8, step: 300, lat: [0, 400, -400], foe: 900, vis: .35, max: 2, T: 420, hold: 240, near: 1200, min: 1, n: 3, spread: [300, 200],
+  walk: 1800, way: 1.3, engX: 600, wk: 1, ban: 300, pool: 6, cand: 4, gain: 50, stall: 240 };
 const CNB = { look: 0, lookN: 0, lookW: 0, fix: 0, fixN: 0, fixW: 0,
   stat() { const r = v => Math.round(v * 1000) / 1000; return { look: r(CNB.lookN ? CNB.look / CNB.lookN : 0), lookWorst: r(CNB.lookW), lookN: CNB.lookN, fix: r(CNB.fixN ? CNB.fix / CNB.fixN : 0), fixWorst: r(CNB.fixW), fixN: CNB.fixN }; } };
 FORT.rel = { k: 8, name: 'Antena de rádio', obj: 'mast', size: [2.6, 2.6, 7], time: 60, cap: 3, put: [5, 9], pad: .6, road: 9, min: 1, near: 0, back: 0, conceal: 0, pitch: 9, cost: [30, 40], garr: [], cn: 1 };
@@ -25273,7 +25283,7 @@ function cnGaps(t) {
   return G.sort((a, b) => b.w - a.w || a.ids[0] - b.ids[0]);
 }
 /* where a relay (or, with car, a radio vehicle) can cover gap g for side t: the furthest back toward its base, unwatched and clear of the known enemy */
-function cnSite(t, g, car) {
+function cnSite(t, g, car, from) {
   const C = cmdOf(t), b = S.base[t], R = cnRelR(), dx = b.x - g.x, dz = b.z - g.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, e = lsFoeBase(t, g.x, g.z);
   let best = null, bs = Infinity;
   for (let d = 0; d <= Math.min(R * CNR.keep, L); d += CNR.step) for (const l of CNR.lat) {
@@ -25281,16 +25291,17 @@ function cnSite(t, g, car) {
     if (!gMapOk(x, z) || !g.m.every(p => Math.hypot(p.x - x, p.z - z) < R * .95) || cnJam(t, x, z) > 0) continue;
     const v = cnWatch(C, x, z); if (v > CNR.vis || cmdKnown(C, x, z, CNR.foe) > 0) continue;
     if (!car && FORT.K[FORT.rel.k] && fortWhy(FORT.rel.k, t, x, z, headTo(x, z, e.x, e.z), true)) continue;
-    const s = v - d / R * .5 + Math.abs(l) / R * .2;
+    const s = v - d / R * .5 + Math.abs(l) / R * .2 + (from ? Math.hypot(from.x - x, from.z - z) / R * CNR.wk : 0);   // with a builder: its walk there counts (cf-radio-general)
     if (s < bs) { bs = s; best = { x, z, v }; }
   }
   return best;
 }
 /* the fix of side C on its way for gap g: 1 a relay, 2 a radio vehicle, 3 an operator; 0 none */
-function cnFixOf(C, g) {
+function cnFixOf(C, g) { const f = cnFixAt(C, g); return !f ? 0 : f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3; }
+function cnFixAt(C, g) {
   const R = cnRelR();
-  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f.k === 'rel' ? 1 : f.k === 'car' ? 2 : 3;
-  return 0;
+  for (const f of C.cnFix || []) if (Math.hypot(f.x - g.x, f.z - g.z) < R) return f;
+  return null;
 }
 /* side t's relays: standing or being built, and those ordered whose site has not been started yet */
 function cnRels(t) {
@@ -25303,7 +25314,7 @@ GC.fort = (G => ({ d: G.d, r: G.r, f(t, c, by, R) {
   if (S.net && !Net.crl) return gBad('crl');
   if (cnRels(t) >= FORT.rel.cap) return gBad('rcap');
   const r = G.f(t, c, by, R);
-  if (r.ok) { const C = cmdOf(t); (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, by }); }
+  if (r.ok) { const C = cmdOf(t), Tm = Number.isFinite(c.walk) && c.walk > 0 ? CNR.T + c.walk * CGN.walkK : CNR.T; (C.cnFix || (C.cnFix = [])).push({ k: 'rel', x: c.x, z: c.z, op: r.id, T0: S.t, Tm, by }); }   // the deadline counts the builder's walk (cf-radio-general)
   return r;
 } }))(GC.fort);
 /* the side's free radio vehicle of the AI nearest x z */
@@ -25337,7 +25348,7 @@ function cnCover(t, c, by) {
   const p = railOf(c.x, c.z), r = gSend(t, 'move', c.x, c.z, qs, 1, rt || [], () => ({ x: c.x, z: c.z, O: { k: 'hold', ri: p.ri, s: p.s, x: c.x, z: c.z, R: 12, fast: 1, mk: 'support' } }));
   if (!r) return gBad('way');
   r.op.v = 'radio'; gWhy(r.qs, why);
-  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, by });
+  F.push({ k: 'man', x: c.x, z: c.z, op: r.op.id, T0: S.t, Tm: CNR.T + CNR.hold + (Number.isFinite(c.walk) && c.walk > 0 ? c.walk * CGN.walkK : 0), by });   // the deadline counts the walk (cf-radio-general)
   gLog(t, 'radio', 'Operador de rádio a caminho ' + gNear(c.x, c.z) + ' com a sua esquadra: cobrir a rede ali' + (c.why && by === 'ai' ? ' (' + c.why + ')' : ''), { x: c.x, z: c.z }, null);
   return gYes(r.op.id);
 }
@@ -25348,13 +25359,22 @@ function cnFixed(C, x) {
   if (x.k === 'rel') {
     const f = S.forts.find(f => f.team === t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
     if (f && f.prog >= 1) { free(); return true; }
-    if (!f && (!op || op.over || !opLive(op).length)) return true;
-    if (S.t - x.T0 > CNR.T) { free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo: o general desiste dela', x, null); return true; }
+    const ban = () => { if (x.by !== 'ai' || !op) return; const B = C.cnBan || (C.cnBan = {}); for (const q of op.sq) B[q.id] = S.t + CNR.ban; };   // the builders that gave it up are not sent to a relay again for a while
+    if (!f && (!op || op.over || !opLive(op).length)) {
+      if (x.by === 'ai') { ban(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ': os construtores não puderam erguê-la (' + (op && opLive(op).length ? 'sem lugar para ela ali' : 'perdidos ou desviados') + '); o general procura outro jeito de cobrir a brecha', x, 'relno' + Math.round(x.x / 500) + ',' + Math.round(x.z / 500)); }
+      return true;
+    }
+    const q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.round(Math.hypot(L.x - x.x, L.z - x.z)) : -1;
+    if (d >= 0 && !(d > (x.dB === undefined ? Infinity : x.dB - CNR.gain))) { x.dB = d; x.dT = S.t; }   // the builders' best distance yet, and when they last gained on it
+    const late = S.t - x.T0 > (x.Tm || CNR.T), still = !f && x.dT !== undefined && S.t - x.dT < CNR.stall && S.t - x.T0 < (x.Tm || CNR.T) * 2;   // past the deadline but still gaining (a ride waited for, a long road): not yet
+    if (late && !still) {
+      ban(); free(); gLog(t, 'radio', 'Antena de rádio ' + gNear(x.x, x.z) + ' não ficou pronta a tempo (' + Math.round(S.t - x.T0) + ' s' + (f ? ', obra em ' + Math.round(f.prog * 100) + '%' : d >= 0 ? ', construtores ainda a ' + d + ' m' : '') + '): o general desiste dela', x, null); return true;
+    }
     return false;
   }
   if (x.k === 'car') return x.u.dead || x.u.gone || !x.u.cnG;
   if (!op || op.over || !opLive(op).length) return true;
-  if (S.t - x.T0 > CNR.T + CNR.hold) { free(); return true; }
+  if (S.t - x.T0 > (x.Tm || CNR.T + CNR.hold)) { free(); return true; }
   return false;
 }
 /* the commander's part, each plan (after its works): the gaps, and the AI closing the heaviest open one */
@@ -25368,12 +25388,55 @@ function cnFix(t) {
   try {
     if (genBy(t, 'sup') !== 'ai' || F.length >= CNR.max) return;
     const g = G.find(g => g.w >= CNR.min && !cnFixOf(C, g)); if (!g) return;
-    const s = cnSite(t, g, false), why = 'brecha na rede ' + gNear(g.x, g.z) + ': ' + gSqTxt(g.n) + ' sem ligação';
-    if (s && genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), why }, 'ai').ok) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ' (' + gSqTxt(g.n) + ' sem ligação): antena de rádio ordenada ' + gNear(s.x, s.z), s, 'gap' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
+    const key = Math.round(g.x / 500) + ',' + Math.round(g.z / 500), at = gNear(g.x, g.z), sq = gSqTxt(g.n) + ' sem ligação', why = 'brecha na rede ' + at + ': ' + sq;
+    const s0 = cnSite(t, g, false), P = s0 ? cnWho(t, g, s0) : null, b = P && P.q, s = P ? P.s : s0, w = P ? P.w : Infinity;   // the builder and its site together: the shortest walk
+    const rel = () => {
+      const r = genCmd(t, { c: 'fort', k: 'radio', x: Math.round(s.x), z: Math.round(s.z), ids: [b.id], walk: Math.round(w), why }, 'ai');
+      if (r.ok) gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): antena de rádio ordenada ' + gNear(s.x, s.z) + ', ' + sqName(b) + ' a ' + (w / 1000).toFixed(1).replace('.', ',') + ' km de caminhada', s, 'gap' + key);
+      return r;
+    };
+    let r1 = null;
+    if (s && b && w <= CNR.walk && (r1 = rel()).ok) return;
     const v = s || cnSite(t, g, true);
-    if (!v) return gLog(t, 'radio', 'Brecha na rede ' + gNear(g.x, g.z) + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + Math.round(g.x / 500) + ',' + Math.round(g.z / 500));
-    genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai');
-  } finally { const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms; }
+    if (!v) { g.note = 'SEM LUGAR SEGURO'; return gLog(t, 'radio', 'Brecha na rede ' + at + ': nenhum lugar fora da vista do inimigo para cobri-la', g, 'gapno' + key); }
+    if (cnCar(t, v.x, v.z) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), why }, 'ai').ok) return;   // the free radio vehicle drives there: it covers now
+    const o = gPick(t, {}, v.x, v.z, CNR.pool).find(cnOp), wo = o ? hdist(gLead(o), v) * CNR.way : Infinity;   // else whoever walks less: an operator's squad or the relay's builder
+    if (o && !(s && b && !r1 && w < wo) && genCmd(t, { c: 'req', k: 'radio', x: Math.round(v.x), z: Math.round(v.z), ids: [o.id], walk: Math.round(wo), why }, 'ai').ok) return;
+    if (s && b && !r1 && (r1 = rel()).ok) return;   // far, and no vehicle or nearer operator: the relay all the same, with the time its walk takes
+    const no = !s ? 'nenhum lugar para uma antena' : !b ? 'nenhuma esquadra livre para construir a antena' : 'antena recusada: ' + (GEN.no[r1 && r1.why] || (r1 && r1.why) || '?').toLowerCase();
+    g.note = !b && s ? 'SEM CONSTRUTOR LIVRE' : r1 && r1.why === 'rcap' ? 'LIMITE DE ANTENAS' : r1 && r1.why === 'cost' ? 'SEM RECURSOS PARA A ANTENA' : 'SEM REFORÇO POSSÍVEL';
+    gLog(t, 'radio', 'Brecha na rede ' + at + ' (' + sq + '): ' + no + ', e nenhum veículo-rádio ou operador livre; a rede segue com o buraco', g, 'gapx' + key);
+  } finally {
+    for (const g of G) if (!g.note) { const f = cnFixAt(C, g); if (f) g.note = cnNote(C, f); }
+    const ms = AIB.now() - a0; CNB.fix += ms; CNB.fixN++; if (ms > CNB.fixW) CNB.fixW = ms;
+  }
+}
+/* the AI's builder of a relay for gap g and its site: of the free squads nearest the safe site s0 (the first `cand` of them, and the
+   nearest engineers), none that gave one up lately, each with the site picked again for its own walk (cnSite with from), the one that
+   walks least (engineers engX m less). It used to be the nearest to s0 alone, and the site moved to it afterwards: a squad of the gap
+   that would have walked 200 m lost to one 2.5 km off. { q, s, w (m of way) } or null */
+function cnWho(t, g, s0) {
+  const B = cmdOf(t).cnBan, l = gPick(t, {}, s0.x, s0.z, CNR.pool).filter(q => !(B && B[q.id] > S.t));
+  const e = l.find(q => q.job === 'eng'), C = l.slice(0, CNR.cand); if (e && !C.includes(e)) C.push(e);
+  let best = null, bs = Infinity;
+  for (const q of C) {
+    const L = gLead(q), s = cnSite(t, g, false, L) || s0, w = hdist(L, s) * CNR.way, sc = w - (q.job === 'eng' ? CNR.engX : 0);
+    if (sc < bs || (sc === bs && best && q.id < best.q.id)) { bs = sc; best = { q, s, w }; }
+  }
+  return best;
+}
+/* the view's line for a gap with a fix on its way: the relay's progress or its builders' distance left, the vehicle's */
+function cnNote(C, x) {
+  const km = m => (m / 1000).toFixed(1).replace('.', ',') + ' KM';
+  if (x.k === 'rel') {
+    const f = S.forts.find(f => f.team === C.t && f.F.cn && !f.gone && Math.hypot(f.x - x.x, f.z - x.z) < FORT.ai.post * 3);
+    if (f) return 'EM OBRA · ' + Math.round(f.prog * 100) + '%';
+    const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q);
+    return L ? 'CONSTRUTORES A ' + km(Math.hypot(L.x - x.x, L.z - x.z)) : '';
+  }
+  if (x.k === 'car') return x.u && x.u.trip ? 'A ' + km(Math.hypot(x.u.x - x.x, x.u.z - x.z)) : 'NO LUGAR';
+  const op = x.op ? C.ops.find(o => o.id === x.op) : null, q = op ? opLive(op)[0] : null, L = q && gLead(q), d = L ? Math.hypot(L.x - x.x, L.z - x.z) : 0;
+  return L ? (d < 100 ? 'NO LUGAR' : 'A ' + km(d)) : '';
 }
 fortPlan = (g => (t, sq) => { g(t, sq); cnFix(t); })(fortPlan);
 /* after each look of the net: the vehicles sent to cover a place (on its way, then holding), and the relays (ready, lost, spotted) */
@@ -25417,7 +25480,7 @@ fortTargets = (g => (u, all) => { g(u, all); for (const f of S.forts) if (f.cg &
 cnVM = (g => t => {
   const V = g(t); if (!V) return V;
   const C = S.cmd && S.cmd[t], r = Math.round;
-  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e)]);
+  V.gap = ((C && C.cnGap) || []).map(e => [r(e.x), r(e.z), r(e.r), e.n, cnFixOf(C, e), e.note || '']);   // the note: what the general is doing about it, or why nothing goes (cf-radio-general)
   return V;
 })(cnVM);
 /* ---------- analytics (ANA): what a match was, for the after-action review and for balancing ----------
@@ -33168,7 +33231,7 @@ coverSpot = (g => (m, sl, o) => {
      "Blindado! Para dentro da casa!" when one of his men's ways goes through a house, else P5's blindado.
    - The general and the MCP see it in the unit card (genCard: leader, rank, confidence, technique, the method and its step and why, the
      teams and their tasks, a vacancy) and the diary (a succession; a decision to flank or to hold and call fire: gLog 'rep').
-   Hooks: belief, mindThink, the when of romper, recuo, fixar, lances and contato, squadThink, killMan, manDown, genCard, and the drills reagir (new), anticarro and tanque (their man and
+   Hooks: belief, mindThink, the when of romper, recuo, fixar, lances and contato, rtsBrain (the commander's camera), squadThink, killMan, manDown, genCard, and the drills reagir (new), anticarro and tanque (their man and
    act). brainHook 'lid' and 'eq'. Each decision is a cb (flCb) before its line. on: 0 leaves the squad as P0 left it */
 const LDR = { on: 1, lead: [1.2, 2.6], far: 1.4, cap: 3.6, rep: { fresh: 1.2, again: 5 }, conf: { ease: .35, lost: 1.2, k: .12, sup: 1.5 },
   tec: { lances: 600, fire: 30 }, react: { cover: 2, lost: 20, u: [2.2, 1.5], first: 1.5 }, fix: { conf: -.3, romper: -.6, live: 4, r: [50, 450], flank: 90, sync: 1.5, close: 35 },
@@ -33417,6 +33480,8 @@ for (const D of DRILLS) if (D.cls === 'inf' && LDRCF[D.id]) D.when = (f => funct
   const k = 1 + Math.max(0, LDRCF[D.id] * (q.bb.conf || 0)) * LDR.conf.k;
   return typeof v === 'number' ? v * k : Object.assign(v, { u: v.u * k });
 })(D.when);
+/* the commander's camera (RTS, #141) shows who leads, close up */
+if (typeof rtsBrain === 'function') rtsBrain = (g => q => { const L = g(q); if (lidOn() && q.eq) L.splice(1, 0, q.lid ? 'Líder: ' + lidQuem(q.lid) + (q.bb ? ' · confiança ' + gN(q.bb.conf || 0) : '') : q.lidV ? 'Sem líder: ' + lidQuem(q.lidV.de) + ' caiu' : 'Sem líder'); return L; })(rtsBrain);
 /* the generic contact drill gives way to the armour drills when the leader has armour fresh in sight (tanque, anticarro: the captain's case) */
 { const D = DRILLS.find(D => D.id === 'contato' && D.cls === 'inf');
   if (D) D.when = (f => (q, bt, d, K) => (!d && lidOn() && q.bb && belTop(q, b => drArm(b) && drFresh(b, 6) && b.d < DRILL.inf.tank.r) ? 0 : f(q, bt, d, K)))(D.when); }
@@ -34587,7 +34652,7 @@ function syncScene(dt) {
   }
   for (const m of S.men) {   // far off a soldier is a dark speck that never shrinks below a couple of pixels, so a squad can be made out
     const d = Math.hypot(m.x - cam.x, m.y - cam.y, m.z - cam.z), sz = px * .75 * d;
-    if (m.dead || sz < 1.2 || k >= MAXP) continue;
+    if (m.dead || sz < 1.2 || k >= MAXP || (RTS.side >= 0 && rtsHid(m))) continue;   // RTS: the fog of the commander's camera (cf-modo-rts)
     pp.set([m.x, m.y + STANCE[m.st].h * MAN.sc * .6, m.z], k * 3); pc.set([.15, .16, .12, .9], k * 4); ps[k++] = sz * (m.st === 2 ? .7 : 1);
   }
   for (const s of S.smokes) {   // a screen: the same drum the sim's line-of-sight rule uses, filled with blobs that billow a little
@@ -38339,7 +38404,7 @@ GV.cv.addEventListener('pointermove', e => { if (gorMove(e)) return; if (!GV.dra
 const gUp = e => { if (gorUp(e)) return; GV.drag = null; GV.cv.style.cursor = ''; };
 GV.cv.addEventListener('pointerup', gUp); GV.cv.addEventListener('pointercancel', gUp);
 GV.cv.addEventListener('wheel', e => { e.preventDefault(); const r = GV.cv.getBoundingClientRect(); genZoom(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
-GV.cv.addEventListener('contextmenu', e => { e.preventDefault(); gorCtx(e); }); GV.cv.addEventListener('dblclick', gorDbl);
+GV.cv.addEventListener('contextmenu', e => { e.preventDefault(); gorCtx(e); }); GV.cv.addEventListener('dblclick', e => gorDbl(e));
 $('#genSide').addEventListener('click', e => { const b = e.target.closest('[data-gs]'); if (b) genSide(+b.dataset.gs); });
 $('#genAll').addEventListener('click', () => genAct('all'));
 $('#genInf').addEventListener('click', () => genAct('inf'));
@@ -38459,7 +38524,7 @@ function gorToast(s, bad) {
   clearTimeout(GOR.toastT); GOR.toastT = setTimeout(() => { el.hidden = true; }, 3000);
 }
 /* the screen and the world of the map (the same maths as genProj) */
-const gorW = (px, py) => ({ x: (px - GV.w / 2) / GV.sc + GV.cx, z: (py - GV.h / 2) / GV.sc + GV.cz });
+const gorW = (px, py) => (GV.rts && GV.on ? rtsW(px, py) : { x: (px - GV.w / 2) / GV.sc + GV.cx, z: (py - GV.h / 2) / GV.sc + GV.cz });   // GV.rts: the 3D ground (cf-modo-rts)
 function gorP(e) { const r = GV.cv.getBoundingClientRect(); return { px: e.clientX - r.left, py: e.clientY - r.top }; }
 const gorSq = V => (V ? V.u.filter(e => e.t === V.t && e.sqd && e.id) : []);
 const gorSquads = () => gorSq(GV.V);
@@ -39328,7 +39393,7 @@ function gNet(g, V, P, now) {
     if (!Array.isArray(e) || !fin(e[0], e[1], e[2]) || !gOn(P, e[0], e[1], e[2] * P.s + 30)) continue;
     const x = P.X(e[0]), y = P.Y(e[1]), R = Math.max(10 * k, e[2] * P.s), c = '#ffb347';
     gHatch(g, x, y, R, c, .22); g.setLineDash([8, 5]); gRing(g, x, y, R, c, 1.6); g.setLineDash([]);
-    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); if (GF[e[4]]) gTxt(g, GF[e[4]], x, y - R + 7 * k, 9 * k, c, 'center'); }
+    if (GV.lab) { gTxt(g, 'BRECHA NA REDE · ' + (e[3] | 0) + ' ESQ.', x, y - R - 6 * k, 10 * k, c, 'center'); const nt = typeof e[5] === 'string' ? e[5].slice(0, 40) : ''; if (GF[e[4]] || nt) gTxt(g, (GF[e[4]] || '') + (GF[e[4]] && nt ? ' · ' : '') + nt, x, y - R + 7 * k, 9 * k, c, 'center'); }
   }
   for (const j of Array.isArray(N.jam) ? N.jam : []) {
     if (!Array.isArray(j) || !fin(j[0], j[1], j[2]) || !gOn(P, j[0], j[1], j[2] * P.s + 20)) continue;
@@ -40922,7 +40987,7 @@ function frame(now) {
     else { const c = CLK.plan(rt, playMode === 'watch' ? GV.spd : 1), t0 = performance.now(); for (let i = 0; i < c.n; i++) step(c.d); CLK.cost(performance.now() - t0, c.n); gdt = c.g; }
     Net.tick(gdt);
   }
-  updateCamera(dt); syncScene(dt); if (!GV.on) render3d(); drawHud(); audioTick(dt); genSample(); if (GV.on) genFrame(now);
+  updateCamera(dt); syncScene(dt); if (!GV.on || GV.rts) render3d(); drawHud(); audioTick(dt); genSample(); if (GV.on) genFrame(now);   // GV.rts: the commander's camera draws the scene under the view (cf-modo-rts)
 }
 /* ---------- the weapon camera (not tested, see docs/nao-testado/cf-camera-bomba.md) ----------
    A bomb let go, a rocket or a missile fired by the LOCAL player (S.my; nobody else's, online or off) is followed from behind and above in an inset
@@ -41268,7 +41333,7 @@ function packProp(id, mx, dk) {
 }
 fortBoxes = (g => put => {
   PK.n = {}; g(put);
-  for (const id in PK.inst) { const me = PK.inst[id]; me.count = PK.n[id] || 0; me.instanceMatrix.needsUpdate = true; if (me.instanceColor) me.instanceColor.needsUpdate = true; }
+  for (const id in PK.inst) { const me = PK.inst[id]; if (!me) continue; me.count = PK.n[id] || 0; me.instanceMatrix.needsUpdate = true; if (me.instanceColor) me.instanceColor.needsUpdate = true; }   // !me: a new world (buildWorld) leaves PK.inst[id] null until packInst makes it again
 })(fortBoxes);
 /* the mines: the pack's mine, scaled to the disc of before, once it is here */
 fortScene = (g => () => {
@@ -41875,6 +41940,466 @@ LEGEND.inf = (g => (d, o) => {
 })(LEGEND.inf);
 BRIEF.inf = (g => (d, o) => g(d, o) + (d.ied ? ' Como Plantador de IED, o compartimento 4 tem também o IED de comando (' + SAP.ied + ' por vez): ele não explode com quem passa, só com o seu celular (compartimento 5, a até ' + SLOT.phone + ' m), quando você quiser.' : '') + (d.bomb === 'man' ? ' O colete arma ' + BOMB.man.arm + ' s depois que você entra; com 5 e o clique ele explode na hora, e com um inimigo a ' + BOMB.man.trig + ' m explode sozinho.' : ''))(BRIEF.inf);
 /* ===== end of the soldier's compartments ===== */
+/* ---------- the commander's camera (RTS; cf-modo-rts, NOT TESTED: docs/nao-testado/cf-modo-rts.md) ----------
+   One more way to play the general, never the main one (issue #123, STRATEGY.md): the general's view (GV, GOR) over the live 3D battle
+   instead of the map table. With GV.rts on and the view open, frame() draws the scene under the view, the camera is the commander's
+   (rtsCam: a point on the ground, a distance, a heading and a tilt; W A S D, the edges, a drag, the wheel, [ ] and PageUp/PageDown, F the
+   selection, Home the overview), the map canvas is a clear overlay (rtsDraw: points, own squads with their leaders, teams and orders, the
+   enemy as the side knows it, the armed order, the box, the speech balloons, a minimap), and GOR's mouse reads the 3D ground (gorW and the
+   pickers, wrapped below). Orders are GOR's own, so gorSend → genDo → genCmd (by: me), with the same refusals and the same reasons the AI
+   and the MCP get; Shift + right button queues a point of the route (W21's GOR.rt) that the next order carries. The panels, the tabs and
+   the unit card are the view's. Fog: with "Ver tudo" off, an enemy soldier or vehicle is drawn only while side GV.t has it in sight (sT
+   within RTS.see s; a body within CMD.mem s); the rest are the contacts the view model has (age, error). Aircraft are drawn as the view
+   draws them (all). The old code knows of this only by hooks: frame (render3d while GV.rts), gorW, the dblclick listener, the far specks
+   in syncScene. ' (Backquote) or the bar's button switch the view between the map table and this camera; the hangar's "Comandante (RTS)"
+   joins as the General does and opens it here. Text goes to the canvas by fillText only; nothing here writes the battle */
+const RTS = { want: 0, M: null, S: null, x: 0, z: 0, fy: 0, d: 700, yaw: 0, pit: .95, k: {}, drag: null, ex: -1, ey: -1, cur: null, gcx: NaN, gcz: NaN, to: null,
+  fog: 1, see: 2.5, dMin: 12, dMax: 2600, pMin: .3, pMax: 1.45, mm: 190, side: -1, nop: false, mmB: null, edge: 8, brain: 260, man: 220, say: 350 };
+const RV = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+GV.rts = false;
+const rtsOn = () => !!(S && GV.on && GV.rts);
+/* the enemy that side RTS.side does not see now is not drawn (a body: what it knew within CMD.mem s) */
+function rtsHid(o) {
+  const t = RTS.side; if (t < 0 || !o || o.civ || o.team === t || !(o.team >= 0)) return false;
+  return !(S.t - sT(o, t) < (o.dead ? CMD.mem : RTS.see));
+}
+/* the camera: first look from the player (on side GV.t) or the side's main base, toward the enemy's */
+function rtsInit() {
+  RTS.S = S; const t = GV.t, P = S.my && !S.my.dead && S.my.team === t ? S.my : null, b = S.base[t] || { x: S.W / 2, z: 0 };
+  const o = P || b, e = (typeof eBase === 'function' ? eBase(t, o.x, o.z) : null) || S.base[1 - t] || { x: S.W / 2, z: 0 };
+  RTS.x = o.x; RTS.z = o.z; RTS.fy = hgt(o.x, o.z); RTS.yaw = Math.atan2(e.z - o.z, e.x - o.x) || 0; RTS.d = P ? 260 : 900; RTS.pit = .95; RTS.to = null; RTS.k = {}; RTS.drag = null;
+  RTS.gcx = GV.cx; RTS.gcz = GV.cz;
+}
+function rtsSet(on) {
+  if (!S || !GV.on) { GV.rts = !!on; return rtsDom(); }
+  GV.rts = !!on; RTS.k = {}; RTS.drag = null; S.input = {};
+  if (GV.rts) { RTS.M = S; if (RTS.S !== S) rtsInit(); RTS.gcx = GV.cx; RTS.gcz = GV.cz; }
+  GV.drawT = 0; GV.sig = {}; genBar();
+  if (GV.rts) gorToast('Câmera de comandante: W A S D ou as bordas movem, roda aproxima, botão do meio ou Alt+arrastar gira, \' volta ao mapa');
+}
+/* the page: the view transparent over the scene, the HUD hidden, the bar's two buttons, the title */
+function rtsDom() {
+  const on = !!(S && GV.on && GV.rts), g = $('#gen'), st = $('#stage');
+  if (g.hasAttribute('data-rts') !== on) g.toggleAttribute('data-rts', on);
+  if (st.hasAttribute('data-rts') !== on) st.toggleAttribute('data-rts', on);
+  if (g.hasAttribute('data-nop') !== (on && RTS.nop)) g.toggleAttribute('data-nop', on && RTS.nop);
+  const b = $('#genRts'), p = $('#genPan'), h = document.querySelector('.gen-top h2');
+  if (b) { if (b.getAttribute('aria-pressed') !== String(on)) b.setAttribute('aria-pressed', String(on)); const t = on ? 'Mapa (\')' : 'Câmera 3D (\')'; if (b.textContent !== t) b.textContent = t; }
+  if (p) { if (p.hidden === on) p.hidden = !on; const t = RTS.nop ? 'Mostrar painéis' : 'Esconder painéis'; if (p.textContent !== t) p.textContent = t; }
+  if (h) { const t = on ? 'Comandante' : 'Visão de General'; if (h.textContent !== t) h.textContent = t; }
+}
+/* a ray from the eye through a pixel of the stage, and where it meets the ground (water counts as its surface); off the ground, the plane of the
+   point the camera looks at, or 4 km out along the heading. The minimap's pixels are its own world points */
+function rtsRay(px, py) {
+  RV.set(px / cw * 2 - 1, -(py / ch) * 2 + 1, .5).unproject(camera); const o = camera.position, dx = RV.x - o.x, dy = RV.y - o.y, dz = RV.z - o.z, l = Math.hypot(dx, dy, dz) || 1;
+  return { x: dx / l, y: dy / l, z: dz / l };
+}
+const rtsIn = (x, z) => ({ x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW) });
+function rtsGround(px, py) {
+  const o = camera.position, d = rtsRay(px, py), WL = S.T && Number.isFinite(S.T.WL) ? S.T.WL : -1e9, H = (x, z) => Math.max(hgt(x, z), WL);
+  let t0 = 0, t1 = 0, hit = false;
+  for (let i = 0; i < 420; i++) {
+    t1 = t0 + Math.max(1.5, t0 * .015);
+    const x = o.x + d.x * t1, y = o.y + d.y * t1, z = o.z + d.z * t1;
+    if (y <= H(x, z)) { hit = true; break; }
+    if (t1 > 9000 || x < -600 || x > S.W + 600 || Math.abs(z) > S.HW + 600) break;
+    t0 = t1;
+  }
+  if (hit) {
+    for (let i = 0; i < 10; i++) { const tm = (t0 + t1) / 2, x = o.x + d.x * tm, y = o.y + d.y * tm, z = o.z + d.z * tm; if (y <= H(x, z)) t1 = tm; else t0 = tm; }
+    return rtsIn(o.x + d.x * t1, o.z + d.z * t1);
+  }
+  if (d.y < -1e-3) { const t = (RTS.fy - o.y) / d.y; return rtsIn(o.x + d.x * t, o.z + d.z * t); }
+  const l = Math.hypot(d.x, d.z) || 1; return rtsIn(o.x + d.x / l * 4000, o.z + d.z / l * 4000);
+}
+function rtsMM(px, py) { const b = RTS.mmB; if (!b || px < b.x || px > b.x + b.w || py < b.y || py > b.y + b.h) return null; return rtsIn((px - b.x) / b.sc, (py - b.y) / b.sc - S.HW); }
+function rtsW(px, py) { return rtsMM(px, py) || rtsGround(px, py); }
+/* a point on the screen, or null behind the eye or far off it */
+function rtsXY(x, y, z, m) { const s = proj(x, y, z); m = m === undefined ? 40 : m; return s.front && s.x > -m && s.x < cw + m && s.y > -m && s.y < ch + m ? s : null; }
+const rtsGY = (x, z) => hgt(x, z);
+/* the side's own squads by id (the host's and solo's; a guest has only the view model's leader) */
+function rtsSqs(t) { const m = new Map(); for (const q of S.squads || []) if (q.team === t && q.live > 0 && q.id) m.set(q.id, q); return m; }
+const rtsLid = q => (typeof flLid === 'function' ? flLid(q) : q.men.find(m => !m.dead && !m.down) || null);
+/* the man or the leader of an own squad nearest the pixel, within r px */
+function rtsPick(px, py, r) {
+  const V = GV.V; if (!V) return null;
+  const Q = rtsSqs(V.t); let b = null, bd = r || 16;
+  for (const e of gorSq(V)) {
+    const q = Q.get(e.id), L = q ? q.men.filter(m => !m.dead && !m.in) : [{ x: e.x, y: rtsGY(e.x, e.z), z: e.z }];
+    for (const m of L) { const s = rtsXY(m.x, (m.y !== undefined ? m.y : rtsGY(m.x, m.z)) + 1, m.z, 0); if (!s) continue; const d = Math.hypot(s.x - px, s.y - py); if (d < bd) { bd = d; b = e; } }
+    const s = rtsXY(e.x, rtsGY(e.x, e.z) + 6, e.z, 0); if (s) { const d = Math.hypot(s.x - px, s.y - py - 10); if (d < bd) { bd = d; b = e; } }   // the marker over the leader
+  }
+  return b;
+}
+function rtsPt(px, py) {
+  const V = GV.V; if (!V) return null;
+  const w = rtsW(px, py); let b = null, bd = 1e9;
+  V.pts.forEach((p, i) => { const d = Math.hypot(p.x - w.x, p.z - w.z); if (d < (p.r || 60) && d < bd) { bd = d; b = { i, p }; } });
+  return b;
+}
+function rtsFoe(px, py) {
+  const V = GV.V; if (!V) return null;
+  let b = null, bd = 18;
+  for (const e of V.u) {
+    if (e.t === V.t || e.g === 'jet' || e.g === 'cas' || e.g === 'heli') continue;
+    const s = rtsXY(e.x, rtsGY(e.x, e.z) + 1.5, e.z, 0); if (!s) continue;
+    const d = Math.hypot(s.x - px, s.y - py); if (d < bd) { bd = d; b = e; }
+  }
+  if (b) return b;
+  const w = rtsW(px, py); bd = 25;   // close to the ground: a contact within 25 m of where the click lands
+  for (const e of V.u) { if (e.t === V.t || e.g === 'jet' || e.g === 'cas' || e.g === 'heli') continue; const d = Math.hypot(e.x - w.x, e.z - w.z); if (d < bd) { bd = d; b = e; } }
+  return b;
+}
+function rtsBox(x0, y0, x1, y1, add) {
+  const V = GV.V, ax = Math.min(x0, x1), bx = Math.max(x0, x1), ay = Math.min(y0, y1), by = Math.max(y0, y1), Q = V ? rtsSqs(V.t) : new Map();
+  if (!add) GOR.sel.clear();
+  const inb = (x, y, z) => { const s = rtsXY(x, y, z, 0); return !!s && s.x >= ax && s.x <= bx && s.y >= ay && s.y <= by; };
+  for (const e of gorSquads()) {
+    const q = Q.get(e.id), L = q ? q.men.filter(m => !m.dead && !m.in) : [];
+    if (inb(e.x, rtsGY(e.x, e.z) + 1, e.z) || L.some(m => inb(m.x, m.y + 1, m.z))) GOR.sel.add(e.id);
+  }
+  gorBar();
+}
+/* the camera, each frame the view is open in this mode: true when it took the frame */
+function rtsCam(dt) {
+  if (!rtsOn()) return false;
+  if (RTS.S !== S) rtsInit();
+  if (GV.cx !== RTS.gcx || GV.cz !== RTS.gcz) {   // the view asked to look somewhere (a group called twice, a line of the log, Ver on a mission): the camera goes there
+    if (Number.isFinite(RTS.gcx) && Number.isFinite(GV.cx)) RTS.to = rtsIn(GV.cx, GV.cz);
+    RTS.gcx = GV.cx; RTS.gcz = GV.cz;
+  }
+  const k = RTS.k, cy = Math.cos(RTS.yaw), sy = Math.sin(RTS.yaw), sp = Math.max(30, RTS.d) * 1.1 * (k.ShiftLeft || k.ShiftRight ? 3 : 1) * dt;
+  let f = (k.KeyW || k.ArrowUp ? 1 : 0) - (k.KeyS || k.ArrowDown ? 1 : 0), r = (k.KeyD || k.ArrowRight ? 1 : 0) - (k.KeyA || k.ArrowLeft ? 1 : 0);
+  if (RTS.ex >= 0 && !RTS.drag && !GOR.dn && document.hasFocus()) { const e = RTS.edge; if (RTS.ex < e) r--; else if (RTS.ex > cw - e) r++; if (RTS.ey < e) f++; else if (RTS.ey > ch - e) f--; }
+  if (f || r) { RTS.to = null; RTS.x += (cy * f - sy * r) * sp; RTS.z += (sy * f + cy * r) * sp; }
+  RTS.yaw += ((k.BracketRight ? 1 : 0) - (k.BracketLeft ? 1 : 0)) * 1.4 * dt;
+  RTS.pit = clamp(RTS.pit + ((k.PageUp ? 1 : 0) - (k.PageDown ? 1 : 0)) * .9 * dt, RTS.pMin, RTS.pMax);
+  if (RTS.to) { const a = 1 - Math.exp(-dt * 5); RTS.x += (RTS.to.x - RTS.x) * a; RTS.z += (RTS.to.z - RTS.z) * a; if (Math.hypot(RTS.to.x - RTS.x, RTS.to.z - RTS.z) < 1) RTS.to = null; }
+  const p = rtsIn(RTS.x, RTS.z); RTS.x = p.x; RTS.z = p.z;
+  const WL = S.T && Number.isFinite(S.T.WL) ? S.T.WL : -1e9, gy = Math.max(hgt(RTS.x, RTS.z), WL); RTS.fy += (gy - RTS.fy) * (1 - Math.exp(-dt * 6));
+  const cp = camera.position, h = RTS.d * Math.sin(RTS.pit), bk = RTS.d * Math.cos(RTS.pit), ly = RTS.fy + (RTS.d < 60 ? 1.2 : 0);
+  cp.set(RTS.x - cy * bk, ly + h, RTS.z - sy * bk);
+  cp.y = clamp(Math.max(cp.y, Math.max(hgt(cp.x, cp.z), WL) + 3), -1e4, S.ceil || 6000);
+  camera.up.set(0, 1, 0); camera.lookAt(RTS.x, ly, RTS.z); camera.fov = 55; camSt.init = false;
+  camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  skyDome.position.copy(cp); S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
+  sparks.material.uniforms.scale.value = ch * dpr / (2 * Math.tan(camera.fov * Math.PI / 360));
+  return true;
+}
+function rtsZoom(f, px, py) {
+  const d0 = RTS.d, d1 = clamp(d0 / f, RTS.dMin, RTS.dMax); if (d1 === d0) return;
+  if (px !== undefined && !rtsMM(px, py)) { const w = rtsGround(px, py), a = 1 - d1 / d0; RTS.x += (w.x - RTS.x) * a; RTS.z += (w.z - RTS.z) * a; RTS.to = null; }
+  RTS.d = d1;
+}
+function rtsFocus() {
+  const V = GV.V, Q = V ? rtsSqs(V.t) : new Map(), L = V ? gorSq(V).filter(e => GOR.sel.has(e.id)) : [];
+  if (L.length) { RTS.to = rtsIn(L.reduce((a, e) => a + e.x, 0) / L.length, L.reduce((a, e) => a + e.z, 0) / L.length); if (L.length === 1 && Q.get(L[0].id)) RTS.d = Math.min(RTS.d, 140); else RTS.d = Math.min(RTS.d, 600); return; }
+  const P = S.my && !S.my.dead && S.my.team === GV.t ? S.my : null;
+  if (P) { RTS.to = rtsIn(P.x, P.z); RTS.d = Math.min(RTS.d, 120); }
+}
+/* the keys in this mode (true: taken); the rest go to the view's and GOR's own */
+const RTSK = { KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1, ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, PageUp: 1, PageDown: 1, BracketLeft: 1, BracketRight: 1 };
+function rtsKey(e) {
+  const c = e.code;
+  if (c === 'ShiftLeft' || c === 'ShiftRight') { RTS.k[c] = 1; return false; }
+  if (e.ctrlKey && /^Digit[1-9]$/.test(c)) {   // Ctrl+number records a group, as Shift+number does (a browser may keep Ctrl+number for its tabs)
+    if (!gorOn()) return false;
+    if (!e.repeat) { const n = +c[5]; GOR.grp[n] = gorIds(); gorToast('Grupo ' + n + ': ' + GOR.grp[n].length + ' esquadra(s) gravada(s)'); }
+    return true;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return false;
+  if ((c === 'BracketLeft' || c === 'BracketRight') && GOR.mode === 'build') return false;   // the build mode turns the work with them
+  if (RTSK[c]) { RTS.k[c] = 1; return true; }
+  if (c === 'Equal' || c === 'NumpadAdd') { rtsZoom(1.25); return true; }
+  if (c === 'Minus' || c === 'NumpadSubtract') { rtsZoom(1 / 1.25); return true; }
+  if (c === 'KeyF') { if (!e.repeat) rtsFocus(); return true; }
+  if (c === 'Home') { if (!e.repeat) { const b = S.base[GV.t] || { x: S.W / 2, z: 0 }; RTS.to = rtsIn((b.x + S.W / 2) / 2, b.z / 2); RTS.d = 2200; RTS.pit = 1.05; } return true; }
+  return false;
+}
+addEventListener('keyup', e => { delete RTS.k[e.code]; });
+addEventListener('blur', () => { RTS.k = {}; RTS.ex = -1; });
+addEventListener('pointermove', e => {
+  if (!rtsOn()) { RTS.ex = -1; return; }
+  const r = $('#stage').getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x < 0 || y < 0 || x > r.width || y > r.height) { RTS.ex = -1; RTS.cur = null; return; }
+  RTS.ex = x; RTS.ey = y; RTS.cur = { px: x, py: y };
+}, { passive: true });
+document.addEventListener('pointerleave', () => { RTS.ex = -1; });
+/* the mouse on the view in this mode: the minimap and the camera's drags here, the rest to GOR; never the map table's pan */
+function rtsDown(e) {
+  const p = gorP(e), mm = rtsMM(p.px, p.py);
+  if (e.button === 0 && mm && !e.altKey && !(GOR.mode && gorOn())) { RTS.drag = { k: 'mm' }; RTS.to = mm; try { GV.cv.setPointerCapture(e.pointerId); } catch (x) {} return true; }
+  if (e.button === 1 || (e.button === 0 && e.altKey)) { e.preventDefault(); RTS.drag = { k: 'rot', x: e.clientX, y: e.clientY }; try { GV.cv.setPointerCapture(e.pointerId); } catch (x) {} return true; }
+  if (e.button === 0 && !gorOn()) { RTS.drag = { k: 'pan', x: e.clientX, y: e.clientY }; try { GV.cv.setPointerCapture(e.pointerId); } catch (x) {} return true; }
+  return false;
+}
+function rtsMove(e) {
+  const D = RTS.drag; if (!D) return false;
+  if (D.k === 'mm') { const p = gorP(e), w = rtsMM(p.px, p.py); if (w) RTS.to = w; return true; }
+  const dx = e.clientX - D.x, dy = e.clientY - D.y; D.x = e.clientX; D.y = e.clientY;
+  if (D.k === 'rot') { RTS.yaw += dx * .006; RTS.pit = clamp(RTS.pit + dy * .004, RTS.pMin, RTS.pMax); return true; }
+  const s = 1.04 * RTS.d / Math.max(200, ch), cy = Math.cos(RTS.yaw), sy = Math.sin(RTS.yaw), fw = dy * s / Math.max(.35, Math.sin(RTS.pit)), rt = -dx * s;
+  RTS.x += cy * fw - sy * rt; RTS.z += sy * fw + cy * rt; RTS.to = null;
+  return true;
+}
+gorDown = (g => e => { if (!rtsOn()) return g(e); gorSync(); if (rtsDown(e)) return true; g(e); return true; })(gorDown);
+gorMove = (g => e => { if (!rtsOn()) return g(e); if (rtsMove(e)) return true; g(e); return true; })(gorMove);
+gorUp = (g => e => { if (RTS.drag) { RTS.drag = null; return true; } if (!rtsOn()) return g(e); g(e); return true; })(gorUp);
+genZoom = (g => (f, px, py) => (rtsOn() ? rtsZoom(f, px, py) : g(f, px, py)))(genZoom);
+gorPick = (g => (px, py) => (rtsOn() ? rtsPick(px, py) : g(px, py)))(gorPick);
+gorPt = (g => (px, py) => (rtsOn() ? rtsPt(px, py) : g(px, py)))(gorPt);
+gorFoe = (g => (px, py) => (rtsOn() ? rtsFoe(px, py) : g(px, py)))(gorFoe);
+gorBox = (g => (x0, y0, x1, y1, add) => (rtsOn() ? rtsBox(x0, y0, x1, y1, add) : g(x0, y0, x1, y1, add)))(gorBox);
+gorDbl = (g => e => {
+  if (!rtsOn()) return g(e);
+  gorSync();
+  if (!gorOn() || GOR.mode) return;
+  const p = gorP(e), s = gorPick(p.px, p.py); if (!s) return;
+  if (!e.shiftKey) GOR.sel.clear();
+  for (const o of gorSquads()) if (o.g === s.g && rtsXY(o.x, rtsGY(o.x, o.z) + 1, o.z, 0)) GOR.sel.add(o.id);
+  gorBar();
+})(gorDbl);
+gorBuild = (g => (w, px, py) => {
+  if (!rtsOn()) return g(w, px, py);
+  let x = w.x, z = w.z, a = GOR.ba;
+  for (const s of GOR.spots) { const q = rtsXY(s.x, rtsGY(s.x, s.z), s.z, 0); if (q && Math.hypot(q.x - px, q.y - py) < 16) { x = s.x; z = s.z; if (a === null && Number.isFinite(s.a)) a = s.a; break; } }
+  const c = { c: 'build', k: GOR.bk, x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10 }; if (a !== null) c.a = Math.round(a * 100) / 100;
+  gorSend(c);
+})(gorBuild);
+/* the right button with Shift and nothing armed: one more point of the route (W21) the next order carries; the order without Shift goes with it */
+gorCtx = (g => e => {
+  if (rtsOn() && gorOn() && e.shiftKey && !GOR.mode && gorIds().length) {
+    const p = gorP(e), w = gorW(p.px, p.py), r1 = v => Math.round(v * 10) / 10;
+    if (GOR.rt.length >= W21.wp) return gorToast('A fila já tem ' + W21.wp + ' pontos: clique direito sem Shift dá a ordem', true);
+    GOR.rt.push({ x: r1(w.x), z: r1(w.z) }); GOR.sig = {};
+    gorToast('Fila: ponto ' + GOR.rt.length + ' da rota · clique direito sem Shift dá a ordem final · Esc apaga');
+    return gorBar();
+  }
+  return g(e);
+})(gorCtx);
+/* the view: the bar, the keys, the title, the frame drawn every frame here (the camera moves every frame), the overlay in place of the map */
+genOpen = (g => (v, user) => {
+  if (v && S && GV.rts && RTS.M !== S) GV.rts = false;   // a new match starts on the map table, unless the hangar asked for this camera
+  g(v, user);
+  if (v && S && GV.on && RTS.want) { RTS.want = 0; rtsSet(true); }
+  rtsDom();
+})(genOpen);
+genBar = (g => () => { g(); rtsDom(); })(genBar);
+genFit = (g => () => { g(); RTS.gcx = GV.cx; RTS.gcz = GV.cz; })(genFit);
+genFrame = (g => now => { if (rtsOn()) GV.drawT = 0; g(now); })(genFrame);
+genDraw = (g => (V, now) => (rtsOn() ? rtsDraw(V, now) : g(V, now)))(genDraw);
+genKey = (g => e => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '');
+  if (S && GV.on && !typing && e.code === 'Backquote' && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); if (!e.repeat) rtsSet(!GV.rts); return true; }
+  if (rtsOn() && !typing && rtsKey(e)) { e.preventDefault(); return true; }
+  return g(e);
+})(genKey);
+gorBar = (g => () => {
+  g();
+  if (!rtsOn()) return;
+  const keys = document.querySelector('.gen-keys'), kt = gorSeat() ? 'Clique/arraste: selecionar · Duplo clique: mesmo tipo · Clique direito: ordem (Shift+direito: fila de pontos) · WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · F: foco · 1-9: grupos (Shift ou Ctrl+número grava) · \': mapa · Tab: fechar'
+    : 'Arraste ou WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · [ ]: girar · PageUp/PageDown: inclinar · Home: visão geral · \': mapa · Tab: fechar';
+  if (keys && keys.textContent !== kt) keys.textContent = kt;
+})(gorBar);
+/* the scene: who is not seen is not drawn (the vehicles' models here, the soldiers in poseMan and the far specks in syncScene); no body of mine
+   drawn round the eye, no weapon in hand, no weapon camera while the commander looks */
+syncScene = (g => dt => {
+  const on = rtsOn(); RTS.side = on && RTS.fog && !GV.all ? GV.t : -1;
+  g(dt);
+  if (on) camSt.body = false;
+  for (const u of S.units) {
+    const m = u.m; if (!m) continue;
+    if (RTS.side >= 0 && rtsHid(u)) { if (m.visible) { m.visible = false; m.userData.rtsH = 1; } }
+    else if (m.userData.rtsH) { m.visible = true; m.userData.rtsH = 0; }
+  }
+})(syncScene);
+poseMan = (f => (m, put) => { if (RTS.side >= 0 && rtsHid(m)) return; f(m, put); })(poseMan);
+vmRender = (g => () => { if (rtsOn()) { for (const V of VM.M.values()) V.root.visible = false; VM.on = false; return; } g(); })(vmRender);
+if (typeof WCAM !== 'undefined' && WCAM && typeof WCAM.render === 'function') WCAM.render = (g => () => { if (rtsOn()) return; g(); })(WCAM.render);
+updateCamera = (g => dt => { if (rtsCam(dt)) return; g(dt); })(updateCamera);
+/* the overlay: a clear canvas over the scene, everything placed by the camera (proj), sized by the distance */
+function rtsRing(g, x, z, r, col, w, dash) {
+  const n = r > 40 ? 32 : 16; let open = false; g.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const a = i / n * TAU, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r, s = rtsXY(px, rtsGY(px, pz) + .4, pz, 400);
+    if (!s) { open = false; continue; }
+    if (open) g.lineTo(s.x, s.y); else { g.moveTo(s.x, s.y); open = true; }
+  }
+  g.strokeStyle = col; g.lineWidth = w || 1.5; if (dash) g.setLineDash(dash); g.stroke(); g.setLineDash([]);
+}
+function rtsLine(g, x1, z1, x2, z2, col, w, dash) {
+  const n = Math.max(2, Math.min(24, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / 60))); let open = false, last = null, prev = null; g.beginPath();
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, x = x1 + (x2 - x1) * t, z = z1 + (z2 - z1) * t, s = rtsXY(x, rtsGY(x, z) + 1.5, z, 400);
+    if (!s) { open = false; continue; }
+    if (open) g.lineTo(s.x, s.y); else { g.moveTo(s.x, s.y); open = true; }
+    prev = last; last = s;
+  }
+  g.strokeStyle = col; g.lineWidth = w || 1.5; if (dash) g.setLineDash(dash); g.stroke(); g.setLineDash([]);
+  if (last && prev) gHeadAt(g, prev.x, prev.y, last.x, last.y, 9, col);
+}
+const rtsK = (x, y, z) => clamp(520 / (Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z) || 1), .6, 1.35);
+const rtsCd = (x, y, z) => Math.hypot(x - camera.position.x, y - camera.position.y, z - camera.position.z);
+const rtsS = v => String(v === undefined || v === null ? '' : v).slice(0, 48);
+/* what the squad's mind says it is doing, from the contract's fields when they are there (CEREBRO P0: q.lid, q.eq, q.tec, q.bb.plano), else
+   from the order and the job: a few short lines */
+function rtsBrain(q) {
+  const L = [], O = q.ord || {};
+  L.push('ESQ ' + q.id + ' · ' + (GEN.job[q.job] || rtsS(q.job) || 'esquadra') + ' · ' + q.live + (q.live === 1 ? ' homem' : ' homens'));
+  if (O.k) L.push('Ordem: ' + (GEN.ord[O.k] || rtsS(O.k)) + (q.op && q.op.k ? ' · operação ' + rtsS((GEN.man || {})[q.op.k] || q.op.k) : ''));
+  const tec = q.tec || O.tec; if (tec) L.push('Técnica: ' + rtsS(tec));
+  const pl = q.bb && q.bb.plano; if (pl && pl.proc) L.push('Plano: ' + rtsS(pl.proc) + (pl.passo !== undefined && pl.passo !== null ? ' · passo ' + rtsS(pl.passo) : ''));
+  if (Array.isArray(q.eq)) for (const T of q.eq.slice(0, 3)) { const tar = T.tar && typeof T.tar === 'object' ? T.tar.k || T.tar.tipo || T.tar.perfil : T.tar; L.push('Equipe ' + rtsS(T.id) + ': ' + rtsS(tar || T.papel || '—') + ' · ' + (T.men || []).filter(m => !m.dead).length); }
+  if (q.state) L.push('Em fuga');
+  return L;
+}
+/* a man's team letter (the contract's q.eq), his reflex, his state, wounded: what shows under him close up */
+function rtsManTxt(q, m) {
+  const o = [];
+  if (Array.isArray(q.eq)) for (const T of q.eq) if (T.men && T.men.includes(m)) { o.push(rtsS(T.id)); break; }
+  if (m.rf && m.rf.k && !(m.rf.ate < S.t)) o.push(rtsS(m.rf.k));
+  if (m.mo && m.mo.est && m.mo.est !== 'firme') o.push(rtsS(m.mo.est));
+  const tar = m.tar && typeof m.tar === 'object' ? m.tar.k || m.tar.perfil : m.tar; if (tar) o.push(rtsS(tar));
+  if (m.down) o.push('ferido');
+  return o.join(' · ');
+}
+function rtsBubble(g, x, y, t, own) {
+  g.font = gMono(11); const w = g.measureText(t).width + 8, h = 17, bx = x - w / 2, by = y - h - 6;
+  g.fillStyle = 'rgba(240,236,220,.9)'; g.fillRect(bx, by, w, h); g.beginPath(); g.moveTo(x - 4, by + h); g.lineTo(x, by + h + 5); g.lineTo(x + 4, by + h); g.fill();
+  g.textAlign = 'center'; g.fillStyle = own ? '#15301c' : '#4a1210'; g.fillText(t, x, by + h - 5);
+}
+function rtsDraw(V, now) {
+  const g = GV.g, lab = !!gLay('lab').on, own = gCol(V, V.t), acc = gAcc(), Q = rtsSqs(V.t);
+  g.setTransform(GV.d, 0, 0, GV.d, 0, 0); g.clearRect(0, 0, GV.w, GV.h); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.setLineDash([]); g.lineJoin = 'round'; g.lineCap = 'round';
+  /* the points: a ring on the ground in the holder's colour, the name over the middle */
+  for (const p of V.pts) {
+    const c = gCol(V, p.hold), cd = rtsCd(p.x, rtsGY(p.x, p.z), p.z); if (cd > 9000) continue;
+    rtsRing(g, p.x, p.z, p.r || 60, c, 2, p.w && cqHot(p) ? [6, 5] : null);
+    const s = rtsXY(p.x, rtsGY(p.x, p.z) + 12, p.z); if (s && (lab || p.L)) gTxt(g, (p.L ? p.L + ' · ' : '') + (lab ? p.name || '' : ''), s.x, s.y, 13 * rtsK(p.x, s.y, p.z), '#ece6d6', 'center');
+  }
+  for (const b of V.base) { const s = rtsXY(b.x, rtsGY(b.x, b.z) + 20, b.z); if (s) gTxt(g, 'BASE', s.x, s.y, 12, gCol(V, b.t), 'center'); }
+  /* fire missions, the rally point, the pilots' mark */
+  for (const M of V.fm || []) { rtsRing(g, M.x, M.z, 60, M.k === 'smk' ? '#d8d8d0' : '#ffb347', 1.6, [4, 4]); const s = rtsXY(M.x, rtsGY(M.x, M.z) + 8, M.z); if (s && lab) gTxt(g, (M.k === 'smk' ? 'FUMAÇA' : 'FOGO') + ' · ' + Math.max(0, Math.round(M.left)) + ' s', s.x, s.y, 11, '#ffb347', 'center'); }
+  if (GOR.rally) { rtsRing(g, GOR.rally.x, GOR.rally.z, 25, acc, 2); const s = rtsXY(GOR.rally.x, rtsGY(GOR.rally.x, GOR.rally.z) + 10, GOR.rally.z); if (s) gTxt(g, 'REUNIÃO', s.x, s.y, 11, acc, 'center'); }
+  if (GOR.mark && GOR.mark.T > S.t) { rtsRing(g, GOR.mark.x, GOR.mark.z, 30, '#ff8a7a', 2, [3, 4]); const s = rtsXY(GOR.mark.x, rtsGY(GOR.mark.x, GOR.mark.z) + 10, GOR.mark.z); if (s) gTxt(g, 'MARCA', s.x, s.y, 11, '#ff8a7a', 'center'); }
+  /* the operations in force: the assault's objective and what an abstract order goes for */
+  for (const o of V.ops || []) {
+    const at = o.k === 'atk' && o.O ? o.O : (o.k === 'usr' || o.k === 'amb') && Number.isFinite(o.x) ? o : o.to || null; if (!at || !Number.isFinite(at.x)) continue;
+    const c = o.k === 'amb' ? '#b9a3e3' : acc; rtsRing(g, at.x, at.z, o.k === 'atk' ? 90 : 40, c, 1.4, [8, 6]);
+    const s = rtsXY(at.x, rtsGY(at.x, at.z) + 18, at.z); if (s && lab) gTxt(g, (o.k === 'atk' ? 'ASSALTO' + (o.st && GEN.st[o.st] ? ' · ' + GEN.st[o.st] : '') : o.k === 'amb' ? 'EMBOSCADA' : o.k === 'usr' ? 'ORDEM' : (GEN.mtag && GEN.mtag[o.k]) || String(o.k).toUpperCase()) + (o.H > 0 ? ' · H ' + Math.round(o.H) + ' s' : ''), s.x, s.y, 11, c, 'center');
+  }
+  /* the enemy as the side knows it: a diamond where it was last seen, faded by its age, a ring for how far off it may be by now */
+  for (const u of V.u) {
+    if (u.t === V.t || (V.all && u.age === undefined && u.g !== 'jet' && u.g !== 'cas' && u.g !== 'heli' && rtsCd(u.x, rtsGY(u.x, u.z), u.z) < 150)) continue;
+    const air = u.g === 'jet' || u.g === 'cas' || u.g === 'heli', y = air ? null : rtsGY(u.x, u.z), c = gCol(V, u.t);
+    let s; if (air) { const P = S.planes.find(p => !p.dead && Math.abs(p.x - u.x) < .5 && Math.abs(p.z - u.z) < .5); s = rtsXY(u.x, P ? P.y : y || 300, u.z); } else s = rtsXY(u.x, y + (u.g === 'inf' ? 3 : 5), u.z);
+    if (!s) continue;
+    const k = rtsK(u.x, y || 0, u.z), al = u.age !== undefined ? clamp(1 - u.age / CMD.mem, .2, 1) : 1;
+    gGlyph(g, s.x, s.y - 10 * k, u.g, false, al, k, c, 0, u.fix, now);
+    if (u.age !== undefined && u.age > 1) {
+      rtsRing(g, u.x, u.z, SHARE.err + u.age * 2, c, 1, [2, 5]);
+      if (lab) gTxt(g, (u.n > 1 ? u.n + ' · ' : '') + 'há ' + Math.round(u.age) + ' s', s.x, s.y + 6 * k, 10 * k, c, 'center');
+    } else if (u.n > 1 && lab) gTxt(g, String(u.n), s.x + 11 * k, s.y - 6 * k, 10 * k, c, 'left');
+  }
+  /* own units: the vehicles and aircraft as the map's glyphs, the squads with their leader, their order, their teams and the selection */
+  const hov = RTS.cur && !GOR.dn ? rtsPick(RTS.cur.px, RTS.cur.py) : null;
+  for (const u of V.u) {
+    if (u.t !== V.t || u.sqd) continue;
+    const air = u.g === 'jet' || u.g === 'cas' || u.g === 'heli'; let y = rtsGY(u.x, u.z) + 6;
+    if (air) { const P = S.planes.find(p => !p.dead && Math.abs(p.x - u.x) < .5 && Math.abs(p.z - u.z) < .5); if (P) y = P.y + 8; }
+    const s = rtsXY(u.x, y, u.z); if (!s) continue;
+    if (!air && rtsCd(u.x, y, u.z) < 120) continue;   // close up the model says it
+    gGlyph(g, s.x, s.y, u.g, true, .85, rtsK(u.x, y, u.z) * .85, own, 0, u.fix, now);
+    if (u.me) gTxt(g, 'VOCÊ', s.x, s.y - 14, 10, '#ffffff', 'center');
+  }
+  const sel = new Set(GOR.sel), one = sel.size === 1 ? [...sel][0] : null;
+  for (const e of gorSq(V)) {
+    const q = Q.get(e.id), L = q ? rtsLid(q) : null, lx = L ? L.x : e.x, lz = L ? L.z : e.z, ly = L && L.y !== undefined ? L.y : rtsGY(lx, lz), cd = rtsCd(lx, ly, lz), on = sel.has(e.id), hv = hov === e;
+    if (cd > 7000) continue;
+    const k = rtsK(lx, ly, lz), c = on ? acc : own;
+    if (e.dx !== undefined && (on || cd < 900)) { g.globalAlpha = on ? .95 : .4; rtsLine(g, lx, lz, e.dx, e.dz, c, on ? 2 : 1.2, [7, 5]); g.globalAlpha = 1; }
+    if (on && q && cd < 450) { for (const m of q.men) { if (!m.dead && !m.in) rtsRing(g, m.x, m.z, .9, acc, 1.6); } }
+    else if (on) rtsRing(g, lx, lz, 14, acc, 2);
+    const s = rtsXY(lx, ly + (cd < 300 ? 3.2 : 6), lz); if (!s) continue;
+    if (cd >= 120 || on || hv) gGlyph(g, s.x, s.y - 10 * k, e.g, true, e.rout ? .5 : 1, k, c, 0, 0, now);
+    if (L && cd < 600) { gStar(g, s.x, s.y - (cd >= 120 || on || hv ? 24 : 4) * k, 5 * k, '#f4d36a'); }   // the leader
+    if (lab && (cd < 1500 || on)) gTxt(g, (e.tag || '') + (e.n ? ' ' + e.n : ''), s.x, s.y + 6 * k, 10 * k, c, 'center');
+    if (e.rout) gTxt(g, '!', s.x + 12 * k, s.y - 10 * k, 12 * k, '#ffb347', 'center');
+    if (q && (cd < RTS.man || (on && cd < RTS.man * 2))) for (const m of q.men) {   // close up, each man: his team, reflex, state, task
+      if (m.dead || m.in) continue; const t = rtsManTxt(q, m); if (!t) continue;
+      const ms = rtsXY(m.x, m.y - .3, m.z, 0); if (ms) gTxt(g, t, ms.x, ms.y + 12, 9.5, m === L ? '#f4d36a' : own, 'center');
+    }
+    if (q && (hv || (one === e.id && cd < RTS.brain * 4))) {   // the squad's mind in a few lines, by its marker
+      const B = rtsBrain(q), x0 = s.x + 16 * k, y0 = s.y - 30 * k, w = Math.min(320, 12 + Math.max(...B.map(t => t.length)) * 6.4), h = 6 + B.length * 14;
+      g.fillStyle = 'rgba(11,17,18,.82)'; g.fillRect(x0, y0, w, h); g.strokeStyle = c; g.lineWidth = 1; g.strokeRect(x0, y0, w, h);
+      B.forEach((t, i) => gTxt(g, t, x0 + 6, y0 + 15 + i * 14, 11, i ? '#ece6d6' : c, 'left'));
+    }
+  }
+  /* what soldiers call out (SAY, and the brain's lines through it): a balloon over the head, close to the camera; an enemy's only while seen */
+  for (const m of S.men) {
+    if (m.dead || m.in || !(m.sayT > S.t) || rtsCd(m.x, m.y, m.z) > RTS.say || (RTS.side >= 0 && rtsHid(m)) || (V.all ? false : m.team !== V.t && !(S.t - sT(m, V.t) < RTS.see))) continue;
+    const s = rtsXY(m.x, m.y + STANCE[m.st].h * MAN.sc + 1.3, m.z, 0); if (!s) continue;
+    const t = sayText(m); if (t) rtsBubble(g, s.x, s.y, t, m.team === V.t);
+  }
+  /* GOR: the route queued, the assault's plan, the build spots, the armed order under the cursor, the box */
+  if (GOR.rt && GOR.rt.length) {
+    const L = gorSq(V).filter(e => sel.has(e.id)); let px = L.length ? L.reduce((a, e) => a + e.x, 0) / L.length : GOR.rt[0].x, pz = L.length ? L.reduce((a, e) => a + e.z, 0) / L.length : GOR.rt[0].z;
+    GOR.rt.forEach((p, i) => { rtsLine(g, px, pz, p.x, p.z, acc, 1.8, [5, 5]); px = p.x; pz = p.z; const s = rtsXY(p.x, rtsGY(p.x, p.z) + 3, p.z); if (s) gTxt(g, String(i + 1), s.x, s.y - 4, 12, acc, 'center'); });
+  }
+  const P = GOR.mode === 'atk' ? GOR.plan : null;
+  if (P) {
+    rtsRing(g, P.x, P.z, 80, acc, 2.2); if (P.fx !== undefined) { rtsRing(g, P.fx, P.fz, 30, acc, 1.6, [4, 4]); rtsLine(g, P.fx, P.fz, P.x, P.z, acc, 1.6); }
+    if (P.x2 !== undefined) { rtsRing(g, P.x2, P.z2, 30, acc, 1.6, [2, 4]); rtsLine(g, P.x2, P.z2, P.x, P.z, acc, 1.4, [3, 4]); }
+  }
+  if (GOR.mode === 'build') for (const s0 of GOR.spots) { const s = rtsXY(s0.x, rtsGY(s0.x, s0.z) + 2, s0.z); if (s) { g.beginPath(); g.moveTo(s.x, s.y - 7); g.lineTo(s.x + 7, s.y); g.lineTo(s.x, s.y + 7); g.lineTo(s.x - 7, s.y); g.closePath(); g.strokeStyle = acc; g.lineWidth = 1.6; g.stroke(); } }
+  if (GOR.mode && RTS.cur && !rtsMM(RTS.cur.px, RTS.cur.py)) { const w = rtsGround(RTS.cur.px, RTS.cur.py); rtsRing(g, w.x, w.z, GOR.mode === 'he' || GOR.mode === 'smk' ? 60 : 20, acc, 1.6, [3, 3]); }
+  const B = GOR.box; if (B) { g.strokeStyle = acc; g.lineWidth = 1.2; g.setLineDash([4, 3]); g.strokeRect(Math.min(B.x0, B.x1), Math.min(B.y0, B.y1), Math.abs(B.x1 - B.x0), Math.abs(B.y1 - B.y0)); g.setLineDash([]); g.globalAlpha = .1; g.fillStyle = acc; g.fillRect(Math.min(B.x0, B.x1), Math.min(B.y0, B.y1), Math.abs(B.x1 - B.x0), Math.abs(B.y1 - B.y0)); g.globalAlpha = 1; }
+  rtsMini(g, V);
+}
+/* the minimap: the map table's ground, the points, the side's units and contacts, and what the camera covers; a click there moves the camera,
+   the right button orders there */
+function rtsMini(g, V) {
+  const gd = $('#gen'), wide = GV.w >= 981, top = (parseFloat(gd.style.getPropertyValue('--gt')) || 56) + 10, right = wide && !RTS.nop ? GV.w - 16 - 340 - 12 : GV.w - 16;
+  const W = S.W, H = 2 * S.HW, sc = RTS.mm / Math.max(W, H), b = (RTS.mmB = { x: right - W * sc, y: top, w: W * sc, h: H * sc, sc });
+  const X = x => b.x + x * sc, Y = z => b.y + (z + S.HW) * sc;
+  g.fillStyle = 'rgba(11,17,18,.85)'; g.fillRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
+  try { if (!GV.img) genImg(); g.drawImage(GV.img, b.x, b.y, b.w, b.h); } catch (e) {}
+  for (const p of V.pts) { g.beginPath(); g.arc(X(p.x), Y(p.z), 3, 0, TAU); g.fillStyle = gCol(V, p.hold); g.fill(); }
+  for (const u of V.u) {
+    const own = u.t === V.t; g.globalAlpha = u.age !== undefined ? clamp(1 - u.age / CMD.mem, .25, 1) : 1; g.fillStyle = own ? (GOR.sel.has(u.id) && u.sqd ? gAcc() : FRIEND) : gCol(V, u.t);
+    g.fillRect(X(u.x) - 1.5, Y(u.z) - 1.5, 3, 3);
+  }
+  g.globalAlpha = 1;
+  const c = [[0, 0], [cw, 0], [cw, ch], [0, ch]].map(([px, py]) => rtsGround(px, py));
+  g.beginPath(); c.forEach((w, i) => (i ? g.lineTo(X(w.x), Y(w.z)) : g.moveTo(X(w.x), Y(w.z)))); g.closePath(); g.strokeStyle = '#ece6d6'; g.lineWidth = 1.2; g.stroke();
+  g.strokeStyle = 'rgba(236,230,214,.5)'; g.lineWidth = 1; g.strokeRect(b.x - .5, b.y - .5, b.w + 1, b.h + 1);
+  if (RTS.side >= 0) gTxt(g, 'Névoa: o que ' + (V.nm[V.t] || 'o lado') + ' vê', b.x, b.y + b.h + 14, 10.5, '#ece6d6', 'left');
+}
+/* the page: the style of this mode, the bar's two buttons and the hangar's */
+(() => {
+  const st = document.createElement('style');
+  st.textContent = '.gen[data-rts]{background:transparent}.gen[data-rts] #genMap{cursor:default}.gen[data-rts][data-seat] #genMap{cursor:crosshair}#stage[data-rts] #hud{visibility:hidden}'
+    + '.gen[data-rts][data-nop] .gen-l,.gen[data-rts][data-nop] .gen-r{display:none}.gen[data-rts][data-nop] .gen-ord{left:var(--gut-l);right:var(--gut-r)}'
+    + '.gen[data-rts] .gen-panel{background:rgba(14,20,22,.78)}';
+  document.head.appendChild(st);
+  const mk = (id, t, title, after) => { const b = document.createElement('button'); b.className = 'chip'; b.id = id; b.type = 'button'; b.textContent = t; b.title = title; after.after(b); return b; };
+  const tm = $('#genTm');
+  if (tm) {
+    const b = mk('genRts', 'Câmera 3D (\')', 'Comandante: a batalha em 3D com câmera de cima, as mesmas ordens, as mesmas abas e o mesmo cartão; só aparece o que o seu lado vê', tm);
+    b.setAttribute('aria-pressed', 'false'); b.addEventListener('click', () => { rtsSet(!GV.rts); b.blur(); });
+    const p = mk('genPan', 'Esconder painéis', 'Esconde ou mostra os painéis laterais na câmera de comandante', b); p.hidden = true;
+    p.addEventListener('click', () => { RTS.nop = !RTS.nop; rtsDom(); GV.drawT = 0; p.blur(); });
+  }
+  const gb = $('#btnGen');
+  if (gb) {
+    const b = mk('btnRts', 'Comandante (RTS)', 'Comandante: entrar como o General e comandar o seu lado com uma câmera 3D sobre a batalha (opcional; \' troca para o mapa)', gb);
+    b.addEventListener('click', () => { if (!ready) return; RTS.want = 1; joinGen(); });
+    if (coarse) { b.disabled = true; b.title = 'Comandante: precisa de mouse e teclado'; }
+  }
+})();
+Net.ui.refused = (f => code => { RTS.want = 0; f(code); })(Net.ui.refused);
+Net.ui.lost = (f => joined => { RTS.want = 0; f(joined); })(Net.ui.lost);
+/* ===== end of the commander's camera ===== */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

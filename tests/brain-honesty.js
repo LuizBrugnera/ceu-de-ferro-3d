@@ -10,7 +10,16 @@
 const fs = require('fs'), H = require('./harness'), { ok, done } = H;
 console.log('page: ' + H.PAGE);
 const html = fs.readFileSync(H.PAGE, 'utf8');
-const LISTS = /\bS\.(men|units|bombs|planes)\b/g, PERC_OK = new Set(['listen']);
+const LISTS = /\bS\.(men|units|bombs|planes)\b/g;
+/* the functions of a CEREBRO section that may read the world's lists, each for what it is: perception (what reaches an eye or an ear is the
+   world's own) or the world's own step (not a decision). A new one is added here by name, with its reason, in review */
+const PERC_OK = new Map([
+  ['listen', 'perception: the report of a shot reaches the ears within its range (P7)'],
+  ['flOuvir', 'perception: a voice reaches the ears within its reach and the din (P5)'],
+  ['flNade', 'perception: a grenade seen landing or at his feet (P5)'],
+  ['tunPeek', 'perception: an enemy sees or hears men at a tunnel mouth (trincheiras-tuneis)'],
+  ['tunSee', 'perception: an enemy near a mouth finds it (trincheiras-tuneis)'],
+  ['tunStep', 'the world\'s step: how many dig at a mouth, a guarded mouth cannot be blown (trincheiras-tuneis)']]);
 
 console.log('-- 1. the code --');
 {
@@ -29,7 +38,7 @@ console.log('-- 1. the code --');
       if (!PERC_OK.has(who)) bad.push(h.name + ': ' + (who || '?') + ': ' + lines[i].trim().slice(0, 100));
     }
   }
-  ok(!bad.length, 'no S.men, S.units, S.bombs or S.planes in a CEREBRO section outside the perception functions (' + [...PERC_OK].join(', ') + ')' + (bad.length ? ':\n      ' + bad.join('\n      ') : ''));
+  ok(!bad.length, 'no S.men, S.units, S.bombs or S.planes in a CEREBRO section outside the perception functions and the world\'s steps (' + [...PERC_OK.keys()].join(', ') + ')' + (bad.length ? ':\n      ' + bad.join('\n      ') : ''));
   const body = (name, n) => { const a = html.indexOf('\nfunction ' + name + '('); return a < 0 ? '' : html.slice(a, a + (n || 3000)); };
   const guarded = (src, k) => src.split('\n').filter(l => new RegExp('\\b' + k + ' = Math.min').test(l) && /S\.(men|units)/.test(l)).every(l => /!HON\.on|else for/.test(l));
   const sq = body('squadThink', 1200), sc = body('scan', 1000), cs = body('cmdSquad', 2000), sm = body('sqMan', 2500), di = body('drInc', 1500);
@@ -106,8 +115,14 @@ console.log('-- 3. each swap --');
   const front = nade(a.x + 6, a.z), back = nade(a.x - 6, a.z), close = nade(a.x - 4, a.z);
   ok($('honNade')(m, front) && !$('honNade')(m, back) && $('honNade')(m, close), 'one 6 m in front is seen, one 6 m behind is not, one 4 m behind is heard landing');
   const n = mk(0, a.x - 9, a.z, 0);   // a mate 3 m beyond it, facing it
-  const g = $('honNade')(n, back), early = $('honNade')(m, back); S.t += HON.nade.react + .05; const late = $('honNade')(m, back);
-  ok(g && (n.sayK & 31) === $('SAYC').nade && !early && late, 'his mate behind sees it and shouts "Granada!": he knows of it ' + HON.nade.react + ' s later');
+  const BR = $('typeof BRAIN === "undefined" ? null : BRAIN'), b0 = BR && BR.on; if (BR) BR.on = 0;
+  const g = $('honNade')(n, back), early = $('honNade')(m, back); S.t += HON.nade.react + .05; const late = $('honNade')(m, back); if (BR) BR.on = b0;
+  ok(g && (n.sayK & 31) === $('SAYC').nade && !early && late, 'without the speech of P5: his mate behind sees it and shouts "Granada!": he knows of it ' + HON.nade.react + ' s later');
+  if (BR && $('typeof flNade') === 'function') {
+    const b2 = nade(a.x - 6, a.z + 1), m3 = mk(0, a.x, a.z + 1, 0); m3.rf = { k: 'granada', x: b2.x, z: b2.z, b: b2, t0: S.t + .3, ate: S.t + 3 };
+    const e3 = $('honNade')(m3, b2); S.t += .35; const l3 = $('honNade')(m3, b2);
+    ok(!e3 && l3, 'with it: the reflex P5 gave him (a call heard, m.rf) is how he knows of the one behind him, from its reaction time');
+  }
   const run = (on, b) => { HON.on = on; const S2 = C.sandbox('modern'), m2 = mk(0, a.x, a.z, 0); S2.bombs.push(Object.assign({}, b, { by: mk(1, a.x + 200, a.z, Math.PI) })); $('sqMan')(m2, m2.ai, null, null); return m2.ai.brk > S2.t; };
   const rB = run(1, back), rF = run(1, front), rT = run(0, back); HON.on = 1;
   ok(!rB && rF && rT, 'sqMan: he runs from the one in front (' + rF + '), not from the one behind he knows nothing of (' + rB + '; with the truth he did: ' + rT + ')');

@@ -17,6 +17,8 @@ Tudo em `Céu de Ferro 3D.html`, numa seção própria `/* ---------- CEREBRO: h
 
 Ruído determinístico (`hash2`), sem `Math.random` nas funções novas.
 
+**Com o P5 (falas) no main:** o P5 trouxe o reflexo da granada (`flNade`, por percepção, e a voz por `flOuvir`, em `m.rf`). Com `BRAIN.on`, `honNade` aceita esse reflexo como o jeito de o soldado saber da granada (a partir do tempo de reação), e quem grita e quem ouve é o P5. Os gritos e o raio de 25 m do P7 só valem sem o P5. A fuga antiga de `sqMan` (com o portão `honNade`) e a do P5 (`m.rf`) convivem: a do P5 não age quando a antiga já está correndo (`A.brk`). `HON.on` continua separado de `BRAIN.on`, para medir a honestidade sozinha.
+
 ### Ganchos no código antigo (para o PR e os pacotes paralelos)
 
 - `squadThink`: `q.fd = HON.on ? honFd(q, L) : 1e9` e os dois laços antigos atrás de `if (!HON.on)`.
@@ -28,7 +30,7 @@ Ruído determinístico (`hash2`), sem `Math.random` nas funções novas.
 
 ### O teste: `tests/brain-honesty.js`
 
-1. **Código**: recorta toda seção `/* ---------- CEREBRO:` da página e falha se `S.men`, `S.units`, `S.bombs` ou `S.planes` aparecer fora das funções de percepção liberadas (hoje só o embrulho de `listen`: o som do tiro é do mundo). Vale para as seções que os outros pacotes (P0–P8) trouxerem. Confere também que os seis ganchos estão lá e que as leituras antigas só rodam com `HON.on` 0.
+1. **Código**: recorta toda seção `/* ---------- CEREBRO:` da página e falha se `S.men`, `S.units`, `S.bombs` ou `S.planes` aparecer fora das funções liberadas. Cada função liberada tem o nome e o motivo numa lista (`PERC_OK`), revista no PR. Hoje são cinco de percepção: `listen` (P7), `flOuvir` e `flNade` (P5, a voz e a granada vista), `tunPeek` e `tunSee` (trincheiras-túneis, achar a boca do túnel). E um passo do mundo: `tunStep` (quantos cavam, boca guardada não explode). Vale para as seções que os outros pacotes (P0–P8) trouxerem. No merge com o main o teste achou essas seis, e conferi uma a uma: nenhuma é decisão. Confere também que os seis ganchos estão lá e que as leituras antigas só rodam com `HON.on` 0.
 2. **Exercício com `Proxy` em `S`**: duas esquadras e dois tanques em contato por 40 s, contando cada leitura daquelas listas feita dentro de `honFd`, `honKz`, `honBel`, `honEar` e `honNade`. Há um controle positivo (uma leitura de propósito é contada). Resultado: centenas de chamadas, zero leituras.
 3. **Cada troca**: `q.fd` vazio para um inimigo ainda não percebido (a verdade dava 140 m) e certo depois de visto; o contato envelhece em `HON.fresh`; `A.fd` do tanque pela crença; a emboscada conta 0 para o tanque não visto e 9/2 para o visto; granada na frente vista, atrás não, perto ouvida, grito do colega com 0,35 s; `sqMan` foge só da conhecida (com a verdade fugia das duas); o erro do ouvido cresce com a distância e na cidade; `listen` e `drInc` usam o estampido.
 

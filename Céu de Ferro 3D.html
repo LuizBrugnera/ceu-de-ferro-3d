@@ -40923,12 +40923,12 @@ gLabels = (g0 => (g, V, P) => {
 })(gLabels);
 genPanels = (g0 => V => {
   g0(V);
-  const tb = $('#genForces'), f = V.f || [], a = f[V.t] && f[V.t].vet, b = V.all && f[1 - V.t] ? f[1 - V.t].vet : undefined;
+  const tb = $('#genForces'), f = V.f || [], a = f[V.t] && f[V.t].vet, fo = f.map((_, s) => s).filter(s => s !== V.t), b = fo.map(s => (V.all && f[s] ? f[s].vet : undefined));
   let tr = tb.querySelector('tr.vet');
-  if (!(a || b)) { if (tr) tr.remove(); return; }
-  const r = ['Veteranos e elite', String(a || 0), b === undefined ? '—' : String(b)];
+  if (!(a || b.some(Boolean))) { if (tr) tr.remove(); return; }
+  const r = ['Veteranos e elite', String(a || 0), ...b.map(v => (v === undefined ? '—' : String(v)))];
   if (!tr) { tr = gE('tr', 'vet'); for (const s of r) tr.appendChild(gE('td', '', s)); tb.appendChild(tr); return; }
-  r.forEach((s, i) => { if (tr.children[i].textContent !== s) tr.children[i].textContent = s; });
+  r.forEach((s, i) => { if (tr.children[i] && tr.children[i].textContent !== s) tr.children[i].textContent = s; });
 })(genPanels);
 /* the Controles panel: opened by its chip, closed by its button, by Esc or by the chip again; the focus goes in and comes back */
 function keysPanel(v) {
@@ -41590,6 +41590,10 @@ function genBar() {
   if (!S) return;
   const nm = SIDES().map(i => S.E.sides[S.fac[i]].name), net = !!S.net && !S.spec, watch = playMode === 'watch' && !S.net;
   $('#genN0').textContent = nm[0]; $('#genN1').textContent = nm[1];
+  let b2 = document.querySelector('#genSide [data-gs="2"]');   // a third side (the Insurgents): its own tab, and the key 3
+  if (nm.length > 2 && !b2) { b2 = gE('button', 'tab'); b2.type = 'button'; b2.setAttribute('role', 'tab'); b2.dataset.gs = '2'; b2.append(gE('b')); $('#genSide').append(b2); }
+  if (b2) { b2.hidden = nm.length < 3; b2.firstChild.textContent = nm[2] || ''; }
+  $('.gen-keys').firstChild.textContent = $('.gen-keys').firstChild.textContent.replace(/ 1 2( 3)?: lado/, nm.length > 2 ? ' 1 2 3: lado' : ' 1 2: lado');
   $('#genSide').hidden = net || !!gorSeat();
   for (const b of $('#genSide').children) b.setAttribute('aria-selected', String(+b.dataset.gs === GV.t));
   $('#genAll').hidden = net; $('#genAll').setAttribute('aria-pressed', String(GV.all));
@@ -41654,6 +41658,7 @@ function genKey(e) {
   else if (c === 'KeyF') genAct('fit');
   else if (c === 'Digit1') genSide(0);
   else if (c === 'Digit2') genSide(1);
+  else if (c === 'Digit3' && NSD() > 2) genSide(2);
   else if (c === 'KeyV') genAct('all');
   else if (c === 'KeyI') genAct('inf');
   else if (c === 'KeyL') genAct('lab');
@@ -42089,11 +42094,13 @@ function genPanels(V) {
   txt('#genPost', V.post.k); txt('#genWhy', V.post.s); txt('#genDoc', V.doc ? 'Doutrina: ' + V.doc : ''); $('#genDoc').hidden = !V.doc;
   list('#genRoads', '', V.road ? V.road.map((r, i) => 'Rota ' + (i + 1) + ' · ' + (GEN.post[r.post] || '') + ' · ' + gN(r.own) + ' contra ' + gN(r.foe)) : [], li);
   const F = [['Infantaria (homens)', 'men'], ['Esquadras', 'sq'], ['Carros de combate', 'arm'], ['Blindados leves', 'mech'], ['Antiaérea', 'aa'], ['Artilharia', 'art'], ['Transporte', 'trk', 'car'], ['Rádio', 'rad'], ['Aviões', 'jet', 'cas'], ['Helicópteros', 'heli']];
-  const fr = F.map(([l, a, b]) => [l, V.f[V.t][a] + (b ? V.f[V.t][b] : 0), V.f[1 - V.t][a] + (b ? V.f[1 - V.t][b] : 0)]).filter(r => r[1] || r[2]);
+  const fo = V.f.map((_, s) => s).filter(s => s !== V.t), cnt = (s, a, b) => V.f[s][a] + (b ? V.f[s][b] : 0);   // fo: every enemy side, a column each (three sides: side 2 has no "1 − t")
+  const fr = F.map(([l, a, b]) => [l, cnt(V.t, a, b), ...fo.map(s => cnt(s, a, b))]).filter(r => r.slice(1).some(Boolean));
   const fs = JSON.stringify(fr) + V.all;
   if (GV.sig.forces !== fs) {
     GV.sig.forces = fs; const tb = $('#genForces'); tb.replaceChildren();
-    const hr = gE('tr'); for (const s of ['', 'Nossas', V.all ? 'Inimigo' : 'Inimigo (conhecido)']) hr.appendChild(gE('th', '', s)); tb.appendChild(hr);
+    const hr = gE('tr'); for (const s of ['', 'Nossas', ...(fo.length > 1 ? fo.map(e => (V.nm && V.nm[e]) || 'Inimigo') : [V.all ? 'Inimigo' : 'Inimigo (conhecido)'])]) hr.appendChild(gE('th', '', s)); tb.appendChild(hr);
+    if (fo.length > 1 && !V.all) hr.title = 'Dos inimigos, só o que este lado conhece';
     for (const r of fr) { const tr = gE('tr'); for (const s of r) tr.appendChild(gE('td', '', String(s))); tb.appendChild(tr); }
   }
   const L = V.lost ? V.lost[V.t] : null; txt('#genLost', L ? 'Baixas: ' + L[0] + ' soldados · ' + L[1] + ' veículos · ' + L[2] + ' aeronaves' : '');

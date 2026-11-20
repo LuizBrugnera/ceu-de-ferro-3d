@@ -20,7 +20,10 @@
      on the page; the review heard Esc only with the focus inside it, so "Fechar (Esc)" did nothing and the review stayed over the hangar.
      Here: Esc closes it from anywhere, and only it; the focus stays in the dialog when a match opens.
    - With the server off, "Entrar na sala" said "Conectando…" for over a minute with no "Tentar de novo" (the attempt timed out instead of being
-     refused). Here: a connection that does not open in Net.wait s is dropped and the hangar is told, so it offers the retry. */
+     refused). Here: a connection that does not open in Net.wait s is dropped and the hangar is told, so it offers the retry.
+   - Every load and every match printed "BufferGeometry.toNonIndexed(): BufferGeometry is already non-indexed" twice (the broadleaf crowns and
+     the clouds are polyhedra, which have no index). Here: one helper copies a geometry without its index, and nothing calls toNonIndexed on
+     its own. */
 const H = require('./harness'), fs = require('fs'), path = require('path'), vm = require('vm'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8');
 
@@ -105,6 +108,14 @@ console.log('-- the review (Partidas anteriores) closes with Esc wherever the fo
   const it = html.slice(html.indexOf('async function aarPast('), html.indexOf('function aarOpen('));
   ok(/await go\(\); \(\$\('#aarBack'\)\.hidden \? \$\('#aarClose'\) : \$\('#aarBack'\)\)\.focus\(\)/.test(it), 'a match picked from the list: the focus goes to the review\'s own buttons');
 }
+console.log('-- no toNonIndexed on a geometry that has no index (a warning in the console at every load) --');
+{
+  const calls = (html.match(/\.toNonIndexed\(\)/g) || []).length, i = html.indexOf('const unIndexed = g =>'), U = vm.createContext({});
+  if (i > 0) vm.runInContext(html.slice(i, html.indexOf('\n', i)) + ';globalThis.unIndexed = unIndexed;', U);
+  const mk = idx => ({ index: idx, toNonIndexed() { return 'flat'; }, clone() { return 'copy'; } });
+  ok(calls === 1 && i > 0 && U.unIndexed(mk({})) === 'flat' && U.unIndexed(mk(null)) === 'copy', 'toNonIndexed only through unIndexed, and only for a geometry with an index (else a copy)');
+}
+
 console.log('-- a connection that never opens is dropped, and the hangar can try again --');
 (async () => {
   const made = [];

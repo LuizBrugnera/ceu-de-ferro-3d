@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.3.0';   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.4.0';   // 2.4: tunnels (dig_tunnel, use_tunnel, destroy_tunnel; cf-trincheiras-tuneis, NOT TESTED);   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -635,6 +635,29 @@ const TOOLS = [
       if (a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give point or both x and z');
       if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
       return runCmd(Object.assign({ c: 'sabot' }, pick(a, ['point', 'x', 'z', 'ids', 'why'], { point: 'pi' })), 'cmd');
+    } },
+  { name: 'dig_tunnel', description: 'Dig a tunnel (NOT TESTED, cf-trincheiras-tuneis): a squad (an engineer or sapper squad for the USA and Russia; any squad for the Insurgents) goes to x,z and digs from there to the exit x2,z2 (40 m at least; at most 450 m for the Insurgents, 260 m for the others; without x2,z2 the general picks a covered exit away from the enemy). It takes minutes (0.12 m/s a digger, up to six). The mouths are hidden: the enemy finds one only by coming near (sappers and scouts from farther) or by seeing squads go in or out. Accepted with the tunnel id (get_state from_host: true lists them in tun.own), or refused map, water, road, obj, short, long, tcap (the side\'s tunnel limit), tunb (no place for the exit), sq, way.',
+    inputSchema: { type: 'object', properties: { ...xz, x2: { type: 'number' }, z2: { type: 'number' }, ids: IDS, why: WHYP }, required: ['x', 'z'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { x: ['n', true], z: ['n', true], x2: ['n', false], z2: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if ((a.x2 === undefined) !== (a.z2 === undefined)) throw new Error('give both x2 and z2, or neither');
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(Object.assign({ c: 'tun', k: 'dig' }, pick(a, ['x', 'z', 'x2', 'z2', 'ids', 'why'])), 'cmd');
+    } },
+  { name: 'use_tunnel', description: 'Send squads through one of your finished tunnels (NOT TESTED): by its id, or the one with a mouth within 300 m of x,z. Each squad walks to the nearer mouth, goes under (out of sight and out of reach) and comes out at the other one after the crawl (about 1 s a metre), then holds there or goes on to x2,z2. Squads named in ids, else n (1-6, default 1) the general picks near x,z (or near the first mouth). Refused tun (no finished tunnel of yours there), sq.',
+    inputSchema: { type: 'object', properties: { id: { type: 'integer' }, ...xz, x2: { type: 'number' }, z2: { type: 'number' }, n: { type: 'integer', minimum: 1, maximum: 6 }, ids: IDS, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { id: ['i', false, 0, 1e6], x: ['n', false], z: ['n', false], x2: ['n', false], z2: ['n', false], n: ['i', false, 1, 6], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.id === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give id or both x and z');
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(Object.assign({ c: 'tun', k: 'use' }, pick(a, ['id', 'x', 'z', 'x2', 'z2', 'n', 'ids', 'why'])), 'cmd');
+    } },
+  { name: 'destroy_tunnel', description: 'Blow an enemy tunnel mouth your side has found (get_state from_host: true, tun.foe) within 200 m of x,z (NOT TESTED): a squad (engineers and sappers first) goes there and collapses it after a few seconds of work with none of the enemy within 25 m (a big explosion at the mouth also does it). Squads inside come out where they went in with half their men. Refused tunf (no known enemy mouth there), sq, way.',
+    inputSchema: { type: 'object', properties: { ...xz, ids: IDS, why: WHYP }, required: ['x', 'z'], additionalProperties: false },
+    run: async a => {
+      const e = need(a, { x: ['n', true], z: ['n', true], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.ids !== undefined && !(Array.isArray(a.ids) && a.ids.length <= 12 && a.ids.every(isInt))) throw new Error('"ids" must be a list of at most 12 squad ids');
+      return runCmd(Object.assign({ c: 'tun', k: 'blow' }, pick(a, ['x', 'z', 'ids', 'why'])), 'cmd');
     } },
   { name: 'arm_militia', description: 'Arm a town\'s civilians as a militia squad that holds it (a point index, or x, z inside the town): needs 3 of your soldiers in the town, once every 150 s a town. Refused hate (the town turned against you after your fire killed its people), nociv (nobody left to arm), mil0 (not 3 of your soldiers there), cool.',
     inputSchema: { type: 'object', properties: { point: { type: 'integer' }, ...xz, why: WHYP }, additionalProperties: false },

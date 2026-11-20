@@ -7478,7 +7478,7 @@ function ffNote(o, by) {
   if ((S.net && !(S.host && by.aid)) || !(by.me || o.team === S.me)) return;
   S.feed.push({ text: 'Fogo amigo: ' + (by.name || (by.def && by.def.name) || 'um soldado') + ' abateu um aliado', life: 5 }); if (S.feed.length > 4) S.feed.shift();
 }
-function explode(x, y, z, r, dmg, by, team, he, ob) {
+function explode(x, y, z, r, dmg, by, team, he, ob, kg) {   // kg: its explosive, for what it does to the buildings near it (cityCharge)
   blastFx(x, y, z, r);
   const o = { x, y, z }, sb = { team, by }, wall = (t, ty) => (walled(x, y, z, t.x, ty, t.z) ? OBJS.shield : 1);
   for (const u of S.units) { if (u.dead || safe(u, sb)) continue; const d = dist(u, o); if (d < r) impact(u, HK.blast, dmg * (1 - d / r) * (he ? ARMOR[u.kind].frag * (he === 2 && u.kind === 'tank' ? SHL.weak : 1) : 1) * wall(u, u.y + 2), by, x, y, z); }
@@ -7489,6 +7489,7 @@ function explode(x, y, z, r, dmg, by, team, he, ob) {
   }
   if (S.civs) civBlast(x, y, z, r, dmg, by, wall);
   blastObjs(x, y, z, r, dmg, by, ob === undefined ? 1 : ob);
+  if (kg > 0) cityCharge(x, y, z, kg, by, !((ob === undefined ? 1 : ob) > CITY.chg.cut));
   if (he && he !== 2) shelled(x, z, team);   // 2: a tank's round, which sends nobody running
   for (const p of S.planes) { if (p.dead || safe(p, sb)) continue; const d = dist(p, o); if (d < r * .7) impact(p, HK.blast, dmg * .4 * (1 - d / (r * .7)), by, x, y, z); }
 }
@@ -11224,7 +11225,7 @@ function nadeStep(b, dt) {
   }
   if (S.t < b.fz && b.life > 0) return;
   b.gone = true;
-  explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast);
+  explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast, b.o.kg || CITY.chg.nade);
 }
 function stepShots(dt) {
   for (const b of S.bullets) {
@@ -11306,11 +11307,11 @@ function stepShots(dt) {
       if (dc && (sh || heat)) { const h = manHit(dc, HK.shell, he || hv ? b.o.hit : b.o.dmg, b.x, b.y, b.z, b.vx, b.vz); if (h) civHurt(dc, h.dmg, b.by); }   // a civilian in the way, struck as a soldier would be
       if (b.k === 'smk') addSmoke(b.x, wo ? hgt(b.x, b.z) : g, b.z, b.o.r, b.o.h);
       else if (b.smk) { addSmoke(b.x, hgt(b.x, b.z), b.z, b.smk.r, b.smk.h, b.smk.life); if (b.by === S.my) S.falls.push({ x: b.x, z: b.z, life: HOW.mark }); }
-      else if ((b.k === 'shell' && !hv) || heat) { if (!du || impact(du, heat ? HK.heat : HK.shell, b.o.dmg, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, heat ? b.o.pen : undefined) || du.man) explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg * .3, b.by, b.team, false, D.blast); }   // the direct hit is what kills; the splash is small, and a round that bounces off armour does not burst (one that hits a man, or the cover he is behind, does)
+      else if ((b.k === 'shell' && !hv) || heat) { if (!du || impact(du, heat ? HK.heat : HK.shell, b.o.dmg, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, heat ? b.o.pen : undefined) || du.man) explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg * .3, b.by, b.team, false, D.blast, heat ? b.o.dmg * CITY.chg.heat : 0); }   // the direct hit is what kills; the splash is small, and a round that bounces off armour does not burst (one that hits a man, or the cover he is behind, does)
       else if (he || hv) {   // (hv: a tank's high-explosive round, which bursts like this one) on the ground the last hop is taken back to the surface; on a vehicle the direct hit, and the burst either way
         if (!du && !dc && !wo && b.vy < 0) { const k = (g + .5 - b.y) / b.vy; b.x += b.vx * k; b.z += b.vz * k; b.y = g + .5; }
         if (du) impact(du, HK.shell, b.o.hit, b.by, b.x, b.y, b.z, b.vx, b.vy, b.vz, hv ? 2 : true);
-        explode(b.x, Math.max(b.y, hgt(b.x, b.z) + .5), b.z, b.o.r, b.o.dmg, b.by, b.team, hv ? 2 : true, D.blast);
+        explode(b.x, Math.max(b.y, hgt(b.x, b.z) + .5), b.z, b.o.r, b.o.dmg, b.by, b.team, hv ? 2 : true, D.blast, hv ? 0 : b.o.dmg * CITY.chg.he);   // a tank's HE round is left as it was
         if (he && b.by === S.my) S.falls.push({ x: b.x, z: b.z, life: HOW.mark });
       }
       else { explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, D.blast); if (b.o.mega) stkFx(b.x, Math.max(b.y, g + .5), b.z, b.o.r); }   // a strategic bomber's bomb: the crater and the cloud (STK)
@@ -16720,7 +16721,16 @@ const CITY = { bay: 5, sh: 4.4, body: 2,
   /* cover (bldCover): the places a building gives, for the soldier's own thinking to pick from. back: m behind an opening the place
      inside is (its sill, CITY.gap, is what a crouched man is under and a standing one fires over); out: m before a wall the place outside
      is; corner: m from a corner along the wall, where one leans out */
-  cov: { back: 1.1, out: .9, corner: 1.2 } };
+  cov: { back: 1.1, out: .9, corner: 1.2 },
+  /* chg: the burst of a small charge among buildings (cityCharge), by its explosive in kg of TNT: nade a hand grenade, he and heat kg per point of
+     a round's damage (a mortar bomb, a shell, a small rocket or a drone's), ied kg per point of a mine's, an IED's or a bomb carried by a man or
+     a car, ap an anti-personnel mine, sab a demolition charge. Within glass x cbrt(kg) m the windows' glass breaks, within door x cbrt(kg) m a
+     door is blown in, and within wall x cbrt(kg) m a wall takes dmg x kg^(2/3), falling with the square of the distance: thin [th under, times]
+     a thin wall (wood, sheet metal) and a partition, open times a wall with a window, a door or a gate in it. Shut in a room (shut of its four
+     walls and ceiling standing, glass and all) the blast is conf times as much on that room, the distance there counted room times, and with
+     kg of at least slab its ceiling takes it too. cut: a burst whose share for objects (ob) is over this already reaches the walls by
+     cityBlast, so here only its glass, doors and the room shut in */
+  chg: { nade: .2, he: 1 / 60, heat: 1 / 250, ied: 1 / 40, ap: .25, sab: 3, glass: 7, door: 2.5, wall: 4.3, dmg: 18, thin: [.15, 2.5], open: 2, shut: 3, conf: 2.5, room: .5, slab: 1, cut: .2 } };
 OBJ.bld = { hp: [100, 0], sight: 1, take: [1, 1, 1], ruin: { h: 2.2, slow: .5 }, fall: { r: 5, dmg: 26 }, veh: bldBump };
 GAI.art.val.bld = CITY.ai.art;
 
@@ -17035,6 +17045,49 @@ function bBurst(o, x, y, z, r, dmg, by) {
     at(B.oS + (L * nz + j) * nx + i, (i + .5) * bw, (L + 1) * sh, (j + .5) * bd);
   }
 }
+/* the burst of a small charge among buildings (CITY.chg): what a grenade, a mortar bomb, a small rocket, a mine, an IED or a demolition
+   charge does to the walls near it, by its kg. own: the walls take its blast here (it has no cityBlast big enough of its own). Each element
+   goes through bDmg, so online a guest's own burst goes to the host (Net.yh) and the host tells the room; a hole or a door blown in is a
+   way in and a change of cover for the AI as any other (bSet: tpsDirty, B.rev) */
+function cityCharge(x, y, z, kg, by, own) {
+  if (!(kg > 0) || !S.T) return;
+  const c = Math.cbrt(kg);
+  for (const o of near(x, z, CITY.chg.glass * c)) if (o.B && S.os[o.id] < 2) bCharge(o, x, y, z, kg, c, by, own);
+}
+function bCharge(o, x, y, z, kg, c, by, own) {
+  const C = CITY.chg, B = o.B, nx = B.nx, nz = B.nz, nl = B.nl, bw = B.bw, bd = B.bd, sh = B.sh, off = B.off, kd = B.kd, st = S.cbs;
+  const px = x - o.x, pz = z - o.z, lx = px * o.c - pz * o.s + o.hw, lz = px * o.s + pz * o.c + o.hd, ly = y - o.y;
+  const Rg = C.glass * c, Rd = C.door * c, Rw = C.wall * c, D = C.dmg * Math.pow(kg, 2 / 3), thin = B.mat.th < C.thin[0];
+  if (lx < -Rg || lx > 2 * o.hw + Rg || lz < -Rg || lz > 2 * o.hd + Rg || ly < -Rg || ly > nl * sh + Rg) return;
+  // the room it bursts in: the bay it is in, when enough of its walls and its ceiling stand round it
+  const ri = Math.floor(lx / bw), rj = Math.floor(lz / bd), rL = Math.floor(ly / sh); let room = null, k = 1;
+  if (ri >= 0 && ri < nx && rj >= 0 && rj < nz && rL >= 0 && rL < nl) {
+    const w = [(rL * nz + rj) * (nx + 1) + ri, (rL * nz + rj) * (nx + 1) + ri + 1, B.oZ + (rL * (nz + 1) + rj) * nx + ri, B.oZ + (rL * (nz + 1) + rj + 1) * nx + ri], top = B.oS + (rL * nz + rj) * nx + ri;
+    let shut = 0;
+    for (const e of w) { const s = st[off + e]; if (kd[e] && s < 2 && !(kd[e] === 2 && s)) shut++; }   // a window with its glass gone lets the blast out
+    if (kd[top] && st[off + top] < 2) shut++;
+    if (shut >= C.shut) { room = new Set(w); if (kg >= C.slab) room.add(top); k = 1 + (C.conf - 1) * (shut - C.shut + 1) / (6 - C.shut); }
+  }
+  const hit = (e, x0, x1, y0, y1, z0, z1) => {
+    const kk = kd[e], s = st[off + e]; if (!kk || s === 3) return;
+    const sl = e >= B.oS, inR = !!room && room.has(e), d0 = Math.hypot(lx - clamp(lx, x0, x1), ly - clamp(ly, y0, y1), lz - clamp(lz, z0, z1)), d = inR ? d0 * C.room : d0;
+    if (kk === 2 && !s && !sl && d < Rg) bDmg(o, e, 0, by, true);   // the glass
+    const sh2 = inR ? (own ? k : k - 1) : own && !sl ? 1 : 0, f = d < Rw ? (1 - d / Rw) * (1 - d / Rw) : 0;
+    let dm = D * f * sh2 * (sl ? 1 : (thin || kk > 4 ? C.thin[1] : 1) * (kk >= 2 && kk <= 4 ? C.open : 1));
+    if (kk === 3 && !sl && s < 2 && d < Rd) {   // a door blown in: a hole where it stood
+      dm = Math.max(dm, bldHp(B, e) / 4 + .25);
+      if (S.debris.length < 24) { const P = bWorld(o, (x0 + x1) / 2, y0 + .9, (z0 + z1) / 2, {}); S.debris.push({ k: 'chunk', sz: rand(.3, .6), x: P.x, y: P.y, z: P.z, vx: rand(-4, 4), vy: rand(1, 4), vz: rand(-4, 4), q: yawQ(rand(0, TAU)), w: { x: rand(-6, 6), y: rand(-3, 3), z: rand(-6, 6) }, drag: .3, h: .3, life: 4 }); }
+    }
+    if (dm > .05) bDmg(o, e, dm, by);
+  };
+  const L0 = Math.max(0, Math.floor((ly - Rg) / sh)), L1 = Math.min(nl - 1, Math.floor((ly + Rg) / sh)), i0 = Math.max(0, Math.floor((lx - Rg) / bw)), i1 = Math.min(nx - 1, Math.floor((lx + Rg) / bw)), j0 = Math.max(0, Math.floor((lz - Rg) / bd)), j1 = Math.min(nz - 1, Math.floor((lz + Rg) / bd));
+  for (let L = L0; L <= L1; L++) for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+    const y0 = L * sh, y1 = y0 + sh, xa = i * bw, xb = xa + bw, za = j * bd, zb = za + bd;
+    hit((L * nz + j) * (nx + 1) + i, xa, xa, y0, y1, za, zb); if (i === i1) hit((L * nz + j) * (nx + 1) + i + 1, xb, xb, y0, y1, za, zb);
+    hit(B.oZ + (L * (nz + 1) + j) * nx + i, xa, xb, y0, y1, za, za); if (j === j1) hit(B.oZ + (L * (nz + 1) + j + 1) * nx + i, xa, xb, y0, y1, zb, zb);
+    if (room && room.has(B.oS + (L * nz + j) * nx + i)) hit(B.oS + (L * nz + j) * nx + i, xa, xb, y1, y1, za, zb);
+  }
+}
 /* damage to one element. sa: a small arm, which only breaks glass. Online as hitObj: mine goes to the host (Net.yh) */
 function bDmg(o, e, dmg, by, sa, rx) {
   const B = o.B, g = B.off + e, k = B.kd[e], s = S.cbs[g];
@@ -17116,7 +17169,7 @@ function bldDown(o, quiet) {
 }
 /* each step: the charges set against walls go off, and the damaged buildings are looked at when their clock says */
 function bldStep(dt) {
-  for (const c of S.chg) if (c.w && !c.done && S.t >= c.T - dt) { c.done = 1; bDmg(c.w, c.e, BLD.charge.dmg, c.by); }
+  for (const c of S.chg) if (c.w && !c.done && S.t >= c.T - dt) { c.done = 1; bAt(c.w.B, c.e); const P = bWorld(c.w, BP.x + (BP.f === 0 ? Math.sign(c.w.hw - BP.x) * .3 : 0), BP.y, BP.z + (BP.f === 1 ? Math.sign(c.w.hd - BP.z) * .3 : 0), {}); bDmg(c.w, c.e, BLD.charge.dmg, c.by); cityCharge(P.x, P.y, P.z, CITY.chg.sab, c.by, false); }   // and round it (cityCharge): the glass, the doors and the room behind, the walls beside it left as they were; P is just inside the wall, in the room behind it
   if (S.cbfall.size) for (const [o, T] of S.cbfall) if (S.t >= T) { if (S.os[o.id] < 2 && bldSettle(o)) S.cbfall.set(o, S.t + CITY.sup.step); else S.cbfall.delete(o); }
 }
 /* a hull against a building: stopped by its box while it stands, slowed by its rubble (wheels more); a blow into its walls breaks what
@@ -20210,8 +20263,8 @@ drive = (f => (P, I, dt) => {
   if (P.dep) { c.drive = c.turn = 0; c.brake = true; }
 })(drive);
 /* a set-down radio is hurt by a burst, is seen by the other side's troops near it, and is then something its batteries and mortars shell */
-explode = (f => (x, y, z, r, dmg, by, team, he, ob) => {
-  f(x, y, z, r, dmg, by, team, he, ob);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg);
   for (const b of S.rad || []) { const d = Math.hypot(b.x - x, b.y - y, b.z - z); if (b.dead || b.team === team || d >= r) continue; b.hitT = S.t; if ((b.hp -= dmg * (1 - d / r)) <= 0) { b.dead = true; S.floats.push({ x: b.x, y: b.y + 3, z: b.z, text: 'Rádio destruído', life: 2.2 }); } }
 })(explode);
 spot = (f => () => { f(); for (const b of S.rad || []) if (!b.dead) for (const s of sdsOf()) if (s !== b.team && (S.men.some(m => !m.dead && !m.in && m.team === s && hdist(m, b) < RAD.see && sees(m, b)) || S.units.some(u => !u.dead && u.team === s && hdist(u, b) < RAD.see && sees(u, b)))) seeBy(b, s); })(spot);   // each other side's own look
@@ -20388,9 +20441,9 @@ function droneEnd(o, how, by, u) {
     if (how === 'boom') {
       const d = o.def, w = d.wh, who = m && !m.dead ? m : o, sp = vlen(o.v), f = o.hd || (sp > 8 ? { x: o.v.x / sp, y: o.v.y / sp, z: o.v.z / sp } : o.f), V = Math.max(sp * ASPD, 30), wo = o.wo;
       if (wo) { const P = shotObj(wo, { by: who, k: 'heat' }, w.dmg * OBJD[d.job === 'owa' ? 'he' : 'heat'].hit, o.x, o.y, o.z, f.x, f.y, f.z); o.x = P.x; o.y = P.y; o.z = P.z; }   // a wall: it is struck and bursts a little short of it, as a rocket does
-      if (d.job === 'owa') { if (u) impact(u, HK.shell, w.hit, who, o.x, o.y, o.z, f.x, f.y, f.z, true); explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg, who, o.team, true); }
-      else if (u && u.kind && !u.man) { if (impact(u, HK.heat, w.dmg, who, o.x, o.y, o.z, f.x * V, f.y * V, f.z * V, w.pen)) explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg * .3, who, o.team, false, OBJD.heat.blast); }   // the plate it struck decides, as for a rocket; a round that bounces off does not burst
-      else { if (u) impact(u, HK.missile, w.dmg, who, o.x, o.y, o.z, f.x, f.y, f.z); explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg * .3, who, o.team, false, wo ? OBJD.heat.blast : undefined); }
+      if (d.job === 'owa') { if (u) impact(u, HK.shell, w.hit, who, o.x, o.y, o.z, f.x, f.y, f.z, true); explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg, who, o.team, true, undefined, w.dmg * CITY.chg.he); }
+      else if (u && u.kind && !u.man) { if (impact(u, HK.heat, w.dmg, who, o.x, o.y, o.z, f.x * V, f.y * V, f.z * V, w.pen)) explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg * .3, who, o.team, false, OBJD.heat.blast, w.dmg * CITY.chg.heat); }   // the plate it struck decides, as for a rocket; a round that bounces off does not burst
+      else { if (u) impact(u, HK.missile, w.dmg, who, o.x, o.y, o.z, f.x, f.y, f.z); explode(o.x, Math.max(o.y, g + .5), o.z, w.r, w.dmg * .3, who, o.team, false, wo ? OBJD.heat.blast : undefined, w.dmg * CITY.chg.heat); }
     } else if (how === 'crash') { puff(o.x, o.y, o.z, 'dust', 1); puff(o.x, o.y, o.z, 'spark', .6); }
     else if (how === 'back' && m && m.dst) m.dst[o.k] = Math.min(o.def.n, m.dst[o.k] + 1);
   }
@@ -20591,7 +20644,7 @@ function droneShots(dt) {
   for (const s of S.shells) if (!s.gone && s.t + dt >= s.T) for (const o of L) { const r = dist(o, s); if (!o.dead && !safe(o, s) && r < s.o.r) droneHit(o, s.o.dmg * (1 - r / s.o.r), s.by); }
 }
 stepShots = (g => dt => { droneShots(dt); g(dt); })(stepShots);
-explode = (g => (x, y, z, r, dmg, by, team, he, ob) => { g(x, y, z, r, dmg, by, team, he, ob); const sb = { team, by }; if (S.drones) for (const o of S.drones) { const d = Math.hypot(o.x - x, o.y - y, o.z - z); if (!o.dead && !o.gone && !safe(o, sb) && d < r) droneHit(o, dmg * (1 - d / r), by); } })(explode);
+explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg) => { g(x, y, z, r, dmg, by, team, he, ob, kg); const sb = { team, by }; if (S.drones) for (const o of S.drones) { const d = Math.hypot(o.x - x, o.y - y, o.z - z); if (!o.dead && !o.gone && !safe(o, sb) && d < r) droneHit(o, dmg * (1 - d / r), by); } })(explode);
 impact = (g => (o, k, dmg, by, x, y, z, dx, dy, dz, ap) => (o.drone ? (droneHit(o, dmg, by), null) : g(o, k, dmg, by, x, y, z, dx, dy, dz, ap)))(impact);
 /* air defence: with no aircraft to take, a gun takes a drone inside the reach its size allows (DSHOT); a missile is kept for the large one.
    A locking sight (lockOn over S.planes) finds only a drone a missile may lock */
@@ -24357,7 +24410,7 @@ const bombHeld = (o, B, t) => !!o.ai && roeHeld(o.team, o.x, o.z, B.r, t);   // 
 function bombGo(o) {
   const B = bombOf(o); if (!B || o.bGone) return; o.bGone = true;
   const x = o.x, z = o.z, y = (o.y || hgt(x, z)) + 1;
-  explode(x, y, z, B.r, B.dmg, o, o.team, B.he, 1);
+  explode(x, y, z, B.r, B.dmg, o, o.team, B.he, 1, B.dmg * CITY.chg.ied);
   for (let i = 0; i < BOMB.fx; i++) { puff(x, y, z, 'fire', B.r / 10, rand(-20, 20), rand(4, 30), rand(-20, 20)); puff(x, y, z, 'dust', B.r / 8, rand(-14, 14), rand(1, 10), rand(-14, 14)); puff(x, y, z, 'smoke', B.r / 7, rand(-8, 8), rand(6, 20), rand(-8, 8)); }
   S.smokes.push({ x, y, z, t0: S.t, r: B.r * BOMB.cloud[0], h: B.r * BOMB.cloud[1], L: BOMB.cloud[2] });
   S.shake = Math.max(S.shake, B.r * BOMB.shake);
@@ -24419,7 +24472,7 @@ function mineBoom(o, v, here) {
   const A = o.k === 2 ? SAP.cmd : o.k ? SAP.ap : SAP.at;
   mineDrop(o);
   (S.mgone || (S.mgone = new Set())).add(o.id);
-  explode(o.x, o.y + .3, o.z, A.blast, A.dmg, o.k === 2 && o.by && !o.by.dead ? o.by : null, o.team, 1, 0);
+  explode(o.x, o.y + .3, o.z, A.blast, A.dmg, o.k === 2 && o.by && !o.by.dead ? o.by : null, o.team, 1, 0, o.k === 1 ? CITY.chg.ap : A.dmg * CITY.chg.ied);
   if (v && o.k !== 1 && v.kind && !v.net && !v.dead && v.def.parts && v.def.parts.ix) {
     const D = v.def.parts, s = (o.x - v.x) * Math.sin(v.h) + (o.z - v.z) * Math.cos(v.h) > 0 ? 1 : -1;
     const i = ['trackL', 'trackR', 'wheelL', 'wheelR'].map(id => D.ix[id]).find(i => i !== undefined && D[i].side === s && v.parts[i].hp > 0);
@@ -24477,7 +24530,7 @@ function sabStep() {
     c.gone = true; const g = c.g, by = c.by && !c.by.dead ? c.by : null;
     if (g.dead) continue;
     const y = g.kind === 'rad' ? g.y : hgt(g.x, g.z) + 1;
-    explode(g.x, y, g.z, SAP.sab.r, BLD.charge.dmg, by, c.team, 1, 1);
+    explode(g.x, y, g.z, SAP.sab.r, BLD.charge.dmg, by, c.team, 1, 1, CITY.chg.sab);
     if (g.kind && g.kind !== 'rad' && !g.dead) hurt(g)(g, BLD.charge.dmg * SAP.sab.veh, by, false, null);
   }
   S.sab = alive(L);
@@ -25895,11 +25948,11 @@ nadeStep = (f => (b, dt) => {
   if (b.gone && b.medW) { for (const m of b.medW) { const D = medD(m.team); D.gr[0]++; if (!m.dead && !m.down) D.gr[1]++; } b.medW = null; }
 })(nadeStep);
 /* a blast: how many of each side it killed or put down at once */
-explode = (f => (x, y, z, r, dmg, by, team, he, ob) => {
-  if (!medOn() || !(r > 0)) return f(x, y, z, r, dmg, by, team, he, ob);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
+  if (!medOn() || !(r > 0)) return f(x, y, z, r, dmg, by, team, he, ob, kg);
   const V = [];
   for (const m of S.men) if (!m.dead && !m.down && !m.in && !m.net && m.ai && Math.abs(m.x - x) < r && Math.abs(m.z - z) < r) V.push(m);
-  f(x, y, z, r, dmg, by, team, he, ob);
+  f(x, y, z, r, dmg, by, team, he, ob, kg);
   const n = []; for (const m of V) if (m.dead || m.down) n[m.team] = (n[m.team] || 0) + 1;
   n.forEach((k, s) => { if (!k) return; const D = medD(s); D.bl[0]++; if (k > 1) D.bl[1]++; D.bl[2] += k; });
 })(explode);
@@ -27566,7 +27619,7 @@ function insIedStep() {
     const y = hgt(c.x, c.z), w = S.men.find(m => !m.dead && !m.in && m.team === c.team && Math.abs(m.x - c.x) < K.watch && Math.abs(m.z - c.z) < K.watch && hdist(m, c) < K.watch && los(m, eyeY(m), { x: c.x, z: c.z }, y + 1));
     if (!w || roeHeld(c.team, c.x, c.z, K.blast, v)) continue;
     c.gone = true;
-    explode(c.x, y + .5, c.z, K.blast, K.dmg, w, c.team, 1, 0);
+    explode(c.x, y + .5, c.z, K.blast, K.dmg, w, c.team, 1, 0, K.dmg * CITY.chg.ied);
     for (let i = 0; i < 10; i++) { puff(c.x, y + 1, c.z, 'dust', 2.5, rand(-8, 8), rand(2, 12), rand(-8, 8)); puff(c.x, y + 1, c.z, 'fire', 1.5, rand(-6, 6), rand(3, 14), rand(-6, 6)); }
     gLog(c.team, 'amb', 'IED de comando detonado sob ' + (v.name || 'veículo inimigo') + ' ' + gNear(c.x, c.z), c, null);
   }
@@ -31281,7 +31334,7 @@ function grlTrapStep(dt) {
     if (roeHeld(b.team, u.x, u.z, K.blast, m)) continue;
     const by = b.by && !b.by.dead ? b.by : S.men.find(o => !o.dead && o.team === b.team); if (!by) continue;
     b.gone = true; u.grlBT = 0;
-    explode(u.x, hgt(u.x, u.z) + 1, u.z, K.blast, K.dmg, by, b.team, 1, 0);
+    explode(u.x, hgt(u.x, u.z) + 1, u.z, K.blast, K.dmg, by, b.team, 1, 0, K.dmg * CITY.chg.ied);
     for (let i = 0; i < 8; i++) puff(u.x, hgt(u.x, u.z) + 1, u.z, 'fire', 1.5, rand(-6, 6), rand(3, 12), rand(-6, 6));
     gLog(b.team, 'grl', GRL.nm.arm + ': armadilha detonada em ' + (u.name || 'veículo abandonado') + ' ' + grlNear(u), u, null);
   }
@@ -31841,8 +31894,8 @@ function tunStep(dt) {
 }
 step = (g => dt => { g(dt); try { tunStep(dt); } catch (er) { if (!S.tunE) { S.tunE = 1; console.warn('túneis:', er); } } })(step);
 /* a big burst at a mouth collapses it (where the match is simulated) */
-explode = (g => (x, y, z, r, dmg, by, team, he, ob) => {
-  const R = g(x, y, z, r, dmg, by, team, he, ob);
+explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg) => {
+  const R = g(x, y, z, r, dmg, by, team, he, ob, kg);
   if (TUN.on && S && S.tun && S.tun.length && (!S.net || S.host) && dmg >= TUN.blast.dmg) for (const tn of S.tun) {
     if (!tunLive(tn)) continue;
     for (const w of ['a', 'b']) { const p = tunEnd(tn, w); if ((w === 'a' || tn.prog >= 1) && Math.hypot(p.x - x, p.z - z) < Math.max(TUN.blast.r, r * .25) && Math.abs(y - hgt(p.x, p.z)) < 6) { tunFall(tn, team, 'uma explosão fechou a boca'); break; } }
@@ -32238,8 +32291,8 @@ sqRescue = (f => (q, live) => { f(q, live); for (const d of q.men) if (d.down &&
    soldier's aim spreads by sp, he does not fire in the first hold of it, and does not run. Each client throws only the men it moves (its
    own player and, on the host, the AI's) */
 const STUN = { r: 1.6, k: .15, push: 2.2, t: 3.5, sp: .05, hold: .4, prone: .3 };
-explode = (f => (x, y, z, r, dmg, by, team, he, ob) => {
-  f(x, y, z, r, dmg, by, team, he, ob);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg);
   const R = r * STUN.r, w = Math.min(1, dmg / MAN.nade.dmg);
   for (const m of S.men) {
     if (m.dead || m.in || m.net || !(m.ai || m === S.my) || Math.abs(m.x - x) > R || Math.abs(m.z - z) > R) continue;
@@ -33848,8 +33901,8 @@ function brStim(m, k, d) {
 }
 drInc = (f => (m, by, vx, vz, w) => { if (by && by.team !== m.team && (!S.net || S.host)) brStim(m, 'tiro', { w, by, ux: -(vx || 0), uz: -(vz || 0) }); return f(m, by, vx, vz, w); })(drInc);
 damageMan = (f => (m, dmg, by, rx, h) => { const was = m.dead; f(m, dmg, by, rx, h); if (!was && !m.dead && dmg > 0) brStim(m, 'atingido', { by, dmg }); })(damageMan);
-explode = (f => (x, y, z, r, dmg, by, team, he, ob) => {
-  f(x, y, z, r, dmg, by, team, he, ob);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg);
   if (!BRAIN.on || (S.net && !S.host)) return;
   const R = Math.max(STIM.hear, r * 2);
   for (const m of S.men) { if (!m.ai || m.dead || m.net || m.in || Math.abs(m.x - x) > R || Math.abs(m.z - z) > R) continue; const d = Math.hypot(m.x - x, m.z - z); if (d < R) brStim(m, 'expl', { x, z, w: clamp((1 - d / R) * Math.min(1, dmg / MAN.nade.dmg) * 1.5, 0, 1) }); }
@@ -38093,7 +38146,7 @@ const LEGEND = {
       ['W / S / A / D', 'Andar para onde a mira aponta e para os lados'], ['Shift', 'Correr, em pé, enquanto houver fôlego'], ['Z', 'Postura: em pé, agachado, deitado. Mais baixo é mais lento, mais preciso e mais difícil de ver e de acertar'],
       ['Botão esquerdo ou Espaço', a0.name + (a0.auto ? ' (rajada enquanto apertado)' : ' (um tiro por aperto)')], ['Botão direito', 'Mirar pela alça: campo mais fechado e menos dispersão'], ['R', 'Recarregar']];
     if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; sem linha de visada não trava: morro, prédio, árvores ou fumaça no caminho)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);
-    rows.push(['F', 'Granada de mão, uns 30 m'], ['G', 'Granada de fumaça: uma cortina pequena que esconde dos dois lados'], ['N', 'Obras: mostra o contorno à sua frente, verde onde dá para construir e vermelho com o motivo onde não dá. Cada toque passa para a próxima: base de suprimento, trincheira, sacos de areia, e fecha. O clique começa a obra (a base gasta o kit) e o botão direito cancela. Fique parado junto da obra para construir (' + BLD.time + ' s sozinho, mais rápido com outros soldados ao lado); um tiro recebido interrompe. Pronta, ela remunicia e repara soldados e veículos do seu lado a até ' + BLD.r + ' m e vira ponto de entrada. Encostado em uma base inimiga, N arma a carga de demolição, que explode em ' + BLD.charge.fuse + ' s'], ['Prédios', 'Entre pelas portas, pelos buracos abertos nas paredes e pelas janelas do térreo. A escada em caracol fica no canto dos fundos: dê a volta no pilar para subir ou descer; nos prédios de teto plano ela leva ao telhado. Parede de pé para tiros e esconde; janela e buraco deixam ver e atirar, nos dois sentidos. Canhão, foguete e a carga de demolição (N, de frente para a parede, a até ' + CITY.plant + ' m) abrem buracos; sem apoio as lajes caem andar por andar, e o prédio vem abaixo quando o térreo cede'], ['C', 'Trocar a visão: por cima do ombro e primeira pessoa'], o.swap, o.esc);
+    rows.push(['F', 'Granada de mão, uns 30 m'], ['G', 'Granada de fumaça: uma cortina pequena que esconde dos dois lados'], ['N', 'Obras: mostra o contorno à sua frente, verde onde dá para construir e vermelho com o motivo onde não dá. Cada toque passa para a próxima: base de suprimento, trincheira, sacos de areia, e fecha. O clique começa a obra (a base gasta o kit) e o botão direito cancela. Fique parado junto da obra para construir (' + BLD.time + ' s sozinho, mais rápido com outros soldados ao lado); um tiro recebido interrompe. Pronta, ela remunicia e repara soldados e veículos do seu lado a até ' + BLD.r + ' m e vira ponto de entrada. Encostado em uma base inimiga, N arma a carga de demolição, que explode em ' + BLD.charge.fuse + ' s'], ['Prédios', 'Entre pelas portas, pelos buracos abertos nas paredes e pelas janelas do térreo. A escada em caracol fica no canto dos fundos: dê a volta no pilar para subir ou descer; nos prédios de teto plano ela leva ao telhado. Parede de pé para tiros e esconde; janela e buraco deixam ver e atirar, nos dois sentidos. Canhão, foguete e a carga de demolição (N, de frente para a parede, a até ' + CITY.plant + ' m) abrem buracos; granada, morteiro, mina e IED quebram vidros e portas, furam madeira e parede fina e, repetidos no mesmo lugar ou dentro de um cômodo fechado, abrem a alvenaria; sem apoio as lajes caem andar por andar, e o prédio vem abaixo quando o térreo cede'], ['C', 'Trocar a visão: por cima do ombro e primeira pessoa'], o.swap, o.esc);
     rows.push(['I', 'Civil ao lado: segure ' + CIV.hold + ' s para recrutá-lo como miliciano do seu lado (no máximo ' + CIV.mil.each + ' de cada vez). Ele segue você e luta com uma arma velha; a IA também arma civis da vila que defende. Cada civil morto custa ' + CIV.toll + ' tíquetes a quem o matou, e uma vila onde o seu lado matou ' + CIV.rage.n + ' não arma mais ninguém para você']);
     return rows;
   },

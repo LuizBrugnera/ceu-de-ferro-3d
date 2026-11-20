@@ -88,6 +88,8 @@ node tests/ana-man.js      # a manobra do general na analytics (M0): a batalha i
 node tools/balance.js --torneio N --brain ab --min M --nobudget   # o A×B do cérebro: as mesmas sementes com BRAIN.on 0 e 1, o resultado e as medidas da seção 4 lado a lado (--brain 0|1 joga um braço só; tools/ref/cerebro-base.json, a linha de base com o cérebro desligado, serve de --ref)
 node tests/ana-online.js   # analytics pelo servidor de verdade: lotes do anfitrião, recusas, arquivo por partida, resumo, HTTP, POST, 90 dias, ANALYTICS=0 e uma página anfitriã de verdade
 node tests/sky.js  sky-relay.js  sky-online.js   # dia, noite e clima: o relógio de luz e os presets, o que o escuro deixa de cada óptica, o clarão do tiro, sinalizadores, iluminativas e holofotes, chuva, neblina baixa e vento, os olhos do jogador no mapa do lado e as luzes da IA à noite
+node tests/veg-fade.js     # as árvores por distância (VEG): na troca da árvore perto pela do meio e da do meio pelo impostor, as duas faixas do pontilhado cobrem a árvore inteira em toda distância e nível (a faixa que entrava guardava o lado errado e um anel de árvores sumia em pontos)
+node tests/sparks-light.js # a fumaça, a poeira, as cortinas de fumaça e os pontinhos dos soldados (as faíscas da cena) tomam a luz do dia e a névoa; o que brilha (fogo, clarão, traçante, chama de motor) continua aceso: a cortina não brilha mais branca à noite
 node tests/oldserver.js     # a página nova contra um servidor antigo, SERVER=<server.js antigo>. Sem infantaria: sem pelotões. Sem bases: ninguém constrói e a entrada continua na estrada do meio
 ```
 

@@ -650,6 +650,23 @@ const MSIDE = {
     c.mdq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k, id: m.id }, m.k === 8 ? { p: m.p } : {}));
   };
 }
+/* bomb vehicles and the disguised bomber (cf-vbied, NÃO TESTADO: docs/nao-testado/cf-vbied.md): the pickup bomb and the truck bomb a player may
+   drive, the Insurgents' kit in plain clothes, at the end of their lists so that no older index moves; and mreq k 9, a guest's driver
+   asks the host to set off its bomb vehicle (500 ms apart at least) */
+{
+  const m = MODELS.modern, R = rooms.modern;
+  for (const [cls, id] of [['trn', 'vbiedPk'], ['trn', 'svbied'], ['inf', 'insCivBomber']]) {
+    if (m[cls].includes(id)) throw new Error('vbied model already there: ' + id);
+    m[cls].push(id); (cls === 'inf' ? R.inf : R.gnd).add(id); MSIDE.modern[2].push(id); R.ms[id] = 2;
+  }
+  const old = RX.mreq;
+  RX.mreq = (c, m) => {
+    if (m.k !== 9) return old(c, m);
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.player.cls !== 'trn' || now - (c.vbq || 0) < 500) return;
+    c.vbq = now; send(h.ws, { t: 'mreq', from: c.player.id, k: 9 });
+  };
+}
 /* the room's sides, said by its first player: the general's seats past them are free again, and a bridge of such a side is told and let go */
 function setNs(room, ns) {
   if (room.ns === ns) return;

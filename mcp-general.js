@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.4.0';   // 2.4: tunnels (dig_tunnel, use_tunnel, destroy_tunnel; cf-trincheiras-tuneis, NOT TESTED);   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.5.0';   // 2.5: bomb vehicles (car_bomb, get_car_bombs; cf-vbied, NOT TESTED);   // 2.4: tunnels (dig_tunnel, use_tunnel, destroy_tunnel; cf-trincheiras-tuneis, NOT TESTED);   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -524,6 +524,18 @@ const TOOLS = [
       if (a.site_id === undefined && a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give site_id, point, or both x and z');
       return runCmd(Object.assign({ c: 'bomb' }, pick(a, ['weapon', 'site_id', 'point', 'x', 'z', 'heading', 'why'], { weapon: 'k', site_id: 'id', point: 'pi', heading: 'a' })), 'cmd');
     } },
+  { name: 'car_bomb', description: 'The Insurgents only (NOT TESTED, cf-vbied): send a bomb vehicle at a target. kind car (default): a car bomb drawn from your economy as a car (model sedan, default, or pickup), at most 2 of your side alive at once; it drives the least watched way of the road network (away from the enemies, points and bases your side knows), then straight at the target, and goes off there, at an enemy close by, or on a hard blow. kind truck: the heavy truck bomb, the same as strategic_strike weapon svbied (it must be in your reserve). Target: an enemy site or supply base you know (site_id), a point index (point), or x, z. Accepted (id: the vehicle model; get_car_bombs lists what is out) or refused: fac (your side has no bomb vehicles), vbcap (the limit is out), pop, res (no car in the economy, or no truck in the reserve), id, at, map, mv, slive. Regular soldiers fire first on a bomb vehicle that speeds toward them, and walls (HESCO) stop it.',
+    inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['car', 'truck'] }, model: { type: 'string', enum: ['sedan', 'pickup'] }, site_id: { type: 'integer', description: 'enemy site or supply base id (knownEnemySites)' }, point: { type: 'integer', minimum: 0, description: 'point index from get_state map.points' }, ...xz, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { kind: ['w', false, ['car', 'truck']], model: ['w', false, ['sedan', 'pickup']], site_id: ['i', false, 0, 999999], point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.site_id === undefined && a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give site_id, point, or both x and z');
+      const c = Object.assign({ c: 'vbied' }, pick(a, ['kind', 'site_id', 'point', 'x', 'z', 'why'], { kind: 'k', site_id: 'id', point: 'pi' }));
+      if (a.model === 'pickup') c.m = 'pk';
+      return runCmd(c, 'cmd');
+    } },
+  { name: 'get_car_bombs', description: 'Ask the host for your side\'s bomb vehicles (the Insurgents): the caps, how many cars and trucks are out, the trucks in the reserve, and each one alive (id, car or truck, name, x z, driven by a player, suspect: the enemy has marked it). One host question a second.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'vb' }) },
   { name: 'get_strikes', description: 'Ask the host for your side\'s strategic weapons: per weapon (strat, svbied, shahed) how many are in the reserve, queued and out, with the cost [energy, metal, seconds], the caps, and the last strikes (id, weapon, target x z, state in words, who ordered it, age in seconds, ended, result ok or lost). One host question a second.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true }, run: async () => runAsk({ q: 'stk' }) },

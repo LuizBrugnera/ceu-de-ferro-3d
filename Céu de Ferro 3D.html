@@ -20163,7 +20163,7 @@ function rqDepot(o) {
   const p = Q.p.find(p => p.base < 0 && hdist(o, p) < p.r && !cqSpawnWhy(p, t) && S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, p) < p.r + 60));
   return p ? { id: p.i + 1, k: 3, x: p.x, z: p.z } : null;
 }
-const rqKind = (cls, model) => (cls === 'trn' ? DEFS.trn[model].svc || (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);   // a service vehicle (REC.play) by its own kind
+const rqKind = (cls, model) => (cls === 'trn' ? (DEFS.trn[model].bomb ? (DEFS.trn[model].bomb === 'truck' ? 'svbied' : 'vbied') : '') || DEFS.trn[model].svc || (DEFS.trn[model].rad ? 'rad' : DEFS.trn[model].kind) : cls);   // a service vehicle (REC.play) by its own kind
 const rqCost = (cls, model) => RQ.cost[rqKind(cls, model)] || 1;
 function rqStock(id) { const Q = S.cq, s = Q.stock[id] || (Q.stock[id] = { n: RQ.stock, t: S.t }); while (s.n < RQ.stock && S.t - s.t >= RQ.refill) { s.n++; s.t += RQ.refill; } if (s.n >= RQ.stock) s.t = S.t; return s; }
 /* why not, for soldier o of player who (0 solo): '' or a key of RQ.why */
@@ -24424,6 +24424,8 @@ Object.assign(SARMS, {
     suv: { name: 'Land Cruiser civil', kind: 'car', role: 'Utilitário civil', l: 4.8, w: 1.9, hh: 1, cab: .6, hp: 12, spd: 27, tr: .85, seats: { pax: 4 }, arm: NOARM },
     sedan: { name: 'Sedã civil', kind: 'car', role: 'Carro civil', l: 4.5, w: 1.75, hh: .75, cab: .4, hp: 9, spd: 28, tr: .9, seats: { pax: 3 }, arm: NOARM },
     vbied: { name: 'Carro-bomba (VBIED)', kind: 'car', role: 'Carro-bomba', l: 4.6, w: 1.8, hh: .9, cab: .5, hp: 16, spd: 24, tr: .8, seats: { pax: 0 }, arm: NOARM, bomb: 'car' },
+    vbiedPk: { name: 'Picape-bomba (VBIED)', kind: 'car', role: 'Carro-bomba (picape carregada)', l: 4.9, w: 1.8, hh: .8, cab: .6, px: -1.3, hp: 18, spd: 23, tr: .85, seats: { pax: 0 }, arm: NOARM, bomb: 'car' },   // cf-vbied
+    svbied: { name: 'Caminhão-bomba (SVBIED)', kind: 'truck', role: 'Caminhão-bomba pesado', l: 7, w: 2.5, hh: 1.05, cab: 2, hp: 30, spd: 13, tr: .5, seats: { pax: 0 }, arm: NOARM, bomb: 'truck' },   // cf-vbied: BOMB.truck
     zil131: { name: 'Caminhão ZIL-131', kind: 'truck', role: 'Caminhão', l: 7, w: 2.5, hh: 1.05, cab: 2, hp: 22, spd: 15, tr: .55, open: 1, mat: 1, seats: { pax: 12 }, arm: NOARM },
     btr70: { name: 'BTR-70 (capturado)', kind: 'lav', role: 'Blindado sobre rodas capturado', l: 7.5, w: 2.8, hh: 1.15, t: [1.2, 1.3, .45, 1], g: 2.2, cab: 2.5, hp: 55, spd: 20, tr: .65, sl: .8, el: [-.08, .9], swim: 2, seats: { gun: 1, pax: 6 }, seat: 'gunnerM',
       arm: [['ac30', { name: 'KPVT 14,5 mm', rate: .11, rl: .11, dmg: 8, ap: .2, spd: 1000, ammo: 500 }], ['coax', { name: 'PKT coaxial' }]] } };
@@ -24475,7 +24477,7 @@ addUnit = (g => (kind, team, x, z, id, ...r) => { const sd = S.E.sides[S.fac[tea
 /* the kits an AI soldier's row names by index: a third side's come after every kit an older page knew, so the old indices hold */
 trnKits = (g => () => { const l = g(), c = INF[S.era][2]; return c ? l.concat(c.filter(id => !l.includes(id))) : l; })(trnKits);
 /* ---- the bombs: when one goes, and the AI that takes it to its target ---- */
-const bombOf = o => (o && o.def && o.def.bomb ? BOMB[o.def.bomb] : null);
+const bombOf = o => (o && !o.svb && o.def && o.def.bomb ? BOMB[o.def.bomb] || null : null);   // the strategic truck (u.svb) is STK's own (cf-vbied)
 const bombSim = () => !S.net || S.host;
 /* the nearest enemy on the ground within r of o (a vehicle, or a soldier not in one) */
 function bombFoe(o, r) {
@@ -30592,7 +30594,7 @@ function stkSvb(u, dt) {
 function stkSvbGo(u) {
   const V = u.svb, K = STK.K.svbied; if (!V || V.go) return; V.go = 1;
   const x = u.x, y = u.y + 1.5, z = u.z;
-  explode(x, y, z, K.r, K.dmg, u, u.team, false, 1); stkFx(x, y, z, K.r);
+  explode(x, y, z, K.r, K.dmg, u, u.team, false, 1, K.dmg * CITY.chg.ied); stkFx(x, y, z, K.r);   // cf-vbied: and the buildings near it
   const s = (S.stk || []).find(s => s.id === V.s); if (s) { s.res = 'ok'; s.st = 'detonado ' + ecoNear(x, z); }
   gLog(u.team, 'atk', 'Caminhão-bomba detonado ' + ecoNear(x, z), { x, z }, 'stkv');
   if (!u.dead) { u.cqd = 1; killUnit(u, true); }   // spent, not lost
@@ -30709,6 +30711,242 @@ function stkView(t) {
 }
 genState = (g => t => { const o = g(t); if (o) o.stk = stkView(t); return o; })(genState);
 genQuery = (g => (t, q) => (q && q.q === 'stk' ? stkView(t) || gBad('off') : g(t, q)))(genQuery);
+/* ---------- the car bomb, the truck bomb and the disguised bomber (cf-vbied; NÃO TESTADO, see docs/nao-testado/cf-vbied.md) ----------
+   The captain: "faltou o carro bomba e caminhão bomba para os insurgentes" and "deve ter uma classe de homem bomba insurgente que se
+   disfarça de civil". What was there: the AI car bomb (vbied, sent by insBomb straight at its target, not playable), the heavy truck bomb of
+   the strategic strike (svbied, a plain truck with no model of its own) and the suicide bomber (insBomber, in uniform, recognised as any
+   soldier but in a village). What this adds, all through hooks:
+   - Models: the car bomb (vbied, a sedan) and a pickup bomb (vbiedPk) and the truck bomb (svbied, a ZIL with 1.5 t in the bed: BOMB.truck),
+     playable by an Insurgent in the hangar, the swap board (H) and the requisition (U; VBM.rq tickets, at most VBM.cap of each alive per side,
+     the AI's included). The strategic truck now has the svbied body (bombOf leaves it to STK's own code, u.svb).
+   - The player sets one off with 5 (VBK), a hard blow (ramHit, vcolHit: VBM.imp m/s or more, armed), or as before an enemy within trig m.
+     Its burst: explode (with what it does to buildings, CITY.chg.ied) and STK's crater, fireball and cloud (stkFx) by its radius.
+   - The command vbied { k: car|truck, m: sedan|pk, x z | id | pi, why } in the general's funnel (genCmd), the same for the AI, a person
+     (General's view: Campanha, Carro-bomba) and the MCP (car_bomb): the car is drawn from the economy as a car and driven by the least seen
+     way of the road network (vbTrip: each edge costs more near the enemies the side knows, its points and its bases), then straight at the
+     target; the truck is GC.bomb's svbied, which now also takes the least seen way.
+   - The AI general (insBomb): a vehicle target (and now the enemy's main base, HQ and points too) goes to genCmd vbied, the truck when its
+     reserve has one and the target is worth VBM.ai.truck; the guerrilla's sabotage (sab) and the cut of the command (cmd) try a bomb first
+     (VBM.ai.grl of the time). The bomber it sends is the disguised one VBM.civ.p of the time.
+   - The disguised bomber (insCivBomber): a kit of the Insurgents, in plain clothes (the pack's civilian), with the vest of compartment 5
+     and a hidden pistol; to every enemy it is at most a man seen (grade 1: no shot) until it is within VBM.civ.near m, it has fired, or it
+     is suspect (below).
+   - Suspicion (vbSusStep, every VBM.sus.every s where the battle is simulated): a bomb vehicle closing at VBM.sus.v m/s or more, or a bomb man
+     running at VBM.civ.v m/s, toward a regular's man or vehicle within VBM.sus.r (a man: VBM.civ.sus) m is suspect for VBM.sus.T s: the
+     regulars' AI fires on it first (manThink, pickGround), the side's log says so once. HESCO and walls already stop a hull (bump), and a
+     bomb that hits one at speed goes off there. */
+const VBM = {
+  cap: { car: 2, truck: 1 },
+  rq: { vbied: 3, svbied: 6 },
+  imp: 8, fx: 1,
+  route: { r: 450, w: 3, post: 2, base: 4, max: 6 },
+  sus: { r: 350, v: 7, cos: .75, every: .5, T: 8 },
+  civ: { near: 25, sus: 80, v: 3.2, p: .6 },
+  ai: { truck: 4.5, grl: .5, val: { base: 4, hq: 6, post: 3 } }
+};
+BOMB.truck = { name: 'Carga de 1,5 t', dmg: STK.K.svbied.dmg, r: STK.K.svbied.r, arm: 3, trig: STK.K.svbied.trig, seek: 1500, kill: STK.K.svbied.kill, he: 1 };
+Object.assign(GEN.no, { vbcap: 'Limite de carros-bomba deste lado (' + VBM.cap.car + ' por vez)' });
+GEN.cn.vbied = 'carro-bomba';
+Object.assign(RQ.cost, VBM.rq);
+Object.assign(RQ.why, { vbcap: 'Limite de veículos-bomba do seu lado: espere o que já saiu explodir.' });
+/* the disguised bomber's kit, the vehicles a player may drive, and the faction's bombs */
+{
+  const F = FACTIONS.modern.insurgentes;
+  KITS.insCivBomber = Object.assign({}, KITS.insBomber, { name: 'Homem-bomba disfarçado', role: 'Homem-bomba (roupa civil)', civ: 1, arms: KITS.insBomber.arms.slice() });
+  if (!F.inf.includes('insCivBomber')) F.inf.push('insCivBomber');
+  if (INF.modern[F.slot] && !INF.modern[F.slot].includes('insCivBomber')) INF.modern[F.slot].push('insCivBomber');   // at the end: no older index moves
+  for (const id of ['vbied', 'vbiedPk', 'svbied']) if (TRNS[id]) Object.defineProperty(TRNS, id, { value: TRNS[id], enumerable: true, configurable: true });
+  Object.assign(F.bomb, { pk: 'vbiedPk', truck: 'svbied', civ: 'insCivBomber' });
+}
+/* the side's faction bombs, or null (STK.any: every side) */
+function vbFac(t) {
+  const sd = S && S.E && S.fac && S.E.sides[S.fac[t]], F = sd && sd.fac && FACTIONS[S.era] && FACTIONS[S.era][sd.fac];
+  return F && F.bomb ? F.bomb : STK.any ? FACTIONS.modern.insurgentes.bomb : null;
+}
+/* the bomb vehicles of side t alive: car (car and pickup) or truck (the strategic one too) */
+const vbCount = (t, k) => S.units.reduce((a, u) => a + (!u.dead && !u.gone && u.team === t && (k === 'truck' ? (u.svb && !u.svb.go) || (u.def && u.def.bomb === 'truck') : u.def && u.def.bomb === 'car') ? 1 : 0), 0);
+/* ---- the least seen way ---- */
+function vbCost(t, mode) {
+  const C = S.cmd && S.cmd[t], K = VBM.route, eyes = [];
+  if (C) for (const o of C.known || []) if (!o.dead && insFoe(t, o) && Number.isFinite(sX(o, t))) eyes.push({ x: sX(o, t), z: sZ(o, t), w: 1 });
+  (S.base || []).forEach((b, s) => { if (b && foeSide(t, s)) eyes.push({ x: b.x, z: b.z, w: K.base }); });
+  if (S.cq && S.cq.p) for (const p of S.cq.p) if (p && Number.isInteger(p.hold) && p.hold >= 0 && foeSide(t, p.hold)) eyes.push({ x: p.x, z: p.z, w: K.post });
+  const R2 = K.r * K.r, memo = new Map();
+  return e => {
+    let k = memo.get(e.i);
+    if (k === undefined) {
+      const L = e.smp || e.p, m = L && L.length ? L[L.length >> 1] : null; let n = 0;
+      if (m) for (const q of eyes) { const dx = q.x - m.x, dz = q.z - m.z; if (dx * dx + dz * dz < R2) n += q.w; }
+      k = 1 + K.w * Math.min(n, K.max); memo.set(e.i, k);
+    }
+    return e.len * RN.cls[mode][e.c] * k;
+  };
+}
+/* tripTo by the least seen way (the fastest when that fails) */
+function vbTrip(u, x, z, why, T) {
+  if (!(S.T.mv >= 4) || u.net || u.dead || !u.ai || !u.rail || u.fixed) return null;
+  const mode = vehMode(u);
+  let p = null; try { p = tripOf(u.x, u.z, x, z, { mode, team: u.team, cost: vbCost(u.team, mode) }); } catch (e) { p = null; }
+  if (!p) return tripTo(u, x, z, { why, T });
+  return (u.trip = { p, s: 0, ri: p.ri, s1: p.s1, T: T !== undefined ? T : S.t + 2 * tripLen(p) / (u.def.spd * GSPD) + 30, drop: false, back: null, gone: false, why: why || '' });
+}
+/* ---- the command ---- */
+const vbSite = (t, id) => S.sup.concat(ecoFoe(t)).find(b => b.id === id && !b.dead && foeSide(t, b.team) && spotted(b, t)) || null;
+function vbSend(t, x, z, o, id, why, by) {
+  const B = S.base[t], p0 = railOf(B.x, B.z);
+  const u = dispatch(t, { kind: 'attack', why: 'carro-bomba' + (why ? ': ' + why : ''), area: { x, z, r: 300 } }, () => addUnit('car', t, 0, 0, id, false, p0.ri, p0.s, 0, 0));
+  if (!u) return null;
+  const real = o && (o.man || o.def) && o.team !== undefined ? o : null;
+  u.insGo = { x, z, o: real };
+  u.vb = { x, z, trip: 0, T: S.t, by };
+  gLog(t, 'atk', (TRNS[id] ? TRNS[id].name : 'Carro-bomba') + ' enviado ' + gNear(x, z) + (by === 'ai' ? '' : ' (ordem do comando)') + (why ? ': ' + why : '') + '; pelo caminho menos vigiado', { x, z }, null);
+  return u;
+}
+GC.vbied = { d: 'atk', f(t, c, by) {
+  const k = c.k === 'truck' ? 'truck' : 'car';
+  if (k === 'truck') return GC.bomb.f(t, Object.assign({}, c, { c: 'bomb', k: 'svbied' }), by);
+  const F = vbFac(t); if (!F || !F.car) return gBad('fac');
+  let x = c.x, z = c.z, tg = null;
+  if (Number.isInteger(c.id)) { tg = vbSite(t, c.id); if (!tg) return gBad('id'); x = tg.x; z = tg.z; }
+  else if (Number.isInteger(c.pi)) { const P = gPts()[c.pi]; if (!P) return gBad('at'); x = P.x; z = P.z; }
+  if (!Number.isFinite(x) || !Number.isFinite(z) || !gMapOk(x, z)) return gBad('map');
+  if (vbCount(t, 'car') >= VBM.cap.car) return gBad('vbcap');
+  const P = popOf(t), U = popUse(t); if (U.veh + 1 > P.veh) return gBad('pop');
+  const o = by === 'ai' && c.o && typeof c.o === 'object' ? c.o : null;   // a target object: the AI's own, never one from the wire
+  if (by === 'ai' && roeHeld(t, x, z, BOMB.car.r, o || tg)) return gBad('roe');
+  if (!ecoUse(t, 'car')) return gBad('res');
+  const id = c.m === 'pk' && F.pk && TRNS[F.pk] ? F.pk : F.car;
+  const u = vbSend(t, x, z, o || tg, id, typeof c.why === 'string' ? c.why.slice(0, 120) : '', by);
+  if (!u) { if (S.eco && ecoSim()) ecoBack(t, 'car', 1); return gBad('bug'); }
+  return gYes(u.id);
+} };
+/* the strategic truck: the svbied body, and the least seen way */
+let vbTruckId = null;
+addUnit = (g => (kind, team, x, z, id, ...r) => (kind === 'truck' && id === null && vbTruckId ? g(kind, team, x, z, vbTruckId, ...r) : g(kind, team, x, z, id, ...r)))(addUnit);
+stkLaunch = (g => (t, k, ...r) => {
+  if (k !== 'svbied') return g(t, k, ...r);
+  const F = vbFac(t); vbTruckId = F && F.truck && TRNS[F.truck] && TRNS[F.truck].side === S.fac[t] ? F.truck : null;
+  try { return g(t, k, ...r); } finally { vbTruckId = null; }
+})(stkLaunch);
+tripTo = (g => (u, x, z, o) => (o && o.why === 'svb' && u.svb && !u.vbW ? ((u.vbW = 1), vbTrip(u, x, z, 'svb', o.T)) : g(u, x, z, o)))(tripTo);
+/* ---- the AI's car: the least seen way first, no stop for a fight on it ---- */
+AI.car = (g => (u, dt) => {
+  const V = u.vb;
+  if (V && !V.trip && !u.dead) { V.trip = 1; if (u.rail && vbTrip(u, V.x, V.z, 'vb')) return; }
+  g(u, dt);
+})(AI.car);
+tripAI = (g => (u, dt) => {
+  if (!u.vb || u.svb) return g(u, dt);
+  const A = u.ai, c = u.ctl;
+  if (!u.rail || u.dead) { u.trip = null; return false; }
+  if ((A.think -= dt) <= 0) { A.think = GAI.think; scan(u); }
+  if (S.t > u.trip.T) { tripStop(u); return false; }
+  c.fire[0] = c.fire[1] = false; c.brake = false; c.drive = 1;
+  return true;
+})(tripAI);
+/* ---- the burst of a bomb vehicle: STK's crater, fireball and cloud by its radius ---- */
+bombGo = (g => o => {
+  const B = bombOf(o), v = !!B && !o.man && !o.bGone, x = o.x, y = (o.y || hgt(o.x, o.z)) + 1, z = o.z;
+  g(o);
+  if (v) { stkFx(x, y, z, B.r * VBM.fx); gLog(o.team, 'atk', (o.def.name || 'Carro-bomba') + ' detonado ' + gNear(x, z), { x, z }, null); }
+})(bombGo);
+/* a hard blow sets an armed bomb vehicle off (into a wall, a house, a HESCO, another hull) */
+function vbBlow(u, v) {
+  if (!u || u.dead || u.man || !bombSim() || u.net || !(v >= VBM.imp)) return;
+  if (u.svb) { if (!u.svb.go && !(u.svb.ff && FF.ai && ffOn() && ffDanger(u.x, u.z, STK.K.svbied.r, u.team, u))) stkSvbGo(u); return; }
+  const B = bombOf(u); if (!B || u.bGone || u.bArm === undefined || S.t < u.bArm || bombHeld(u, B, null)) return;
+  bombGo(u);
+}
+ramHit = (g => (u, o, x, z, v) => { const r = g(u, o, x, z, v); vbBlow(u, v); return r; })(ramHit);
+vcolHit = (g => (u, o, v, k, x, z, crush) => { const d = u.dead; g(u, o, v, k, x, z, crush); if (!d) vbBlow(u, v); })(vcolHit);
+/* ---- the requisition: its own price and cap ---- */
+rqWhy = (g => (o, cls, model, who) => {
+  const r = g(o, cls, model, who), d = cls === 'trn' && DEFS.trn[model]; if (r || !d || !d.bomb) return r;
+  return vbCount(o.team, d.bomb === 'truck' ? 'truck' : 'car') >= VBM.cap[d.bomb === 'truck' ? 'truck' : 'car'] ? 'vbcap' : '';
+})(rqWhy);
+/* ---- the disguised bomber: a man seen, not an enemy, until near, firing or suspect ---- */
+grade = (g => (a, t) => {
+  const k = g(a, t);
+  if (k < 2 || !t || !t.man || t.in || !t.def || !t.def.civ || !a || a.team === t.team) return k;
+  if (S.t - shotAt(t) < INS.dis.calm || (t.vbS || 0) > S.t || hdist(a, t) < VBM.civ.near) return k;
+  return 1;
+})(grade);
+/* ---- the AI general ---- */
+insBombTgt = (g => C => {
+  let best = g(C); const t = C.t, K = INS.bomb, B = S.base[t], V = VBM.ai.val;
+  let bs = best ? best.v / (1 + hdist(B, best) / 4000) : 0;
+  const take = (v, x, z, nm) => { if (!Number.isFinite(x) || hdist(B, { x, z }) > K.reach) return; const s = v / (1 + hdist(B, { x, z }) / 4000); if (s > bs) { bs = s; best = { o: { name: nm }, x, z, v, veh: true, fix: 1 }; } };
+  (S.base || []).forEach((b, s) => { if (b && foeSide(t, s) && s !== t) take(V.base, b.x, b.z, 'a base principal inimiga'); });
+  if (S.eco) for (const e of ecoFoe(t)) if (e.k === 'hq' && spotted(e, t)) take(V.hq, e.x, e.z, 'a sede inimiga');
+  if (S.cq && S.cq.p) for (const p of S.cq.p) if (p && Number.isInteger(p.hold) && p.hold >= 0 && foeSide(t, p.hold)) take(V.post, p.x, p.z, 'o posto inimigo em ' + (p.nm || gName(p)));
+  return best;
+})(insBombTgt);
+/* a bomb at target a { x, z, v, o, nm }: the truck when its reserve has one and a is worth it, else a car; true when one went */
+function vbGo(C, a, why) {
+  const t = C.t, F = vbFac(t); if (!F || !a) return false;
+  if (a.v >= VBM.ai.truck && stkKinds(t).includes('svbied') && stkRes(t, 'svbied') > 0 && !stkLive(t, 'svbied').length) {
+    const r = genCmd(t, { c: 'vbied', k: 'truck', x: Math.round(a.x), z: Math.round(a.z), why }, 'ai'); if (r && r.ok) return true;
+  }
+  const r = genCmd(t, { c: 'vbied', k: 'car', m: Math.random() < .5 ? 'pk' : 'sedan', x: Math.round(a.x), z: Math.round(a.z), o: a.o && (a.o.man || a.o.def) ? a.o : null, why }, 'ai');
+  return !!(r && r.ok);
+}
+insBomb = (g => C => {
+  const t = C.t, K = INS.bomb, F = FACTIONS.modern.insurgentes; if (S.t < (C.bombT || 0)) return;
+  const a = insBombTgt(C);
+  if (a && a.veh && vbCount(t, 'car') < K.car && vbGo(C, a, (a.o && a.o.name) || 'alvo de valor')) { C.bombT = S.t + K.every; return; }
+  const c0 = K.car, m0 = F.bomb.man; K.car = 0;   // the old path for the man only (the car went by the command above)
+  if (Math.random() < VBM.civ.p) F.bomb.man = 'insCivBomber';
+  try { g(C); } finally { K.car = c0; F.bomb.man = m0; }
+})(insBomb);
+/* ---- suspicion and the regulars' answer ---- */
+function vbSusStep(dt) {
+  if (!bombSim() || (S.vbT = (S.vbT || 0) - dt) > 0) return;
+  const K = VBM.sus, e = K.every - S.vbT; S.vbT = K.every;
+  const L = S.vbSus = [];
+  const look = (o, v0, r) => {
+    const p = o.vbP; o.vbP = { x: o.x, z: o.z }; if (!p || !(e > 0)) return;
+    const vx = (o.x - p.x) / e, vz = (o.z - p.z) / e, v = Math.hypot(vx, vz); if (v < v0) { if ((o.vbS || 0) > S.t) L.push(o); return; }
+    let hit = null;
+    for (const l of [S.men, S.units]) for (const q of l) {
+      if (hit || q.dead || q.in || q.team === o.team || !foeSide(o.team, q.team) || insT(q.team) || Math.abs(q.x - o.x) > r || Math.abs(q.z - o.z) > r) continue;
+      const dx = q.x - o.x, dz = q.z - o.z, d = Math.hypot(dx, dz); if (d < r && (dx * vx + dz * vz) / ((d || 1) * v) > K.cos) hit = q;
+    }
+    if (!hit) { if ((o.vbS || 0) > S.t) L.push(o); return; }
+    if (!((o.vbS || 0) > S.t)) gLog(hit.team, 'def', (o.man ? 'Civil suspeito correndo' : 'Veículo suspeito acelerando') + ' para as nossas tropas ' + gNear(o.x, o.z) + ': fogo nele', o, 'vbs' + (o.id || 0));
+    o.vbS = S.t + K.T; L.push(o);
+  };
+  for (const u of S.units) if (!u.dead && !u.gone && (u.svb || (u.def && u.def.bomb))) look(u, K.v, K.r);
+  for (const m of S.men) if (!m.dead && !m.in && m.def && m.def.bomb === 'man') look(m, VBM.civ.v, VBM.civ.sus);
+}
+trnStep = (g => dt => { g(dt); if (S.units.length || S.men.length) vbSusStep(dt); })(trnStep);
+/* the nearest suspect within r of a that a's side may fire on and knows */
+function vbSusFor(a, r, men) {
+  const L = S.vbSus; if (!L || !L.length || !a.ai) return null;
+  let best = null, bd = r;
+  for (const o of L) {
+    if (o.dead || o.gone || o.in || (!men && o.man) || !foeSide(a.team, o.team) || insT(a.team)) continue;
+    const d = hdist(a, o); if (d < bd && known(a.ai, a, o)) { bd = d; best = o; }
+  }
+  return best;
+}
+pickGround = (g => u => { const b = g(u); return vbSusFor(u, GAI.tank.see) || b; })(pickGround);
+manThink = (g => m => {
+  g(m);
+  const A = m.ai; if (!A || m.dead || m.down) return;
+  const s = vbSusFor(m, VBM.sus.r, true); if (!s || A.tgt === s) return;
+  A.tgt = s; A.los = los(m, eyeY(m), s, s.man ? bodyY(s) : s.y + 1.5);
+  const sp = m.arms[1]; if (!s.man && sp && sp.mag + sp.res > 0 && sp.d.k === 'heat') m.ctl.w = 1; else if (s.man) m.ctl.w = 0;
+  if (!A.st) A.st = 1;
+})(manThink);
+/* ---- what the side sees: the general's state and the question vb ---- */
+function vbView(t) {
+  if (!S || !isSide(t) || !vbFac(t)) return null;
+  const l = S.units.filter(u => !u.dead && u.team === t && (u.svb || (u.def && u.def.bomb))).map(u => ({ id: u.id, k: u.svb || (u.def && u.def.bomb === 'truck') ? 'truck' : 'car', name: u.name || u.def.name, x: Math.round(u.x), z: Math.round(u.z), player: u.ai ? 0 : 1, sus: (u.vbS || 0) > S.t ? 1 : 0 }));
+  return { cap: VBM.cap, car: vbCount(t, 'car'), truck: vbCount(t, 'truck'), truckRes: stkKinds(t).includes('svbied') ? stkRes(t, 'svbied') : 0, l };
+}
+genState = (g => t => { const o = g(t); if (o) o.vb = vbView(t); return o; })(genState);
+genQuery = (g => (t, q) => (q && q.q === 'vb' ? vbView(t) || gBad('fac') : g(t, q)))(genQuery);
+/* ---------- end of cf-vbied (the sim) ---------- */
 /* ---------- combined arms (CA; não testado, see docs/nao-testado/cf-armas-combinadas.md): tanks and infantry as teams, at the unit level ----------
    The captain: "tanques devem apoiar a infantaria e vice versa". Every CA.every s each side's general pairs each of its tanks and armoured cars
    (an AI one, or a player's) that has no team with the best free squad of its side within CA.r m (CA.rArm times as far while the strategy
@@ -31806,6 +32044,17 @@ GRLDO.rcv = (C, X) => {
   gLog(t, 'grl', GRL.nm.rcv + ': esquadra ' + grlNear(q.L) + ' vai a ' + b.nm + ' recrutar (simpatia ' + icvPct(b.v) + ', ' + b.home + ' civis)', b.b, null);
   return true;
 };
+/* cf-vbied (NÃO TESTADO): the guerrilla's sabotage and the cut of the command try a bomb vehicle first (vbGo, VBM.ai.grl of the time) */
+for (const k of ['sab', 'cmd']) {
+  const g = GRLDO[k]; if (!g) continue;
+  GRLDO[k] = (C, X) => {
+    if (Math.random() < VBM.ai.grl && insAI(C.t, 'atk')) {
+      const a = grlBest(C, X, k === 'cmd' ? (a => a.k === 'rad' || (a.k === 'eco' && a.o.k === 'hq')) : (a => a.k === 'eco' || a.k === 'sup'));
+      if (a && vbGo(C, { x: a.x, z: a.z, v: a.val, o: a.o, nm: a.nm }, (GRL.nm[k] || '') + ': ' + a.nm)) { gLog(C.t, 'grl', GRL.nm[k] + ': veículo-bomba contra ' + a.nm + ' ' + grlNear(a), a, null); return true; }
+    }
+    return g(C, X);
+  };
+}
 GRLDO.ter = (C, X) => {
   const t = C.t, a = X.terT; if (!a) return false;
   const R = a.b.ru + 30, n = S.men.filter(m => !m.dead && !m.in && m.team === t && hdist(m, a.b) < R).length;
@@ -44463,7 +44712,7 @@ function packMan(m) {
     if (!s.root.parent) scene.add(s.root);
     s.m = m; PM.by.set(m, s); s.cur = null; s.mixer.stopAllAction(); fresh = true;
   }
-  const col = m.civ ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];
+  const col = m.civ || (m.def && m.def.civ) ? 0xffffff : (m.cc || MCOL[m.def.era][m.def.side])[0];   // cf-vbied: the disguised bomber in plain clothes
   for (const mt of s.mats) if (mt.userData.c !== col) { mt.color.setHex(col); mt.userData.c = col; }
   s.root.visible = true; s.seen = frameId; packPose(s, m, PM.dt || 0, fresh);
   return true;
@@ -45873,6 +46122,71 @@ gorTarget = (g => (px, py, shift) => {
   if (!shift) GOR.mode = ''; GOR.sig = {}; gorBar();
 })(gorTarget);
 /* ---------- end of CEREBRO: defesa on the general's view ---------- */
+/* ---------- cf-vbied on the screen (NÃO TESTADO, see docs/nao-testado/cf-vbied.md): the driver's key 5, the General's view, the looks ----------
+   VBK: the driver of a bomb vehicle sets it off with 5 (armed BOMB.arm s after it entered); a guest asks the host (mreq k 9).
+   The General's view (and the commander's camera, which is the same view): Campanha has Carro-bomba (mode vbied: a click on the map sends
+   genCmd vbied car there; Shift keeps the mode). The pickup bomb and the truck bomb have their looks (TLOOK, the pack's pickup and truck, the
+   drums and the plates), and the disguised bomber is the pack's civilian */
+const VBK = { say: 2.5 };
+function vbMe() {
+  const P = S.my, B = P && !P.man && bombOf(P); if (!B || P.dead || P.bGone) return '';
+  const T = P.bArm !== undefined ? P.bArm : (P.vbA || (P.vbA = S.t + B.arm));
+  if (S.t < T) return 'Carga armando: ' + Math.ceil(T - S.t) + ' s';
+  if (S.net && !S.host) { Net.send('mreq', { k: 9 }); return 'Detonando'; }
+  bombGo(P); return '';
+}
+addEventListener('keydown', e => {
+  if (e.code !== 'Digit5' || e.repeat || playMode !== 'play' || paused || sw.on || GV.on || !S || !S.my || S.my.man || !S.my.kind || S.my.dead || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+  if (!bombOf(S.my)) return;
+  const w = vbMe(); if (w) S.banner = { text: (S.my.def.name || 'Veículo-bomba').toUpperCase(), sub: w, life: VBK.say };
+});
+Net.rx.mreq = (g => m => {
+  if (!m || m.k !== 9) return g(m);
+  const G = Net.ghosts.get(m.from);
+  if (!S || !S.net || !S.host || !G || G.dead || G.man || G.bGone || !bombOf(G)) return;
+  if (G.bArm !== undefined && S.t < G.bArm) return;
+  bombGo(G);
+})(Net.rx.mreq);
+/* the driver's line: what 5 does, once when it enters */
+spawnPlayer = (g => (...a) => {
+  const p = g(...a), B = p && !p.man && bombOf(p);
+  if (B) S.banner = { text: (p.def.name || 'Veículo-bomba').toUpperCase(), sub: '5 detona (raio de ' + B.r + ' m) · explode sozinho com inimigo a ' + B.trig + ' m ou numa batida forte', life: 5 };
+  return p;
+})(spawnPlayer);
+/* ---- the General's view ---- */
+GORW.vbied = 1;
+Object.defineProperty(GORT, 'vbied', { enumerable: true, get: () => 'Carro-bomba (' + vbCount(S.me, 'car') + ' de ' + VBM.cap.car + ' em campo): clique no alvo · ele vai pelo caminho menos vigiado' });
+gorTarget = (g => (px, py, shift) => {
+  if (GOR.mode !== 'vbied') return g(px, py, shift);
+  const w = gorW(px, py); gorSend({ c: 'vbied', k: 'car', x: Math.round(w.x * 10) / 10, z: Math.round(w.z * 10) / 10 });
+  if (!shift) GOR.mode = '';
+  GOR.sig = {}; gorBar();
+})(gorTarget);
+gorCampP = (g => V => {
+  g(V);
+  const el = $('#gcTgtB'); if (!el || el.querySelector('[data-m="vbied"]')) return;
+  const F = vbFac(S.me); if (!F || !F.car) return;
+  const n = vbCount(S.me, 'car'), L = S.units.filter(u => !u.dead && u.team === S.me && ((u.def && u.def.bomb) || u.svb));
+  el.append(gorBtn('Carro-bomba (' + n + '/' + VBM.cap.car + ')', { a: 'mode', m: 'vbied' }, 'Carro-bomba contra o alvo que você clicar (custa um carro da economia; vai pelo caminho menos vigiado e explode no alvo ou perto do inimigo). O caminhão-bomba pesado está em Bombardeio' + (L.length ? '. Em campo: ' + L.map(u => (u.name || u.def.name) + ' ' + gNear(u.x, u.z)).join('; ') : ''), GOR.mode === 'vbied', n >= VBM.cap.car || !gorTac()));
+})(gorCampP);
+/* ---- the looks ---- */
+Object.assign(TLOOK, { vbiedPk: { ax: [1.5, -1.3], hood: 1.3 }, svbied: { ax: [2.6, -1.3, -2.5], hood: 1.6 } });
+Object.assign(PACK.trn, { vbiedPk: 'pickup', svbied: 'trk_m939' });
+PACK.civWreck.vbiedPk = 1;
+buildTrn = (f => (u, wreck) => {
+  const g = f(u, wreck), d = u.def; if (wreck || !d || (d.id !== 'vbiedPk' && d.id !== 'svbied')) return g;
+  const by = (d.kind === 'truck' ? .78 : .45) + d.hh, drum = mat(0x5b5f57), wire = mat(0xb3201d), plate = mat(0x3d3f3a);
+  const box = (w, h, dp, m, x, y, z) => { const b = new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), m); b.position.set(x, y, z); g.add(b); return b; };
+  if (d.id === 'vbiedPk') { for (let i = 0; i < 4; i++) box(.45, .5, .45, drum, -d.l * .32 + (i >> 1) * .5, by - .05, (i % 2 ? 1 : -1) * .3); box(.02, .02, d.w * .7, wire, -d.l * .2, by + .25, 0); }
+  else {
+    for (let i = 0; i < 8; i++) box(.55, .7, .55, drum, -d.l * .38 + (i >> 1) * .65, by + .1, (i % 2 ? 1 : -1) * .45);
+    box(.06, 1, d.w * .95, plate, d.l * .28, by + .2, 0);   // the plate welded over the windscreen
+    box(.02, .02, d.w * .8, wire, -d.l * .1, by + .5, 0);
+  }
+  return g;
+})(buildTrn);
+packManModel = (f => m => (m && !m.civ && m.def && m.def.civ ? ((m.id || 0) % 2 ? 'civ_woman' : 'civ_man') : f(m)))(packManModel);
+/* ---------- end of cf-vbied on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

@@ -124,3 +124,21 @@ Nenhuma suíte (`tests/all.sh`, `drills.js`, `infantry.js`, `squads.js`, `help.j
 3. Torneio A×B fora do elrei (bartolomeu, ou aqui com `nice`): `BRAIN.on` 1 × 0 nas mesmas sementes; contar `cb` no `ANA` (rendições, prisioneiros, granadas devolvidas, `blindado`) e comparar vitórias e tíquetes.
 4. No navegador, partida IA × IA em 1944 numa vila: ver soldados correndo para trás das casas quando um tanque aparece, "Eu me rendo!" e "RENDIDO" numa esquadra cercada, "Médico!" e o ferido rastejando.
 5. Online: um convidado deve ver os balões, "RENDIDO" e "PRISIONEIRO" dos soldados do anfitrião.
+
+## Seguimento do #145 (pedido do Firstmate: o caso do capitão a todos, e as falas por minuto)
+
+**(e) todos fora da visada do tanque em 3 s.** As causas das falhas (2 a 6 de 20), achadas medindo homem a homem, e o que mudou:
+
+- **Parava 1,5 m antes do ponto**: o andar antigo dá a chegada por feita a 1,5 m, e o caminho real (escorregando na parede) não é a reta que se conferia. Agora o reflexo leva o homem até o ponto (`brArrive`), corre em pé até 0,8 m dele (`SOLB.run`, antes 2 m, quando passava a andar agachado a 1,35 m/s), e "onde ele para" é conferido em três pontos a 1,4 m (de frente e a ±45°, `CVR.stopA`).
+- **Ficava com um lugar ruim porque o bom já era de um colega**: a sombra de cada casa tem agora duas profundidades (`CVR.lee` 3 e 4,5 m) e cinco ângulos, o `covBld` dá 12 lugares de parede (eram 6), e contra blindado dois homens podem ficar atrás da mesma parede (`CVR.hgap` 0: sair da visada primeiro, espalhar depois).
+- **Ia para dentro do prédio ou contornava a quina**: no primeiro movimento contra blindado não há vão de prédio (só na saída pelo outro lado), e o caminho que cruza uma parede conta 1,8 vez (`cvWay`) na escolha. Testei pontos logo atrás das quinas e tirei: o homem trava na própria quina.
+- **Passava pela sombra e saía dela**: correndo para o ponto, se já está fora da visada a até 3 m dele, fica ali (`SOLB.arm.stay`).
+- **Longe demais de qualquer parede**: se deitar onde está já o esconde (dobra do terreno) e o abrigo duro mais perto passa de 14 m (`SOLB.arm.reach`), ele deita ali (fora da visada, não "no aberto").
+- O exercício agora junta a esquadra a até 2 m do ponto a 15 m da casa (antes era uma fila de 8 m num eixo fixo do mapa, que punha os das pontas a 18–30 m da casa, onde a 5,6 m/s não há como chegar em 3 s).
+
+Resultado: **50 de 50** (10 sementes) e **100 de 100** (20 sementes) fora da visada aos 3 s, ninguém deitado à vista.
+
+**Falas por minuto.** Com o P1 desligado (`SOLB.on = 0`, chave nova do P1 para o A/B) o lado que falhava tinha **10 falas em 2,0 min** de contato; com o P1 ligado, **7 falas em 1,0 min**. O P1 não acrescenta falas, tira: os soldados saem da visada, o inimigo os perde ("Cadê ele?", "Perdi ele!") e o contato acaba antes. A taxa passava de 6 só porque `tests/brain-falas.js` dividia pela janela de contato (do primeiro ato a 30 s depois do último contato) e contava também as falas de depois dela (o líder mudando a formação aos 63 s e 91 s). Corrigi a medida para contar só as falas dentro da mesma janela; agora passa nos 4 lados (4 a 5 falas/min).
+
+Rodados (curtos, `nice`): `tests/brain-soldado.js` (N=6 e N=10, todos ok), `tests/brain.js`, `tests/brain-honesty.js`, `tests/brain-falas.js`. Nada além disso.
+

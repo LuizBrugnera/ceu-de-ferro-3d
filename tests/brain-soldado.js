@@ -121,7 +121,8 @@ console.log('-- (e) a tank made out, a house 15 m off --');
     }
     if (!best) continue;
     const p = $('railOf')(best.sx, best.sz), q = C.dispatch(0, { kind: 'defend', why: 'teste' }, () => C.addSquad(0, best.sx, best.sz, p.ri, p.s)); C.setOrd(q, { k: 'hold', ri: p.ri, s: p.s, x: best.sx, z: best.sz, R: 8 });
-    for (const m of q.men) { m.x = best.sx + (m.ai.i - 2) * 2; m.z = best.sz; m.y = C.hgt(m.x, m.z); m.inv = 1e9; if (m.arms[1] && (m.arms[1].d.k === 'heat' || m.arms[1].d.k === 'atgm')) { m.arms[1].mag = 0; m.arms[1].res = 0; } }
+    for (const m of q.men) { const a = m.ai.i * 2.4; m.x = best.sx + Math.cos(a) * (m.ai.i ? 2 : 0); m.z = best.sz + Math.sin(a) * (m.ai.i ? 2 : 0);   // the squad bunched round the point 15 m from the house (each within 2 m of it)
+      m.y = C.hgt(m.x, m.z); m.inv = 1e9; if (m.arms[1] && (m.arms[1].d.k === 'heat' || m.arms[1].d.k === 'atgm')) { m.arms[1].mag = 0; m.arms[1].res = 0; } }
     const t = C.dispatch(1, { why: 'teste' }, () => C.addUnit('tank', 1, best.tx, best.tz, S.E.sides[S.fac[1]].tanks[0], false));
     t.x = best.tx; t.z = best.tz; t.y = C.hgt(t.x, t.z); if (t.mis) t.mis.roe = 'hold'; t.rail = false;
     const pin = () => { t.x = best.tx; t.z = best.tz; t.v.x = t.v.z = 0; for (const a of t.arms || []) a.cool = 9; };

@@ -31,8 +31,9 @@ for (const era of ['ww2', 'modern']) {
   ok(lines.length > 0 && orphan.length === 0, era + ': ' + lines.length + ' lines, each from a decision of the same soldier within 1 s (' + orphan.length + ' without)' + (orphan.length ? ' ' + JSON.stringify(orphan.slice(0, 3)) : ''));
   const sq = new Map(); for (const q of [a, b]) for (const m of q.men) if (m.flI) sq.set(m.flI, q);
   for (const q of [a, b]) {
-    const my = lines.filter(f => sq.get(f.m) === q), Q = q.fala, cont = Q ? Q.cont : -99;
-    const first = L.find(e => sq.get(e.m) === q && e.st !== 'fala'), span = Math.max(1, (Math.min(S.t, cont + 30) - (first ? first.t : S.t)) / 60);
+    const Q = q.fala, cont = Q ? Q.cont : -99, end = Math.min(S.t, cont + 30);
+    const my = lines.filter(f => sq.get(f.m) === q && f.t <= end);   // the lines of the window the rate is over (contact, and 30 s after the last of it): a squad that lost its contact early talks on about its formation, which is not talk in contact
+    const first = L.find(e => sq.get(e.m) === q && e.st !== 'fala'), span = Math.max(1, (end - (first ? first.t : S.t)) / 60);
     const pm = my.length / span, FL = $('FALAS');
     let rep = 0; my.forEach((f, i) => { if (FL[f.f].p < 3 && my.slice(0, i).some(g => g.x === f.x && f.t - g.t < 10)) rep++; });
     ok(pm >= 2 && pm <= 6.5 && rep === 0, era + ' side ' + q.team + ': ' + my.length + ' lines in ' + span.toFixed(1) + ' min of contact (' + pm.toFixed(1) + '/min), ' + rep + ' repeated within 10 s');

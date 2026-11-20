@@ -1,7 +1,7 @@
 'use strict';
 /* g2-mundo: the world model of the General 2 (G1 of the report cf-ia-opensource, task cf-g2-g1-mundo), measured.
    1. the code: the section GENERAL 2: mundo reads none of S.men, S.units, S.bombs and S.planes.
-   2. the ground, on the maps MAPS in both eras: every capture point and base a region of its own, the seat towns marked, every passable cell
+   2. the ground, on the maps MAPS in both eras (and the front of three sides on map 11 or later): every capture point and base a region of its own, the seat towns marked, every passable cell
       in a region, the regions all reach each other, every edge with its times (on a road, wheels before feet).
    3. the routes, G1's criterion: for each ordered pair of points, two routes or more with overlap 40 % or less and arrivals 45° or more
       apart, in 70 % of the pairs or more, and for each point; no route over water, none longer than G2W.rt.long times the quickest. The table.
@@ -18,7 +18,7 @@ const fs = require('fs'), H = require('./harness'), { ok, done } = H, { performa
 const MAPS = (process.env.MAPS || '6,11').split(',').map(Number).filter(Boolean), SECS = process.env.SECS === undefined ? 60 : +process.env.SECS;
 console.log('page: ' + H.PAGE);
 const html = fs.readFileSync(H.PAGE, 'utf8');
-const watch = (era, mapv, o) => { const C = H.load(Object.assign({ seed: 7, eco: 1, mapv }, o)); C.$('globalThis').performance = performance; const S = C.watch(era, { len: 0, doc: ['balanced', 'balanced'] }); return { C, S, $: C.$ }; };
+const watch = (era, mapv, o, n) => { const C = H.load(Object.assign({ seed: 7, eco: 1, mapv }, o)); C.$('globalThis').performance = performance; const S = C.watch(era, Object.assign({ len: 0, doc: ['balanced', 'balanced', 'balanced'].slice(0, n || 2) }, n && { n })); return { C, S, $: C.$ }; };
 const med = a => { const b = [...a].sort((x, y) => x - y); return b.length ? b[b.length >> 1] : NaN; };
 const pc = v => Math.round(v * 100) + '%';
 
@@ -33,8 +33,8 @@ console.log('-- 1. the code --');
 
 console.log('-- 2 and 3. the ground and the routes (the criterion of G1) --');
 const rows = [];
-for (const mapv of MAPS) for (const era of ['ww2', 'modern']) {
-  const { S, $ } = watch(era, mapv), W = S.T.g2w, G2W = $('G2W'), tag = era + ' map ' + mapv;
+for (const [mapv, era, n] of MAPS.flatMap(m => [[m, 'ww2'], [m, 'modern']].concat(m >= 11 ? [[m, 'modern', 3]] : []))) {
+  const { S, $ } = watch(era, mapv, {}, n), W = S.T.g2w, G2W = $('G2W'), tag = era + ' map ' + mapv + (n ? ' (' + S.N + ' lados)' : '');
   if (!ok(W && W.N > 0, tag + ': the ground was built at the load (' + (W ? W.N + ' regions, ' + W.e.length + ' edges, ' + W.ms.toFixed(0) + ' ms' : 'none') + ')')) continue;
   const pts = S.cq.p, P = W.n.filter(o => o.p >= 0), kinds = {};
   for (const o of W.n) kinds[o.k] = (kinds[o.k] || 0) + 1;

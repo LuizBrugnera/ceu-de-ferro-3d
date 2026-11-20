@@ -34524,6 +34524,7 @@ function pelDefOf(q) {
   const pi = gPts().indexOf(O.tw); if (pi < 0) return null;
   const D = S.pelD || (S.pelD = new Map()), key = q.team * 1000 + pi; let P = D.get(key);
   if (!P || P.over) {
+    if (O.tw.hold !== q.team) return null;   // not ours (yet): pelDefThink would end it the same step (the loop of ~11-14 thousand pel-forma a match)
     const l = pelDefSq(q.team, O.tw); if (l.length < PEL.def.n) return null;
     P = pelNew('def', q.team); P.w = O.tw; P.pi = pi; P.met = 'defesa'; P.sq = l;
     const s = pelPick(P, null); if (s) pelLead(P, s);
@@ -35790,7 +35791,7 @@ genCard = (f => (t, id) => {
    The AI general (enpPlan, from fortPlan, a side whose defence the AI leads, ENP.every s, after ENP.start s):
      - forward bases (enpFob, every ENP.fob.every s): key positions ahead from the tactical map (M1: k the choke points, bridges, junctions, the
        ways out of a town; a crest; l the front, near it on our side; v where the enemy sees, worse; f the enemy's strength, none) within
-       ENP.fob.dep m of the line, ENP.fob.apart m from every own base, held point and forward base, near a road; one under way at a time, up to
+       ENP.fob.dep m of the line, ENP.fob.apart m from every own supply base, the main base and forward base, ENP.fob.pt m from a held point (the point is what it firms up), ENP.fob.bad m from one given up within ENP.redo s, near a road; one under way at a time, up to
        ENP.fob.max[tier] (AFP's tier); as the line goes forward the next ones are further forward;
      - the sites by value: held points (a point just taken and a threatened one first: the threat board, cmdKnown), the forward bases, the
        supply bases; a site with known enemy within ENP.quiet m worth ENP.hot is left for later; a site whose ring stands is looked at again
@@ -35800,7 +35801,7 @@ genCard = (f => (t, id) => {
    No random number is drawn here */
 const ENP = { on: 1, every: 8, start: 40, seg: 12, R: { pt: 26, sup: 20, fob: 22 }, gap: 2.1, front: .75, side: 1.9, foe: 120, quiet: 300, hot: 3,
   keep: [20, 30], near: [4, 10], tries: [0, 4, -4, 8], fail: 3, T: 900, walkK: .45, redo: 150, again: 60, wait: 240, shield: .15, reach: 4000, log: 40,
-  fob: { every: 30, max: [1, 2, 3], apart: 700, dep: [-650, 300], v: .7, road: 260, choke: .3, crest: 8, T: 1500 },
+  fob: { every: 30, max: [1, 2, 3], apart: 700, pt: 300, bad: 300, dep: [-650, 300], v: .7, road: 260, choke: .3, crest: 8, T: 1500 },
   nm: { ww2: ['Pioniere', 'Combat Engineers'], modern: ['Combat Engineers', 'Sapyory', 'Sapadores da milícia'] } };
 const enpPay = (t, c) => { const d = S.eco && S.eco.d[t]; return !d || (d.en >= c[0] + ENP.keep[0] && d.mt >= c[1] + ENP.keep[1]); };
 const enpEra = () => (typeof S !== 'undefined' && S && S.era === 'ww2' ? 'ww2' : 'modern');
@@ -36083,6 +36084,10 @@ function enpEnd(C, op, why) {
   if (why) enpSay(C.t, (E.fob ? 'Base avançada ' + gNear(E.site.x, E.site.z) : 'Perímetro em ' + E.site.nm) + ': desiste, ' + why, E.site, null);
   for (const q of l) if (E.bq.includes(q) && q.ord && q.ord.enp && q.ord.wk) q.ord.wk = null;
   if (E.fob && E.gd && E.gd.op === op && E.gd.live > 0) { E.gd.op = null; E.gd.back = null; }   // the guard stays and holds the forward base
+  if (E.fob && why) {   // given up: its place among the forward bases is free again (enpPlan picks another ENP.fob.every s later), the site left a while
+    const A = enpOf(C), s = E.site; A.fobs = A.fobs.filter(f => Math.hypot(f.x - s.x, f.z - s.z) >= 60);
+    (A.fobNo || (A.fobNo = [])).push({ x: s.x, z: s.z, T: S.t }); A.fobNo = A.fobNo.filter(f => S.t - f.T < ENP.redo);
+  }
   if (!op.over) opEnd(C, op);
 }
 OPS.usr = (g => (C, op) => { g(C, op); if (!op.over && op.enp) enpTick(C, op); })(OPS.usr);
@@ -36103,7 +36108,10 @@ const enpOn = t => !!ENP.on && !!S.cmd && !S.over && !(S.demo && !S.watch) && (!
 /* a key position ahead (M1): the choke points, a crest, near the front on our side, out of the enemy's sight, near a road, away from what we have */
 function enpFobPick(t, C, A) {
   const M = C.tm, F = ENP.fob; if (!M || !M.k || !M.l) return null;
-  const mine = S.sup.filter(b => b.team === t && !b.dead).map(b => ({ x: b.x, z: b.z })).concat(S.cq ? S.cq.p.filter(p => p.hold === t).map(p => ({ x: p.x, z: p.z })) : [], A.fobs, S.base[t] ? [S.base[t]] : []);
+  const mine = S.sup.filter(b => b.team === t && !b.dead).map(b => ({ x: b.x, z: b.z, r: F.apart })).concat(S.cq ? S.cq.p.filter(p => p.hold === t).map(p => ({ x: p.x, z: p.z, r: F.pt })) : [],
+    A.fobs.map(f => ({ x: f.x, z: f.z, r: F.apart })), S.base[t] ? [{ x: S.base[t].x, z: S.base[t].z, r: F.apart }] : [],
+    (A.fobNo || []).filter(f => S.t - f.T < ENP.redo).map(f => ({ x: f.x, z: f.z, r: F.bad })));   // held points only pt m (the point is the place to firm up), a site given up a while
+
   let best = null, bs = 0;
   for (let q = 0; q < M.k.length; q++) {
     const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
@@ -36112,7 +36120,7 @@ function enpFobPick(t, C, A) {
     const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
     const sc = (M.k[q] >= F.choke ? 1 + M.k[q] : 0) + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
     const r = railOf(x, z); if (r.d > F.road) continue;
-    if (mine.some(o => Math.hypot(o.x - x, o.z - z) < F.apart)) continue;
+    if (mine.some(o => Math.hypot(o.x - x, o.z - z) < o.r)) continue;
     const v = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5) - Math.min(2, cmdKnown(C, x, z, 600) / 3);
     if (v > bs) { bs = v; best = { x, z, why: (M.k[q] >= F.choke ? 'gargalo' : 'crista') + (crest > F.crest && M.k[q] >= F.choke ? ' numa crista' : ''), sc: v }; }
   }

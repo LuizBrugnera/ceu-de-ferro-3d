@@ -45523,6 +45523,69 @@ function packRead(buf) {
   const ex = (J.asset && J.asset.extras) || {};
   return { nodes, meshes, skins, clips, dims: ex.dims || [1, 1, 1], parts: Object.fromEntries(nodes.map((n, i) => [n.name, i]).filter(([, i]) => nodes[i].mesh !== undefined && nodes[i].skin === undefined)) };
 }
+/* ---------- the pack's own colours that read wrong in the game (cf-pol-modelos), mended once as each model comes in (packFix). The 'fixed'
+   primitives keep the sources' own colours, and some are toy colours there (the Sherman's pale blue tracks and road wheels and its red and
+   white extinguishers, the Jeep's navy tyres, the M1A1's navy idlers and olive skirts, the T-72's yellow reflectors, the technicals' sky
+   blue, the Tigr's maroon doors, the pale cyan windscreens) or a paint that the side's colour never reaches (the Tiger's and the Panzer IV's road wheels, hull band and barrels). PACK.fix[id]
+   [part]: rules [colours, to], the first that matches a vertex's colour (each channel within tol of 255) wins; colours '*' is any. to: a
+   colour; 'steel', the dark of tracks and tyres, the vertex's light and shade kept; a shade in 0..1, the triangle goes over to the paint
+   (merged into the part's own paint, or one of its own), a grey of that shade that the side's colour multiplies; the people's skinned
+   body is named by its node (soldier: body) ---------- */
+const PACKFIX = { tol: 22, steel: [.08, .3] };
+PACK.fix = {
+  tk_sherman: { trackL: [['*', 'steel']], trackR: [['*', 'steel']], hull: [[[0xf04030, 0xd0e0e0, 0xffffff], 0x3b3d36]], turret: [[[0x50b050], 0x4b5139], [[0x8090a0], 'steel']] },
+  tk_leo: { trackL: [['*', 'steel']], trackR: [['*', 'steel']], hull: [[[0x606020], .8]], turret: [[[0x606020], .8]] },
+  tk_tiger: { trackL: [['*', 'steel']], trackR: [['*', 'steel']], hull: [[[0x404030], .66], [[0x504030], .8]], gun: [[[0x504030], .85]] },
+  tk_pz4: { trackL: [['*', 'steel']], trackR: [['*', 'steel']], hull: [[[0x706060], .66], [[0x605040], 'steel']], gun: [[[0x605040], .85]] },
+  tk_t34: { trackL: [['*', 'steel']], trackR: [['*', 'steel']] },
+  tk_t55: { trackL: [['*', 'steel']], trackR: [['*', 'steel']] },
+  tk_t72: { hull: [[[0xd0d040], 0x2e2f2b]], trackL: [[[0xd0d040], 0x2e2f2b]], trackR: [[[0xd0d040], 0x2e2f2b]] },
+  car_jeep: { wheels: [[[0x001020], 'steel']], hull: [[[0x001020], 'steel'], [[0xc0f0ff], 0x46565e]] },
+  car_scout: { hull: [[[0x501000], .8], [[0xc0f0ff], 0x46565e]] },
+  pickup: { hull: [[[0x5090b0], .86]] },
+  soldier: { body: [[[0x303020], .5]] }   // the SWAT's black vest, helmet, pads and boots: the side's colour, darker, so a soldier reads as one of an army
+};
+function packFix(id, P) {
+  const F = PACK.fix[id]; if (!F || !P) return P;
+  const tol = PACKFIX.tol / 255, near = (r, g, b, hex) => Math.abs(r - (hex >> 16 & 255) / 255) <= tol && Math.abs(g - (hex >> 8 & 255) / 255) <= tol && Math.abs(b - (hex & 255) / 255) <= tol;
+  const rule = (L, r, g, b) => L.find(([c]) => c === '*' || c.some(h => near(r, g, b, h)));
+  for (const part in F) {
+    const i = P.parts[part] !== undefined ? P.parts[part] : P.nodes.findIndex(n => n.name === part && n.mesh !== undefined); if (i < 0 || i === undefined) continue;   // a part, or the people's skinned body
+    const prims = P.meshes[P.nodes[i].mesh], add = [];
+    for (const pr of prims) {
+      if (pr.mat === 0) continue;
+      const ge = pr.g, ca = ge.attributes.color; if (!ca || !ge.index) continue;
+      const A = ca.array, k = ca.normalized ? 1 / packNorm(A) : 1, put = (v, r, g, b) => { const m = ca.normalized ? packNorm(A) : 1; A[v * 3] = Math.round(r * m); A[v * 3 + 1] = Math.round(g * m); A[v * 3 + 2] = Math.round(b * m); };
+      /* first which triangles go over to the paint, by the colours as they came; then the colours */
+      const I = ge.index.array, keep = [], move = [], nv = ca.count, R = new Array(nv);
+      for (let v = 0; v < nv; v++) R[v] = rule(F[part], A[v * 3] * k, A[v * 3 + 1] * k, A[v * 3 + 2] * k);
+      for (let t = 0; t < I.length; t += 3) { const R0 = R[I[t]]; (R0 && typeof R0[1] === 'number' && R0[1] <= 1 ? move : keep).push(I[t], I[t + 1], I[t + 2]); }
+      for (let v = 0; v < nv; v++) {
+        if (!R[v]) continue;
+        const r = A[v * 3] * k, g = A[v * 3 + 1] * k, b = A[v * 3 + 2] * k, to = R[v][1];
+        if (to === 'steel') { const l = PACKFIX.steel[0] + PACKFIX.steel[1] * (.3 * r + .59 * g + .11 * b); put(v, l, l, l * .94); }
+        else if (to <= 1) put(v, to, to, to);
+        else put(v, (to >> 16 & 255) / 255, (to >> 8 & 255) / 255, (to & 255) / 255);
+      }
+      ca.needsUpdate = true;
+      if (!move.length) continue;
+      ge.setIndex(new THREE.BufferAttribute(new I.constructor(keep), 1)); ge.computeBoundingSphere();
+      /* into the paint the part already has (its vertices, then these after them: no draw call more), else a paint of its own */
+      const pp = prims.find(q => q.mat === 0), G0 = pp && pp.g, nm0 = G0 ? Object.keys(G0.attributes) : [];
+      const same = G0 && G0.index && nm0.length === Object.keys(ge.attributes).length && nm0.every(n => { const a = G0.attributes[n], b = ge.attributes[n]; return b && a.itemSize === b.itemSize && a.normalized === b.normalized && a.array.constructor === b.array.constructor; });
+      const pg = new THREE.BufferGeometry(), n0 = same ? G0.attributes.position.count : 0, i0 = same ? G0.index.array : [];
+      for (const nm in ge.attributes) {
+        const b = ge.attributes[nm]; if (!same) { pg.setAttribute(nm, b); continue; }
+        const a = G0.attributes[nm], arr = new a.array.constructor(a.array.length + b.array.length); arr.set(a.array); arr.set(b.array, a.array.length); pg.setAttribute(nm, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+      }
+      const idx = new (n0 + ge.attributes.position.count > 65535 ? Uint32Array : Uint16Array)(i0.length + move.length); idx.set(i0); for (let q = 0; q < move.length; q++) idx[i0.length + q] = move[q] + n0;
+      pg.setIndex(new THREE.BufferAttribute(idx, 1)); pg.computeBoundingSphere(); pg.computeBoundingBox(); pg.userData.keep = true;
+      if (same) pp.g = pg; else add.push({ g: pg, mat: 0 });
+    }
+    prims.push(...add);
+  }
+  return P;
+}
 /* the model id, or null while it is not here (the first ask starts the fetch; a failure is remembered and never retried) */
 function packGet(id) {
   if (!PACK.on || !id) return null;
@@ -45530,7 +45593,7 @@ function packGet(id) {
   if (E) return E.st === 1 ? E.d : null;
   const e = (PACK.M[id] = { st: 0, d: null });
   try {
-    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packRead(b); e.st = 1; PACK.dirty = true; packHangar(); })
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packFix(id, packRead(b)); e.st = 1; PACK.dirty = true; packHangar(); })
       .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
   } catch (er) { e.st = -1; }
   return null;

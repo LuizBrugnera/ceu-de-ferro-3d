@@ -1,8 +1,9 @@
 'use strict';
-/* CEREBRO: contrato (P0, cf-lideres): the brain's shared objects and clock change nothing in the battle. The same AI × AI match with BRAIN.on 0,
-   with BRAIN.on 1, and with BRAIN.on 1 and a no-op hook on every layer ends the same, to the last digit and the random stream; with it on, every
-   squad of the AI has its board, its leader and two fire teams, every soldier his reflex, morale and task; an order, a report by voice and a
-   word (fala) go where the contract says; and the brain's clock costs at most 0.1 ms a frame. SECS: the match's length (default 40) */
+/* CEREBRO: contrato (P0, cf-lideres): the brain's shared objects and clock. With BRAIN.on 0 none of it is made and a no-op hook on every layer
+   changes nothing (the battle of before: the other brain packages read these objects only when they exist); with BRAIN.on 1 the same no-op
+   hooks change nothing either (the clock itself moves no man and draws no random number), every squad of the AI has its board, its leader
+   and two fire teams, every soldier his reflex, morale and task; an order, a report by voice and a word (fala, P5's) go where the contract
+   says; and the brain's clock costs at most 0.1 ms a step. SECS: the match's length (default 40) */
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 40;
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
@@ -18,9 +19,9 @@ const go = (on, hooks, era) => {
 
 console.log('-- the battle is not changed (' + SECS + ' s, AI × AI) --');
 for (const era of ['ww2', 'modern']) {
-  const a = go(0, false, era), b = go(1, false, era), c = go(1, true, era);
-  ok(a.p === b.p, era + ': BRAIN.on 0 and 1 end the same (' + a.p + ')');
-  ok(a.p === c.p, era + ': with a no-op hook on every layer too');
+  const a = go(0, false, era), a2 = go(0, true, era), b = go(1, false, era), c = go(1, true, era);
+  ok(a.p === a2.p && !a2.n.lid && !a2.n.eq && !a2.n.sold, era + ': BRAIN.on 0, with and without hooks, the same (' + a.p + '), and no hook ran');
+  ok(b.p === c.p, era + ': BRAIN.on 1, with and without a no-op hook on every layer, the same (' + b.p + ')');
   ok(c.n.lid > 0 && c.n.eq > 0, era + ': the leaders\' and the teams\' hooks ran (' + JSON.stringify(c.n) + ')');
   if (era === 'ww2') {
     const S = b.S, $ = b.C.$, sq = S.squads.filter(q => !q.net && q.live > 0 && !q.mil);
@@ -49,7 +50,9 @@ console.log('-- orders, reports and words --');
   ok([...q.bb.cont.values()].some(c => c.de === m && c.c === 'mg'), 'after it, the contact is on the board, reported by that man');
   const far = q.men.find(n => n !== L && !n.dead); far.x = L.x + 2000; far.z = L.z;
   ok(!$('brainRel')(q, $('rel')('contato', far, { x: 0, z: 0 })) || q.cnL === 2, 'a report from 2 km, out of voice and sign, needs the radio');
-  $('fala')(L, 'contato', { h: 2 });
-  ok(L.fala && L.fala.k === 'contato' && $('ANA').ev.some(e => e.k === 'cb' && e.c === 'fala' && e.f === 'contato'), 'a word is recorded, and is a brain event for the analytics');
+  ok(!$('fala')(L, 'contato', { p: 3 }), 'no word without a decision of his own (P5)');
+  $('flCb')(L, 'contato', {}); const said = $('fala')(L, 'contato', { p: 3 });
+  ok(!!said && $('ANA').ev.some(e => e.k === 'cb' && e.st === 'fala' && e.f === 'contato'), 'after one, the word is said (' + said + ') and is a brain event for the analytics');
+  ok($('ANA').ev.some(e => e.k === 'cb' && e.st === 'ord' && e.o === 'manter'), 'the order given is a brain event too');
 }
 H.done();

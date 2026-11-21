@@ -37346,6 +37346,385 @@ genCard = (f => (t, id) => {
   return c;
 })(genCard);
 /* ---------- end of the medic (cf-medico) ---------- */
+/* ---------- GENERAL 2: régua (G0, cf-g2-g0-regua; não testado além de tests/g2-regua.js e do torneio da régua: docs/nao-testado/cf-g2-g0-regua.md) ----------
+   The captain's examples in numbers: the yardstick every package of the General 2 (cf-ia-opensource §6, G1 to G8) measures against, and the
+   combats G2 calibrates its simulation with. tools/ref/general2-base.json is today's general by it.
+   An observer, as the analytics (ANA) and the brain's measurement (MED) are: it reads the battle as it is (the truth: S.men, S.squads,
+   S.units, S.bombs, S.forts, and each side's C.known only to note when the side first knew of an enemy gun), draws no random numbers, writes
+   nothing on the battle's objects (its own state is G2S, with WeakMaps and WeakSets for what it remembers of them) and changes nothing the
+   battle reads. It decides nothing, so it is no part of the side's honesty (P7): it only measures. tests/g2-regua.js plays the same match
+   with it off and on and checks that every event but its own is the same. G2R.on 0 leaves it all out (the switch to compare). An error of its
+   own (G2S.err) turns it off for the rest of the match and never reaches the battle.
+   It runs where the analytics does (anaLive: solo, a local watch, the online host), every dt s of match time (h the s since the last look);
+   per side s, counted in s × h unless it says otherwise:
+     inf  [soldier-s of the AI on foot (not down, not aboard), in a building (bldAt, as the research's probe), in the defence of a town (within
+          its r of an urban point s holds while an enemy is within thr m of it), of those in a building, inside an urban point an enemy holds]
+     snp  [sniper-s, in a building, shots fired]           at  [AT rounds (heat, atgm) fired by soldiers of the AI, at armour (G2R.armour)]
+     km   [squad-m on foot, squad-m aboard]: each squad's leader, or the vehicle he rides, or the vehicle of its ride (rideBoard puts the men
+          aboard as gone: g2Where), from one look to the next (a jump over hop m is not a walk)
+     emb  [long walks begun, ridden]: EMB's own measure (S.emb), taken as it stands
+     df   [defender-s: men of s within dr m of a point s holds with an enemy within thr m, Σ distance to its centre, s with a mate there,
+          Σ distance to the nearest mate, s with him nn m or more]
+     dq   [threatened point-s of s, with at most one squad of s within cen m of the centre, Σ squads of s within cen m]
+     dt   [tank-s of s within tr m of a threatened point of s, with no other tank of s within tsp m]
+     sd   [assaults opened on an enemy seat (op.sede, cf-sede-ataque-defesa), those that reached H-hour (go, fight or cons), squad-s inside an
+          enemy seat town (within its ru + seatIn m)]
+     hq   [incursions into s's seat (an enemy squad or armed vehicle within its ru + seatR m; over once quiet s with none), answered (as
+          many squads and armed vehicles of s there as of the enemy's), Σ s to answer, over unanswered]
+     dm   [domes up (the most at once), s the first was up (-1 none), enemy rounds (the shells and rockets AID counts: S.bombs he with a fall
+          point) coming down within imR m of an asset of s (its seat or factory, its base, its points, its supply bases), of those before its
+          first dome, s of the 10th (-1), s s first knew of an enemy gun or launcher (C.known kind art; -1)]
+     fob  [forward bases ordered (ENP: A.fobs), up (enpFobNext)]
+     pc   a histogram (0 to 10 or more) of the works of s (built; no bridge, pontoon or radio mast: noPc) within pcR m of a point s took, pcT s after
+          it took it (a point taken in the last pcT s of the match is left out)
+     cb   [combats s was in that went out as events, combats left out past cMax]
+   Events: g2 { s, and the counters above as they stand } every ev s and at the end (the review keeps each side's last; pushed past ANA.max,
+   as sn, end and MED's cb are: a few a match); g2c, one combat, as it ends (at most cMax a match, also past ANA.max). The header carries g2
+   { on, v, u: each point urban (1) or not, in the order of hdr.pts }.
+   A combat (for G2's calibration: who was there, how long, who was left): every dt s each squad (its leader, or what he rides) and each
+   vehicle is a fighter; one with an enemy fighter within cR m is in contact; fighters in contact within cL m of one another are one fight
+   (single link), and a fight with two sides or more is a combat. It keeps its members from one look to the next (a member already in an
+   open combat brings the fight into it; two open combats that meet become the older one), and ends cEnd s after its last look in contact
+   (or with the match). It goes out when it lasted cMin s or more or anyone died in it: g2c { t its start, d s it lasted, x z where it began,
+   u 1 in a town, p [the nearest point's L within cP m, who held it at the start] or null, sd [{ s, m0 men at the start by class (g2Cls),
+   mj men who joined later, v0 vehicles at the start by kind, vj joined, me men of them fit at the end, md dead, ve vehicles left, vd lost }] }.
+   The cap of the analytics (ANA.max) counts the battle's events, not these: with the yardstick on, the battle's events kept are the same.
+   The review: R.g2 { on, v, cb (combats), side: [{ raw, f (the additive record a tournament adds up: g2Flat, with what the other events say
+   of the side's assaults, points, armour killed by its infantry and command net) } | null] }; g2Sum(f, matches) the measures, g2Rows the
+   rows a table shows, with the target of the package (G2R.goal) that each one is the number of. */
+const G2R = { on: 1, v: 1, dt: 5, bt: 1, ev: 60, thr: 600, dr: 250, cen: 30, tr: 300, nn: 5, tsp: 30, seatIn: 60, seatR: 300, quiet: 60, imR: 600,
+  pcR: 150, pcT: 300, pcN: 3, hop: 600, cR: 400, cL: 500, cEnd: 30, cMin: 10, cMax: 500, cP: 400,
+  noPc: { 7: 1, 8: 1, 9: 1, 10: 1 }, armour: { tank: 1, lav: 1 }, armed: { tank: 1, lav: 1, car: 1, aa: 1 },
+  /* the targets: section 6 of cf-ia-opensource, by package */
+  goal: { sede: '> 0 (G3)', hq: 'todas; resposta curta (G4)', net: '≥ 85% (G6)', dome: '≥ 1 antes do 10º impacto (G6)', fob: '≥ 1 por partida (G6)', pc: '≥ 60% (G6)',
+    nn: '≥ 5 m (G5)', cen: '≤ 1 esquadra a < 30 m (G5)', tank: '≥ 30 m (G5)', lost: '≤ régua × 0,8 (G5)', urb: '≥ 40% (G7)', foeT: '> 0 (G7)', urbTook: '≥ 40% (G7)',
+    at: '≥ 3 por partida (G7)', ride: '≥ 50% (G8)', go: '≥ 2 por partida (G4)', canc: '≤ 15% (G4)', want: '≤ 10 por partida (G4)', cb: 'registro para o G2' } };
+const G2K = ['inf', 'snp', 'at', 'km', 'emb', 'df', 'dq', 'dt', 'sd', 'hq', 'dm', 'fob', 'pc', 'cb'];
+const g2New = () => ({ inf: [0, 0, 0, 0, 0], snp: [0, 0, 0], at: [0, 0], km: [0, 0], emb: [0, 0], df: [0, 0, 0, 0, 0], dq: [0, 0, 0], dt: [0, 0], sd: [0, 0, 0], hq: [0, 0, 0, 0],
+  dm: [0, -1, 0, 0, -1, -1], fob: [0, 0], pc: Array(11).fill(0), cb: [0, 0] });
+let G2S = null;
+const g2On = () => !!G2R.on && !!G2S && G2S.S === S && !G2S.err && anaLive() && ANA.S === S && !S.cq.ph;
+const g2D = s => G2S.D[s] || (G2S.D[s] = g2New());
+const g2Ok = s => s >= 0 && s < anaN();
+const g2In = (o, c, r) => Math.abs(o.x - c.x) < r && Math.abs(o.z - c.z) < r && hdist(o, c) < r;
+/* a soldier's class in a combat: sniper, anti-tank, air defence, machine gun, medic, rifle */
+const g2Cls = m => { const d = m.def || {}, a = m.arms && m.arms[1] && m.arms[1].d; return d.snp ? 'snp' : a && (a.k === 'heat' || a.k === 'atgm') ? 'at' : a && a.k === 'sam' ? 'ad' : /metralh/i.test(d.role || '') ? 'mg' : d.med ? 'med' : 'rf'; };
+/* the hooks run their part guarded: an error of the yardstick's turns it off and is kept, never thrown into the battle */
+function g2Try(f) { try { f(); } catch (e) { G2S.err = String((e && e.stack) || e).split('\n').slice(0, 3).join(' | '); } }
+function g2Fresh() {
+  return { S, D: [], last: S.t, sT: S.t + G2R.dt, bT: S.t, evT: S.t + G2R.ev, end: false, err: null, nev: 0, pos: new WeakMap(), ops: new WeakSet(), opsH: new WeakSet(), bomb: new WeakSet(),
+    fob: new WeakSet(), hq: [], hold: S.cq.p.map(p => p.hold), pcq: [], as: [], mem: new WeakMap(), cmb: [], cid: 0, out: 0 };
+}
+/* where squad q is and whether it is aboard: its leader on foot, or the vehicle he rides (m.in); a squad on a ride (rideBoard: its men gone
+   aboard q.rd.u, which they follow) is where that vehicle is. null for a squad with nobody left */
+function g2Where(q) {
+  const L = anaLead(q); if (L) return { o: L.in || L, ab: !!L.in };
+  const u = q.rd && q.rd.u; return u && !u.dead && q.men.some(m => !m.dead) ? { o: u, ab: true } : null;
+}
+/* the places of side s an enemy round coming down near counts against (looked up every dt s) */
+function g2Assets(s) {
+  const l = typeof aidAreas === 'function' && S.base && S.base[s] ? aidAreas(s).slice() : [];
+  for (const p of S.cq.p) if (p.hold === s) l.push(p);
+  for (const b of S.sup || []) if (b.team === s && !b.dead) l.push(b);
+  return l;
+}
+/* the rounds of indirect fire, every bt s: where each comes down, once */
+function g2Bombs() {
+  for (const b of S.bombs) {
+    if (b.k !== 'he' || b.px === undefined || b.gone || G2S.bomb.has(b)) continue;
+    G2S.bomb.add(b);
+    const at = { x: b.px, z: b.pz };
+    for (let s = 0; s < anaN(); s++) {
+      if (s === b.team || !(G2S.as[s] || []).some(P => g2In(at, P, G2R.imR))) continue;
+      const D = g2D(s); D.dm[2]++; if (D.dm[1] < 0) D.dm[3]++; if (D.dm[2] === 10) D.dm[4] = anaR(S.t);
+    }
+  }
+}
+/* the look every dt s */
+function g2Sample(h) {
+  const n = anaN(), P = S.cq.p, sd = anaSides(n), lead = q => anaLead(q);
+  for (const s of sd) G2S.as[s] = g2Assets(s);
+  /* who is on the ground, and which held points have an enemy near */
+  const gnd = [];
+  for (const m of S.men) if (!m.dead && !m.gone && !m.in && g2Ok(m.team)) gnd.push(m);
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team)) gnd.push(u);
+  const thr = P.map(p => g2Ok(p.hold) && gnd.some(o => o.team !== p.hold && g2In(o, p, G2R.thr)));
+  /* the soldiers of the AI */
+  for (const m of S.men) {
+    if (m.dead || m.gone || m.down || m.in || !m.ai || m.net || !g2Ok(m.team)) continue;
+    const D = g2D(m.team), B = !!bldAt(m.x, m.z, .3);
+    D.inf[0] += h; if (B) D.inf[1] += h;
+    if (m.def && m.def.snp) { D.snp[0] += h; if (B) D.snp[1] += h; }
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; if (!p.tw || !g2Ok(p.hold) || !g2In(m, p, p.r || 150)) continue;
+      if (p.hold !== m.team) D.inf[4] += h; else if (thr[i]) { D.inf[2] += h; if (B) D.inf[3] += h; }
+      break;
+    }
+  }
+  /* the defence of each threatened point */
+  for (let i = 0; i < P.length; i++) {
+    if (!thr[i]) continue;
+    const p = P[i], s = p.hold, D = g2D(s), men = gnd.filter(o => o.man && o.team === s && !o.down && g2In(o, p, G2R.dr));
+    for (const m of men) {
+      D.df[0] += h; D.df[1] += hdist(m, p) * h;
+      let nd = 1e9; for (const o of men) if (o !== m) { const d = hdist(o, m); if (d < nd) nd = d; }
+      if (nd < 1e9) { D.df[2] += h; D.df[3] += nd * h; if (nd >= G2R.nn) D.df[4] += h; }
+    }
+    let k = 0; for (const q of S.squads) { if (q.team !== s || q.net || !q.men) continue; const L = lead(q); if (L && !L.in && g2In(L, p, G2R.cen)) k++; }
+    D.dq[0] += h; if (k <= 1) D.dq[1] += h; D.dq[2] += k * h;
+    const tk = gnd.filter(u => !u.man && u.team === s && u.kind === 'tank' && g2In(u, p, G2R.tr));
+    for (const u of tk) { D.dt[0] += h; if (!tk.some(o => o !== u && g2In(o, u, G2R.tsp))) D.dt[1] += h; }
+  }
+  /* the walks and rides of every squad, and who is in each seat town */
+  const seat = sd.map(s => (typeof aidSeat === 'function' && S.T && S.T.burgs ? aidSeat(s) : null)), cnt = seat.map(() => sd.map(() => 0));
+  for (const q of S.squads) {
+    if (q.net || !q.men || !g2Ok(q.team)) continue;
+    const at = g2Where(q); if (!at) continue;
+    const o = at.o, p = G2S.pos.get(q);
+    if (p) { const d = Math.hypot(o.x - p.x, o.z - p.z); if (d < G2R.hop) g2D(q.team).km[at.ab ? 1 : 0] += d; }
+    G2S.pos.set(q, { x: o.x, z: o.z });
+    seat.forEach((w, s) => {
+      if (!w) return;
+      const d = hdist(o, w);
+      if (d < w.ru + G2R.seatR) cnt[s][q.team]++;
+      if (q.team !== s && d < w.ru + G2R.seatIn) g2D(q.team).sd[2] += h;
+    });
+  }
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team) && G2R.armed[u.kind] && u.arms && u.arms[0] && u.arms[0].d && u.arms[0].d.dmg > 0)
+    seat.forEach((w, s) => { if (w && hdist(u, w) < w.ru + G2R.seatR) cnt[s][u.team]++; });
+  seat.forEach((w, s) => {
+    if (!w) return;
+    const D = g2D(s), e = cnt[s].reduce((a, v, f) => a + (f === s ? 0 : v), 0), o = cnt[s][s], I = G2S.hq[s] || (G2S.hq[s] = { on: 0, t0: 0, ans: 0, last: 0 });
+    if (e > 0) {
+      I.last = S.t;
+      if (!I.on) { I.on = 1; I.t0 = S.t; I.ans = 0; D.hq[0]++; }
+      if (!I.ans && o >= e) { I.ans = 1; D.hq[1]++; D.hq[2] += S.t - I.t0; }
+    } else if (I.on && S.t - I.last > G2R.quiet) { I.on = 0; if (!I.ans) D.hq[3]++; }
+  });
+  /* the general's assaults on a seat, its domes, what it knows of the enemy's guns, its forward bases */
+  for (const C of S.cmd || []) {
+    if (!C || !g2Ok(C.t)) continue;
+    const D = g2D(C.t);
+    for (const op of C.ops || []) {
+      if (!op || op.k !== 'atk' || op.sede === undefined) continue;
+      if (!G2S.ops.has(op)) { G2S.ops.add(op); D.sd[0]++; }
+      if (!G2S.opsH.has(op) && (op.st === 'go' || op.st === 'fight' || op.st === 'cons')) { G2S.opsH.add(op); D.sd[1]++; }
+    }
+    if (D.dm[5] < 0 && Array.isArray(C.known) && C.known.some(o => o && !o.dead && o.kind === 'art' && o.team !== C.t)) D.dm[5] = anaR(S.t);
+    if (C.enp && Array.isArray(C.enp.fobs)) for (const f of C.enp.fobs) if (!G2S.fob.has(f)) { G2S.fob.add(f); D.fob[0]++; }
+  }
+  for (const s of sd) {
+    const D = g2D(s), k = (S.forts || []).filter(f => f.k === 6 && f.team === s && !f.gone && f.prog >= 1).length;
+    if (k > D.dm[0]) D.dm[0] = k; if (k && D.dm[1] < 0) D.dm[1] = anaR(S.t);
+  }
+  /* the points taken, and pcT s later the works by each */
+  P.forEach((p, i) => { const was = G2S.hold[i]; G2S.hold[i] = p.hold; if (p.hold !== was && g2Ok(p.hold)) G2S.pcq.push({ i, s: p.hold, t: S.t + G2R.pcT }); });
+  G2S.pcq = G2S.pcq.filter(c => {
+    if (S.t < c.t) return true;
+    const p = P[c.i]; let k = 0;
+    for (const f of S.forts || []) if (f.team === c.s && !f.gone && f.prog >= 1 && !G2R.noPc[f.k] && g2In(f, p, G2R.pcR)) k++;
+    g2D(c.s).pc[Math.min(10, k)]++; return false;
+  });
+  g2Combat(n);
+}
+/* ---- the combats ---- */
+function g2Combat(n) {
+  const F = [], R2 = G2R.cR * G2R.cR, L2 = G2R.cL * G2R.cL;
+  for (const q of S.squads) { if (q.net || !q.men || !g2Ok(q.team)) continue; const L = anaLead(q); if (!L) continue; const o = L.in || L; F.push({ o: q, s: q.team, x: o.x, z: o.z, sq: 1 }); }
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team)) F.push({ o: u, s: u.team, x: u.x, z: u.z, sq: 0 });
+  const hot = F.filter(a => F.some(b => b.s !== a.s && (a.x - b.x) ** 2 + (a.z - b.z) ** 2 < R2));
+  const par = hot.map((_, i) => i), root = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+  for (let i = 0; i < hot.length; i++) for (let j = i + 1; j < hot.length; j++) if ((hot[i].x - hot[j].x) ** 2 + (hot[i].z - hot[j].z) ** 2 < L2) par[root(i)] = root(j);
+  const G = new Map();
+  hot.forEach((f, i) => { const r = root(i); if (!G.has(r)) G.set(r, []); G.get(r).push(f); });
+  for (const l of G.values()) {
+    if (!l.some(f => f.s !== l[0].s)) continue;
+    let c = null; const more = [];
+    for (const f of l) { const x = G2S.mem.get(f.o); if (!x || x.done || x === c || more.includes(x)) continue; if (!c) c = x; else if (x.id < c.id) { more.push(c); c = x; } else more.push(x); }
+    if (!c) c = g2CbOpen(l);
+    for (const x of more) g2CbMerge(c, x);
+    for (const f of l) g2CbJoin(c, f);
+    c.tL = S.t; c.n++;
+  }
+  for (const c of G2S.cmb) if (!c.done && S.t - c.tL > G2R.cEnd) g2CbEnd(c);
+  G2S.cmb = G2S.cmb.filter(c => !c.done);
+}
+function g2CbOpen(l) {
+  let x = 0, z = 0; for (const f of l) { x += f.x; z += f.z; }
+  const c = { id: ++G2S.cid, t0: S.t, tL: S.t, n: 0, x: x / l.length, z: z / l.length, sd: new Map(), done: false, P: null };
+  let b = G2R.cP; for (const p of S.cq.p) { const d = hdist(p, c); if (d < b) { b = d; c.P = [p.L, p.hold]; } }
+  G2S.cmb.push(c); return c;
+}
+const g2CbSide = (c, s) => { if (!c.sd.has(s)) c.sd.set(s, { m0: {}, mj: {}, v0: {}, vj: {}, men: new Set(), un: new Set(), sq: new Set() }); return c.sd.get(s); };
+const g2Add = (o, k, v) => { o[k] = (o[k] || 0) + (v === undefined ? 1 : v); };
+/* a fighter into a combat: on its first look the start, after it what joined */
+function g2CbJoin(c, f) {
+  if (G2S.mem.get(f.o) === c) return;
+  G2S.mem.set(f.o, c);
+  const X = g2CbSide(c, f.s), late = c.n > 0;
+  if (f.sq) { X.sq.add(f.o); for (const m of f.o.men) if (!m.dead && !m.gone && !X.men.has(m)) { X.men.add(m); g2Add(late ? X.mj : X.m0, g2Cls(m)); } }
+  else if (!X.un.has(f.o)) { X.un.add(f.o); g2Add(late ? X.vj : X.v0, anaKind(f.o) || f.o.kind || '?'); }
+}
+/* two open combats that met: the younger into the older, as it stood */
+function g2CbMerge(c, x) {
+  x.done = true; c.t0 = Math.min(c.t0, x.t0); c.n = Math.max(c.n, x.n);
+  for (const [s, Y] of x.sd) {
+    const X = g2CbSide(c, s);
+    for (const k of ['m0', 'mj', 'v0', 'vj']) for (const j in Y[k]) g2Add(X[k], j, Y[k][j]);
+    for (const k of ['men', 'un', 'sq']) for (const o of Y[k]) X[k].add(o);
+    for (const o of Y.sq) G2S.mem.set(o, c);
+    for (const o of Y.un) G2S.mem.set(o, c);
+  }
+}
+function g2CbEnd(c) {
+  c.done = true;
+  const d = c.tL - c.t0, sd = [...c.sd.entries()].sort((a, b) => a[0] - b[0]).map(([s, X]) => {
+    const me = {}, md = {}, ve = {}, vd = {};
+    for (const m of X.men) { if (m.dead) g2Add(md, g2Cls(m)); else if (!m.down && !m.gone) g2Add(me, g2Cls(m)); }
+    for (const u of X.un) g2Add(u.dead ? vd : ve, anaKind(u) || u.kind || '?');
+    return { s, m0: X.m0, mj: X.mj, v0: X.v0, vj: X.vj, me, md, ve, vd };
+  });
+  if (sd.length < 2 || (d < G2R.cMin && !sd.some(x => Object.keys(x.md).length || Object.keys(x.vd).length))) return;
+  if (G2S.out >= G2R.cMax) { for (const x of sd) if (g2Ok(x.s)) g2D(x.s).cb[1]++; return; }
+  G2S.out++;
+  for (const x of sd) if (g2Ok(x.s)) g2D(x.s).cb[0]++;
+  const u = S.cq.p.some(p => p.tw && g2In(c, p, (p.r || 150) + 100)) ? 1 : 0;
+  const e = { k: 'g2c', t: anaR(c.t0), d: anaR(d), x: Math.round(c.x), z: Math.round(c.z), u, p: c.P, sd };
+  ANA.ev.push(e); ANA.q.push(e); G2S.nev++;   // past ANA.max, at most cMax a match
+}
+/* each side's counters as they stand, as events g2 (EMB's measure of the long walks taken as it is) */
+function g2Emit() {
+  const E = S.emb;
+  for (let s = 0; s < anaN(); s++) {
+    const D = g2D(s);
+    if (E && Array.isArray(E.legs) && Array.isArray(E.rode)) { D.emb[0] = E.legs[s] || 0; D.emb[1] = E.rode[s] || 0; }
+    const e = { k: 'g2', t: anaR(S.t), s };
+    for (const k of G2K) e[k] = D[k].map(anaR);
+    ANA.ev.push(e); ANA.q.push(e); G2S.nev++;   // past ANA.max, as sn and end: a few a match
+  }
+}
+/* the cap of the analytics counts the battle's events only: the yardstick's own (nev of them) do not bring it nearer */
+anaPush = (f => e => {
+  const k = G2S && G2S.S === S ? G2S.nev : 0;
+  if (k && ANA.ev.length >= ANA.max && ANA.ev.length - k < ANA.max) { ANA.ev.push(e); ANA.q.push(e); return; }   // f would have dropped it for the yardstick's events
+  return f(e);
+})(anaPush);
+/* ---- the hooks ---- */
+anaBegin = (g => () => {
+  g();
+  G2S = null; if (!G2R.on) return;
+  G2S = g2Fresh();
+  const h = ANA.ev.find(e => e.k === 'hdr'); if (h) h.g2 = { on: 1, v: G2R.v, u: S.cq.p.map(p => (p.tw ? 1 : 0)) };
+})(anaBegin);
+anaStep = (g => dt => {
+  g(dt);
+  if (!g2On()) return;
+  g2Try(() => {
+    if (S.t >= G2S.bT) { G2S.bT = S.t + G2R.bt; g2Bombs(); }
+    if (S.t >= G2S.sT) { const h = S.t - G2S.last; G2S.last = S.t; G2S.sT = S.t + G2R.dt; g2Sample(h); }
+    if (S.t >= G2S.evT) { G2S.evT = S.t + G2R.ev; g2Emit(); }
+  });
+})(anaStep);
+/* the end: a last look, the combats still open, and the counters, before the end event */
+cqEnd = (g => (...a) => {
+  if (g2On() && !G2S.end && !S.over) { G2S.end = true; g2Try(() => { if (S.t > G2S.last) { g2Sample(S.t - G2S.last); G2S.last = S.t; } for (const c of G2S.cmb) if (!c.done) g2CbEnd(c); g2Emit(); }); }
+  return g(...a);
+})(cqEnd);
+/* the rounds a soldier of the AI fires: a sniper's, and anti-tank ones, and at what */
+manFire = (f => (m, a) => {
+  if (!m || !m.ai || m.net || !a || !a.d || !g2On()) return f(m, a);
+  const w = a.d, n0 = a.mag, tg = m.ai.tgt;
+  f(m, a);
+  if (!(a.mag < n0) || !g2Ok(m.team)) return;
+  g2Try(() => {
+    const D = g2D(m.team);
+    if (w.snp) D.snp[2]++;
+    else if (w.k === 'heat' || w.k === 'atgm') { D.at[0]++; const t = w.lockT ? a.lock : tg; if (t && !t.man && G2R.armour[t.kind]) D.at[1]++; }
+  });
+})(manFire);
+/* a forward base up */
+enpFobNext = (f => (t, C, E) => { f(t, C, E); if (g2On() && g2Ok(t)) g2D(t).fob[1]++; })(enpFobNext);
+/* ---- the review ---- */
+function g2Raw(e) {
+  const D = g2New();
+  if (e) for (const k of G2K) if (Array.isArray(e[k])) e[k].forEach((x, i) => { if (i < D[k].length) D[k][i] = +x || 0; });
+  return D;
+}
+/* side s's additive record: its counters (D) and what the other events say of it (H the header) */
+function g2Flat(D, ev, s, H) {
+  const pts = H.pts || [], u = H.g2 && Array.isArray(H.g2.u) ? H.g2.u : [], ur = new Set(pts.filter((p, i) => u[i]).map(p => p[0]));
+  const ap = ev.filter(e => e.k === 'ap' && e.s === s), atk = ap.filter(e => !e.walk), uap = atk.filter(e => ur.has(e.L)), lg = ev.filter(e => e.k === 'lg' && e.s === s);
+  let netIn = 0, netAll = 0, ptLost = 0, ptTook = 0, armK = 0;
+  for (const e of ev) {
+    if (e.k === 'sn' && Array.isArray(e.cn) && Array.isArray(e.cn[s])) { const x = e.cn[s]; netIn += x[8] || 0; netAll += (x[8] || 0) + (x[9] || 0) + (x[10] || 0); }
+    else if (e.k === 'pt') { if (e.from === s && e.to !== s) ptLost++; if (e.to === s && e.from !== s) ptTook++; }
+    else if (e.k === 'ls' && e.s !== s && Array.isArray(e.by) && e.by[0] === s && e.by[1] === 'inf' && G2R.armour[e.u]) armK++;
+  }
+  const t10 = D.dm[4], dT = D.dm[1], app = H.era === 'modern' && D.dm[5] >= 0 && (t10 >= 0 || dT >= 0) ? 1 : 0;
+  return { n: 1, infS: D.inf[0], infB: D.inf[1], urbS: D.inf[2], urbB: D.inf[3], foeT: D.inf[4], snpS: D.snp[0], snpB: D.snp[1], snpShot: D.snp[2], atShot: D.at[0], atArm: D.at[1], armK,
+    kmF: D.km[0], kmE: D.km[1], legs: D.emb[0], rode: D.emb[1], dfS: D.df[0], dfD: D.df[1], nnS: D.df[2], nnD: D.df[3], nn5: D.df[4], dqN: D.dq[0], dq1: D.dq[1], dqSq: D.dq[2], dtN: D.dt[0], dt30: D.dt[1],
+    sdOpen: D.sd[0], sdGo: D.sd[1], sdIn: D.sd[2], hqInc: D.hq[0], hqAns: D.hq[1], hqT: D.hq[2], hqUn: D.hq[3],
+    dmMax: D.dm[0], dmUp: dT >= 0 ? 1 : 0, imp: D.dm[2], impB: D.dm[3], seen: D.dm[5] >= 0 ? 1 : 0, dmApp: app, dmOk: app && dT >= 0 && (t10 < 0 || dT <= t10) ? 1 : 0,
+    fobO: D.fob[0], fobU: D.fob[1], fobOk: D.fob[1] > 0 ? 1 : 0,
+    pcN: D.pc.reduce((a, b) => a + b, 0), pcOk: D.pc.reduce((a, b, i) => a + (i >= G2R.pcN ? b : 0), 0), pcSum: D.pc.reduce((a, b, i) => a + b * i, 0), cbN: D.cb[0], cbOut: D.cb[1],
+    asm: ap.length, atk: atk.length, go: atk.filter(e => MVA.st.indexOf(e.st) >= 3).length, canc: lg.filter(e => e.c === 'atk' && /^Reunião para .* demorou demais/.test(e.x)).length,
+    want: lg.filter(e => e.c === 'rf' && /^Sem força para atacar/.test(e.x)).length, ptLost, ptTook, urbAtk: uap.length, urbTook: uap.filter(e => e.ok).length, netIn, netAll };
+}
+/* many records added up (a tournament) */
+function g2Sums(a, b) { for (const k in b) a[k] = (a[k] || 0) + b[k]; return a; }
+/* the measures from an added record F of m matches (both sides added: a count is a match's, a share pools them) */
+function g2Sum(F, m) {
+  const sh = (a, b) => (b ? a / b : null), n = m || 1;
+  return { n, sides: F.n, inB: sh(F.infB, F.infS), urbMin: F.urbS / 60 / n, urbB: sh(F.urbB, F.urbS), foeT: F.foeT / 60 / n, snpShot: F.snpShot / n, snpB: sh(F.snpB, F.snpS),
+    atShot: F.atShot / n, atArm: F.atArm / n, armK: F.armK / n, kmF: F.kmF / 1000 / n, kmE: F.kmE / 1000 / n, kmESh: sh(F.kmE, F.kmF + F.kmE), legs: F.legs / n, rode: sh(F.rode, F.legs),
+    dfD: sh(F.dfD, F.dfS), nn: sh(F.nnD, F.nnS), nn5: sh(F.nn5, F.nnS), dfMin: F.dfS / 60 / n, dq1: sh(F.dq1, F.dqN), dqSq: sh(F.dqSq, F.dqN), dt30: sh(F.dt30, F.dtN), dtMin: F.dtN / 60 / n,
+    sdOpen: F.sdOpen / n, sdGo: F.sdGo / n, sdIn: F.sdIn / 60 / n, hqInc: F.hqInc / n, hqAns: sh(F.hqAns, F.hqAns + F.hqUn), hqT: sh(F.hqT, F.hqAns),
+    net: sh(F.netIn, F.netAll), dmUp: F.dmUp / n, imp: F.imp / n, impB: F.impB / n, dmApp: F.dmApp, dmOk: F.dmOk, seen: F.seen,
+    fobO: F.fobO / n, fobU: F.fobU / n, fobOk: sh(F.fobOk, F.n), pcN: F.pcN, pcOk: sh(F.pcOk, F.pcN), pcMean: sh(F.pcSum, F.pcN), cbN: F.cbN, cbOut: F.cbOut,
+    go: F.go / n, atk: F.atk / n, canc: sh(F.canc, F.asm), cancN: F.canc / n, want: F.want / n, ptLost: F.ptLost / n, ptTook: F.ptTook / n, urbAtk: F.urbAtk / n, urbTook: sh(F.urbTook, F.urbAtk) };
+}
+/* the rows [measure, value, target] of a summary (g2Sum): the tournament's table */
+function g2Rows(M) {
+  const d = v => String(v).replace('.', ','), f1 = v => (v === null || v === undefined ? '—' : d(Math.round(v * 10) / 10)), pc = v => (v === null || v === undefined ? '—' : Math.round(v * 100) + '%'), G = G2R.goal;
+  const m = v => (v === null || v === undefined ? '—' : f1(v) + ' m'), s = v => (v === null || v === undefined ? '—' : f1(v) + ' s');
+  return [
+    ['Sede inimiga: assaltos abertos por partida (chegaram à hora H); esquadra-min dentro da cidade-sede inimiga', f1(M.sdOpen) + ' (' + f1(M.sdGo) + '); ' + f1(M.sdIn), G.sede],
+    ['Própria sede: incursões inimigas por partida; atendidas (tantas esquadras e blindados nossos quanto deles); tempo médio até atender', f1(M.hqInc) + '; ' + pc(M.hqAns) + '; ' + s(M.hqT), G.hq],
+    ['Esquadras dentro da rede de comando (do tempo)', pc(M.net), G.net],
+    ['Cúpulas prontas por partida; impactos inimigos perto de um ativo por partida (antes da 1ª cúpula); lados-partida na moderna com canhão inimigo visto: cúpula antes do 10º impacto', f1(M.dmUp) + '; ' + f1(M.imp) + ' (' + f1(M.impB) + '); ' + M.dmOk + ' de ' + M.dmApp, G.dome],
+    ['Bases avançadas por partida: ordenadas, prontas; lados-partida com ao menos uma pronta', f1(M.fobO) + ', ' + f1(M.fobU) + '; ' + pc(M.fobOk), G.fob],
+    ['Pontos tomados com ' + G2R.pcN + ' peças ou mais a ≤ ' + G2R.pcR + ' m, ' + G2R.pcT / 60 + ' min depois (média de peças; casos)', pc(M.pcOk) + ' (' + f1(M.pcMean) + '; ' + M.pcN + ')', G.pc],
+    ['Defensores de ponto ameaçado: distância ao centro; vizinho mais perto (com ' + G2R.nn + ' m ou mais)', m(M.dfD) + '; ' + m(M.nn) + ' (' + pc(M.nn5) + ')', G.nn],
+    ['Ponto ameaçado com no máximo 1 esquadra a < ' + G2R.cen + ' m do centro (esquadras ali, média)', pc(M.dq1) + ' (' + f1(M.dqSq) + ')', G.cen],
+    ['Tanques na defesa de ponto ameaçado sem outro tanque a < ' + G2R.tsp + ' m (tanque-min por partida)', pc(M.dt30) + ' (' + f1(M.dtMin) + ')', G.tank],
+    ['Pontos perdidos por partida (tomados)', f1(M.ptLost) + ' (' + f1(M.ptTook) + ')', G.lost],
+    ['Soldado em prédio: do tempo todo; na defesa de cidade (soldado-min por partida)', pc(M.inB) + '; ' + pc(M.urbB) + ' (' + f1(M.urbMin) + ')', G.urb],
+    ['Soldado-min dentro de cidade que o inimigo segura, por partida', f1(M.foeT), G.foeT],
+    ['Assaltos a ponto urbano que tomam o ponto (assaltos por partida)', pc(M.urbTook) + ' (' + f1(M.urbAtk) + ')', G.urbTook],
+    ['Foguetes AT de soldado por partida: em blindado; todos; blindados destruídos pela infantaria', f1(M.atArm) + '; ' + f1(M.atShot) + '; ' + f1(M.armK), G.at],
+    ['Atirador de elite: tiros por partida; em prédio (do tempo)', f1(M.snpShot) + '; ' + pc(M.snpB), '—'],
+    ['Deslocamento das esquadras por partida: km a pé; km embarcado (embarcado do total)', f1(M.kmF) + '; ' + f1(M.kmE) + ' (' + pc(M.kmESh) + ')', '—'],
+    ['Caminhadas longas (≥ 1,5 km) por partida; feitas de carona', f1(M.legs) + '; ' + pc(M.rode), G.ride],
+    ['Hora H por partida (assaltos abertos)', f1(M.go) + ' (' + f1(M.atk) + ')', G.go],
+    ['Reuniões canceladas por prazo, das reuniões (por partida)', pc(M.canc) + ' (' + f1(M.cancN) + ')', G.canc],
+    ['"Sem força para atacar" por partida', f1(M.want), G.want],
+    ['Combates registrados (lados-combate; deixados de fora)', M.cbN + ' (' + M.cbOut + ')', G.cb]];
+}
+/* R.g2: each side's last g2 event, its record and its measures; the enemy's left out of a side's view of a match not over */
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  const H = ev.find(e => e.k === 'hdr') || {}, n = R.ns || 2, last = [];
+  let any = false, cb = 0;
+  for (const e of ev) { if (e.k === 'g2' && e.s >= 0 && e.s < n) { any = true; if (!last[e.s] || e.t >= last[e.s].t) last[e.s] = e; } else if (e.k === 'g2c') cb++; }
+  if (!any && !H.g2) { R.g2 = null; return R; }
+  const hide = anaHide(me, n, R.over);
+  R.g2 = { on: H.g2 ? H.g2.on : null, v: H.g2 ? H.g2.v : null, cb, side: anaSides(n).map(s => {
+    if ((hide && s !== me) || !last[s]) return null;
+    const raw = g2Raw(last[s]); return { raw, f: g2Flat(raw, ev, s, H) };   // the measures are g2Sum(f, 1): left out here, the review (rep) goes to the server under its 16 KB
+  }) };
+  return R;
+})(anaReport);
+/* ---------- end of GENERAL 2: régua ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

@@ -37325,13 +37325,82 @@ function spinMat(m, U) {
   m.customProgramCacheKey = () => 'wheelspin';
   return m;
 }
+/* the hand-made body kept for far off, merged: its meshes of one node and one colour as one mesh, hidden (a few draw calls where it was
+   a dozen or more), the meshes themselves let go */
+function packLodMerge(off) {
+  const B = new Map(), out = [];
+  for (const m of off) {
+    const p = m.parent, mt = m.material; if (!p || !mt || Array.isArray(mt) || !m.geometry) continue;
+    m.updateMatrix(); const key = p.uuid + '|' + mt.color.getHex() + '|' + (mt.transparent ? mt.opacity : 1);
+    let e = B.get(key); if (!e) B.set(key, (e = { p, mt, l: [] }));
+    const ge = m.geometry.clone(); ge.applyMatrix4(m.matrix); e.l.push(ge);
+  }
+  for (const e of B.values()) { const me = new THREE.Mesh(vkGeo(e.l), e.mt.clone()); me.visible = false; e.p.add(me); out.push(me); }
+  for (const m of off) kill(m);
+  return out;
+}
+/* the pack's vehicles far off (PLOD, cf-pol-modelos): beyond far m of the eye (at the field of view fov; a zoomed view, a gunner's sight or
+   a scope, counts as nearer by as much) the hand-made body packSkin kept is drawn in place of the pack's (some 300 triangles where a truck
+   of the pack has 10 000), and back within near m; the turret and the gun go where each had them.
+   Damage looks go on the pack's meshes as before (the hand-made ones are not in pm) */
+const PLOD = { far: 450, near: 400, fov: 55 };
+function packLod(m, cx, cz, zk) {   // zk: how much nearer the camera's zoom brings things than PLOD.fov does (a sight at 36× keeps the pack's models 36 times as far)
+  const U = m.userData, L = U.lod; if (!L) return;
+  const d2 = ((m.position.x - cx) * (m.position.x - cx) + (m.position.z - cz) * (m.position.z - cz)) * (zk || 1) * (zk || 1), far = L.far ? d2 > PLOD.near * PLOD.near : d2 > PLOD.far * PLOD.far;
+  if (far === L.far) return; L.far = far;
+  for (const o of L.hi) o.visible = !far; for (const o of L.lo) o.visible = far;
+  if (U.tur && L.t0) U.tur.position.copy(far ? L.t0 : L.t1); if (U.gun && L.g0) U.gun.position.copy(far ? L.g0 : L.g1);
+}
 syncScene = (g0 => dt => {
   g0(dt);
+  const cp = typeof camera !== 'undefined' && camera ? camera.position : null, zk = cp ? Math.tan(camera.fov * Math.PI / 360) / Math.tan(PLOD.fov * Math.PI / 360) : 1;
+  if (cp) for (const L of [S.units, S.wrecks || []]) for (const o of L) if (o.m && o.m.userData.lod) packLod(o.m, cp.x, cp.z, zk);
   for (const u of S.units) {
     const m = u.m, U = m && m.userData; if (!U || !U.spin) continue;
     const dx = u.x - (U.wx === undefined ? u.x : U.wx), dz = u.z - (U.wz === undefined ? u.z : U.wz), d = dx * Math.cos(u.h) - dz * Math.sin(u.h);
     U.wx = u.x; U.wz = u.z; if (Math.abs(d) < WSPIN.jump) U.spin.value += d / GS * (U.spinK || 1);
   }
+})(syncScene);
+/* ---------- the vehicles' contact shadows (cf-pol-modelos): a soft dark patch under each vehicle and wreck on the ground, as long and as wide
+   as it (d.env) a little past, turned to its heading and laid on the slope under it, so that what drives is seen on the ground and not
+   over it; and a small one under each soldier and civilian within CSHAD.men m (long when he lies or is down). One instanced mesh for
+   all of them, within CSHAD.far m of the eye; none where the quality draws the sun's real shadows (GFXQ shadow, Alta) ---------- */
+const CSHAD = { max: 640, far: 900, grow: [1.6, 2.1], lift: .14, alpha: .55, men: 160, man: [.5, .45], prone: [1.05, .42] };
+const CSH = { me: null, at: null, m: null, q: null, v: null, s: null, x: null, y: null, z: null };
+function cshadMesh() {
+  if (CSH.me && CSH.at === scene) return CSH.me;
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 4, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(0,0,0,' + CSHAD.alpha + ')'); gr.addColorStop(.6, 'rgba(0,0,0,' + CSHAD.alpha * .85 + ')'); gr.addColorStop(.85, 'rgba(0,0,0,' + CSHAD.alpha * .4 + ')'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  const ge = new THREE.PlaneGeometry(1, 1); ge.rotateX(-Math.PI / 2);
+  const me = new THREE.InstancedMesh(ge, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), CSHAD.max);
+  me.frustumCulled = false; me.count = 0; me.renderOrder = 1; scene.add(me);
+  Object.assign(CSH, { me, at: scene, m: new THREE.Matrix4(), q: new THREE.Quaternion(), v: new THREE.Vector3(), s: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3() });
+  return me;
+}
+syncScene = (g0 => dt => {
+  g0(dt);
+  if (typeof scene === 'undefined' || !scene) return;
+  const me = cshadMesh(), Q = typeof GFXQ === 'object' && typeof gfxLevel === 'function' && GFXQ[gfxLevel()];
+  if (Q && Q.shadow) { me.count = 0; return; }
+  const c = camera.position, F2 = CSHAD.far * CSHAD.far; let n = 0;
+  const put = (x, z, h, d, far, man) => {
+    if (n >= CSHAD.max || !d) return; const dx = x - c.x, dz = z - c.z; if (dx * dx + dz * dz > (far ? far * far : F2)) return;
+    const e = !man && d.env, hl = man ? man[0] : e ? e[3] : (d.l || 4) * GS / 2, hw = man ? man[1] : e ? e[5] : (d.w || 2) * GS / 2, fx = Math.cos(h), fz = -Math.sin(h);
+    const yf = hgt(x + fx * hl, z + fz * hl), yb = hgt(x - fx * hl, z - fz * hl), yl = hgt(x - fz * hw, z + fx * hw), yr = hgt(x + fz * hw, z - fx * hw), y0 = Math.max(hgt(x, z), (yf + yb) / 2, (yl + yr) / 2);
+    CSH.x.set(fx * 2 * hl, yf - yb, fz * 2 * hl).normalize(); CSH.z.set(-fz * 2 * hw, yl - yr, fx * 2 * hw).normalize(); CSH.y.crossVectors(CSH.z, CSH.x).normalize(); CSH.z.crossVectors(CSH.x, CSH.y);
+    CSH.m.makeBasis(CSH.x, CSH.y, CSH.z); CSH.q.setFromRotationMatrix(CSH.m);
+    me.setMatrixAt(n++, CSH.m.compose(CSH.v.set(x, y0 + CSHAD.lift, z), CSH.q, CSH.s.set(hl * 2 * (man ? 1 : CSHAD.grow[0]), 1, hw * 2 * (man ? 1 : CSHAD.grow[1]))));
+  };
+  const blink = S.my && S.my.inv > 0 && (S.t * 10 | 0) % 2;   // the player's own, hidden with the model while it blinks in its protection
+  for (const u of S.units) if (!u.gone && !(u.in && u.in.air) && !(u === S.my && blink)) put(u.x, u.z, u.h, u.def);
+  for (const w of S.wrecks || []) if (w.u && !w.gone) put(w.u.x, w.u.z, w.u.h, w.u.def);
+  /* the people near the eye: a small round one, long when he lies */
+  for (const L of [S.men, S.civs || []]) for (const m of L) {
+    if (m.in || m.gone || (m === S.my && blink) || Math.abs(m.y - hgt(m.x, m.z)) > .6) continue;   // aboard, or down in a trench: none
+    const lie = m.st === 2 || m.dead, h = m.h || 0, k = lie ? CSHAD.prone[0] * .9 : 0;   // a body lying stretches back from where he stands
+    put(m.x - Math.cos(h) * k, m.z + Math.sin(h) * k, h, m.def || m, CSHAD.men, lie ? CSHAD.prone : CSHAD.man);
+  }
+  me.count = n; me.instanceMatrix.needsUpdate = true;
 })(syncScene);
 function vkit() {
   const B = new Map(), E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1), M4 = new THREE.Matrix4();
@@ -37620,6 +37689,7 @@ buildUnit = (f => (u, wreck) => {
    with the wing when the wing is lost or cut short; the blades of a propeller are one mesh. A burnt plane darkens them with the rest.
    The textured models (mdl.glb) keep their own look; the stealth bomber wears none ---------- */
 const PROP = { blades: { stuka: 3, bf109: 3, spit: 4, p47: 4, he177: 4, b17: 3 }, chord: .24, col: 0x1f2122, spin: 40, blur: [.3, .8] };
+const CANOPY = { glass: 0x4f6872, hoops: [-.2, .14], tube: .035 };   // the canopy's glass; where the frame's hoops cross it (of its length, from its middle), how thick
 const INSIG = { kind: { stuka: 'balk', bf109: 'balk', he177: 'balk', spit: 'raf', p47: 'us', b17: 'us', su57: 'ru', su25: 'ru', tu160: 'ru', ah64: 'us', uh60: 'us', mi28: 'ru', mi8: 'ru' }, at: .62, size: [.72, 2.4], fus: .52, boom: .22, tex: {} };
 function insigTex(k) {
   if (INSIG.tex[k]) return INSIG.tex[k];
@@ -37675,6 +37745,17 @@ buildPlane = (f => id => {
   if (m.prop) blades(m.prop[0] + .18, 0, 0, m.prop[1]);
   if (m.nac) for (const n of m.nac) if (n[5]) for (const s of [1, -1]) blades(n[0] + n[4] / 2 + .2, n[1], s * n[2], n[5]);
   U.discs = []; g.traverse(c => { if (c.isMesh && c.material && c.material.isMeshBasicMaterial && c.material.transparent && c.geometry && c.geometry.type === 'CircleGeometry') { U.discs.push(c); c.userData.o = c.material.opacity; } });
+  /* the canopy: a darker glass where it was a pale blue blob, and on the propeller planes its frame in the plane's colour (two hoops across
+     and a spine), filed under the pilot with the glass */
+  const cn = U.pm && U.pm.pilot && U.pm.pilot[0], cv = m.can;
+  if (cn && cv) {
+    cn.material.color.setHex(CANOPY.glass); cn.material.userData.c = CANOPY.glass; cn.material.shininess = 60; cn.material.specular = new THREE.Color(0x667a84);
+    if (m.prop || m.nac) {
+      const fm = mat(d.c); fm.userData.c = d.c; mats.push(fm);
+      for (const t of CANOPY.hoops) { const h = new THREE.TorusGeometry(1, CANOPY.tube, 4, 12, Math.PI); h.rotateY(Math.PI / 2); const me = new THREE.Mesh(h, fm); me.scale.set(1, cv[3] * 1.02, cv[4] * 1.02); me.position.set(cv[0] + cv[2] * t, cv[1], 0); g.add(me); (U.pm.pilot || []).push(me); }
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(cv[2] * .8, .05, .05), fm); sp.position.set(cv[0], cv[1] + cv[3] * 1.0, 0); g.add(sp); U.pm.pilot.push(sp);
+    }
+  }
   if (!k) return g;
   /* the markings: on the widest wing (not the tailplane), over and under, a child of each side's mesh; and on each side of the fuselage */
   const T = insigTex(k), W = m.wings.slice(0, -1), wi = W.indexOf(W.slice().sort((a, b) => b.span - a.span)[0]), w = m.wings[wi];
@@ -39041,8 +39122,14 @@ function preview(m, L, canvas, ang) {
     let b = m.userData.fit;
     if (!b) {   // framed by its own size: the half diagonal on the ground and the half height, from the model's box
       m.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), c = bb.getCenter(new THREE.Vector3()), r = Math.hypot(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2, hy = (bb.max.y - bb.min.y) / 2;
-      b = m.userData.fit = isFinite(r) && r > 0 ? { y: c.y, d: Math.max((hy + r * .25) / .268, r / .477) * 1.06 } : { y: 0, d: L * 1.6 };
+      b = m.userData.fit = isFinite(r) && r > 0 ? { y: c.y, d: Math.max((hy + r * .25) / .268, r / .477) * 1.06, lo: bb.min.y, r } : { y: 0, d: L * 1.6 };
     }
+    if (!TT.sh) {   // a soft shadow on the floor under the model (cf-pol-modelos), so that it stands rather than floats on the card
+      const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 2, 32, 32, 31);
+      gr.addColorStop(0, 'rgba(0,0,0,.34)'); gr.addColorStop(.6, 'rgba(0,0,0,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+      const ge = new THREE.PlaneGeometry(1, 1); ge.rotateX(-Math.PI / 2); TT.sh = new THREE.Mesh(ge, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })); TT.s.add(TT.sh);
+    }
+    TT.sh.visible = b.lo !== undefined; if (TT.sh.visible) { TT.sh.position.set(0, b.lo + .02, 0); TT.sh.scale.set(b.r * 1.45, 1, b.r * 1.45); }
     TT.p.add(m); TT.p.rotation.y = ang || 0; TT.c.position.set(b.d * .594, b.y + b.d * .218, b.d * .775); TT.c.lookAt(0, b.y, 0);
     TT.r.render(TT.s, TT.c); TT.p.remove(m); g.clearRect(0, 0, W, H); g.drawImage(TT.r.domElement, 0, TT.h - H, W, H, 0, 0, W, H);   // the viewport's rows are the buffer's last H (GL counts from the bottom)
   } catch (e) {}
@@ -40714,6 +40801,60 @@ function buildTrn(u, wreck) {
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
 }
+/* the ZSU-23-4 Shilka (cf-pol-modelos): tracked, as the real one, where it was the LAV's eight wheels and boat hull: six road wheels under
+   a low hull, the flat turret with its four 23 mm barrels and the radar dish on its post at the back. The turret and the guns turn where
+   they did (tur at the LAV's place, gun at tl .55); the damage parts are the LAV's (wheels: the tracks; hull, engine, turret, gun, sight) */
+buildTrn = (f => (u, wreck) => {
+  const d = u.def; if (!d || d.id !== 'shilka') return f(u, wreck);
+  const g = new THREE.Group(), tur = new THREE.Group(), gun = new THREE.Group(), pm = (g.userData.pm = {}), K = vkit(), col = u.col || [0x6a6f62, 0x4d5247], P = col[0], P2 = col[1], dk = VKC.dk;
+  const [tl, tw, th, tx] = d.t, y0 = .5, H = d.hh, L = d.l;
+  tur.add(gun); g.add(tur); tur.position.set(tx, y0 + H + th / 2, 0); gun.position.x = tl * .55;
+  vkTracks(K, g, P2, -L / 2 + .1, L / 2 - .1, 1.15, .6, .9, 6, 'wheels', 'wheels');
+  K.pr(g, 'hull', P, [[-L / 2, .45], [L / 2 - .6, .45], [L / 2, .85], [L / 2, 1.1], [-L / 2, 1.1]], 1.7, 0, 0, 0).pr(g, 'hull', P, [[-L / 2 - .05, .9], [L / 2 - .05, .9], [L / 2, 1], [L / 2 - .8, y0 + H], [-L / 2 - .05, y0 + H]], d.w, 0, 0, 0);
+  for (const s of LRS) K.box(g, 'hull', P2, L - .2, .05, .65, 0, .95, s * 1.15);
+  K.box(g, 'engine', dk, 1.2, .05, 1.3, -L / 2 + 1, y0 + H + .02, 0).cy(g, 'hull', P2, .3, .3, .1, 10, L / 2 - 1.1, y0 + H + .05, -.8);
+  K.pr(tur, 'turret', P, [[-tl / 2, -th / 2], [tl / 2 - .2, -th / 2], [tl / 2, -th / 6], [tl / 2 - .15, th / 2], [-tl / 2, th / 2]], tw, 0, 0, 0);
+  for (const s of LRS) K.box(tur, 'turret', P2, tl * .6, th * .5, .15, -tl * .1, -.05, s * (tw / 2 + .07));
+  K.cy(tur, 'sight', dk, .07, .07, .9, 6, -tl / 2 + .3, th / 2 + .45, 0).cx(tur, 'sight', P2, .5, .5, .08, 12, -tl / 2 + .45, th / 2 + .95, 0).box(tur, 'sight', dk, .25, .3, .3, tl * .2, th / 2 + .15, tw * .3);
+  K.box(gun, 'gun', P2, .6, .55, 1.1, .1, 0, 0);
+  for (const y of [.13, -.13]) for (const z of [-.33, .33]) K.cx(gun, 'gun', dk, .05, .045, d.g + .3, 6, (d.g + .3) / 2 + .2, y, z).cx(gun, 'gun', dk, .07, .07, .22, 6, d.g + .35, y, z);
+  K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 }));
+  g.userData.tur = tur; g.userData.gun = gun;
+  g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
+  return g;
+})(buildTrn);
+/* the Insurgents' towed AA (TAAB, cf-pol-modelos), where each was a car's low body with barrels stuck on: the ZPU-4 and the ZPU-2 on their
+   carriage (wheels, a frame with its tow bar and jacks, the pedestal, the gunner's seat, the KPVs in pairs with their ammunition boxes),
+   the DShK on its tripod. The mount (tur) and the barrels (gun) stand and turn where they did; the damage parts are the car's (wheels; hull) */
+const TAAB = {
+  zpu4: { n: 4, wh: 1 }, zpu2: { n: 2, wh: 1 }, dshkAA: { n: 1, wh: 0 }
+};
+buildTrn = (f => (u, wreck) => {
+  const d = u.def, T = d && TAAB[d.id]; if (!T) return f(u, wreck);
+  const g = new THREE.Group(), tur = new THREE.Group(), gun = new THREE.Group(), pm = (g.userData.pm = {}), K = vkit(), col = u.col || [0x6a6f62, 0x4d5247], P = col[0], P2 = col[1], dk = VKC.dk, L = d.l, W = d.w;
+  tur.add(gun); g.add(tur); const ty = (d.mh - 1.5) / GS; tur.position.set(d.px || 0, ty, 0);
+  if (T.wh) {
+    vkWheels(K, g, P2, TLOOK[d.id].ax, W * .5 - .12, .4, .24, 0, 'wheels', 'wheels');
+    K.box(g, 'hull', P, L * .78, .16, W * .5, 0, .62, 0).box(g, 'hull', dk, .9, .07, .07, L * .39 + .4, .58, 0, 0, 0, .12);
+    for (const a of [1, -1]) for (const b of LRS) K.cy(g, 'hull', dk, .05, .05, .5, 6, a * L * .36, .45, b * W * .2);
+    K.cy(tur, 'hull', P2, .26, .3, ty - .7, 8, 0, -(ty - .7) / 2 - .1, 0).box(tur, 'hull', dk, .38, .08, .38, -.62, -.25, 0).box(tur, 'hull', dk, .06, .4, .36, -.8, -.05, 0);
+  } else {   // the tripod: three legs from the mount down to the ground
+    for (let i = 0; i < 3; i++) { const a = i * TAU / 3 + Math.PI / 3, h = ty - .15, dd = .95, l = Math.hypot(h, dd); K.box(g, 'hull', dk, .07, l, .07, Math.cos(a) * dd / 2, h / 2, Math.sin(a) * dd / 2, 0, -a, Math.asin(dd / l)); }
+    K.cy(tur, 'hull', dk, .07, .07, .3, 6, 0, -.25, 0);
+  }
+  const n = T.n, bl = d.id === 'dshkAA' ? 1.25 : 1.9;
+  K.box(gun, 'hull', P2, .55, .3, n > 2 ? .62 : n > 1 ? .5 : .22, .05, .05, 0);
+  for (let i = 0; i < n; i++) {
+    const y = n > 2 ? (i > 1 ? .27 : .05) : .08, z = n === 1 ? 0 : (i % 2 ? 1 : -1) * .2;
+    K.cx(gun, null, dk, .045, .035, bl, 6, .25 + bl / 2, y, z).cx(gun, null, dk, .06, .06, .18, 6, .3 + bl, y, z);
+  }
+  if (n > 1) for (const s of LRS) K.box(gun, 'hull', P2, .32, .26, .14, 0, .12, s * (n > 2 ? .44 : .36));
+  else K.box(gun, 'hull', dk, .3, .16, .12, .1, -.12, .12);
+  K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 }));
+  g.userData.tur = tur; g.userData.gun = gun;
+  g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
+  return g;
+})(buildTrn);
 /* the recovery vehicles, repair trucks and ambulances (REC): a car's body, and on it the tracks, the crane and the spade, the workshop with its lockers and jib,
    or the box with its red crosses */
 Object.assign(TLOOK, { bergep: { ax: [2.5, 1.4, .3, -.8, -1.9, -2.9], hood: 0, roof: 1 }, m32: { ax: [2.2, 1.2, .1, -1, -2.1], hood: 0, roof: 1 }, m88a2: { ax: [3.2, 2, .8, -.4, -1.6, -2.8, -3.6], hood: 0, roof: 1 },
@@ -40759,8 +40900,8 @@ buildTrn = (f => (u, wreck) => {
   if (d.id === 'tecSpg9' && gun) { const t = new THREE.Mesh(cylX(.1, .1, 2.1, 10), dark); t.position.set(.5, .12, 0); gun.add(t); }
   if (d.id === 'tecZu' && gun) for (const s of LRS) { const t = new THREE.Mesh(cylX(.05, .04, 2.2, 8), dark); t.position.set(.9, .1, s * .22); gun.add(t); }
   /* the old AA (cf-insurg-antiaerea): barrels on the mount (the model's gun group), a rocket pod's tubes, the Shilka's four barrels */
-  if (gun && (d.id === 'zpu4' || d.id === 'zpu2' || d.id === 'zuTruck' || d.id === 'shilka')) { const n = d.id === 'zpu2' || d.id === 'zuTruck' ? 2 : 4; for (let i = 0; i < n; i++) { const t = new THREE.Mesh(cylX(.045, .035, d.id === 'shilka' ? 2.2 : 1.9, 8), dark); t.position.set(.9, .1 + (i > 1 ? .22 : 0), (i % 2 ? 1 : -1) * .2); gun.add(t); } }
-  if (gun && d.id === 'dshkAA') { const t = new THREE.Mesh(cylX(.05, .04, 1.2, 8), dark); t.position.set(.6, .1, 0); gun.add(t); }
+  if (gun && d.id === 'zuTruck') {   // the ZPUs, the DShK's mount and the Shilka carry their own (cf-pol-modelos: TAAB, the Shilka's model)
+    const n = d.id === 'zpu2' || d.id === 'zuTruck' ? 2 : 4; for (let i = 0; i < n; i++) { const t = new THREE.Mesh(cylX(.045, .035, d.id === 'shilka' ? 2.2 : 1.9, 8), dark); t.position.set(.9, .1 + (i > 1 ? .22 : 0), (i % 2 ? 1 : -1) * .2); gun.add(t); } }
   if (gun && (d.id === 'tecS5' || d.id === 'tecS8')) for (const z of d.id === 'tecS5' ? [-.4, 0, .4] : [-.3, .3]) { const t = new THREE.Mesh(cylX(d.id === 'tecS5' ? .09 : .13, d.id === 'tecS5' ? .09 : .13, 1.3, 10), mat(0x4e5442)); t.position.set(.5, .1, z); gun.add(t); }
   if (d.id === 'vbied' && !wreck) { const c = mat(0x5b5f57); for (let i = 0; i < 3; i++) box(g, .45, .5, .45, c, -d.l * .3 + i * .5, by - .1, 0); box(g, .02, .02, W * .7, mat(0xb3201d), -d.l * .1, by + .2, 0); }   // the drums and the wire
   return g;
@@ -46017,10 +46158,11 @@ function packSkin(g, P, d, col, wreck, keepTur) {
   g.traverse(c => { if (c.isMesh && !keep.has(c)) off.push(c); });
   const gone = new Set(off);
   for (const k in pm) pm[k] = pm[k].filter(m => !gone.has(m));
-  for (const m of off) kill(m);
+  /* the hand-made body stays, hidden: far off it is drawn in the pack's place (PLOD, cf-pol-modelos), with the turret and gun where it had them */
+  const lod = (U.lod = { lo: packLodMerge(off), hi: [], t0: U.tur && U.tur.position.clone(), g0: U.gun && U.gun.position.clone(), t1: null, g1: null, far: false });
   const [L, W] = P.dims, sx = d.l / L, sz = d.w / W, sy = (sx + sz) / 2, hex = wreck ? 0x2b2b28 : col, dk = wreck ? .3 : 0;
   const tag = (pid, grp) => { if (!grp) return grp; grp.traverse(c => { if (c.isMesh) (pm[pid] || (pm[pid] = [])).push(c); }); return grp; };
-  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body);
+  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body); lod.hi.push(body);
   for (const nm of ['hull', 'trackL', 'trackR', 'wheels']) {
     const p = tag(nm === 'hull' ? 'hull' : nm, packPart(P, nm, hex, dk)); if (!p) continue;
     p.position.fromArray(packPivot(P, nm)); body.add(p);
@@ -46029,14 +46171,14 @@ function packSkin(g, P, d, col, wreck, keepTur) {
     const tp = packPivot(P, 'turret'), gp = packPivot(P, 'gun'), tur = U.tur, gun = U.gun;
     if (tp) {
       tur.position.set(tp[0] * sx, tp[1] * sy, tp[2] * sz);
-      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t);
+      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t); lod.hi.push(t);
     }
     if (gp && gun) {
       const o = tp || [0, 0, 0]; gun.position.set((gp[0] - o[0]) * sx, (gp[1] - o[1]) * sy, (gp[2] - o[2]) * sz);
-      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm);
+      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm); lod.hi.push(gm);
     }
   }
-  U.pack = 1; U.sig = undefined;
+  U.pack = 1; U.sig = undefined; lod.t1 = U.tur && U.tur.position.clone(); lod.g1 = U.gun && U.gun.position.clone();
   return g;
 }
 /* the debris of a wreck: a pile of rubble under it */
@@ -46229,6 +46371,27 @@ manModel = (f => d => {
     const g = new THREE.Group(); g.add(s.root); return g;
   } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
 })(manModel);
+/* the medic's marks on the pack's animated soldier (cf-pol-modelos): a white armband round the left upper arm and a white disc with a red
+   cross on the helmet's top, children of those bones (UpperArm_L, Head), so that they move with him; in the bones' own units (the armature
+   is scaled a hundred times: .001 is some 10 cm), y along the bone. The box rig's medic keeps the marks of before; a slot used by another
+   soldier hides them */
+const PMED = { band: [.00055, .0008, .0011], disc: [.00118, .00012, .00222], cross: [.0014, .00038, .0002] };
+function packMedMarks(root) {
+  const arm = root.getObjectByName('UpperArm_L'), head = root.getObjectByName('Head'); if (!arm || !head) return [];
+  const wm = mat(0xeeeeee), rm = mat(0xc8102e), P = PMED, L = [];
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(P.band[0], P.band[0], P.band[1], 10), wm); band.position.y = P.band[2]; arm.add(band); L.push(band);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(P.disc[0], P.disc[0], P.disc[1], 12), wm); disc.position.y = P.disc[2]; head.add(disc); L.push(disc);
+  for (const r of [0, Math.PI / 2]) { const c = new THREE.Mesh(new THREE.BoxGeometry(P.cross[0], P.cross[2], P.cross[1]), rm); c.position.y = P.disc[2] + P.disc[1] / 2 + P.cross[2] / 2; c.rotation.y = r; head.add(c); L.push(c); }
+  return L;
+}
+const packMedic = d => !!(d && d.med && !d.irr);
+packPose = (f => (s, m, dt, fresh) => {
+  f(s, m, dt, fresh);
+  const on = packMedic(m.def) && !m.civ && !m.dead;
+  if (on && !s.med) s.med = packMedMarks(s.root);
+  if (s.med) for (const o of s.med) o.visible = on;
+})(packPose);
+manModel = (f => d => { const g = f(d); if (packMedic(d) && g && g.getObjectByName && g.getObjectByName('Head')) packMedMarks(g); return g; })(manModel);
 /* each frame: what came in is built again, the people chosen before and tidied after */
 syncScene = (g => dt => {
   if (PACK.dirty) {
@@ -46933,11 +47096,14 @@ hudMan = (g => (P, u, ink, acc, disp, blink, seat) => {
     else say('KIT DE PRIMEIROS SOCORROS  ×' + (P.bnd | 0), P.bnd > 0 ? 'Segure o clique perto de um aliado caído ou ferido (' + SAN.pl.r + ' m), ou sem ninguém para tratar a si mesmo' + back : 'Sem curativos: reabasteça perto de um caminhão ou numa base', !(P.bnd > 0));
   } else say('ARRASTAR FERIDO', P.drg ? 'Arrastando ' + sanName(P.drg) + ': ande até o abrigo (devagar); o clique solta' : 'Clique perto de um caído (' + SAN.pl.dragR + ' m) para arrastá-lo' + back, false);
 })(hudMan);
-/* the look: the armband and the cross on the helmet, two pieces of the rig's own */
+/* the look: the armband and the cross on the helmet, two pieces of the rig's own; only on a medic the rig posed (cf-pol-modelos: one drawn
+   as the pack's animated model has no rig pose of his own, and before any soldier far off was posed there was no rig at all: rig.san
+   threw in the scene's frame and the picture stopped while such a medic was near the eye) */
 poseMan = (g => (m, put) => {
   g(m, put);
   if (!m.def || !m.def.med || m.def.irr || m.dead || m.civ) return;
   const R = rig;
+  if (!R || (typeof PM !== 'undefined' && PM.by && PM.by.has(m) && PM.by.get(m).m === m)) return;
   if (!R.san) {
     const box = (par, x, y, z, sx, sy, sz) => { const o = new THREE.Object3D(); o.position.set(x, y, z); o.scale.set(sx, sy, sz); par.add(o); return o; };
     R.san = [box(R.arms[0], 0, -.14, 0, .14, .12, .14), box(R.body, -.01, 1.0, 0, .22, .02, .22), box(R.body, -.01, 1.012, 0, .06, .02, .17), box(R.body, -.01, 1.012, 0, .17, .02, .06), box(R.arms[0], 0, -.14, -.072, .05, .05, .01)];

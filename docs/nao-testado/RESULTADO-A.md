@@ -87,10 +87,3 @@ Achado e não consertado (seção CEREBRO, outra frente): a defesa por posiçõe
 | cf-lideres-p3 | em parte | morto o líder, um cabo assume em 2 s e a esquadra segue a missão (215–220 m em 60 s contra 223 m sem a perda) | — |
 
 Suítes que já falham no `main` (iguais com e sem estes lotes): `sim-split` (`rtsS`/`rtsBrain` nomeados em seções CEREBRO), `inf-drills` (4 checagens), `brain-lider` ("the unit card"), `mcp-general` (o texto `far`, ver o lote 1).
-
-## Rodada 2 (depois dos cinco lotes)
-
-| Documento | Resultado | Evidência | Conserto e teste |
-|---|---|---|---|
-| cf-bombardeiro | **falhou** a pontaria, consertado | o tapete do B-2 fora do alvo era o procedimento `radar-aa` disparando em plena corrida (comandos em `roll 1` enquanto o `stkFly` pedia reta): a linha passava 170 m ao lado ou a corrida era abandonada ("arremete e volta") | nenhum procedimento de aeronave manobra o bombardeiro estratégico enquanto ele alinha e corre (`daHeld`; os flares continuam); `tests/bomber-run.js`: antes arremete e nenhuma cratera, depois 8 crateras com a mais perto a 24 m do alvo |
-| cf-colisao-veiculos | visto, não mudado | a calibragem do golpe (`VCOL.v` 20 m/s em velocidade do mapa, 2,3 × a do painel) mata os dois tanques num choque de frente a toda velocidade, contra "os dois perdem pouco hp" do documento; o exemplo do autor era a 10 m/s | escolha de balanço para o capitão (dividir o fechamento por `GSPD` deixaria ~36%) |

@@ -1,5 +1,9 @@
 # Cérebro P2: serviço de posição e pontos de abrigo (não testado)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok, menos o custo
+- `tests/tps.js`: 25 checagens passam (registro, muro do lado certo, janela, canto, parede derrubada, 6 homens a ≥ 3 m, perfis, `coverSpot`, contra blindado). Falha só o custo, que é medido: 20 ms por consulta contra a meta de 0,15 ms. O próprio teste avisa que o vm do harness deixa as buscas globais lentas, e a conta toda estava presa a 12 núcleos com torneios de outras frentes. Não é defeito do código.
+- **Continua sem teste:** o custo no navegador (`tpsStat()`), as suítes antigas que o `coverSpot` muda, o A×B e o online.
+
 Tarefa `cf-p2-posicao`, pacote P2 da pesquisa `cf-cerebro-pesquisa` (arquitetura do "cérebro" dos soldados). Tudo numa seção nova do HTML, `/* ---------- CEREBRO: posicao (P2) */`, logo antes da cena 3D; o código antigo só é tocado por ganchos de embrulho.
 
 ## O que mudou

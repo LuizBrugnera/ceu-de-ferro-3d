@@ -1,5 +1,11 @@
 # cf-pol-modelos: braços e mãos da arma em 1ª pessoa (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok, com um conserto
+- Navegador, 1ª pessoa (assento a pé), mesma cena semeada: Fuzileiro de Hoje (M4), Schütze de 1944 (Kar98k), Operador de Javelin (o tubo no ombro) e Sniper de 1944 (Springfield com luneta). Os braços redondos e os punhos aparecem; nenhum erro no console.
+- **Conserto**: no Kar98k (Schütze e Sniper de 1944) flutuava ao lado do fuzil um pente de 5 balas. Era um adereço solto que o modelo da fonte (`w_kar98.glb`) trazia ao lado da culatra, e que também empurrava para cima a caixa do fuzil: a luneta do Sniper ficava 7 cm acima e 3,4 cm ao lado da arma. Agora `PACK.cut` corta esse pente quando o modelo chega (`packCut`, depois de `packFix`), e a luneta fica apoiada na culatra, no meio do fuzil (o clarão da boca também). Teste: `tests/pack-cut.js` (no `all.sh`), sobre o `.glb` de verdade. O defeito já existia antes do #173.
+- Custo: a mesma cena do Schütze, mediana de 31 quadros da cena: 74–195 ms depois e 89–122 ms antes. Ruído da máquina cheia.
+- **Continua sem teste:** pistola, metralhadoras, morteiro e compartimentos (`slotVm`), correndo, recarregando e trocando de arma.
+
 ## O que mudou
 
 Na arma em 1ª pessoa (`vmBuild`), os braços eram caixas esticadas e as mãos, tijolos (`VM.box`). Agora:

@@ -1,5 +1,9 @@
 # cf-popk-medidor: medidor de orçamento da IA (popK) por média sustentada
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em 1944, nesta máquina presa a 12 núcleos (IA do anfitrião de 175–193 ms por quadro): o teto desce 10% a cada 10 s (70% aos 30 s, 60% aos 40 s), como desenhado para sobrecarga sustentada. Cada linha do diário traz os números medidos ("IA do anfitrião em 193,04 ms por quadro em média nos últimos 10 s (orçamento 4 ms; pior quadro 634 ms, comandante 35,9 ms)").
+- **Continua sem teste:** uma máquina com GPU folgada (o caso de 57 qps, onde o teto deve ficar em 100%) e o percentual no painel do convidado online.
+
 Issue: https://github.com/LuizBrugnera/ceu-de-ferro-3d/issues/35
 
 ## O que mudou

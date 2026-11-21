@@ -37931,6 +37931,60 @@ function bushTex() {
 }
 const bushMat = hex => mat(hex, { vertexColors: true, flatShading: false, map: bushTex() });
 
+/* ---------- an airfield (cf-pol-modelos): its runway and markings, and its buildings (BASE), turned toward the middle of the map. The
+   buildings are the world objects the simulation placed (genTerrain: id 200 + 10 t + j, BASE[era] for sides 0 and 1, BASE.ins for side 2's
+   hideout), each drawn on its own object's ground, its meshes kept in wo.base (lookObj: the first stays as the rubble, the rest go with the
+   building). Side 2's hideout has no runway: it was drawn as an airfield, three hangars and a tower where nothing stood, its sheds unseen.
+   AFL, the look: a modern hangar's hall with doors on its front (toward the runway) and an edge round its roof; an old one's round arch
+   with its ribs and its doors; the tower's glass cab with its floor, its roof, its frames and a mast; the hideout's sheds (its hangars)
+   with a pitched roof, a door and windows, and its low bunker (its ctl) with a slab and a firing slit. The details of each building are
+   one mesh; the runway's markings too ---------- */
+const AFL = { run: 0x3a3c3b, mark: 0xd8d3bd, hall: 0x70756f, door: 0x3c403e, arch: 0x5b5f4d, rib: 0x3a3c33, cab: 0x7ea2ae, shed: [0x8b8069, 0x9a8f78], roof: [0x6b6e66, 0x7a5038], dark: 0x2b2a26, bunker: 0x7d7460, slab: 0x6a624f };
+function baseScene(b, t) {
+  const g = new THREE.Group(), gy = hgt(b.x, b.z), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
+  const box = (sx, sy, sz, x, y, z) => new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z);
+  g.position.set(b.x, gy, b.z); g.rotation.y = headTo(b.x, b.z, S.W / 2, 0);   // as genTerrain turns its objects
+  if (t < 2) {
+    add(new THREE.BoxGeometry(1100, 1, 44), mat(AFL.run), 0, 2, 150);
+    const L = []; for (let i = -480; i <= 480; i += 120) L.push(box(40, 1.1, 2, i, 0, 0));
+    add(vkGeo(L), mat(AFL.mark), 0, 2.1, 150);
+  }
+  (t > 1 ? BASE.ins : BASE[S.era]).forEach(([k, x, z, w, d, hh], j) => {
+    const id = 200 + t * 10 + j, o = S.T.byId[id], y = o ? o.y - gy : 0, ms = (wo.base[id] = []), keep = (me, c) => { me.userData.c = c; ms.push(me); return me; };
+    const one = (l, c, op) => keep(add(vkGeo(l), mat(c, op), x, y, z), c);   // pieces placed about the building's foot, as one mesh
+    if (k === 'hangar' && t > 1) {   // a shed: walls, a pitched roof along its length, a door and two windows on its front
+      const c = AFL.shed[j % 2], rc = AFL.roof[j % 2], rh = Math.min(3, d * .22), sh = new THREE.Shape();
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(c), x, y + hh / 2, z), c);
+      sh.moveTo(-d / 2 - .4, 0); sh.lineTo(0, rh); sh.lineTo(d / 2 + .4, 0); sh.closePath();
+      const rg = new THREE.ExtrudeGeometry(sh, { depth: w + .8, bevelEnabled: false }); rg.translate(0, 0, -(w + .8) / 2); rg.rotateY(Math.PI / 2); rg.translate(0, hh, 0);
+      one([rg], rc);
+      one([box(Math.min(4, w * .3), hh * .7, .3, 0, hh * .35, -d / 2 - .1), box(1.4, 1, .3, -w * .32, hh * .62, -d / 2 - .1), box(1.4, 1, .3, w * .32, hh * .62, -d / 2 - .1)], AFL.dark);
+    } else if (k === 'hangar' && S.modern) {   // a hall: four door leaves on its front, an edge round its roof
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(AFL.hall), x, y + hh / 2, z), AFL.hall);
+      const L = [], dw = w * .84 / 4;
+      for (let i = 0; i < 4; i++) L.push(box(dw - .35, hh * .8, .4, (i - 1.5) * dw, hh * .4, -d / 2 - .2));
+      L.push(box(w + .6, .9, .6, 0, hh, -d / 2), box(w + .6, .9, .6, 0, hh, d / 2), box(.6, .9, d, -w / 2, hh, 0), box(.6, .9, d, w / 2, hh, 0));
+      one(L, AFL.door);
+    } else if (k === 'hangar') {   // the old arch, round, with its ribs and the doors on its front
+      const hg = new THREE.CylinderGeometry(24, 24, 55, 20, 1, false, 0, Math.PI); hg.rotateZ(Math.PI / 2); hg.rotateY(Math.PI / 2);
+      keep(add(hg, mat(AFL.arch, { side: THREE.DoubleSide, flatShading: false }), x, y, z), AFL.arch);
+      const L = []; for (let i = 0; i <= 5; i++) L.push(new THREE.TorusGeometry(24.15, .35, 4, 24, Math.PI).translate(0, 0, -27.5 + i * 11));
+      const dr = new THREE.CircleGeometry(19, 18, 0, Math.PI); dr.rotateY(Math.PI); dr.translate(0, 0, -27.65); L.push(dr);
+      one(L, AFL.rib);
+    } else if (k === 'ctl' && t > 1) {   // the hideout's low bunker: a slab over it and a firing slit
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(AFL.bunker), x, y + hh / 2, z), AFL.bunker);
+      one([box(w + 1.2, .6, d + 1.2, 0, hh + .3, 0)], AFL.slab);
+      one([box(w * .6, .45, .3, 0, hh * .7, -d / 2 - .1)], AFL.dark);
+    } else if (k === 'ctl') {   // the tower and its glass cab, with the cab's floor, roof, frames and a mast
+      const c = S.modern ? 0x7b807a : 0x6a5a44;
+      keep(add(new THREE.BoxGeometry(9, 34, 9), mat(c), x, y + 17, z), c); keep(add(new THREE.BoxGeometry(15, 8, 15), mat(AFL.cab, { shininess: 40 }), x, y + 38, z), AFL.cab);
+      const L = [box(16.6, .8, 16.6, 0, 33.6, 0), box(17.2, 1, 17.2, 0, 42.5, 0), box(.25, 6, .25, 4, 46, 4)];
+      for (const [i, j2] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) L.push(box(.35, 8, .35, i * 7.55, 38, j2 * 7.55));
+      one(L, c);
+    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? foeCol(t) : FRIEND }), x + 8, y + hh - 4, z)); }
+  });
+  return g;
+}
 function buildWorld() {
   if (scene) scene.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   const E = S.E, W = S.W, HW = S.HW, T = S.T, N = T.N, P = PAL[S.era], c = new THREE.Color();
@@ -37968,20 +38022,7 @@ function buildWorld() {
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
   /* airfields, turned toward the middle of the map */
   wo = { seen: 0, at: {}, base: {}, cv: {}, falls: [], trees: null, houses: null, roofs: null, holes: null, rocks: null, bushes: null };
-  S.base.forEach((b, t) => {
-    const g = new THREE.Group(), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
-    add(new THREE.BoxGeometry(1100, 1, 44), mat(0x3a3c3b), 0, 2, 150);
-    for (let i = -480; i <= 480; i += 120) add(new THREE.BoxGeometry(40, 1.1, 2), mat(0xd8d3bd), i, 2.1, 150);
-    BASE[S.era].forEach(([k, x, z, w, d, hh], j) => {   // its buildings are world objects (BASE): the meshes of each are kept, to show its stage
-      const ms = (wo.base[200 + t * 10 + j] = []), keep = (me, c) => { me.userData.c = c; ms.push(me); };
-      if (k === 'hangar') {
-        if (S.modern) keep(add(new THREE.BoxGeometry(w, hh, d), mat(0x70756f), x, hh / 2, z), 0x70756f);
-        else { const hg = new THREE.CylinderGeometry(24, 24, 55, 10, 1, false, 0, Math.PI); hg.rotateZ(Math.PI / 2); hg.rotateY(Math.PI / 2); keep(add(hg, mat(0x5b5f4d, { side: THREE.DoubleSide }), x, 0, z), 0x5b5f4d); }
-      } else if (k === 'ctl') { const c = S.modern ? 0x7b807a : 0x6a5a44; keep(add(new THREE.BoxGeometry(9, 34, 9), mat(c), x, 17, z), c); keep(add(new THREE.BoxGeometry(15, 8, 15), mat(0xb9d3d8), x, 38, z), 0xb9d3d8); }
-      else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? FOE : FRIEND }), x + 8, hh - 4, z)); }
-    });
-    g.position.set(b.x, hgt(b.x, b.z), b.z); g.rotation.y = headTo(b.x, b.z, W / 2, 0); scene.add(g);
-  });
+  S.base.forEach((b, t) => scene.add(baseScene(b, t)));
   /* forests, towns, clouds */
   const mx = new THREE.Matrix4(), q0 = new THREE.Quaternion(), v0 = new THREE.Vector3(), s0 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
   /* the trees and the houses are the terrain's world objects: one instance each, by id, which lookObj() changes with the object's stage */

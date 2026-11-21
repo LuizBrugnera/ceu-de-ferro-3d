@@ -1,5 +1,9 @@
 # Cérebro P7: honestidade (não testado)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): falha (1 checagem estática, de outra seção)
+- `tests/brain-honesty.js`: tudo passa menos a checagem do código: "no S.men, S.units, S.bombs or S.planes in a CEREBRO section outside the perception functions". Quem quebra é a seção `CEREBRO: defesa` (DFP, cf-defesa-posicoes, mais nova que o P7): `dfpTkGo` percorre `S.units` para mandar blindados e antiaéreas à defesa. As checagens dinâmicas passam (a coluna não vista, `drInc` pelo relato ouvido, a 3,4° do verdadeiro). Não consertado: é a seção do cérebro, de outra frente; ou a defesa lê o que o lado sabe, ou entra na lista de exceções do teste.
+- **Continua sem teste:** o A×B longo e as suítes de exercícios que dependem de `q.fd`/`A.fd`.
+
 Tarefa `cf-p7-honestidade`, pacote P7 da pesquisa do cérebro do soldado (tabela 2.6). Pedido: a IA decide pelo que percebe, nunca pelas listas do mundo (`S.men`, `S.units`, `S.bombs`, `S.planes`). Um teste impede que essas leituras voltem.
 
 ## O que mudou

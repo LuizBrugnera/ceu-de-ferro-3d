@@ -6,9 +6,11 @@
   - Abrams: retículo vermelho aceso de noite e o círculo pequeno da queda no centro; dentro da luneta, nenhum texto.
   - Visor do B-17 de noite: a faixa da salva tracejada e os ◇ de cada bomba, âmbar, com as bombas restantes em pontos. B-2: a tela de alvo cinza com a faixa.
   - Mapa de tiro: prancheta em 1944, tablete hoje.
-- **Conserto 1, cabine do jato**: na cabine (assento com painel) a lista de armas começava em 170 u, 16 u dentro do painel de danos, e a 1ª linha ("BTN ESQ M61A2 480") ficava escondida sob ele. Agora a lista começa abaixo do painel, pelos números do próprio painel (`DMGP`).
-- **Conserto 2, aviões inimigos**: vários aviões juntos na tela (uma formação a 15 km) escreviam as distâncias umas sobre as outras. Agora os próximos dividem um rótulo com a menor distância e ×n ("14,3 km ×4"), com vírgula decimal. O travado continua com o rótulo próprio. Teste dos dois: `tests/hud-labels.js` (no `all.sh`).
-- Custo: `drawHud` na mesma cena do F-22, mediana de 31: 6,4 ms antes e 6,8 ms depois. Ruído da máquina cheia (outra rodada deu 13 ms).
+- **Dois defeitos achados** (o cf-pol-hud, #172, achou e consertou os mesmos ao mesmo tempo; ficou a versão do main, com o número do painel tirado de `DMGP`):
+  - **Cabine do jato**: na cabine (assento com painel) a lista de armas começava em 170 u, 16 u dentro do painel de danos, e a 1ª linha ("BTN ESQ M61A2 480") ficava escondida sob ele. Agora começa abaixo do painel.
+  - **Aviões inimigos**: vários aviões juntos na tela (uma formação a 15 km) escreviam as distâncias umas sobre as outras. Agora `tagTxt` escreve o travado e depois o mais perto, e deixa de fora (ou sobe uma linha) o que cairia em cima.
+  - Teste dos dois: `tests/hud-labels.js` (no `all.sh`), sobre o código do main; a página anterior falha 4 checagens.
+- Custo: `drawHud` na mesma cena do F-22 (semente 7, parada), mediana de 31 chamadas: 6,4 ms na página de antes e 4,2–4,3 ms na página mesclada (duas rodadas). A máquina estava cheia, então isso só mostra que não piorou.
 - **Continua sem teste:** a salva de Grad (a cena não chegou a disparar: sem solução de tiro) e o custo da fita de fumaça; luneta do sniper; lança-rojão; Javelin; drone (horizonte do OSD); câmera das armas; CCIP em mergulho; Revi com as marcas de mergulho (só a captura, não conferida de perto).
 
 Tarefa `cf-miras-impl`. O capitão escolheu uma direção por grupo no quadro das miras e disse "implemente".

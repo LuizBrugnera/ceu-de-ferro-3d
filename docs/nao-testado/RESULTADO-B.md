@@ -45,9 +45,9 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
 
 | Documento | Resultado |
 | --- | --- |
-| cf-mapa-cidades | **conserto**: no mapa do General, o nome da vila do ponto de conquista saía duas vezes. `tests/town-names.js`. Nomes vistos no General (1920) e no mapa de tiro de 1944. |
+| cf-mapa-cidades | **defeito achado** (consertado em paralelo pelo cf-pol-hud): no mapa do General, o nome da vila do ponto de conquista saía duas vezes. `tests/town-names.js` cobre o conserto. Nomes vistos no General (1920) e no mapa de tiro de 1944. |
 | cf-medico | parte: cartão do Sanitäter no hangar; 56 médicos em 455 soldados da IA; eventos do médico na analytics. O soldado do cartão segura fuzil (o pack não tem pistola). |
-| cf-miras-impl | **2 consertos**: a 1ª linha de armas da cabine do jato escondida sob o painel de danos, e distâncias de aviões empilhadas no HUD (agora "14,3 km ×4"). `tests/hud-labels.js`. 12 óticas em 1280 e 1920 px sem erro. |
+| cf-miras-impl | **2 defeitos achados** (consertados em paralelo pelo cf-pol-hud): a 1ª linha de armas da cabine do jato escondida sob o painel de danos, e distâncias de aviões empilhadas no HUD. `tests/hud-labels.js` cobre os dois. 12 óticas em 1280 e 1920 px sem erro. |
 | cf-modo-rts | ok (parte): câmera, W/D, névoa (276 de 323 escondidos), quadro da esquadra de perto, esconder painéis, 1280 e 1920 px. |
 | cf-moitas-floresta | parte: 88.165 células de mato e 380 faixas no mapa 11; as moitas aparecem na orla. |
 | cf-moitas-mato | achado: as sebes do mapa 7 são 0 no mapa de 3 lados (ids a 65.448 de 65.536); o mato do mapa 10 cobre. |

@@ -2,7 +2,7 @@
 
 ## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok, com um conserto
 - Navegador (Chrome headless, servidor em 127.0.0.1). Mapa do General em 1920 px (Assistir, Hoje, 3 lados): os nomes das aldeias e vilas aparecem (Aldeia do Açude, Aldeia da Várzea, Aldeia de Alto, Aldeia da Capela, Vila do Carrascal). Mapa de tiro em 1944 (Hummel, M): os nomes aparecem na prancheta (Aldeia do Açude, Vila do Moinho, Sede, Vila das Oliveiras, Três Pinheiros). Nenhum lote disfarçado da sede desenhado. Nenhum erro no console.
-- **Conserto**: no mapa do General, a vila que leva o nome do ponto de conquista saía duas vezes (o nome apagado da vila em cima e o rótulo aceso do ponto embaixo). Agora `drawTownNames(…, pts)` deixa esse nome para o ponto, só no mapa do General. Os mapas de tiro, do drone e da batalha, cujos pontos são letras, continuam nomeando todas. Teste: `tests/town-names.js` (no `all.sh`).
+- **Defeito achado** (o cf-pol-hud, #172, consertou o mesmo ao mesmo tempo; ficou a versão do main): no mapa do General, a vila que leva o nome do ponto de conquista saía duas vezes (o nome apagado da vila em cima e o rótulo aceso do ponto embaixo). Agora `drawTownNames(…, 'skip')` deixa esse nome para o ponto, e o mapa da batalha o desce para baixo do anel. Os mapas de tiro e do drone continuam nomeando todas. Teste: `tests/town-names.js` (no `all.sh`).
 - **Continua sem teste:** as pegadas tingidas no minimapa vistas de perto; o mapa do drone com zoom; partida online com dois humanos; mapas antigos sem `T.net`; a orientação das pegadas longe de estrada.
 
 ## O que mudou

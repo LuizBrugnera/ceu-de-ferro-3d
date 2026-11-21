@@ -1,49 +1,27 @@
-# Granada quebra as casas (cf-granada-casas)
+# Granada quebra as casas (cf-granada-casas): o que ainda falta testar
 
-Regra do capitão: implementado sem testes. Só o smoke: o servidor sobe e a página abre sem erro no console (Chromium headless), e uma conta rápida no harness (3 granadas no meio de um cômodo de reboco quebram os vidros, abrem a porta da divisória e deixam a parede com ~40% da vida).
+Testado (cf-pol-testes-a, no harness, com granadas de verdade: `lobbed` → `nadeStep` → `explode` com o `kg`; script em `/home/luiz/secondmate/data/cf-pol-testes-a/ag4/proof/nade.js` e `nade2.js`):
+- **Granada encostada numa parede externa sem abertura**:
+  - reboco lasca com 2 e fura com 3;
+  - tijolo lasca com 2 e fura com 4;
+  - pedra (igreja) lasca com 3 e fura com 6;
+  - celeiro de madeira e galpão de chapa furam com 1.
+  - Um pouco mais fraco que o doc dizia (4, 5 e 7), mas na mesma ordem.
+- **Uma granada a 1 m da frente** quebra o vidro da janela daquele vão, e só ele.
+- **Carga de 3 kg num cômodo do térreo de um sobrado**: o forro cai (estado 3) e as paredes do cômodo também.
+- **Outras explosões a 1 m da frente de uma casa**: todas quebram o vidro.
+  - Morteiro de 81 mm (1 kg) lasca a parede com janela (75%), RPG-7 também (84%).
+  - Mina AP só quebra o vidro.
+  - IED de estrada (5 kg) e carro-bomba derrubam a parede, e a casa fica de pé.
+- **Carga na parede (`bldStep`)**: a parede some.
+  - Do cômodo atrás, a porta da divisória e a janela somem (o extra do cômodo). Uma porta a 3 m vira buraco, um vidro vizinho quebra.
+  - As paredes sólidas ao lado não levam nada.
 
-## O que mudou
+**Achado de balanço (não mexi)**: a primeira granada no meio de um cômodo fechado de reboco quebra os vidros, abre a porta da divisória e deixa as paredes com uns 46%. A segunda e a terceira quase não fazem nada (45%). Com o vidro quebrado, o cômodo deixa de contar como fechado (`shut`). Aí a granada no meio do cômodo fica a ~2,3 m das paredes, quase no limite `wall × ∛kg` = 2,5 m. Então "2 abrem buraco" (item 1 do "como testar" antigo) não acontece. Ajuste em `CITY.chg` (`wall`, `conf`, ou contar o cômodo com o vidro quebrado) se o capitão quiser.
 
-**`cityCharge(x, y, z, kg, by, own)` / `bCharge`** (logo antes de `bDmg`): o estouro de uma carga pequena entre os prédios, pela carga em kg de TNT. Tudo passa por `bDmg`, o mesmo dano por elemento que o canhão e a carga na parede já usam.
-- Vidro: janelas a até `glass × ∛kg` m (granada ~4 m, morteiro ~7 m) quebram (estado 1, como o tiro de fuzil).
-- Porta: a até `door × ∛kg` m (granada ~1,5 m) vira buraco.
-- Parede: a até `wall × ∛kg` m leva `dmg × kg^(2/3)` caindo com o quadrado da distância; parede fina (madeira, chapa: `th < 0,15`) e divisória 2,5×; parede com janela, porta ou portão 2×. Granada encostada: reboco precisa de ~4 (lasca com 2), tijolo ~5, pedra ~7; celeiro de madeira e galpão de chapa abrem com uma.
-- Cômodo fechado (o vão em que estoura, com 3 ou mais das 4 paredes e o forro de pé, vidro inteiro): as paredes dele levam até 2,5× e a distância conta pela metade; com carga de 1 kg ou mais, o forro (laje de cima / telhado) leva também e pode cair (`bldFell`).
-- `own`: a explosão que já tem `cityBlast` grande (morteiro, artilharia, sabotagem, colete, carro-bomba: `ob > CITY.chg.cut`) só ganha vidro, porta e o extra do cômodo; as outras (granada, foguete, mina, IED de comando e de estrada) levam a parede inteira por aqui.
-- Configuração: `CITY.chg` (comentada no código).
-
-**`explode(..., ob, kg)`**: 10º argumento, a carga. Os 6 embrulhos de `explode` repassam o `kg`. Quem passa: granada (`CITY.chg.nade` 0,2 kg), projétil `he` que não é do tanque (dano/60: morteiro 81 mm 1 kg), foguete `heat` (dano/250), drones (FPV, munição vagante), minas (AT e de comando dano/40; AP 0,25), IED do insurgente e da guerrilha (dano/40), colete e carro-bomba (dano/40), sabotagem (3 kg). Tanque (perfurante e HE) e bomba de avião continuam como eram (sem `kg`).
-
-**Carga na parede (`bldStep`)**: além dos 150 na parede, quebra vidros e portas em volta e faz o extra do cômodo atrás dela (as paredes vizinhas não levam mais nada).
-
-**Abrigo e entradas**: nada novo; o buraco passa por `bSet`, que já marca as células sujas do registro do P2 (`tpsDirty`), soma `B.rev` (o cache de `bldCover`) e muda `bldEnts`/`tpsEnts` (entradas que o líder P3 e limpar prédio leem).
-
-**Online**: `bDmg` sem `rx`: o convidado manda o dano da própria granada ao anfitrião (`Net.yh`), o anfitrião aplica e manda o estado (`Net.yq`). Nenhuma mensagem nova.
-
-**Visual**: só o que já existia (poeira de `bSet`, pedaço de `S.debris` 'chunk' pequeno quando a porta voa). Não mexi em `blastFx` (cf-explosoes).
-
-**Textos**: ajuda do soldado (prédios) e README.
-
-## O que NÃO foi testado
-
-Nada além do smoke. Em especial: granada de verdade numa partida (jogador e IA); morteiro, foguete, mina, IED, colete e carro-bomba perto de casa; a laje/telhado caindo com carga grande num cômodo; a IA (P1/P2/P3) usando o buraco novo como entrada e abrigo; online com convidado; desempenho com muitas granadas numa vila.
-
-## Riscos
-- **Balanço**: a IA joga granada para limpar prédio (`CITY.ai.nade`): casas podem ficar cheias de buracos e lajes caírem mais vezes; celeiro e galpão abrem com uma granada. Ajuste em `CITY.chg` (`dmg`, `wall`, `conf`, `thin`).
-- **Mina/IED de estrada** perto de casa agora lasca e fura parede (antes `ob 0`: nada).
-- **Morteiro dentro de cômodo** ficou mais forte (cityBlast + extra do cômodo).
-- **Online**: muitos `bDmg` do convidado num quadro (vidros) vão no `Net.yh`; vidro e dano no mesmo elemento no mesmo quadro: o vidro some do pacote (o dano ganha).
-- **Detecção de cômodo**: pelo vão (bay) em que o ponto cai; a granada encostada na face de dentro de uma parede externa pode contar como fora (ou o contrário) por causa da espessura.
-- **Carga na parede**: o ponto do cômodo atrás é 0,3 m para dentro do eixo da parede; em parede interna pode pegar o vão errado.
-
-## Como testar depois
-1. `npm start` (ou `HOST=127.0.0.1 PORT=8080 node server.js`), `http://localhost:8080`, entrar como soldado (1944 e Hoje).
-   - Granada (F) a ~1 m de uma casa de reboco: vidros perto quebram; 2 granadas lascam, 4 abrem buraco. Num celeiro: uma abre buraco.
-   - Granada pela janela, dentro do cômodo: vidros do cômodo todos quebram, porta vira buraco, parede lasca; 2 abrem buraco.
-   - Carga na parede (N): vidros em volta quebram; nada a mais nas paredes vizinhas.
-   - Sapador com mina/IED perto de casa: a parede mais perto lasca ou fura.
-2. Console: `cityCharge(S.my.x, S.my.y + 1, S.my.z, 3, S.my, true)` dentro de um sobrado: o forro cai.
-3. Online (dois navegadores): granada do convidado na casa: o buraco aparece nos dois.
-4. IA: uma esquadra limpando prédio (líder P3) entra pelo buraco novo; `covBld` lista o buraco como `win`.
-5. Suítes: `node tests/city.js`, `node tests/city-online.js`, `node tests/infantry.js`, `node tests/brain-soldado.js`, `node tests/world.js` (comparar com o main).
-6. Conta rápida usada no smoke: `/home/luiz/firstmate/data/cf-granada-casas/smoke.js` (ajustar o caminho do harness).
+## O que ainda não foi testado
+- **A granada lançada por um soldado numa partida** (tecla F do jogador e `CITY.ai.nade` da IA limpando prédio). Por exemplo, quantos buracos e lajes caídas aparecem numa vila numa partida de 20 min.
+- **A IA usando o buraco novo** como entrada e abrigo (P1/P2/P3, `covBld`, `bldEnts`).
+- **Online**: a granada do convidado vai pelo `Net.yh` e o buraco aparece nos dois. Precisa de `node tests/city-online.js` mais um teste com o convidado lançando.
+- **Desempenho** com muitas granadas numa vila.
+- **As suítes** `tests/city.js`, `city-online.js`, `infantry.js`, `brain-soldado.js` e `world.js` não rodaram de novo aqui. A linha de base do `main` estava sendo feita junto; comparar com ela.

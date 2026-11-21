@@ -3,7 +3,10 @@
 ## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): parte
 - Navegador, hangar 1944, Infantaria: o cartão do Sanitäter mostra Socorro no máximo, Walther P38, 2 granadas e 1 de fumaça, 6 curativos ("trata e estabiliza") e 3 granadas de fumaça. O soldado do cartão é o do pack, mas segura um fuzil (o pack não tem pistola) e não tem braçadeira (já listado nos riscos).
 - Navegador, Assistir em Hoje (3 lados), 68 s: 56 médicos entre 455 soldados nas esquadras da IA e 7 eventos `cb` do médico na analytics. Nenhum erro no console.
-- `tests/brain-medico.js`: veja o RESULTADO-B (rodado nesta tarefa).
+- `tests/brain-medico.js` (nunca tinha rodado), 6 sementes: **1 falha**.
+  - (a) o médico da esquadra trata o caído a 20 m: 6/6, em 9–10 s cada.
+  - (b) honestidade: fora da voz e da vista, o médico de outra esquadra não vem (6/6, certo). Mas **depois de "Médico!", dentro da voz, ele também não vem: 0/6** (devia vir). O socorro ouvido por outra esquadra não funciona. É do cérebro (`CEREBRO: medico`, `flOuve`/`sqRescue`), que outra frente cuida: não mexi.
+  - (c) a cruz vermelha: o soldado regular não toma o médico como alvo (6/6).
 - **Continua sem teste:** o jogador médico (compartimento 5, clique segurado, arrastar, HUD, ✚, "Vidas salvas"), a cruz vermelha segurando o fogo da IA, o online e o MCP.
 
 Regra do capitão: implementado sem testes. Só rodei um smoke de ~1 minuto: `node --check` do servidor, do MCP e do exercício novo; o script inteiro da página compila; a parte de simulação carrega no `tests/harness.js` e roda 2 s de batalha em 1944 e hoje (as esquadras saem com médico: 25 de 137 e 24 de 158 soldados); o servidor sobe e serve a página (HTTP 200). O navegador headless deste node não abriu a página (timeout de navegação), então **a parte de tela não foi vista rodando**.

@@ -97,6 +97,9 @@ console.log('-- the HUD does not write over itself --');
   const dh = html.slice(html.indexOf('let wy = hudWarn('), html.indexOf("if (paused) txt('PAUSADO'"));
   ok(/S\.feed\.forEach\([^\n]*wy \+ i \* 19 \* u/.test(dh) && !/ty \+ (36|58|76|94) \* u/.test(dh), 'the impact, artillery, base and protection lines take the next free line, and the feed comes after them');
   const hh = html.slice(html.indexOf('function helpHud('), html.indexOf('\n}\n', html.indexOf('function helpHud(')));
+  const sky = html.slice(html.indexOf('function skyHud('), html.indexOf('\n}\n', html.indexOf('function skyHud('))), cq = html.slice(html.indexOf('  txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u'), html.indexOf('  const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere()'));
+  const skyY = +((sky.match(/txt\(s, cw \/ 2, (\d+) \* u, 11 \* u/) || [])[1]), gap = +((cq.match(/let y = y0 \+ h \+ (\d+) \* u \+ \(S\.sky \? (\d+) \* u : 0\)/) || []).slice(1).reduce((a, b) => a + +b, 0));
+  ok(skyY === 50 && gap >= 38, 'the point being taken is written under the clock\'s line (skyHud at ' + skyY + 'u, the point at y0 + h + ' + gap + 'u), not over it');
   ok(/const low = hudLow; hudLow = 0;/.test(hh) && /low - 16 \* u - \(n - 1\) \* 16 \* u/.test(hh) && /hudLow = y0;/.test(html) && /if \(y0 > ch \/ 2\) hudLow = y0;/.test(html), 'the radio lines end above the panel the soldier\'s and the vehicle\'s HUD drew this frame');
 }
 console.log('-- the review (Partidas anteriores) closes with Esc wherever the focus is --');

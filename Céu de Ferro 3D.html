@@ -728,7 +728,7 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
         <div class="net" id="netBox" hidden>
           <p class="net-about">PvP online: gente e IA na mesma batalha, um time por lado. Conquista por pontos e tíquetes, com aliados ao lado.</p>
           <label for="pname">Nome do jogador</label>
-          <input id="pname" type="text" maxlength="16" autocomplete="off" spellcheck="false">
+          <input id="pname" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Jogador">
           <p id="netStatus" role="status"></p>
           <button class="chip" id="btnRetry" type="button" hidden>Tentar de novo</button>
           <p id="susNote" hidden></p>
@@ -16134,8 +16134,9 @@ function woodCut(ax, ay, az, bx, by, bz) {
 }
 /* is o under the canopy: kept for a second while it stays within move m of where it was looked at */
 function canopy(o) {
-  if (o.cnS === S && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
-  o.cnS = S; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
+  const k = S.cnK || (S.cnK = canopy.n = (canopy.n || 0) + 1);   // the state's number, not the state: an entity kept after its match (the bomb the camera followed, the vehicle left in the picker) held its whole battle alive through o.cnS (cf-pol-fluxos)
+  if (o.cnS === k && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
+  o.cnS = k; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
   return (o.cn = woodAt(o.x, o.z) || near(o.x, o.z, 1).some(t => t.k === 'tree' && S.os[t.id] < 2 && Math.hypot(t.x - o.x, t.z - o.z) < t.cr));
 }
 /* the rocks and bushes of a terrain, after everything else is placed */
@@ -20187,6 +20188,12 @@ function cqStep(dt) {
    clock to the next match (Q.left, the host's; the guests read it in cq) runs on here, and at 0 the host starts the next one. Without it the end
    screen said "Nova partida nesta sala em 25 s" for ever and the room never started again (cf-pol-fluxos; tests/rematch.js) */
 function overStep(dt) { if (S.cq && S.cq.ph) cqStep(dt); }
+/* a new state (a match, the hangar's battle behind it, a watch) keeps nothing of the last one alive. honTown's cache of 50 m cells (HONU)
+   kept the state each cell was worked out in, and was dropped only past 4096 cells; the analytics kept its last match's (ANA.S, and its live
+   manoeuvres, MVA.live, whose soldiers lead back to it). Each match
+   left its whole battle reachable: in the browser about 85 MB more after every join and every leave, the states alive 1, 2, 3, 5 after three
+   matches, until the tab ran out of memory (cf-pol-fluxos; tests/state-gc.js). Here, outside the brain's section, which keeps its cache */
+newState = (g => (e, m, o) => { HONU.clear(); ANA.S = null; MVA.live = new Map(); return g(e, m, o); })(newState);
 /* the point the player's body stands in, for the capture bar */
 function cqHere() {
   const P = S.my, Q = S.cq; if (!Q || !P || P.dead) return null;
@@ -37178,6 +37185,7 @@ function buildPlane(id) {
   const d = PLANES[id], m = d.mdl, g = new THREE.Group(), body = new THREE.Group(), pm = (g.userData.pm = {}), mats = (g.userData.mats = []), own = {}, dark = mat(0x222526);
   /* every damage part has a material of its own, so that it darkens apart from the rest; tag files a mesh under its part */
   const pmat = (pid, c, o) => own[pid] || (mats.push((own[pid] = mat(c, o))), (own[pid].userData.c = c), own[pid]), skin = pid => pmat(pid, d.c2, { side: THREE.DoubleSide });
+  const engSkin = pid => pmat(pid, d.c2, { side: THREE.DoubleSide, flatShading: false });   // the engines and nacelles round and smooth, as the fuselage (cf-pol-modelos)
   const tag = (pid, me) => { (pm[pid] || (pm[pid] = [])).push(me); return me; };
   g.userData.flames = [];
   const G = m.glb && glbModel(m.glb);
@@ -37190,7 +37198,7 @@ function buildPlane(id) {
     g.scale.setScalar(MS); return g;
   }
   for (let i = 0; i < m.fus.length - 1; i++) {
-    const a = m.fus[i], b = m.fus[i + 1], s = tag('hull', new THREE.Mesh(cylX(a[1], b[1], b[0] - a[0], 10), pmat('hull', d.c)));
+    const a = m.fus[i], b = m.fus[i + 1], s = tag('hull', new THREE.Mesh(cylX(a[1], b[1], b[0] - a[0], 14), pmat('hull', d.c, { flatShading: false, shininess: 14 })));   // cf-pol-modelos: rounder and smooth, as the textured ones
     s.position.x = (a[0] + b[0]) / 2; body.add(s);
   }
   body.scale.set(1, m.sy, m.sz); g.add(body);
@@ -37208,7 +37216,7 @@ function buildPlane(id) {
     const me = tag('fin', new THREE.Mesh(ge, skin('fin'))); me.position.z = z; me.rotation.x = Math.sign(z) * (m.fin.cant || 0); g.add(me);
   }
   if (m.prop) {
-    const sp = tag('eng', new THREE.Mesh(cylX(.38, .05, .9, 8), pmat('eng', 0x222526))); sp.position.x = m.prop[0]; g.add(sp);
+    const sp = tag('eng', new THREE.Mesh(cylX(.38, .05, .9, 12), pmat('eng', 0x222526, { flatShading: false }))); sp.position.x = m.prop[0]; g.add(sp);
     const dg = new THREE.CircleGeometry(m.prop[1], 20); dg.rotateY(Math.PI / 2);
     const disc = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({ color: 0xe8e6da, transparent: true, opacity: .22, side: THREE.DoubleSide, depthWrite: false }));
     disc.position.x = m.prop[0] + .1; g.add(disc);
@@ -37218,16 +37226,16 @@ function buildPlane(id) {
     const spat = new THREE.Mesh(new THREE.BoxGeometry(1.6, .6, .45), skin('gear')); spat.position.set(m.gear[0] + .1, -2.05, s * m.gear[1]); g.add(spat);
   }
   if (m.eng) for (const s of [1, -1]) {
-    const pid = s > 0 ? 'engR' : 'engL', e = tag(pid, new THREE.Mesh(cylX(m.eng[3] * .85, m.eng[3], m.eng[4], 10), skin(pid))); e.position.set(m.eng[0], m.eng[1], s * m.eng[2]); g.add(e);
-    const i = new THREE.Mesh(cylX(m.eng[3] * .8, m.eng[3] * .8, .1, 10), dark); i.position.set(m.eng[0] + m.eng[4] / 2 + .03, m.eng[1], s * m.eng[2]); g.add(i);
+    const pid = s > 0 ? 'engR' : 'engL', e = tag(pid, new THREE.Mesh(cylX(m.eng[3] * .85, m.eng[3], m.eng[4], 14), engSkin(pid))); e.position.set(m.eng[0], m.eng[1], s * m.eng[2]); g.add(e);
+    const i = new THREE.Mesh(cylX(m.eng[3] * .8, m.eng[3] * .8, .1, 14), dark); i.position.set(m.eng[0] + m.eng[4] / 2 + .03, m.eng[1], s * m.eng[2]); g.add(i);
   }
   if (m.nac) for (const n of m.nac) for (const s of [1, -1]) {   // more nacelles and the propellers of a heavy bomber (STK)
     const pid = s > 0 ? 'engR' : 'engL';
-    if (n[3] > 0) { const e = tag(pid, new THREE.Mesh(cylX(n[3] * .85, n[3], n[4], 10), skin(pid))); e.position.set(n[0], n[1], s * n[2]); g.add(e); }
+    if (n[3] > 0) { const e = tag(pid, new THREE.Mesh(cylX(n[3] * .85, n[3], n[4], 14), engSkin(pid))); e.position.set(n[0], n[1], s * n[2]); g.add(e); }
     if (n[5]) { const dg = new THREE.CircleGeometry(n[5], 18); dg.rotateY(Math.PI / 2); const disc = new THREE.Mesh(dg, new THREE.MeshBasicMaterial({ color: 0xe8e6da, transparent: true, opacity: .2, side: THREE.DoubleSide, depthWrite: false })); disc.position.set(n[0] + n[4] / 2 + .15, n[1], s * n[2]); g.add(disc); }
   }
   if (m.noz) for (const n of m.noz) {
-    const pid = n[2] > 0 ? 'engR' : 'engL', nz = tag(pid, new THREE.Mesh(cylX(.6, .75, 1.2, 10), pmat(pid, 0x222526))); nz.position.set(n[0] - .4, n[1], n[2]); g.add(nz);
+    const pid = n[2] > 0 ? 'engR' : 'engL', nz = tag(pid, new THREE.Mesh(cylX(.6, .75, 1.2, 14), pmat(pid, 0x222526, { flatShading: false }))); nz.position.set(n[0] - .4, n[1], n[2]); g.add(nz);
     const fl = flameMesh(n[0] - .8, n[1], n[2], .55); g.add(fl); g.userData.flames.push(fl);
   }
   g.scale.setScalar(MS); return g;
@@ -37691,6 +37699,16 @@ buildUnit = (f => (u, wreck) => {
    The textured models (mdl.glb) keep their own look; the stealth bomber wears none ---------- */
 const PROP = { blades: { stuka: 3, bf109: 3, spit: 4, p47: 4, he177: 4, b17: 3 }, chord: .24, col: 0x1f2122, spin: 40, blur: [.3, .8] };
 const CANOPY = { glass: 0x4f6872, hoops: [-.2, .14], tube: .035 };   // the canopy's glass; where the frame's hoops cross it (of its length, from its middle), how thick
+/* the propeller planes' outer wing and tailplane tips, rounded within the same span over this share of the tip's chord (at most .3 of the
+   span; the Spitfire's all but elliptical); an inner panel, whose tip is the next one's root (the Stuka's gull wing), keeps its square end */
+const WTIP = { spit: .95, bf109: .5, p47: .6, stuka: .45, he177: .45, b17: .5 };
+const wingOuter = (m, w) => !m.wings.some(v => v !== w && Math.abs(v.z0 - w.z0 - w.span) < .3 && Math.abs(v.a[0] - w.a[2]) < .2 && Math.abs(v.a[1] - w.a[3]) < .2);   // inner: another panel starts where it ends, with its chord
+function wingRound(w, s, k) {
+  const c = Math.abs(w.a[2] - w.a[3]), r = Math.min(c * k, w.span * .3), sp = w.span, f = (sp - r) / sp, mx = (w.a[2] + w.a[3]) / 2, xl = w.a[0] + (w.a[2] - w.a[0]) * f, xt = w.a[1] + (w.a[3] - w.a[1]) * f, sh = new THREE.Shape();
+  sh.moveTo(w.a[0], 0); sh.lineTo(xl, sp - r); sh.bezierCurveTo(xl, sp - r * .2, mx + c * .3, sp, mx, sp); sh.bezierCurveTo(mx - c * .3, sp, xt, sp - r * .2, xt, sp - r); sh.lineTo(w.a[1], 0); sh.closePath();
+  const t = w.t || .18, ge = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false, curveSegments: 5 }); ge.translate(0, 0, -t / 2); ge.rotateX(Math.PI / 2); if (s < 0) ge.scale(1, 1, -1);
+  return ge;
+}
 const INSIG = { kind: { stuka: 'balk', bf109: 'balk', he177: 'balk', spit: 'raf', p47: 'us', b17: 'us', su57: 'ru', su25: 'ru', tu160: 'ru', ah64: 'us', uh60: 'us', mi28: 'ru', mi8: 'ru' }, at: .62, size: [.72, 2.4], fus: .52, boom: .22, tex: {} };
 function insigTex(k) {
   if (INSIG.tex[k]) return INSIG.tex[k];
@@ -37746,6 +37764,11 @@ buildPlane = (f => id => {
   if (m.prop) blades(m.prop[0] + .18, 0, 0, m.prop[1]);
   if (m.nac) for (const n of m.nac) if (n[5]) for (const s of [1, -1]) blades(n[0] + n[4] / 2 + .2, n[1], s * n[2], n[5]);
   U.discs = []; g.traverse(c => { if (c.isMesh && c.material && c.material.isMeshBasicMaterial && c.material.transparent && c.geometry && c.geometry.type === 'CircleGeometry') { U.discs.push(c); c.userData.o = c.material.opacity; } });
+  if (WTIP[id]) m.wings.forEach((w, i) => {   // the tips rounded: each outer wing's mesh by side (the last, the tailplane, under stab)
+    if (!wingOuter(m, w)) return;
+    const last = i === m.wings.length - 1, L = last ? [[(U.pm.stab || [])[0], 1], [(U.pm.stab || [])[1], -1]] : [[(U.pm.wingR || [])[i], 1], [(U.pm.wingL || [])[i], -1]];
+    for (const [me, s] of L) if (me) { me.geometry.dispose(); me.geometry = wingRound(w, s, WTIP[id]); }
+  });
   /* the canopy: a darker glass where it was a pale blue blob, and on the propeller planes its frame in the plane's colour (two hoops across
      and a spine), filed under the pilot with the glass */
   const cn = U.pm && U.pm.pilot && U.pm.pilot[0], cv = m.can;
@@ -38057,7 +38080,7 @@ const VEG = {
   },
   cell: 128, move: 10, every: .3, nearMax: 3000, midMax: 9000, wind: .5, wood: .25, crop: 1.5, chunk: 24, make: 2, grid: .55, jump: 80, treeSat: .6
 };
-const VS = { built: null, atlas: null, imp: null, base: null };
+const VS = { built: null, atlas: null, imp: null, base: null, shade: null };
 /* the picture the cards are cut from: a spruce frond, a bunch of leaves, bark and dark foliage, drawn by hand on a canvas */
 function vegAtlas() {
   if (VS.atlas) return VS.atlas;
@@ -38315,10 +38338,13 @@ function vegBuild() {
   V.mid = [0, 1].map(k => mk(V.geo[k][1], VEG.midMax, 'mid'));
   /* shadows: a soft round patch laid on the ground, a little toward the far side from the sun */
   {
-    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
-    gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.55, 'rgba(0,0,0,.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    if (!VS.shade) {   // the patch is made once (VS.shade): one made at every build stayed in the GPU when vegDrop let the build go (cf-pol-fluxos)
+      const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.55, 'rgba(0,0,0,.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      VS.shade = new THREE.CanvasTexture(c);
+    }
     const sg = new THREE.PlaneGeometry(1, 1); sg.rotateX(-Math.PI / 2);
-    const sm2 = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const sm2 = new THREE.MeshBasicMaterial({ map: VS.shade, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     V.shadow = new THREE.InstancedMesh(sg, sm2, VEG.nearMax + VEG.midMax); V.shadow.instanceMatrix.setUsage(THREE.DynamicDrawUsage); V.shadow.count = 0; V.shadow.frustumCulled = false; V.shadow.renderOrder = -1;
     scene.add(V.shadow);
     V.SM = new Float32Array(n * 16); const nn = new THREE.Vector3(), qq = new THREE.Quaternion(), p = new THREE.Vector3();
@@ -39280,7 +39306,11 @@ const CLOOK = { tile: 128, lod: 650, chunk: 380, back: .74, rise: [.34, 6.5, 1.3
   chim: [.62, .9], corn: [.3, .28], det: 1 };
 const CMAT = ['plaster', 'brick', 'concrete', 'stone', 'metal', '', 'wood'];   // a material's row of the atlas (5: the flat tiles)
 let gCity = null;
+/* made once: the same seed draws the same sheet, and a new one at every world (each match and the hangar's battle) stayed in the GPU after the city it
+   dressed was gone (its meshes and materials disposed, never the texture: two more textures a join and a leave, cf-pol-fluxos) */
+let cityTexC = null;
 function cityTex() {
+  if (cityTexC) return cityTexC;
   const P = CLOOK.tile, cv = document.createElement('canvas'), g = cv.getContext('2d'); let sd = 7;
   const rnd = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296, G = CITY.gap;
   cv.width = cv.height = P * 8;
@@ -39320,7 +39350,7 @@ function cityTex() {
   const flat = (c, col, lines) => { const x = c * P, y = 5 * P; g.fillStyle = col; g.fillRect(x, y, P, P); g.strokeStyle = 'rgba(30,24,18,.3)'; g.lineWidth = 1; g.beginPath(); for (let k = 0; k < lines; k++) { g.moveTo(x, y + k * P / lines + .5); g.lineTo(x + P, y + k * P / lines + .5); } g.stroke(); for (let k = 0; k < 30; k++) { g.fillStyle = 'rgba(40,32,24,' + (.04 + rnd() * .07) + ')'; g.fillRect(x + rnd() * P, y + rnd() * P, 3 + rnd() * 12, 2 + rnd() * 5); } };
   flat(0, '#e6e2da', 8); flat(1, '#e6e2da', 8); crack(1, 5, 6); flat(2, '#e8e2dc', 10); flat(3, '#dcdcd8', 2); flat(5, '#e2e0da', 3); flat(7, '#ffffff', 0);
   { const x = 4 * P, y = 5 * P; g.fillStyle = '#d6d2ca'; g.fillRect(x, y, P, P); for (let k = 0; k < 70; k++) { const s = 6 + rnd() * 18; g.fillStyle = 'rgba(' + [60, 110, 150, 200][k % 4] + ',' + [56, 104, 144, 194][k % 4] + ',' + [50, 96, 136, 186][k % 4] + ',.8)'; g.save(); g.translate(x + rnd() * P, y + rnd() * P); g.rotate(rnd() * 3); g.fillRect(-s / 2, -s / 3, s, s * .66); g.restore(); } }
-  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return t;
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return (cityTexC = t);
 }
 /* the tile an element shows: [column, row] of the atlas; 6 5 is nothing. Codes: 0 a wall, 11 the inner face of an outer one (plastered
    inside masonry), 1 a floor, 2 a roof, 3 rubble, 4 a step, 5 a plain wall, 6 a flat roof, 7 a pillar, 12 a detail in its colour while the
@@ -40708,16 +40738,17 @@ function drawHud() {
   if (S.t < S.shellT && !P.dead) { txt(blink ? 'ARTILHARIA CAINDO PERTO' : '', cw / 2, wy, 15 * u, FOE, 'center', disp); wy += 20 * u; }
   if (bs.hit > 0) { txt('BASE SOB FOGO', cw / 2, wy, 14 * u, FOE, 'center'); wy += 19 * u; }
   if (P.inv > 0 && !P.dead && P.kind) { txt('Protegido por ' + Math.ceil(P.inv) + ' s', cw / 2, wy, 13 * u, ink, 'center'); wy += 19 * u; }
-  if (P.dead && !S.over && !(cdLeft(S.cls, S.model) > 0) && radHold() > 0) txt('PRÓXIMA LEVA PELO RÁDIO EM ' + Math.ceil(radHold()) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
-  if (P.dead && S.cq && !S.over && cdLeft(S.cls, S.model) > 0) txt(DEFS[S.cls][S.model].name.toUpperCase() + ' VOLTA EM ' + Math.ceil(cdLeft(S.cls, S.model)) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
+  const by = Math.max(ch * .22, wy + S.feed.length * 19 * u + 8 * u);   // the banner's top: under the column of warnings and feed when that reaches it (cf-pol-hud: the two wrote on each other)
+  if (P.dead && !S.over && !(cdLeft(S.cls, S.model) > 0) && radHold() > 0) txt('PRÓXIMA LEVA PELO RÁDIO EM ' + Math.ceil(radHold()) + ' s', cw / 2, by + 74 * u, 14 * u, ink, 'center');
+  if (P.dead && S.cq && !S.over && cdLeft(S.cls, S.model) > 0) txt(DEFS[S.cls][S.model].name.toUpperCase() + ' VOLTA EM ' + Math.ceil(cdLeft(S.cls, S.model)) + ' s', cw / 2, by + 74 * u, 14 * u, ink, 'center');
   if (S.banner) {
     hx.globalAlpha = clamp(S.banner.life, 0, 1);
-    txt(S.banner.text.toUpperCase(), cw / 2, ch * .22, 40 * u, acc, 'center', disp);
+    txt(S.banner.text.toUpperCase(), cw / 2, by, 40 * u, acc, 'center', disp);
     hx.font = '600 ' + 15 * u + "px 'Barlow Semi Condensed', sans-serif"; hx.textAlign = 'center';   // semibold (the light face washed out on a bright sky), and in lines no wider than the middle of the screen (it ran into the scores at 1280)
     const sl = [], mw = Math.min(cw * .5, 640 * u); let ln = '';   // half the screen: clear of the scores on the right at 1280
     for (const w of String(S.banner.sub || '').split(' ')) { const t = ln ? ln + ' ' + w : w; if (ln && hx.measureText(t).width > mw) { sl.push(ln); ln = w; } else ln = t; }
     if (ln) sl.push(ln);
-    sl.forEach((l, i) => { const ly = ch * .22 + 48 * u + i * 19 * u; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(l, cw / 2 + 1, ly + 1); hx.fillStyle = ink; hx.fillText(l, cw / 2, ly); });
+    sl.forEach((l, i) => { const ly = by + 48 * u + i * 19 * u; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(l, cw / 2 + 1, ly + 1); hx.fillStyle = ink; hx.fillText(l, cw / 2, ly); });
     hx.globalAlpha = 1;
   }
   S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, wy + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
@@ -41859,7 +41890,7 @@ $('#btnSwap').addEventListener('click', () => (sw.on ? closeSwap() : openSwap())
 function joinRoom(fresh) {
   if (!ready) return;
   audioInit();
-  const name = $('#pname').value.trim().slice(0, 16) || 'Piloto', k = klass();
+  const name = $('#pname').value.trim().slice(0, 16) || 'Jogador', k = klass();   // with no name: Jogador, whatever the class ("Piloto · Fuzileiro" read oddly)
   try { localStorage.setItem('ceu-de-ferro-3d-nome', name); } catch (e) {}
   netStatus('Conectando a ' + Net.url() + '…');
   Net.wantSpec = false; Net.fresh = fresh === true; Net.susO = null; Net.connect(era, name, k, sel[era][k]);
@@ -41922,6 +41953,7 @@ ANA.post = (e, last) => {
   try { fetch('/ana', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: !!last && body.length < AAR.ka }).then(r => { if (r.status === 404) AAR.off = true; }, () => {}); } catch (er) {}
 };
 const aarLocal = () => { try { return JSON.parse(localStorage.getItem(AAR.key)) || []; } catch (e) { return []; } };
+newState = (g => (e, m, o) => { AAR.kS = null; return g(e, m, o); })(newState);   // its key's match (a state) is let go with the match
 ANA.done = R => {
   const l = aarLocal(); l.unshift({ at: Date.now(), rep: R }); try { localStorage.setItem(AAR.key, JSON.stringify(l.slice(0, AAR.keep))); } catch (e) {}
   $('#btnAar').hidden = false;
@@ -42092,7 +42124,7 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
   let xt = x + 5 * u;
   for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
-  let y = y0 + h + 26 * u;
+  let y = y0 + h + 26 * u + (S.sky ? 12 * u : 0);   // under the clock's line (skyHud: the hour, day or night, the weather) when it shows: the point's name was written over it (cf-pol-fluxos)
   const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere() : null;
   if (p) {
     const sd = cqSide(p), k = sd === me ? .5 + .5 * p.c : sd < 0 ? .5 : .5 - .5 * p.c, a = p.w[me] || 0, b = cqFoeW(p, me), may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
@@ -43939,18 +43971,18 @@ function buildHeli(id) {
   const box = (pid, c, w, h, dp, x, y, z, to) => { const b = tag(pid, new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), pmat(pid, c)), to); b.position.set(x, y, z); return b; };
   const rmax = Math.max(...m.fus.map(s => s[1])), DK = 0x1d1f1f, GL = 0x22333c;
   U.flames = [];
-  for (let i = 0; i < m.fus.length - 1; i++) { const a = m.fus[i], b = m.fus[i + 1], ge = new THREE.CylinderGeometry(b[1], a[1], b[0] - a[0], 10, 1, true); ge.rotateZ(-Math.PI / 2); const s = tag('hull', new THREE.Mesh(ge, pmat('hull', d.c)), body); s.position.x = (a[0] + b[0]) / 2; }   // open rings: no disc across the cabin in front of the pilot's eye
+  for (let i = 0; i < m.fus.length - 1; i++) { const a = m.fus[i], b = m.fus[i + 1], ge = new THREE.CylinderGeometry(b[1], a[1], b[0] - a[0], 14, 1, true); ge.rotateZ(-Math.PI / 2); const s = tag('hull', new THREE.Mesh(ge, pmat('hull', d.c, { flatShading: false, shininess: 14 })), body); s.position.x = (a[0] + b[0]) / 2; }   // cf-pol-modelos: rounder and smooth   // open rings: no disc across the cabin in front of the pilot's eye
   const tip = m.fus[m.fus.length - 1], cap = tag('hull', new THREE.Mesh(new THREE.SphereGeometry(tip[1], 8, 6), pmat('hull', d.c)), body); cap.position.x = tip[0];
   body.scale.set(1, m.sy, m.sz); g.add(body);
-  const B = m.boom, bm = tag('hull', new THREE.Mesh(cylX(B[3], B[2], B[0] - B[1], 8), pmat('hull', d.c))); bm.position.set((B[0] + B[1]) / 2, B[4], 0);
+  const B = m.boom, bm = tag('hull', new THREE.Mesh(cylX(B[3], B[2], B[0] - B[1], 12), pmat('hull', d.c))); bm.position.set((B[0] + B[1]) / 2, B[4], 0);
   const fs = new THREE.Shape(); m.fin.forEach((p, i) => (i ? fs.lineTo(p[0], p[1]) : fs.moveTo(p[0], p[1]))); fs.closePath();
   const fg = new THREE.ExtrudeGeometry(fs, { depth: .14, bevelEnabled: false }); fg.translate(0, 0, -.07); tag('hull', new THREE.Mesh(fg, pmat('hull', d.c2, { side: THREE.DoubleSide })));
   box('hull', d.c2, m.stab[3], .08, m.stab[2] * 2, m.stab[0], m.stab[1], 0);
   for (const s of LRS) {
-    const e = m.eng, pid = s > 0 ? 'engR' : 'engL', n = tag(pid, new THREE.Mesh(cylX(e[3] * .8, e[3], e[4], 8), pmat(pid, d.c2))); n.position.set(e[0], e[1], s * e[2]);
-    const ex = tag(pid, new THREE.Mesh(cylX(e[3] * .55, e[3] * .6, .5, 8), pmat(pid, DK))); ex.position.set(e[0] - e[4] / 2 - .2, e[1], s * e[2]);
+    const e = m.eng, pid = s > 0 ? 'engR' : 'engL', n = tag(pid, new THREE.Mesh(cylX(e[3] * .8, e[3], e[4], 12), pmat(pid, d.c2, { flatShading: false }))); n.position.set(e[0], e[1], s * e[2]);
+    const ex = tag(pid, new THREE.Mesh(cylX(e[3] * .55, e[3] * .6, .5, 12), pmat(pid, DK))); ex.position.set(e[0] - e[4] / 2 - .2, e[1], s * e[2]);
     const w = m.wing, z0 = rmax * m.sz * .7; box('hull', d.c2, w[3], .13, w[2], w[0], w[1], s * (z0 + w[2] / 2));
-    for (const q of m.pods) { const pd = tag('hull', new THREE.Mesh(cylX(q[3], q[3], q[4], 8), pmat('hull', 0x3a3d38))); pd.position.set(q[0], q[1], s * q[2]); }
+    for (const q of m.pods) { const pd = tag('hull', new THREE.Mesh(cylX(q[3], q[3], q[4], 12), pmat('hull', 0x3a3d38))); pd.position.set(q[0], q[1], s * q[2]); }
     const G = m.gear, lh = -G[3] - .9; box('hull', DK, .15, lh, .15, G[0], G[3] + .5 + lh / 2, s * G[1]); box('hull', DK, .5, .14, G[1] * .6, G[0], G[3] + .5 + lh, s * G[1] * .72);
     const wh = tag('hull', new THREE.Mesh(new THREE.CylinderGeometry(.38, .38, .26, 10), pmat('hull', DK))); wh.rotation.x = Math.PI / 2; wh.position.set(G[0], G[3] + .38, s * G[1]);
   }

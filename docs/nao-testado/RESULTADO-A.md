@@ -56,3 +56,17 @@ Achado e não consertado (seção CEREBRO, outra frente): a defesa por posiçõe
 | cf-foguete-tecnica | em parte | `tests/foguete-tecnica.js` passa | — |
 | cf-gbu-lock | em parte | a trava escolhe o alvo mais perto ao alcance, "FORA DE ALCANCE" além dele, o morro bloqueia, jogador e IA concordam (o buscador só vê 6,5 km) | `tests/gbu-lock.js` novo |
 | cf-general-constroi | em parte | nível 1 aos ~120 s, antiaérea fixa de 1 a 3 por lado, 1–2 ninhos, 14 e 7 minas, a poupança no diário | — |
+
+## Lote 4: cf-arma-1p a cf-colisao-veiculos
+
+| Documento | Resultado | Evidência | Conserto e teste |
+|---|---|---|---|
+| cf-arma-1p | em parte | capturas do M4 do quadril e mirando, Kar98k mirando, RPG, Javelin, M4 dentro de casa; para olhar: o M4 grande do quadril, o Kar98k torto na mira, o Javelin turquesa | — |
+| cf-armas-combinadas | em parte | 48 s ligado × desligado: 5 duplas carro-esquadra formadas, nada quebrou | — |
+| cf-bombardeiro | em parte; **falhou** a pontaria | os 4 bombardeiros aparecem; um B-2 entra, solta as 8 bombas e é abatido na volta; mas as 8 crateras ficam numa linha de 770 m a 170 m do alvo (raio da bomba 135 m) | não consertado (causa não achada); documentado |
+| cf-camera-bomba | em parte | a janela abre quando a bomba cai, a tecla ` põe em tela cheia, desligada não aparece; ela cobre o texto do HUD do avião | — |
+| cf-caminhoes-parados | em parte | `tests/trucks-base.js` passa (18) | — |
+| cf-canhao-dano | em parte | `tests/shell-hits.js` passa (26); civil em pé morre; saco de areia para o perfurante; Hydra e RPG-7 matam; contra o soldado deitado o tiro ainda pega o chão ~20 m antes | — |
+| cf-casas-paredes | **falhou**, consertado | a .50 dos veículos (M2 do tanque, Kord, NSVT, DShK, a quádrupla do M16) não atravessava reboco nem tijolo | `bPow` com o mínimo pelo calibre (`CITY.pen.cal`); `tests/walls-pen.js`: 5 falhas antes, passa depois |
+| cf-cerebro-soldado | em parte | a dobra do terreno corta o dano a 0,35; granada na trincheira cai no fundo; morteiro a 5 m empurra 1,79 m e atordoa 2,86 s; granada da IA de 8–10 m cai a 5,6–6,9 m do alvo e uma atravessou a casa pela janela (não consertado: CEREBRO) | — |
+| cf-colisao-veiculos | **falhou**, consertado | 6 veículos da IA destruídos pelo próprio lado no primeiro minuto (colunas saindo da base batendo de frente a 15–51 m/s) | `vcolPair`: dois veículos da IA do mesmo lado só se empurram; `tests/vcol.js`: 5 falhas antes, passa depois; dois tanques de frente a toda velocidade ainda morrem os dois (documentado) |

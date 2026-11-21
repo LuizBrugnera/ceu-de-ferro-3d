@@ -8953,7 +8953,7 @@ function bump(u, x, z, cx, cz) {
    that overlap are pushed apart by weight (ramW; m0 for a hull with none): the lighter is shoved further, a fixed one (an emplaced gun) does
    not move, nor does one another client drives (u.net: it gives its own share on its own client, so the room settles as one). A hull on its
    rail is pushed along its rail (s) and to its side (u.cox, which place and tripMove add to its lane and which eases back at `back` m/s); one
-   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow: each hull takes hit of its hp times its blow squared, its blow
+   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow (not between two hulls the AI drives for one side: those only push): each hull takes hit of its hp times its blow squared, its blow
    2 * (the other's weight share) * closing speed / v[1], so a car that rams a tank pays for it and a tank barely feels a car; a heavy tracked
    hull (tank) closing at crush.v on a hull of crush.w weight or less drives over it (crush.dmg of its hp more, and the tank slows). Every
    client deals only its own hulls' blows and pushes (rx), as RAM does; no message. cd: s between two blows of one hull. A rail hull with a
@@ -9049,6 +9049,7 @@ function vcolPair(A, B, dt) {
   const j = (1 + VCOL.e) * vc / ((ia + ib) || 1);
   for (const [u, im, s] of [[a, ia, 1], [b, ib, -1]]) if (!u.net && !u.rail && im > 0) { const f = Math.cos(u.h) * nx - Math.sin(u.h) * nz; u.sp = clamp(u.sp + s * j * im * f / GSPD, -u.def.spd, u.def.spd); }
   if (vc < VCOL.v[0] || ia + ib <= 0) return;
+  if (a.team === b.team && a.ai && b.ai) return;   // two hulls of the AI's own side: pushed apart and held, no blow (their drivers see only their own lane, scan; the columns leaving a base rammed each other)
   const K = VCOL.crush, wa = ramW(a), wb = ramW(b);
   const crA = b.kind === 'tank' && wa <= K.w && vc >= K.v && vbn > K.v / 2 && !a.def.rad, crB = a.kind === 'tank' && wb <= K.w && vc >= K.v && -van > K.v / 2 && !b.def.rad;   // a light car under a tank's tracks
   vcolHit(a, b, vc, 2 * sa, cx, cz, crA); vcolHit(b, a, vc, 2 * sb, cx, cz, crB);
@@ -16826,8 +16827,10 @@ const CITY = { bay: 5, sh: 4.4, body: 2,
   /* going through: a round's power (bPow) is sa for a soldier's rifle or a light gun with no armour piercing, else gun[0] + gun[1] x its ap +
      gun[2] x its damage over 5 (a .50 about 2 to 2.5, a 20 mm 4 or more, a 30 mm far more); a wall takes pen of it whole, crack of that cracked, a
      slab slab times and a partition part times, and what is left goes on (its damage and speed by the share left), max walls at most.
+     cal: [calibre mm, power] the least power of a gun's round of that calibre or more (b.cal), whatever its damage and ap say: a vehicle's
+     .50 with no ap (a tank's M2, Kord, NSVT, DShK) and the M16's four (their damage cut for the rate) are .50s too.
      shell: walls a tank's solid shot goes through; th: m of a slab; puff: the dust where it comes out */
-  pen: { sa: 1, gun: [1, 15, .25], crack: .6, slab: 1.4, part: .4, max: 3, shell: 2, th: .3 },
+  pen: { sa: 1, gun: [1, 15, .25], cal: [[12.7, 2.3], [14.5, 2.8], [20, 4], [30, 6]], crack: .6, slab: 1.4, part: .4, max: 3, shell: 2, th: .3 },
   dmg: { gun: 2, k: .34, r: .42, crack: .6, gone: .6, crash: [9, 160] },
   sup: { posts: 4, T: 1.5, step: .4, fall: .34 }, rub: [0, .9, 1.7, 2.6], fall: { on: 9, under: 34, near: 12, r: 3.5 },
   types: {
@@ -17139,7 +17142,8 @@ function bShot(o, b, dmg, x, y, z, vx, vy, vz) {
   return OUT;
 }
 /* what a round has to go through a wall with (CITY.pen), kept on it as it loses some at each wall */
-const bPow = b => b.pw !== undefined ? b.pw : (b.pw = b.sa ? CITY.pen.sa : CITY.pen.gun[0] + CITY.pen.gun[1] * (b.ap || 0) + CITY.pen.gun[2] * Math.max(0, (b.dmg || 0) - 5));
+const bPow = b => b.pw !== undefined ? b.pw : (b.pw = b.sa ? CITY.pen.sa : Math.max(CITY.pen.gun[0] + CITY.pen.gun[1] * (b.ap || 0) + CITY.pen.gun[2] * Math.max(0, (b.dmg || 0) - 5),
+  CITY.pen.cal.reduce((p, c) => (b.cal >= c[0] ? c[1] : p), 0)));
 /* what element e of a building takes of a round's power to be gone through: its material, what it is and its state */
 function bRes(o, e) { const B = o.B, P = CITY.pen, s = S.cbs[B.off + e]; return B.mat.pen * (e >= B.oS ? P.slab : B.kd[e] > 4 ? P.part : 1) * (s === 1 ? P.crack : s === 2 ? P.crack * .5 : 1); }
 /* a round that struck element e (on axis an, RAY.ax) comes out on its far side: past the wall's body, however slant it went in */

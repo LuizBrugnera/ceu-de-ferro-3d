@@ -66,8 +66,10 @@ for (const [era, mv, N] of [['modern', 11, 3], ['ww2', 11, 2], ['modern', 1, 2]]
   const per = (seen + full * all) / onMap.length;
   ok(per < all / 2 && full === 0, 'and reads ' + per.toFixed(0) + ' segments a point on the map instead of all ' + all + ' (none by the old loop)');
   bad = null; n = 0;
-  for (let i = 0; i < 600 && !bad; i++) { const [x, z] = pts[i], ri = i % R.length, a = sOn(ri, x, z), b = OLD.sOn(C, R, ri, x, z); n++; if (!Object.is(a, b)) bad = [x, z, ri, a, b]; }
-  ok(!bad, 'sOn: the same s on each road at ' + n + ' points' + (bad ? ': ' + bad.join(' ') : ''));
+  const sp = pts.slice(0, 600).map((p, i) => [p[0], p[1], i % R.length]), routeAt = C.$('routeAt');
+  R.forEach((r, ri) => { for (let s = 0; s + 50 <= r.len; s += 50 * 7) { const a = routeAt(r, s), b = routeAt(r, s + 50); sp.push([(a.x + b.x) / 2, (a.z + b.z) / 2, (ri + 1) % R.length], [a.x + 300, a.z - 200, (ri + 1) % R.length]); } });   // between two samples of a road (a tie), and off it
+  for (const [x, z, ri] of sp) { if (bad) break; const a = sOn(ri, x, z), b = OLD.sOn(C, R, ri, x, z); n++; if (!Object.is(a, b)) bad = [x, z, ri, a, b]; }
+  ok(!bad, 'sOn: the same s on each road at ' + n + ' points (between two of its 50 m samples too)' + (bad ? ': ' + bad.join(' ') : ''));
   bad = null; n = 0;
   for (let i = 0; i < 900 && !bad; i++) { const [x, z] = pts[(i * 7) % pts.length], t = i % N, a = lsRail(t, x, z), b = OLD.lsRail(C, R, t, x, z); n++; if (!same(a, b)) bad = [t, x, z, show(a), show(b)]; }
   ok(!bad, 'lsRail: the same road, s and distance for every side at ' + n + ' points' + (bad ? ': ' + bad.join(' ') : ''));

@@ -171,6 +171,17 @@ console.log('-- P6b, P6c: the general\'s helpers --');
   ok([3, 4].includes(p.ri), 'side 2 measures depth on its own roads (lsRail gives road ' + p.ri + ')');
 }
 
+{
+  /* P6c: the convoy lost and the load taken credit the side that did it, with three sides (lgLost by lastBy, lgGrab by the taker's side) */
+  const B = S.base, L = S.glog.l, n0 = L.map(l => l.length), since = t => L[t].slice(n0[t]).map(e => e.s);
+  $('lgLost')({ team: 0, lgc: 40, x: B[0].x + 3000, z: B[0].z, hitT: S.t, lastBy: { team: 1 } });
+  ok(since(0).some(m => /Comboio perdido/.test(m)) && since(1).some(m => /Comboio inimigo destruído/.test(m)) && !since(2).some(m => /Comboio/.test(m)), 'a USA convoy destroyed by Russia: lost in the USA\'s log, destroyed in Russia\'s, nothing in the Insurgents\'');
+  const n1 = L.map(l => l.length), since1 = t => L[t].slice(n1[t]).map(e => e.s);
+  const u = S.units.find(o => o.team === 0 && !o.dead && o.kind === 'truck') || C.addUnit('truck', 0, B[0].x + 500, B[0].z, null, false, 0, 600);
+  u.lgc = 40; $('lgGrab')(u, 0, { team: 2, lgg: 1 });
+  ok(since1(2).some(m => /Tomamos 40 caixas/.test(m)) && since1(0).some(m => /tomada pelo inimigo/.test(m)) && !since1(1).some(m => /caixas/.test(m)), 'a USA truck\'s load taken by an Insurgent: theirs (' + (since1(2).find(m => /Tomamos/.test(m)) || 'nothing') + '), nothing in Russia\'s log');
+}
+
 console.log('-- P8: a town\'s militia --');
 {
   const C6 = H.load({ seed: 5, mapv: 9 }), S6 = C6.watch('modern', { n: 3 }); C6.run(2, null, 1 / 20);

@@ -37274,6 +37274,40 @@ syncScene = (g0 => dt => {
     U.wx = u.x; U.wz = u.z; if (Math.abs(d) < WSPIN.jump) U.spin.value += d / GS * (U.spinK || 1);
   }
 })(syncScene);
+/* ---------- the vehicles' contact shadows (cf-pol-modelos): a soft dark patch under each vehicle and wreck on the ground, as long and as wide
+   as it (d.env) a little past, turned to its heading and laid on the slope under it, so that what drives is seen on the ground and not
+   over it. One instanced mesh for all of them, within CSHAD.far m of the eye; none where the quality draws the sun's real shadows (GFXQ
+   shadow, Alta) ---------- */
+const CSHAD = { max: 320, far: 900, grow: [1.6, 2.1], lift: .14, alpha: .55 };
+const CSH = { me: null, at: null, m: null, q: null, v: null, s: null, x: null, y: null, z: null };
+function cshadMesh() {
+  if (CSH.me && CSH.at === scene) return CSH.me;
+  const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 4, 32, 32, 31);
+  gr.addColorStop(0, 'rgba(0,0,0,' + CSHAD.alpha + ')'); gr.addColorStop(.6, 'rgba(0,0,0,' + CSHAD.alpha * .85 + ')'); gr.addColorStop(.85, 'rgba(0,0,0,' + CSHAD.alpha * .4 + ')'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+  const ge = new THREE.PlaneGeometry(1, 1); ge.rotateX(-Math.PI / 2);
+  const me = new THREE.InstancedMesh(ge, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), CSHAD.max);
+  me.frustumCulled = false; me.count = 0; me.renderOrder = 1; scene.add(me);
+  Object.assign(CSH, { me, at: scene, m: new THREE.Matrix4(), q: new THREE.Quaternion(), v: new THREE.Vector3(), s: new THREE.Vector3(), x: new THREE.Vector3(), y: new THREE.Vector3(), z: new THREE.Vector3() });
+  return me;
+}
+syncScene = (g0 => dt => {
+  g0(dt);
+  if (typeof scene === 'undefined' || !scene) return;
+  const me = cshadMesh(), Q = typeof GFXQ === 'object' && typeof gfxLevel === 'function' && GFXQ[gfxLevel()];
+  if (Q && Q.shadow) { me.count = 0; return; }
+  const c = camera.position, F2 = CSHAD.far * CSHAD.far; let n = 0;
+  const put = (x, z, h, d) => {
+    if (n >= CSHAD.max || !d) return; const dx = x - c.x, dz = z - c.z; if (dx * dx + dz * dz > F2) return;
+    const e = d.env, hl = e ? e[3] : (d.l || 4) * GS / 2, hw = e ? e[5] : (d.w || 2) * GS / 2, fx = Math.cos(h), fz = -Math.sin(h);
+    const yf = hgt(x + fx * hl, z + fz * hl), yb = hgt(x - fx * hl, z - fz * hl), yl = hgt(x - fz * hw, z + fx * hw), yr = hgt(x + fz * hw, z - fx * hw), y0 = Math.max(hgt(x, z), (yf + yb) / 2, (yl + yr) / 2);
+    CSH.x.set(fx * 2 * hl, yf - yb, fz * 2 * hl).normalize(); CSH.z.set(-fz * 2 * hw, yl - yr, fx * 2 * hw).normalize(); CSH.y.crossVectors(CSH.z, CSH.x).normalize(); CSH.z.crossVectors(CSH.x, CSH.y);
+    CSH.m.makeBasis(CSH.x, CSH.y, CSH.z); CSH.q.setFromRotationMatrix(CSH.m);
+    me.setMatrixAt(n++, CSH.m.compose(CSH.v.set(x, y0 + CSHAD.lift, z), CSH.q, CSH.s.set(hl * 2 * CSHAD.grow[0], 1, hw * 2 * CSHAD.grow[1])));
+  };
+  for (const u of S.units) if (!u.gone && !(u.in && u.in.air)) put(u.x, u.z, u.h, u.def);
+  for (const w of S.wrecks || []) if (w.u && !w.gone) put(w.u.x, w.u.z, w.u.h, w.u.def);
+  me.count = n; me.instanceMatrix.needsUpdate = true;
+})(syncScene);
 function vkit() {
   const B = new Map(), E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1), M4 = new THREE.Matrix4();
   const K = {

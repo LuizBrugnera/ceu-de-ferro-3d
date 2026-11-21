@@ -48,7 +48,7 @@ for (const era of ['ww2', 'modern']) {
   if (!before) try { const f = path.join(os.tmpdir(), 'cdf-seat-before-' + process.pid + '.html'); fs.writeFileSync(f, cp.execSync('git show 71157f5:"Céu de Ferro 3D.html"', { cwd: H.ROOT, maxBuffer: 1 << 26 })); before = f; } catch (e) { before = null; }
   if (before && fs.existsSync(before)) {
     for (const era of ['ww2', 'modern']) {
-      const sig = page => { const C = H.load({ seed: 3, mapv: 4, page }); const T = C.$('genTerrain')(era, 4); return J([T.houses.map(o => [o.x, o.z, o.B.t, o.h]), T.objs.length, T.burgs.length]); };
+      const mm = v => Math.round(v * 1000), sig = page => { const C = H.load({ seed: 3, mapv: 4, page }); const T = C.$('genTerrain')(era, 4); return J([T.houses.map(o => [mm(o.x), mm(o.z), o.B.t, o.h]), T.objs.length, T.burgs.length]); };   // to the millimetre: a reordered sum moves a house by 1e-12 m
       ok(sig(before) === sig(undefined), era + ': map version 4 is planned exactly as before (buildings, objects, places)');
     }
     if (!process.env.BEFORE) fs.unlinkSync(before);

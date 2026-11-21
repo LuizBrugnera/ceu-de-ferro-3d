@@ -6,6 +6,6 @@ Testado (cf-pol-testes-a):
 
 ## O que falta
 
-- Na tela: a faixa de pontos com 3 cores, os tíquetes dos dois inimigos (✕ do eliminado), as marquinhas por lado, a barra na cor de quem toma e a Visão de General com o `cap`.
+- Na tela, visto (rodada 3, jogando de Insurgente numa sala de 3 lados, 1280 e 1920 px): a faixa com os 17 pontos nas cores de cada lado (os meus, os dos EUA, os da Rússia e os neutros), os tíquetes dos dois inimigos e, eliminada a Rússia, o ✕ no lugar dos tíquetes dela, os pontos dela neutros e o aviso no feed. Falta ver de perto a barra de captura na cor de quem toma, as marquinhas de presença por lado e o `cap` na Visão de General.
 - A perda de tíquetes pelo líder numa partida inteira, e se `ANA` (P9) a recalcula igual.
 - Equivalência exata com 2 lados ao cruzar 0 (não medida); o jogador eliminado fica sem câmera de espectador própria.

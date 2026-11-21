@@ -29,7 +29,9 @@ const { WebSocketServer } = require('ws');
 
 const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Ferro 3D.html'), MAXLEN = 2048, MAXAI = 16384, AICAP = 64, CAP = 16;
 /* valid models per room and class (a model's side is MSIDE's, below); the page's PLANES, TANKS, AAS, ARTS and INF tables are the other copy.
-   inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size */
+   inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size.
+   The row has 9 numbers, or 10 when its last is what the soldier calls out (SAY, the page's speech balloons): with only 9 allowed, every
+   soldier row of a host whose page had the balloons was dropped and the guests saw none of the AI's infantry (cf-pol-fluxos; tests/relay.js) */
 const MODELS = {
   ww2: { plane: ['stuka', 'bf109', 'spit', 'p47', 'he177', 'b17'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
   modern: { plane: ['f22', 'a10', 'su57', 'su25', 'b2', 'tu160'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
@@ -113,7 +115,7 @@ const host = c => c.room.host === c, toss = m => Number.isInteger(m.k) && m.k >=
 const scores = c => cast(c, { t: 'scores', players: [...c.room.values()].map(o => ({ id: o.player.id, kills: o.player.kills, deaths: o.player.deaths, ai: o.player.ai })) }, true);
 /* one AI entity of a snapshot: [id, model, team, hp, flags, then 10 numbers for a plane (p, q, v) or 8 for a vehicle (p, heading, turret, pitch, vx, vz), then its part states].
    A soldier's row (k 2) is shorter: [id, kit index, team, hp, flags, x, z, heading, stance and weapon and squad packed in one integer] */
-const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && ts(room, e[2]) && (k === 2 ? e.length === 9 && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
+const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && ts(room, e[2]) && (k === 2 ? (e.length === 9 || (e.length === 10 && Number.isInteger(e[9]) && e[9] >= 0 && e[9] < 1024)) && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
   : e.length === (k ? (room.gnd.has(e[1]) ? 14 : 0) : room.air.has(e[1]) ? 16 : 0) && e.every((v, i) => i === 1 || num(v)) && bits(e[e.length - 1]));
 const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
 const cast = (c, m, all) => { snapIn(c, m); for (const o of c.room.values()) if (all || o !== c) send(o.ws, m); for (const o of c.room.specs || []) if (o !== c) sendSpec(o, m); };
@@ -150,7 +152,7 @@ const RX = {
     if (!model(era, m.cls, m.model)) return send(c.ws, { t: 'error', code: 'model' });
     const room = rooms[m.room];
     if (room.size >= CAP) return send(c.ws, { t: 'error', code: 'full' });
-    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Piloto';
+    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Jogador';   // the page's own default (it was Piloto, also for a soldier)
     c.player = { id: nextId++, name, cls: m.cls, model: m.model, lo: load(m.cls, m.model, m.lo), kills: 0, deaths: 0, ai: 0 };
     const mv = int(m.mv, 1, 99) ? m.mv : 1;   // the map version of the page; the first player's is the room's
     const ns = m.ns === 3 && MAXN[m.room] >= 3 ? 3 : 2;   // and its sides: a page that does not say is of 2

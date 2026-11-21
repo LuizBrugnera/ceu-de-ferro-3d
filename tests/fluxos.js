@@ -97,6 +97,9 @@ console.log('-- the HUD does not write over itself --');
   const dh = html.slice(html.indexOf('let wy = hudWarn('), html.indexOf("if (paused) txt('PAUSADO'"));
   ok(/S\.feed\.forEach\([^\n]*wy \+ i \* 19 \* u/.test(dh) && !/ty \+ (36|58|76|94) \* u/.test(dh), 'the impact, artillery, base and protection lines take the next free line, and the feed comes after them');
   const hh = html.slice(html.indexOf('function helpHud('), html.indexOf('\n}\n', html.indexOf('function helpHud(')));
+  const sky = html.slice(html.indexOf('function skyHud('), html.indexOf('\n}\n', html.indexOf('function skyHud('))), cq = html.slice(html.indexOf('  txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u'), html.indexOf('  const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere()'));
+  const skyY = +((sky.match(/txt\(s, cw \/ 2, (\d+) \* u, 11 \* u/) || [])[1]), gap = +((cq.match(/let y = y0 \+ h \+ (\d+) \* u \+ \(S\.sky \? (\d+) \* u : 0\)/) || []).slice(1).reduce((a, b) => a + +b, 0));
+  ok(skyY === 50 && gap >= 38, 'the point being taken is written under the clock\'s line (skyHud at ' + skyY + 'u, the point at y0 + h + ' + gap + 'u), not over it');
   ok(/const low = hudLow; hudLow = 0;/.test(hh) && /low - 16 \* u - \(n - 1\) \* 16 \* u/.test(hh) && /hudLow = y0;/.test(html) && /if \(y0 > ch \/ 2\) hudLow = y0;/.test(html), 'the radio lines end above the panel the soldier\'s and the vehicle\'s HUD drew this frame');
 }
 console.log('-- the review (Partidas anteriores) closes with Esc wherever the focus is --');
@@ -117,6 +120,18 @@ console.log('-- no toNonIndexed on a geometry that has no index (a warning in th
   if (i > 0) vm.runInContext(html.slice(i, html.indexOf('\n', i)) + ';globalThis.unIndexed = unIndexed;', U);
   const mk = idx => ({ index: idx, toNonIndexed() { return 'flat'; }, clone() { return 'copy'; } });
   ok(calls === 1 && i > 0 && U.unIndexed(mk({})) === 'flat' && U.unIndexed(mk(null)) === 'copy', 'toNonIndexed only through unIndexed, and only for a geometry with an index (else a copy)');
+}
+
+console.log('-- the Partida panel fits a short window: its choices on one line each below 900 px of height --');
+{
+  const m = html.match(/@media \(min-width:761px\) and \(max-height:900px\)\{\.hg-setp \.tab\{([^}]*)\}/);
+  ok(!!m && /flex-direction:row/.test(m[1]) && /flex-wrap:wrap/.test(m[1]), 'at 1280 × 800 the panel ran past the bottom and the difficulty was out of sight (738 px of choices in 629): a short window lays each choice\'s name and note side by side (measured in the browser: 587 px, all of it on screen)');
+}
+
+console.log('-- the end screen fits a short window: the buttons on screen at 1280 × 720 --');
+{
+  const m = html.match(/@media \(min-width:761px\) and \(max-height:780px\)\{\.over \.sheet-in\{([^}]*)\}\.over h2\{([^}]*)\}/);
+  ok(!!m && /padding-block:4vh/.test(m[1]) && /max-width:720px/.test(m[1]) && /font-size:clamp\(28px,5\.5vh,44px\)/.test(m[2]), 'at 1280 × 720 "Voltar ao hangar" ended under the bottom edge (the sheet 783 px tall), the title on two lines: a short window starts it higher, wider and smaller');
 }
 
 console.log('-- "Onde entrar": the button names the place, and choosing stops the clock --');

@@ -37617,6 +37617,7 @@ buildUnit = (f => (u, wreck) => {
    with the wing when the wing is lost or cut short; the blades of a propeller are one mesh. A burnt plane darkens them with the rest.
    The textured models (mdl.glb) keep their own look; the stealth bomber wears none ---------- */
 const PROP = { blades: { stuka: 3, bf109: 3, spit: 4, p47: 4, he177: 4, b17: 3 }, chord: .24, col: 0x1f2122, spin: 40, blur: [.3, .8] };
+const CANOPY = { glass: 0x4f6872, hoops: [-.2, .14], tube: .035 };   // the canopy's glass; where the frame's hoops cross it (of its length, from its middle), how thick
 const INSIG = { kind: { stuka: 'balk', bf109: 'balk', he177: 'balk', spit: 'raf', p47: 'us', b17: 'us', su57: 'ru', su25: 'ru', tu160: 'ru', ah64: 'us', uh60: 'us', mi28: 'ru', mi8: 'ru' }, at: .62, size: [.72, 2.4], fus: .52, boom: .22, tex: {} };
 function insigTex(k) {
   if (INSIG.tex[k]) return INSIG.tex[k];
@@ -37672,6 +37673,17 @@ buildPlane = (f => id => {
   if (m.prop) blades(m.prop[0] + .18, 0, 0, m.prop[1]);
   if (m.nac) for (const n of m.nac) if (n[5]) for (const s of [1, -1]) blades(n[0] + n[4] / 2 + .2, n[1], s * n[2], n[5]);
   U.discs = []; g.traverse(c => { if (c.isMesh && c.material && c.material.isMeshBasicMaterial && c.material.transparent && c.geometry && c.geometry.type === 'CircleGeometry') { U.discs.push(c); c.userData.o = c.material.opacity; } });
+  /* the canopy: a darker glass where it was a pale blue blob, and on the propeller planes its frame in the plane's colour (two hoops across
+     and a spine), filed under the pilot with the glass */
+  const cn = U.pm && U.pm.pilot && U.pm.pilot[0], cv = m.can;
+  if (cn && cv) {
+    cn.material.color.setHex(CANOPY.glass); cn.material.userData.c = CANOPY.glass; cn.material.shininess = 60; cn.material.specular = new THREE.Color(0x667a84);
+    if (m.prop || m.nac) {
+      const fm = mat(d.c); fm.userData.c = d.c; mats.push(fm);
+      for (const t of CANOPY.hoops) { const h = new THREE.TorusGeometry(1, CANOPY.tube, 4, 12, Math.PI); h.rotateY(Math.PI / 2); const me = new THREE.Mesh(h, fm); me.scale.set(1, cv[3] * 1.02, cv[4] * 1.02); me.position.set(cv[0] + cv[2] * t, cv[1], 0); g.add(me); (U.pm.pilot || []).push(me); }
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(cv[2] * .8, .05, .05), fm); sp.position.set(cv[0], cv[1] + cv[3] * 1.0, 0); g.add(sp); U.pm.pilot.push(sp);
+    }
+  }
   if (!k) return g;
   /* the markings: on the widest wing (not the tailplane), over and under, a child of each side's mesh; and on each side of the fuselage */
   const T = insigTex(k), W = m.wings.slice(0, -1), wi = W.indexOf(W.slice().sort((a, b) => b.span - a.span)[0]), w = m.wings[wi];
@@ -39044,8 +39056,14 @@ function preview(m, L, canvas, ang) {
     let b = m.userData.fit;
     if (!b) {   // framed by its own size: the half diagonal on the ground and the half height, from the model's box
       m.updateMatrixWorld(true); const bb = new THREE.Box3().setFromObject(m), c = bb.getCenter(new THREE.Vector3()), r = Math.hypot(bb.max.x - bb.min.x, bb.max.z - bb.min.z) / 2, hy = (bb.max.y - bb.min.y) / 2;
-      b = m.userData.fit = isFinite(r) && r > 0 ? { y: c.y, d: Math.max((hy + r * .25) / .268, r / .477) * 1.06 } : { y: 0, d: L * 1.6 };
+      b = m.userData.fit = isFinite(r) && r > 0 ? { y: c.y, d: Math.max((hy + r * .25) / .268, r / .477) * 1.06, lo: bb.min.y, r } : { y: 0, d: L * 1.6 };
     }
+    if (!TT.sh) {   // a soft shadow on the floor under the model (cf-pol-modelos), so that it stands rather than floats on the card
+      const c = document.createElement('canvas'); c.width = c.height = 64; const x = c.getContext('2d'), gr = x.createRadialGradient(32, 32, 2, 32, 32, 31);
+      gr.addColorStop(0, 'rgba(0,0,0,.34)'); gr.addColorStop(.6, 'rgba(0,0,0,.16)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+      const ge = new THREE.PlaneGeometry(1, 1); ge.rotateX(-Math.PI / 2); TT.sh = new THREE.Mesh(ge, new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })); TT.s.add(TT.sh);
+    }
+    TT.sh.visible = b.lo !== undefined; if (TT.sh.visible) { TT.sh.position.set(0, b.lo + .02, 0); TT.sh.scale.set(b.r * 1.45, 1, b.r * 1.45); }
     TT.p.add(m); TT.p.rotation.y = ang || 0; TT.c.position.set(b.d * .594, b.y + b.d * .218, b.d * .775); TT.c.lookAt(0, b.y, 0);
     TT.r.render(TT.s, TT.c); TT.p.remove(m); g.clearRect(0, 0, W, H); g.drawImage(TT.r.domElement, 0, 0, W, H);
   } catch (e) {}

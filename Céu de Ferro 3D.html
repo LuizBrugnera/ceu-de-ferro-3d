@@ -37285,8 +37285,8 @@ function vkit() {
     box: (to, pid, col, w, h, d, x, y, z, rx, ry, rz) => K.put(to, pid, col, new THREE.BoxGeometry(w, h, d), x, y, z, rx, ry, rz),
     /* along x: r0 at the back, r1 at the front; open: no end discs */
     cx: (to, pid, col, r0, r1, len, seg, x, y, z, rz, open) => { const g = new THREE.CylinderGeometry(r1, r0, len, seg, 1, !!open); g.rotateZ(-Math.PI / 2); return K.put(to, pid, col, g, x, y, z, 0, 0, rz); },
-    /* along z (a wheel, an axle) */
-    cz: (to, pid, col, r, w, seg, x, y, z) => { const g = new THREE.CylinderGeometry(r, r, w, seg); g.rotateX(Math.PI / 2); return K.put(to, pid, col, g, x, y, z); },
+    /* along z (a wheel, an axle); open: no end discs */
+    cz: (to, pid, col, r, w, seg, x, y, z, open) => { const g = new THREE.CylinderGeometry(r, r, w, seg, 1, !!open); g.rotateX(Math.PI / 2); return K.put(to, pid, col, g, x, y, z); },
     cy: (to, pid, col, r0, r1, h, seg, x, y, z) => K.put(to, pid, col, new THREE.CylinderGeometry(r1, r0, h, seg), x, y, z),
     /* a disc facing +z, or -z with s < 0 (a hub's face) */
     dz: (to, pid, col, r, seg, x, y, z, s) => { const g = new THREE.CircleGeometry(r, seg); if (s < 0) g.rotateY(Math.PI); return K.put(to, pid, col, g, x, y, z); },
@@ -47526,7 +47526,8 @@ buildTrn = (f => (u, wreck) => {
 })(buildTrn);
 /* the hand-made wheels that roll too (cf-pol-modelos, WSPIN): the armoured cars' (LAV-25, BTR, Shilka) and the support and radio vehicles'
    own wheels (buildTrn's wheel(): a plain black round of its own, turned about z), where the pack has not put its model on, get a hub on
-   their outer face in the vehicle's second colour; the hubs of a vehicle are one mesh, and roll by the shader (aWheel) with its distance */
+   their outer face in the vehicle's second colour; the hubs of a vehicle are one mesh, and roll by the shader (aWheel) with its distance.
+   The tracked ones get their belts (TBELT) */
 buildTrn = (f => (u, wreck) => {
   const g = f(u, wreck), U = g.userData; if (wreck || U.pack) return g;
   const L = [];
@@ -47539,8 +47540,23 @@ buildTrn = (f => (u, wreck) => {
   U.spin = U.spin || { value: 0 };
   const hc = (u.col || [0, 0x4d5247])[1], hm = spinMat(mat(hc), U.spin); hm.userData.c = hc;
   g.add(new THREE.Mesh(vkGeo(L), hm));
+  /* the tracked ones (TLOOK trk, the recovery vehicles): a belt round each side's row of wheels (the runs over and under, open rounds at the
+     ends so that the hubs show), where it was a flat black box; a half-track's steered front wheel (TBELT.gap m ahead of the next) stays out */
+  const d = u.def, T = TLOOK[d.id];
+  if (T && (T.trk || d.svc === 'arv')) {
+    for (const c of g.children.slice()) { const q = c.geometry && c.geometry.parameters; if (c.isMesh && c.geometry.type === 'BoxGeometry' && q && Math.abs(Math.abs(c.position.z) - d.w * .5) < .02 && (Math.abs(q.width - d.l * .7) < .02 || Math.abs(q.width - d.l * .9) < .02)) { g.remove(c); c.geometry.dispose(); } }
+    const K = vkit(), pm = U.pm || (U.pm = {});
+    for (const s of LRS) {
+      const row = L.map(h => h.userData.wheel).filter(w => Math.sign(w[2]) === s).sort((a, b) => b[0] - a[0]); if (row.length > 1 && row[0][0] - row[1][0] > TBELT.gap) row.shift(); if (row.length < 2) continue;
+      const r = row[0][3], R = r + TBELT.out, x1 = row[0][0], x0 = row[row.length - 1][0], z = row[0][2], tw = TBELT.w, pid = U.pm.wheelL ? (s < 0 ? 'wheelL' : 'wheelR') : 'wheels';
+      K.box(g, pid, VKC.dk, x1 - x0, .08, tw, (x0 + x1) / 2, r + R - .04, z).box(g, pid, VKC.dk, x1 - x0, .08, tw, (x0 + x1) / 2, r - R + .04, z);
+      K.cz(g, pid, VKC.dk, R, tw, 10, x1, r, z, 1); K.cz(g, pid, VKC.dk, R, tw, 10, x0, r, z, 1);
+    }
+    K.done(pm, false);
+  }
   return g;
 })(buildTrn);
+const TBELT = { gap: 1.4, out: .07, w: .5 };
 packManModel = (f => m => (m && !m.civ && m.def && m.def.civ ? ((m.id || 0) % 2 ? 'civ_woman' : 'civ_man') : f(m)))(packManModel);
 /* ---------- end of cf-vbied on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();

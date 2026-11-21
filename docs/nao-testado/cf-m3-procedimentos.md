@@ -1,7 +1,11 @@
 # M3 Procedimentos de manobra: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): falha (1 checagem) e uma suíte que cai
+- `tests/procedures.js`: 32 ok e 1 falha. Na hora H do P1, a fixação não está em `overwatch` na base com a manobra em `assault` ("the fixing element fires from its base, the manoeuvre assaults"). A causa da hora H, lida no código: desde o pelotão (P8, #144, `CEREBRO: pelotao`) a manobra segura (`hold`, passo "espera") na hora H até ouvir a base atirar, por até `PEL.fogo.max` = 45 s. O próprio `cf-p8-pelotao.md` avisa (risco 2) e pedia para rodar `approaches` e `procedures` com o pelotão no meio. O cenário do teste chama `OPS.atk` uma vez só, sem base atirando, e encontra `hold, hold, overwatch`. O ajuste dos dois testes é `PEL.on = 0` nesses cenários, como eles já fazem com `PR.on = 0`. O portão do pelotão fica com `tests/brain-pelotao.js`.
+  - **Confirmado em 2026-11-21**: com `PEL.on = 0` no cenário, `procedures` passa inteiro e a hora H do `approaches` passa ("2 squads assault, each along its approach, 1 covers them"). Os dois testes foram ajustados assim (lote 2 desta tarefa). Ficam no `approaches` só as 4 falhas da reunião.
+- `tests/man-c.js` **cai** no meio (`TypeError: Cannot read properties of undefined (reading 'spec')`, `tests/man-c.js:107`): o cenário do `cut` não acha nenhum candidato (`score undefined`) e o teste lê `c.spec` sem conferir. Antes eram 7 falhas (`blk`, `fnt`; veja a memória de falhas antigas). Agora `blk` falha 3 vezes antes da queda. Não consertado: é código da manobra.
+
 Tarefa `cf-m3-procedimentos`, pacote M3 da proposta de manobra do general (D1-D12 = A). Fica em cima das abordagens do M2 (`AP`, `atkAp`).
-Pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado em partida**.
 
 ## O que mudou (`Céu de Ferro 3D.html`, bloco `PR` logo depois do M2)
 

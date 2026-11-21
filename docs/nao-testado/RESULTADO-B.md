@@ -6,8 +6,10 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
 
 ## Resumo
 
-- **54 documentos** da metade B, em 5 lotes e 5 PRs (#176, #179, #182, #189 e o do lote 5). Os 9 `cf-pol-*` entraram no meio, quando o main
-  os trouxe. Nenhum documento foi apagado: em todos sobrou algo que não deu para testar (online com dois navegadores, partidas longas,
+- **60 documentos** da metade B, em 5 lotes e 5 PRs (#176, #179, #182, #189 e o do lote 5). 15 `cf-pol-*` entraram no meio, quando o main
+  os trouxe. **Ficaram de fora** 18 documentos que outras frentes de polimento escreveram enquanto o lote 5 rodava (entraram no main às
+  06:15 de 2026-11-21): `cf-pol-armas-*` (7), `cf-pol-cenario-chao`, `cf-pol-fluxos`, `cf-pol-graficos-2` e `cf-pol-modelos-` aerodromos,
+  apoio, asas, bandeiras, obras, pedras, radares e rodas-redondas. Nenhum documento foi apagado: em todos sobrou algo que não deu para testar (online com dois navegadores, partidas longas,
   torneios A/B). Cada um ganhou no alto uma seção "Testado em …" com o que passou, o que falhou e o que continua sem teste.
 - **Consertos com teste focado** (todos fora das seções do general e do cérebro):
   - mapa de tiro: rótulos de inimigos agrupados ("CC ×3 · CM") e sem aviões não vistos (`tests/map-tags.js`);
@@ -149,6 +151,7 @@ embaixo do próprio nome. A nota e "Nova partida" agora dividem uma linha em tel
 
 Suítes deste lote: `respawn-air`, `radio-general`, `logistics-online`, `gen-cap`, `gen-relay` passam. `radio`: 55 ok e 3 falhas (2 de custo
 com a máquina cheia, e a da mensagem acima, consertada). `comms`: as seções medidas passam, com a mensagem a 8.175 bytes (perto do limite:
-mais um motivo para o `genMsg`). `gen-online`: 1 falha (o mapa do convidado sem esquadras), comparada com a página de antes abaixo.
+mais um motivo para o `genMsg`). `gen-online`: 1 falha ("its map has squads with their job tags": o mapa do convidado sem esquadras), **igual na página de antes**
+(c397126): não é do `genMsg`; a maior mensagem foi 4.781 bytes e nada foi cortado. Fica para quem cuida do online.
 Não rodaram por falta de tempo: `sede`, `rec`, `veh-drills`, `ram`, `transport`. `logistics`: parado por mim depois de 1 h, na partida
 inteira do fim; antes dela 45 ok e 1 falha já conhecida no main (as caixas do caminhão parado tomadas por um soldado inimigo).

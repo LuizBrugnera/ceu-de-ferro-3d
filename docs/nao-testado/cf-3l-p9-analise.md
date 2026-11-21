@@ -11,7 +11,7 @@ Testado (cf-pol-testes-a):
 
 ## O que falta
 
-- Um torneio de verdade: `node tools/balance.js --torneio 6 --lados 3 --min 10 --nobudget` (6 trios, "Colocação por lado", "Lados eliminados por partida", alerta a 45%). Uma partida de 5 min de 3 lados com economia passou de 280 s de máquina e foi cortada (a máquina estava dividida).
+- Um torneio de verdade: `node tools/balance.js --torneio 6 --lados 3 --min 10 --nobudget`. Visto em 2 partidas de 1 min (rodada 5): o relatório traz "Vitória por lado", "Colocação por lado" (1º, 2º, 3º e média) e "Lados eliminados por partida"; os Insurgentes venceram as duas pelo desempate de tíquetes (pontos iguais no fim do tempo; os EUA e a Rússia já gastaram alguns em requisições e baixas), o que não diz nada de balanço numa partida tão curta.
 - A eliminação por base na revisão (`el` com `why: 'base'`); "Partidas anteriores" e a mesma partida pelo servidor (`GET /ana/m/...`).
 - MCP: `get_match_report` com `CEU_SIDE=2` durante e depois da partida.
 - Leitores de fora que esperam a curva de 5 colunas (com 3 lados são 7).

@@ -17,7 +17,7 @@ const kind = t => class extends Geo { constructor(...a) { super(t, ...a); } };
 const THREE = { Group: Obj, Mesh: Obj, BoxGeometry: kind('Box'), CylinderGeometry: kind('Cylinder'), TorusGeometry: kind('Torus'), ConeGeometry: kind('Cone') };
 const S = { E: { sides: [{ col: 0x556b2f, col2: 0x3b4a20 }] }, fac: [0], me: 0, os: {}, spec: false };
 const ctx = vm.createContext({ THREE, S, ECO: sim.$('ECO'), clamp: sim.$('clamp'), ecoHid: () => false, CORN: [[-1, -1], [1, -1], [1, 1], [-1, 1]],
-  mat: c => ({ color: { c, multiplyScalar() { return this; } } }), vkGeo: list => ({ type: 'merged', list }) });
+  mat: c => ({ color: { c, multiplyScalar() { return this; } } }), vkGeo: list => ({ type: 'merged', list }), flagMesh: () => new Obj(new Geo('flag'), { color: { multiplyScalar() { return this; } } }) });
 vm.runInContext(src + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'eco-looks.js' });
 const buildEco = ctx.$('buildEco'), lookEco = ctx.$('lookEco'), ECO = sim.$('ECO');
 

@@ -1,5 +1,10 @@
 # Veículo bate na casa e quebra (cf-tanque-casa)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Tiger I a 25 m de uma casa, acelerando: ele entra na casa a ~4 m/s, a casa passa ao estágio 1 (furada de lado a lado), o tanque perde 6 de 130 de casco e segue, e entra na casa seguinte. Como o documento diz, a casa não desaba. Sem erro no console.
+- `tests/ram.js`: não rodou nesta tarefa (faltou tempo com a máquina cheia).
+- **Continua sem teste:** o online e os caminhões da IA batendo em paredes.
+
 ## O que mudou
 - **`RAM`** (perto de `bump`): cada veículo tem um peso por tipo (tanque 1, artilharia 0,8, antiaérea 0,6, blindado sobre rodas 0,45, caminhão 0,3, carro 0,15, veículo-rádio sobre lagartas 0,35; uma def pode ter `ram` próprio). O golpe é `peso × velocidade de fechamento / 20 m/s`; abaixo de 2,5 m/s não conta. Um golpe por veículo a cada 0,6 s.
 - **`ramHit`**: o golpe de um casco contra o que está de pé.

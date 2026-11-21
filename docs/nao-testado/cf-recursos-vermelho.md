@@ -1,5 +1,11 @@
 # cf-recursos-vermelho: recursos do general vermelho na Visão de General
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1), Assistir em 1944, Tab, botão "Aliados": a faixa diz "Economia do general · Aliados", com os números dos Aliados (metal 185; a Luftwaffe tinha 189).
+- Solo, jogando de Tiger: com a Visão de General no meu lado a faixa aparece ("Economia do general", sem nome); trocando para o inimigo ela some (névoa), e volta quando torno ao meu lado.
+- Nenhum erro no console.
+- **Continua sem teste:** o espectador online, o jogador vermelho online (convidado e anfitrião) e na cadeira de General.
+
 ## Testado em 1cedd86 e 806508d: ok (parte)
 - Navegador (1cedd86), Assistir sem ninguém na sala: a faixa mostra "Economia do general · Força Azul" e, com `genSide(1)`, "Economia do general · Força Vermelha", com energia, metal e renda por minuto. A Visão de General ocupa a largura toda em 1280 e 1920 px.
 - Solo (anfitrião sozinho), Visão de General: no próprio lado a faixa aparece sem nome de lado. Trocando a visão para o inimigo (`GV.t = 1`), `gorEconSide()` dá -1 e a faixa some (névoa ok).
@@ -18,8 +24,6 @@
 ## O que NÃO foi testado
 - Espectador online (sala com jogadores, botão Assistir): a faixa do lado 1.
 - Jogador do lado vermelho online (convidado e anfitrião) e na cadeira de General: a faixa do próprio lado.
-- Jogador solo trocando a visão para o inimigo: a faixa deve sumir (névoa).
-- Nenhuma suíte de `tests/` foi rodada; nenhum teste novo foi escrito (a faixa é DOM, fora do `harness.js`).
 
 ## Riscos
 - `S.watch` também é verdadeiro no demo do hangar? (`watch: !model && !!o.watch`, só com `o.watch`): conferir que o demo não mostra a faixa de forma estranha.

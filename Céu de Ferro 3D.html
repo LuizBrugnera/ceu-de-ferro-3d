@@ -6766,8 +6766,8 @@ function near(x, z, r) {
   const i1 = Math.min(G.nx - 1, Math.floor((x + r - T.x0) / C)), j1 = Math.min(G.nz - 1, Math.floor((z + r - T.z0) / C));
   for (let j = Math.max(0, Math.floor((z - r - T.z0) / C)); j <= j1; j++) for (let i = Math.max(0, Math.floor((x - r - T.x0) / C)); i <= i1; i++) {
     const k = j * G.nx + i;
-    if (G.f[k]) for (const o of G.c[k]) if (M[o.id] !== st) { M[o.id] = st; out.push(o); }
-    if (dyn) { const l = S.dyn.get(k); if (l) for (const o of l) if (M[o.id] !== st) { M[o.id] = st; out.push(o); } }
+    if (G.f[k]) for (let _i = 0, _l = G.c[k], o = _l[0]; _i < _l.length; o = _l[++_i]) if (M[o.id] !== st) { M[o.id] = st; out.push(o); }
+    if (dyn) { const l = S.dyn.get(k); if (l) for (let _i = 0, _l = l, o = _l[0]; _i < _l.length; o = _l[++_i]) if (M[o.id] !== st) { M[o.id] = st; out.push(o); } }
   }
   return out;
 }
@@ -7000,16 +7000,127 @@ function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
 }
 /* the nearest road to a point: route ri, distance s along it and the signed offset to its side */
 function railOf(x, z) {
-  let b = { d: 1e9 };
-  const R = S.T.routes;
+  const R = S.T.routes, X = rixOf(R);
+  if (!rixNear(X, x, z, rixScan)) return railAll(R, x, z);   // off the grid, or not a number: every segment, as before
+  const g = RIX.q.g; if (g < 0) return { d: 1e9 };
+  const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), ox = x - ax - ex * t, oz = z - az - ez * t;
+  return { d: RIX.q.d, ri: X.li[g], s: X.as[g] + L * t, off: (oz * ex - ox * ez) / L };
+}
+/* railOf over every segment of every road (the loop before RIX): off the grid, and the reference RIX answers as */
+function railAll(R, x, z) {
+  let bd = 1e9, bri = -1, bs = 0, bo = 0;
   for (let ri = 0; ri < R.length; ri++) {
     const r = R[ri];
     for (let i = 1; i < r.length; i++) {
       const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.sqrt(ex * ex + ez * ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.sqrt(ox * ox + oz * oz);   // sqrt, not Math.hypot: 3x dearer (cf-lag)
-      if (d < b.d) b = { d, ri, s: a.s + L * t, off: (oz * ex - ox * ez) / L };
+      if (d < bd) { bd = d; bri = ri; bs = a.s + L * t; bo = (oz * ex - ox * ez) / L; }   // the numbers, and one object at the end (cf-lag-2: an object for each nearer segment before)
     }
   }
-  return b;
+  return bri < 0 ? { d: 1e9 } : { d: bd, ri: bri, s: bs, off: bo };
+}
+/* RIX (cf-lag-2): the segments of a set of polylines in squares of c m, so that the nearest-road questions read the few segments round a
+   point instead of every point of every road (a forward base's pick read them all in each cell of the map). Two sets: the main roads
+   (S.T.routes, railOf) and the edges of the network (T.net.e, netNear). Built the first time a set is asked for (a terrain is shared by
+   every match on its map and its roads do not move), again when it changes. Segment g is (line li, point i), numbered in that order, with
+   the numbers the old loops computed (a the first point, e the step, L its length: Math.sqrt for railOf, Math.hypot for netNear, as a.s),
+   so the answers are the same numbers, and on a tie the first segment, as the loops gave. The same for the points of a road's 50 m samples
+   (sOn's walk along a road, sNear). The grid covers the terrain's ground (and the roads'
+   box); a point off it is answered by the old loop over every segment. dk: how many squares from each square to the nearest one with a
+   segment (the rings inside are empty, so the search starts there: a point 3 km from every road reads a few rings, not fifteen). sm: the 50 m samples of a road for sOn (as
+   routeAt gives them) */
+const RIX = { c: 200, w: new WeakMap(), sm: new WeakMap(), q: { d: 1e9, g: -1 } };
+/* the grid of polylines Ls (arrays of points with s) over terrain T's ground and the polylines' box; hyp: lengths by Math.hypot */
+function rixBuild(Ls, hyp, T) {
+  let n = 0, x0 = T.x0, z0 = T.z0, x1 = T.x0 + T.N * T.cx, z1 = T.z0 + T.N * T.cz;
+  for (const r of Ls) { n += Math.max(0, r.length - 1); for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); } }
+  const X = rixGrid(n, x0, z0, x1, z1);
+  Object.assign(X, { hyp, ax: new Float64Array(n), az: new Float64Array(n), ex: new Float64Array(n), ez: new Float64Array(n), L: new Float64Array(n), as: new Float64Array(n), li: new Int32Array(n) });
+  const c = RIX.c, cells = Array.from({ length: X.nx * X.nz }, () => []); let g = 0;
+  for (let li = 0; li < Ls.length; li++) {
+    const r = Ls[li];
+    for (let i = 1; i < r.length; i++, g++) {
+      const a = r[i - 1], b = r[i], ex = b.x - a.x, ez = b.z - a.z;
+      X.ax[g] = a.x; X.az[g] = a.z; X.ex[g] = ex; X.ez[g] = ez; X.L[g] = (hyp ? Math.hypot(ex, ez) : Math.sqrt(ex * ex + ez * ez)) || 1; X.as[g] = a.s; X.li[g] = li;
+      const i0 = Math.floor((Math.min(a.x, b.x) - X.x0) / c), i1 = Math.floor((Math.max(a.x, b.x) - X.x0) / c), j0 = Math.floor((Math.min(a.z, b.z) - X.z0) / c), j1 = Math.floor((Math.max(a.z, b.z) - X.z0) / c);
+      for (let j = j0; j <= j1; j++) for (let k = i0; k <= i1; k++) cells[j * X.nx + k].push(g);   // every square its box touches: the one of its nearest point to anywhere among them
+    }
+  }
+  return rixCells(X, cells);
+}
+/* the grid of points (xs, zs: the samples of a road) over terrain T's ground and the points' box, a point in the square it lies in */
+function rixPts(xs, zs, T) {
+  const n = xs.length; let x0 = T.x0, z0 = T.z0, x1 = T.x0 + T.N * T.cx, z1 = T.z0 + T.N * T.cz;
+  for (let i = 0; i < n; i++) { x0 = Math.min(x0, xs[i]); x1 = Math.max(x1, xs[i]); z0 = Math.min(z0, zs[i]); z1 = Math.max(z1, zs[i]); }
+  const X = Object.assign(rixGrid(n, x0, z0, x1, z1), { px: xs, pz: zs }), c = RIX.c, cells = Array.from({ length: X.nx * X.nz }, () => []);
+  for (let i = 0; i < n; i++) cells[Math.floor((zs[i] - X.z0) / c) * X.nx + Math.floor((xs[i] - X.x0) / c)].push(i);
+  return rixCells(X, cells);
+}
+/* the squares over a box, one more round it (none when there is nothing to hold) */
+const rixGrid = (n, x0, z0, x1, z1) => ({ x0: x0 - RIX.c, z0: z0 - RIX.c, nx: n ? Math.ceil((x1 - x0) / RIX.c) + 3 : 0, nz: n ? Math.ceil((z1 - z0) / RIX.c) + 3 : 0 });
+/* the squares' lists packed (at: where square k's starts in sg), and dk */
+function rixCells(X, cells) {
+  X.at = new Int32Array(cells.length + 1); for (let k = 0; k < cells.length; k++) X.at[k + 1] = X.at[k] + cells[k].length;
+  X.sg = new Int32Array(X.at[cells.length]); for (let k = 0; k < cells.length; k++) X.sg.set(cells[k], X.at[k]);
+  const nx = X.nx, nz = X.nz, dk = (X.dk = new Int32Array(nx * nz)), BIG = nx + nz + 2;   // the chessboard distance to a square with something, two passes
+  for (let k = 0; k < dk.length; k++) dk[k] = cells[k].length ? 0 : BIG;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; let v = dk[k]; if (i) v = Math.min(v, dk[k - 1] + 1); if (j) { v = Math.min(v, dk[k - nx] + 1); if (i) v = Math.min(v, dk[k - nx - 1] + 1); if (i < nx - 1) v = Math.min(v, dk[k - nx + 1] + 1); } dk[k] = v; }
+  for (let j = nz; j--;) for (let i = nx; i--;) { const k = j * nx + i; let v = dk[k]; if (i < nx - 1) v = Math.min(v, dk[k + 1] + 1); if (j < nz - 1) { v = Math.min(v, dk[k + nx] + 1); if (i < nx - 1) v = Math.min(v, dk[k + nx + 1] + 1); if (i) v = Math.min(v, dk[k + nx - 1] + 1); } dk[k] = v; }
+  return X;
+}
+/* the main roads' grid, again if a road is added or one is not the same */
+function rixOf(R) {
+  let X = RIX.w.get(R), ok = !!X && X.nr === R.length;
+  for (let ri = 0; ok && ri < R.length; ri++) ok = X.rs[ri] === R[ri] && X.np[ri] === R[ri].length;
+  if (ok) return X;
+  X = Object.assign(rixBuild(R, false, S.T), { nr: R.length, np: R.map(r => r.length), rs: R.slice() });
+  RIX.w.set(R, X);
+  return X;
+}
+/* the network's grid: its edges up to ne (the bridges' pontoons add edges after the terrain's and take them away again: those after ne are
+   read one by one, after the grid, as the loop read them) */
+function rixNet(N, T) {
+  const E = N.e; let X = RIX.w.get(N);
+  if (X && X.e === E && E.length >= X.ne && E[X.ne - 1] === X.last) return X;
+  X = Object.assign(rixBuild(E.map(e => e.p), true, T), { e: E, ne: E.length, last: E[E.length - 1] });
+  RIX.w.set(N, X);
+  return X;
+}
+/* the nearest segment (or point) of grid X to x z by scan, in RIX.q (d, g; g -1 none), ring by ring of squares round the point's from the
+   first that can hold one (dk): every one whose nearest point lies beyond ring k is k * c m away or more. False when x z is off the grid (or
+   not a number): the caller reads them all, as before */
+function rixNear(X, x, z, scan) {
+  const c = RIX.c, cx = Math.floor((x - X.x0) / c), cz = Math.floor((z - X.z0) / c), nx = X.nx, nz = X.nz;
+  if (!(cx >= 0 && cx < nx && cz >= 0 && cz < nz)) return false;
+  const Q = RIX.q, K = Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz); Q.d = 1e9; Q.g = -1;
+  for (let k = X.dk[cz * nx + cx]; k <= K; k++) {
+    for (let j = Math.max(0, cz - k), jb = Math.min(nz - 1, cz + k); j <= jb; j++) {
+      if (j === cz - k || j === cz + k) { for (let i = Math.max(0, cx - k), ib = Math.min(nx - 1, cx + k); i <= ib; i++) scan(X, j * nx + i, x, z); }
+      else { if (cx - k >= 0) scan(X, j * nx + cx - k, x, z); if (k && cx + k < nx) scan(X, j * nx + cx + k, x, z); }
+    }
+    if (Q.g >= 0 && Q.d < k * c - 1e-3) break;
+  }
+  return true;
+}
+/* the segments of square k against the nearest so far (RIX.q: d, g): the arithmetic of railOf's loop, the lower g on a tie */
+function rixScan(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) {
+    const g = sg[n], ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), ox = x - ax - ex * t, oz = z - az - ez * t, d = Math.sqrt(ox * ox + oz * oz);
+    if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
+  }
+}
+/* the points of square k (a road's samples, rixPts) against the nearest so far: Math.hypot, as sOn's walk, the lower index on a tie */
+function rixScanP(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) { const i = sg[n], d = Math.hypot(X.px[i] - x, X.pz[i] - z); if (d < Q.d || (d === Q.d && i < Q.g)) { Q.d = d; Q.g = i; } }
+}
+/* the same with netNear's arithmetic (the point on the segment, then Math.hypot to it) */
+function rixScanN(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) {
+    const g = sg[n], ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), d = Math.hypot(x - (ax + ex * t), z - (az + ez * t));
+    if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
+  }
 }
 /* ---------- path-finding on the road network (map version 2; nothing in the game calls it yet) ----------
    netNear: the nearest point of any edge. netPath: the cheapest way between two nodes (Dijkstra, ties by index); cost(e) defaults to the edge's
@@ -7017,12 +7128,20 @@ function railOf(x, z) {
    point by the network (start, its projection on the nearest edge, the path, the target's projection, the target), with ri and s1 when the end
    lies on a main road (a vehicle or a squad rides it as it rides the route) */
 function netNear(x, z, T) {
-  T = T || S.T; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
-  for (const E of T.net.e) for (let i = 1; i < E.p.length; i++) {
-    const a = E.p[i - 1], ex = E.p[i].x - a.x, ez = E.p[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
-    if (d < b.d) b = { e: E.i, s: a.s + L * t, d, x: px, z: pz };
+  T = T || S.T; const N = T.net, X = rixNet(N, T);
+  if (!rixNear(X, x, z, rixScanN)) return netAll(N.e, 0, x, z, { e: -1, s: 0, d: 1e9, x: 0, z: 0 });   // off the grid, or not a number: every edge, as before
+  const g = RIX.q.g; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
+  if (g >= 0) { const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1); b = { e: N.e[X.li[g]].i, s: X.as[g] + L * t, d: RIX.q.d, x: ax + ex * t, z: az + ez * t }; }
+  return X.ne < N.e.length ? netAll(N.e, X.ne, x, z, b) : b;   // the pontoons' edges after the grid's
+}
+/* netNear's loop over the edges from e0 on, against the nearest so far b (the loop before RIX) */
+function netAll(E, e0, x, z, b) {
+  let bd = b.d, be = -1, bs = 0, bx = 0, bz = 0;
+  for (let k = e0; k < E.length; k++) for (let i = 1, P = E[k].p; i < P.length; i++) {
+    const a = P[i - 1], ex = P[i].x - a.x, ez = P[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
+    if (d < bd) { bd = d; be = E[k].i; bs = a.s + L * t; bx = px; bz = pz; }
   }
-  return b;
+  return be < 0 ? b : { e: be, s: bs, d: bd, x: bx, z: bz };
 }
 function netPath(a, b, cost, mode, T) {
   T = T || S.T; mode = mode || 'veh';
@@ -7344,9 +7463,9 @@ function popOf(t) {
 }
 function popUse(t) {
   let men = 0, veh = 0, air = 0;
-  for (const m of S.men) if (m.team === t && !m.dead && m.ai && !m.net && m !== S.my) men++;
-  for (const u of S.units) if (u.team === t && !u.dead && !u.net) { if (u.cargo) men += u.cargo.length; if (u.ai && !u.fixed) veh++; }
-  for (const p of S.planes) if (p.team === t && !p.dead && p.ai && !p.net) { air++; if (Array.isArray(p.cargo)) men += p.cargo.length; }
+  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) if (m.team === t && !m.dead && m.ai && !m.net && m !== S.my) men++;
+  for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) if (u.team === t && !u.dead && !u.net) { if (u.cargo) men += u.cargo.length; if (u.ai && !u.fixed) veh++; }
+  for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (p.team === t && !p.dead && p.ai && !p.net) { air++; if (Array.isArray(p.cargo)) men += p.cargo.length; }
   return { men, veh, air };
 }
 /* what side t has out of a kind of the plan, as the director counted it: a column's, not a parked, fetching or requisitioned one */
@@ -7559,7 +7678,7 @@ function smoked(ax, ay, az, bx, by, bz) {
 function addSmoke(x, y, z, r, h, L) {
   r = r || SMOKE.r; S.smokes.push({ x, y, z, t0: S.t, r, h: h || SMOKE.h, L: L || SMOKE.life });
   for (let i = 0; i < 8; i++) { const a = i * TAU / 8; puff(x + Math.cos(a) * r * .7, y + 3, z + Math.sin(a) * r * .7, 'flash', .8); }
-  fx.launch(false);
+  fx.launch(false, { x, y, z });
 }
 /* a vehicle fires a salvo of its launchers; its owner tells the room */
 function popSmoke(u) {
@@ -7943,7 +8062,7 @@ function fireGun(p) {
   const dx = f.x + rand(-s, s), dy = f.y + rand(-s, s), dz = f.z + rand(-s, s);
   p.gcool = g.rate; p.ammo--; p.shotT = S.t;
   S.bullets.push({ x: p.x + f.x * L, y: p.y + f.y * L, z: p.z + f.z * L, vx: p.v.x + dx * g.spd, vy: p.v.y + dy * g.spd, vz: p.v.z + dz * g.spd, life: g.life || 1.5, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: p.def.prop ? 0 : 1, fr: g.fr, cal: calOf(g) });
-  fx.shot(p === S.my, p);
+  fx.shot(p === S.my, p, g);
 }
 /* see: the lock needs the seeker's line (seekLine, smoke included); see 2: a radar's, the ground and what hides only. LOCK.blk: see above */
 function lockOn(p, list, range, cone, see) {
@@ -7972,7 +8091,7 @@ function useOrd(p, i) {
   else if (o.k === 'rocket') { p.ocool[i] = .14; const v = p.V + 450, s = .008; S.bombs.push(Object.assign(b, { k: 'rocket', vx: (p.f.x + rand(-s, s)) * v, vy: (p.f.y + rand(-s, s)) * v, vz: (p.f.z + rand(-s, s)) * v, life: 4 })); }
   else if (o.k === 'agm') { p.ocool[i] = .8; S.missiles.push(MSL.arm(Object.assign(b, { gnd: true, target: lockOn(p, S.units, 6500, .8, true) }), p.f, p)); }
   else { p.ocool[i] = .7; S.missiles.push(MSL.arm(Object.assign(b, { target: MSL.pick(p, o, !!p.ai) }), p.f, p)); }
-  if (o.k !== 'bomb') fx.launch(p === S.my);
+  if (o.k !== 'bomb') fx.launch(p === S.my, p);
   return true;
 }
 /* a release by the player or by an AI plane hosted here: online, the others replay it on their copy of this plane, with the same missile target */
@@ -8369,7 +8488,7 @@ function lob(u, w, x, y, z, vx, vy, vz) {
 function launchSam(u, w, t) {
   const m = MSL.arm({ x: u.x, y: u.y + 5, z: u.z, target: t, o: w, team: u.team, by: u, sam: true }, t ? vnorm({ x: t.x - u.x, y: t.y - u.y + dist(t, u) * .2, z: t.z - u.z }) : u.f, u);
   if (t && t.gnd && !u.net && Math.random() > (u.ai ? GAI.aa.msl.pk : w.mpk)) m.drop = S.t + rand(.4, 1.2);   // the lock on a missile will not hold
-  S.missiles.push(m); fx.launch(u === S.my); return m;
+  S.missiles.push(m); fx.launch(u === S.my, u); return m;
 }
 /* fire(u, w, m, d): from muzzle m along d, returns the projectile. relay: a discrete shot its owner (the player, or the host for an AI vehicle) announces online; a ghost only fires those when told */
 const ARMK = {
@@ -8382,7 +8501,7 @@ const ARMK = {
   }, relay: (u, i, b) => Net.shot(u, [b.x, b.y, b.z], [b.vx, b.vy, b.vz], b.smk) },
   gun: { fire(u, w, m, d) {
     const b = { x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, life: w.life, team: u.team, dmg: w.dmg, ap: w.ap, by: u, tr: 2, am: w.am, cal: calOf(w) };
-    S.bullets.push(b); fx.shot(u === S.my, u); return b;
+    S.bullets.push(b); fx.shot(u === S.my, u, w); return b;
   } },
   flak: { fire(u, w, m, d) {   // the fuse is set for where the nearest plane on the gun line will be when the round gets there
     let R = u.ctl.fuse;
@@ -8393,7 +8512,7 @@ const ARMK = {
   } },
   rkt: { fire(u, w, m, d) {   // an unguided rocket from a vehicle's pod: the aircraft's rocket (S.bombs k rocket), which bursts on what it strikes
     const b = { k: 'rocket', x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, o: w, team: u.team, by: u, life: w.life || 4 };
-    S.bombs.push(b); puff(m.x, m.y, m.z, 'flash', .8); puff(m.x - d.x * 2, m.y, m.z - d.z * 2, 'smoke', 1); fx.launch(u === S.my); return b;
+    S.bombs.push(b); puff(m.x, m.y, m.z, 'flash', .8); puff(m.x - d.x * 2, m.y, m.z - d.z * 2, 'smoke', 1); fx.launch(u === S.my, u); return b;
   } },
   sam: { fire: (u, w) => (u.ctl.lock && !u.ctl.lock.dead && !u.ctl.lock.gone ? launchSam(u, w, u.ctl.lock) : null), relay: (u, i, m) => Net.ord(u, i, m) }
 };
@@ -8782,13 +8901,13 @@ function notice(a, t) {
     if ((a.ai.tgt || a.tgt) === t) off = Math.min(off, PERC.focus);   // what it is fighting it keeps its eyes on
     const oi = oc === 'man' && !(a.arms && a.arms[1] && a.arms[1].d.k === 'sam') ? -1 : LADDER.opt[oc];   // the optic, for the model
     const dark = S.sky && S.sky.on, lt = dark ? skyLit(t) : 1;   // the night and the weather take their share of each sensor (SKY), for every rung of the ladder
-    VIEW[oc].forEach((v, i) => {
-      const R = air ? v[1] : v[0]; if (!R) return;
+    for (let i = 0, VV = VIEW[oc]; i < VV.length; i++) {   // a loop, not forEach: no closure a call (cf-lag-2)
+      const v = VV[i], R = air ? v[1] : v[0]; if (!R) continue;
       const sk = dark ? skySee(a, t, oc, i, d, lt) : 1, fa = off <= v[2] ? 1 : off <= v[3] ? v[5] + (1 - v[5]) * Math.max(0, 1 - (off - v[2]) / ((v[3] - v[2]) * .3 + .02)) : v[6], r = PERC.base * v[4] * fa * Math.pow(R / d, PERC.pw) * sk, q = v[4] * fa * R / d * sk;
       if (r > best) best = r;
       if (q > qa) qa = q;
       if (i === oi && q > qo) qo = q;
-    });
+    }
     if (best > .01 && !hid(a, t)) {
       const cv = t.man ? cover(t) : null, look = (t.man ? STANCE[t.st].vis * (1 - (cv.all || t.st ? cv.c : 0)) : !air && kindAt(t.x, t.z) === 1 ? PERC.woods : 1)
         * (!air && (oc === 'plane' || oc === 'heli') && -dy / hd > PERC.low[0] ? PERC.low[1] : 1);
@@ -8814,14 +8933,16 @@ function notice(a, t) {
   else if (e.kn && e.v < PERC.lose) e.kn = e.told = false;
   if (!e.kn) e.rc = e.ic = 0;
   else {   // the ladder: the class, then the model, while it is in sight
-    const L = LADDER, vk = vetK(a, 'id'), f = x => Math.min(L.cap, Math.pow(x, L.pw)) * L.rate * vk * dt;   // a veteran makes out faster (VET)
+    const L = LADDER, vk = vetK(a, 'id');   // a veteran makes out faster (VET)
     if (e.k0 !== e.kt) { e.k0 = e.kt; e.rt = qr(L.react[0], L.react[1]) * vetK(a, 'react'); const r = d * L.err; e.ex = qr(-r, r); e.ez = qr(-r, r); e.mis = qr(0, 1) < L.mis; }
-    if (sr > 0) { e.rc = Math.min(1, e.rc + f(qa * L.rec)); e.ic = Math.min(1, e.ic + f(Math.max(qa, qo * L.optF) * L.id)); if (e.ic >= 1) e.rc = 1; }
+    if (sr > 0) { e.rc = Math.min(1, e.rc + ladK(qa * L.rec, vk, dt)); e.ic = Math.min(1, e.ic + ladK(Math.max(qa, qo * L.optF) * L.id, vk, dt)); if (e.ic >= 1) e.rc = 1; }
     if (e.rc < 1 && !(a.ai.tgt || a.tgt) && (!a.ln || S.t - a.ln.t > HEAR.ln * .5)) a.ln = { x: t.x + e.ex, z: t.z + e.ez, t: S.t, of: t };   // something there: it looks
   }
   if (e.kn && !e.told && sr > .15) claim(a, t);
   return e.kn;
 }
+/* the ladder's step for a sighting of strength x (notice; a function of its own, not a closure a call: cf-lag-2) */
+const ladK = (x, vk, dt) => Math.min(LADDER.cap, Math.pow(x, LADDER.pw)) * LADDER.rate * vk * dt;
 /* how far up the ladder the AI a has t: 0 not known, 1 detected (or not yet reacted to), 2 recognized (its class), 3 identified (model and side).
    A player, a drone, or what is not a soldier, vehicle or aircraft is always 3 */
 function grade(a, t) {
@@ -9173,7 +9294,7 @@ function navAt(x, z) {
     const b = W[i]; if (x < b[0] - P || x > b[2] + P || z < b[1] - P || z > b[3] + P) continue;
     if (S.nav[i]) return S.nav[i];
     const nx = Math.ceil((b[2] - b[0] + 2 * P) / C), nz = Math.ceil((b[3] - b[1] + 2 * P) / C), N = (S.nav[i] = { b, x0: b[0] - P, z0: b[1] - P, nx, nz, n: NAV.r.map(() => new Uint8Array(nx * nz)), g: new Float32Array(nx * nz), from: new Int32Array(nx * nz), mark: new Uint32Array(nx * nz), q: 0 });
-    for (const o of S.T.objs) if (o.K.sight && S.os[o.id] < 2 && o.x > b[0] - 1 && o.x < b[2] + 1 && o.z > b[1] - 1 && o.z < b[3] + 1) navMark(N, o, 1);
+    for (let _i = 0, _l = S.T.objs, o = _l[0]; _i < _l.length; o = _l[++_i]) if (o.K.sight && S.os[o.id] < 2 && o.x > b[0] - 1 && o.x < b[2] + 1 && o.z > b[1] - 1 && o.z < b[3] + 1) navMark(N, o, 1);
     return N;
   }
   return null;
@@ -9210,7 +9331,7 @@ function navPath(N, c, a, b) {
     const f0 = HF[0], k = pop(), i = k % nx, j = (k / nx) | 0;
     if (k === b) { const out = []; for (let m = b; m >= 0; m = F[m]) out.push({ x: N.x0 + (m % nx + .5) * C, z: N.z0 + (((m / nx) | 0) + .5) * C }); return out.reverse(); }
     if (f0 > G[k] + h(k) + 1e-3) continue;
-    for (const d of DIR8) {
+    for (let _i = 0, _l = DIR8, d = _l[0]; _i < _l.length; d = _l[++_i]) {
       const ii = i + d[0], jj = j + d[1], m = jj * nx + ii;
       if (ii < 0 || jj < 0 || ii >= nx || jj >= N.nz || B[m] || (d[0] && d[1] && (B[k + d[0]] || B[k + d[1] * nx]))) continue;
       const g = G[k] + (d[0] && d[1] ? 1.414 : 1);
@@ -9247,7 +9368,7 @@ function wayTo(M, x, z, gx, gz, r, heavy) {
   let b = null, bt = L, bl = 0, bR = 0;
   WAY.x = gx; WAY.z = gz;
   if (heavy) return WAY;
-  for (const o of near(x + ux * L / 2, z + uz * L / 2, L / 2 + r)) {
+  for (let _i = 0, _l = near(x + ux * L / 2, z + uz * L / 2, L / 2 + r), o = _l[0]; _i < _l.length; o = _l[++_i]) {
     if (S.os[o.id] > 1 || (o.K.sight && !o.K.rock) || o.K.veil) continue;   // a rock is gone round as a tree is; a bush is walked through
     const px = o.x - x, pz = o.z - z, t = px * ux + pz * uz, l = pz * ux - px * uz, R = (o.rd || o.r) + r;
     if (t <= 0 || Math.abs(l) >= R || Math.hypot(gx - o.x, gz - o.z) < R) continue;
@@ -9527,9 +9648,9 @@ function seeBy(u, t, x, z, T = S.t) {
 /* side f's look at u (3 sides): the look below, by f's own ground units, soldiers and aircraft only */
 function spotSd(u, f) {
   let seen = false, late = null;
-  for (const o of S.units) if (!o.dead && o.team === f && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
-  if (!seen) for (const o of S.men) if (!o.dead && o.team === f && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
-  if (!seen) for (const p of S.planes) if (!p.dead && p.team === f && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
+  for (let _i = 0, _l = S.units, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team === f && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
+  if (!seen) for (let _i = 0, _l = S.men, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team === f && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
+  if (!seen) for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (!p.dead && p.team === f && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
   if (seen) { const own = S.my && !S.my.dead && S.my.team === f && sees(S.my, u); seeBy(u, f, u.x + (own ? 0 : qr(-SHARE.err, SHARE.err)), u.z + (own ? 0 : qr(-SHARE.err, SHARE.err))); }
   else if (late) cnLate(u, late);
 }
@@ -9542,7 +9663,7 @@ function spotJob() { const J = spotRun(); J.n = S.units.length + S.men.length + 
 function* spotRun() {
   const all = [...S.units, ...S.men];
   listen();
-  for (const b of S.sup) {   // a supply base, by the other side's ground troops and aircraft
+  for (let _i = 0, _l = S.sup, b = _l[0]; _i < _l.length; b = _l[++_i]) {   // a supply base, by the other side's ground troops and aircraft
     if (b.dead) continue;
     if (NSD() > 2) {   // each other side's own look
       for (const f of sdsOf()) if (f !== b.team && !(S.t - sT(b, f) < 3) && (S.units.some(o => !o.dead && o.team === f && hdist(o, b) < SPOT.gnd && sees(o, b)) || S.men.some(o => !o.dead && o.team === f && hdist(o, b) < MAN.see && sees(o, b)) || S.planes.some(p => !p.dead && p.team === f && dist(p, b) < SPOT.air && sees(p, b)))) seeBy(b, f);
@@ -9557,9 +9678,9 @@ function* spotRun() {
     if (NSD() > 2) { for (const f of sdsOf()) if (f !== u.team) spotSd(u, f); yield; continue; }   // 3 sides: what one side sees is not the other's
     let seen = false;
     let late = null;   // one out of its side's net that saw it: the sighting goes on its way (cnLate) unless one in the net sees it too
-    for (const o of S.units) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
-    if (!seen) for (const o of S.men) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
-    if (!seen) for (const p of S.planes) if (!p.dead && p.team !== u.team && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
+    for (let _i = 0, _l = S.units, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
+    if (!seen) for (let _i = 0, _l = S.men, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== u.team && hdist(o, u) < SPOT.gnd && sees(o, u) && aware(o, u, SHARE.report)) { if (cnSaw(o)) { seen = true; break; } late = late || o; }
+    if (!seen) for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (!p.dead && p.team !== u.team && dist(p, u) < SPOT.air && sees(p, u) && aware(p, u, SHARE.report)) { seen = true; break; }
     if (seen) { const own = S.my && !S.my.dead && S.my.team !== u.team && sees(S.my, u); u.seenT = S.t; u.sx = u.x + (own ? 0 : qr(-SHARE.err, SHARE.err)); u.sz = u.z + (own ? 0 : qr(-SHARE.err, SHARE.err)); }   // what the others report is a little off
     else if (late) cnLate(u, late);
     yield;
@@ -9577,9 +9698,9 @@ function lodTier(q) {
   const O = q.ord, L = q.men.find(m => !m.dead), K = LOD;
   if (!L || q.net || q.state || q.op || q.lift || S.t - (q.shT || -1e9) < K.calm) return 0;
   for (const m of q.men) if (!m.dead && (m.down || m.bl > 0 || m.sup > S.t || S.t - m.hitT < K.calm || (m.ln && S.t - m.ln.t < K.calm))) return 0;
-  for (const o of S.units) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
-  for (const o of S.men) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
-  for (const o of S.planes) if (!o.dead && o.team !== q.team && dist(o, L) < K.air) return 0;
+  for (let _i = 0, _l = S.units, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
+  for (let _i = 0, _l = S.men, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== q.team && hdist(o, L) < K.near) return 0;
+  for (let _i = 0, _l = S.planes, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== q.team && dist(o, L) < K.air) return 0;
   for (const o of S.drones || []) if (!o.dead && !o.gone && o.team !== q.team && dist(o, L) < K.near) return 0;
   const me = S.my && !S.my.dead && !S.watch ? S.my : null; if (me && hdist(me, L) < K.pl) return 0;
   for (const g of Net.ghosts.values()) if (!g.dead && Number.isFinite(g.x) && hdist(g, L) < K.pl) return 0;
@@ -9762,14 +9883,14 @@ const TOSS = ['heat', 'nade', 'smk'];
 const GRN = { fuse: 3.6, e: .32, f: .6, roll: 2.4, slope: .6, r: .08, step: 1.2, car: [2.4, 2.6] };
 function lobbed(m, k, o, x, y, z, vx, vy, vz) { const b = { k, x, y, z, vx, vy, vz, o, team: m.team, by: m, life: 8 }; S.bombs.push(b); return b; }
 const MSHOT = {
-  heat(m, w, e, d) { fx.launch(m === S.my); puff(e.x - d.x * 2, e.y, e.z - d.z * 2, 'dust', 1.2); return lobbed(m, 'heat', w, e.x + d.x, e.y + d.y, e.z + d.z, d.x * w.spd, d.y * w.spd, d.z * w.spd); },
+  heat(m, w, e, d) { fx.launch(m === S.my, m); puff(e.x - d.x * 2, e.y, e.z - d.z * 2, 'dust', 1.2); return lobbed(m, 'heat', w, e.x + d.x, e.y + d.y, e.z + d.z, d.x * w.spd, d.y * w.spd, d.z * w.spd); },
   atgm(m, w, e, d, t) {
     const o = MSL.arm({ x: e.x + d.x, y: e.y + .3, z: e.z + d.z, gnd: true, target: t, o: w, team: m.team, by: m }, vnorm({ x: d.x, y: d.y + .35, z: d.z }), m);
-    S.missiles.push(o); fx.launch(m === S.my); return o;
+    S.missiles.push(o); fx.launch(m === S.my, m); return o;
   },
   sam(m, w, e, d, t) {
     const o = MSL.arm({ x: e.x + d.x, y: e.y + .3, z: e.z + d.z, target: t, o: w, team: m.team, by: m, sam: true }, vnorm({ x: d.x, y: d.y + .1, z: d.z }), m);
-    S.missiles.push(o); fx.launch(m === S.my); return o;
+    S.missiles.push(o); fx.launch(m === S.my, m); return o;
   }
 };
 /* the target a guided special has: the nearest its line inside the cone, in range and in clear sight; ready once held for lockT s */
@@ -9794,7 +9915,7 @@ function manFire(m, a) {
   const s = (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) + c.sp) * (m.sup > S.t ? SUP.sp : 1);
   a.mag--; a.cool = w.rate; a.t = m.shotT = S.t;
   S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
-  fx.shot(m === S.my, m);
+  fx.shot(m === S.my, m, w);
 }
 /* a hand grenade (k 1) or a smoke grenade (2), thrown along the aim and a little up */
 function toss(m, k) {
@@ -9822,7 +9943,7 @@ function manArms(m, dt) {
 }
 /* a vehicle of the other side driving over where a soldier stands */
 function ranOver(m) {
-  for (const u of S.units) {
+  for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {
     if (u.dead || u.team === m.team || u.v.x * u.v.x + u.v.z * u.v.z < MAN.over * MAN.over || Math.abs(u.x - m.x) > 9 || Math.abs(u.z - m.z) > 9) continue;
     toBody(u, m.x - u.x, 0, m.z - u.z, 0);
     if (Math.abs(HB[0]) < u.def.env[3] && Math.abs(HB[2]) < u.def.env[5]) return u;
@@ -9872,7 +9993,7 @@ function stepMan(m, dt) {
   if (go > .01 && S.t >= m.stT) {
     const v = (run ? MAN.run : MAN.walk * STANCE[m.st].spd * (c.ads ? MAN.ads.spd : 1)) * (1 - Math.min(MAN.limp[1], m.wl * MAN.limp[0])) * Math.min(1, go) / go * dt * rubble(m.x, m.z);
     let nx = m.x + c.mx * v, nz = m.z + c.mz * v;
-    for (const o of near(nx, nz, 1)) if (S.os[o.id] < 2 && pushOut(o, nx, nz, MAN.r * MAN.sc)) { nx += PUSH.x; nz += PUSH.z; }   // a wall or a trunk: it slides along it
+    for (let _i = 0, _l = near(nx, nz, 1), o = _l[0]; _i < _l.length; o = _l[++_i]) if (S.os[o.id] < 2 && pushOut(o, nx, nz, MAN.r * MAN.sc)) { nx += PUSH.x; nz += PUSH.z; }   // a wall or a trunk: it slides along it
     const ny = hgt(nx, nz), h0 = hgt(m.x, m.z), wet = ny <= S.T.WL + .2 && !(h0 <= S.T.WL + .2 && ny >= h0 - .01);   // one set down in the water (out of a hull afloat, thrown from one) wades out: a step no deeper (cf-obras-sair)
     if (!(wet || (ny - h0) / (Math.hypot(nx - m.x, nz - m.z) || 1) > 1.1 || nx < 0 || nx > S.W || Math.abs(nz) > S.HW)) { m.x = nx; m.y = manY(nx, nz); m.z = nz; m.step += Math.hypot(nx - x0, nz - z0); m.moveT = S.t; }
   }
@@ -10567,9 +10688,20 @@ function holdPt(C, p, q) {
 /* the s on road ri nearest x z */
 function sOn(ri, x, z) {
   const p = railOf(x, z); if (p.ri === ri) return p.s;
-  const r = S.T.routes[ri]; let bs = 0, bd = 1e9;
-  for (let s = 0; s <= r.len; s += 50) { const q = routeAt(r, s), d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; bs = s; } }
-  return bs;
+  return sNear(ri, x, z);
+}
+/* sOn off the nearest road: the s of road ri's 50 m sample nearest x z (the first on a tie), and its distance in RIX.sd. The samples are
+   routeAt's, kept once a road (RIX.sm, cf-lag-2: a binary search and an object each, 200-300 of them a call, before) */
+function sNear(ri, x, z) {
+  const r = S.T.routes[ri]; let M = RIX.sm.get(r);
+  if (!M || M.len !== r.len || M.np !== r.length) {
+    const xs = [], zs = []; for (let s = 0; s <= r.len; s += 50) { const q = routeAt(r, s); xs.push(q.x); zs.push(q.z); }
+    M = { len: r.len, np: r.length, x: Float64Array.from(xs), z: Float64Array.from(zs) }; M.g = rixPts(M.x, M.z, S.T); RIX.sm.set(r, M);
+  }
+  let bs = 0, bd = 1e9, kb = 0;
+  if (rixNear(M.g, x, z, rixScanP)) { kb = RIX.q.g; bs = kb * 50; }   // through the grid of the samples (cf-lag-2: every sample of the road before), s = 50 kb as the walk adds it
+  else for (let k = 0, s = 0; k < M.x.length; k++, s += 50) { const d = Math.hypot(M.x[k] - x, M.z[k] - z); if (d < bd) { bd = d; bs = s; kb = k; } }
+  RIX.sd = Math.hypot(M.x[kb] - x, M.z[kb] - z); return bs;   // bd, or NaN as routeAt(r, 0) gave for a point that is not a number
 }
 /* the dispersed elements (INC.disp): rec, small teams that go ahead of the line and out to its flanks from one hidden place to the next
    (on to another after move s at most), watching and not fighting; lp, a listening post off the flank of the foremost point a side holds
@@ -10626,8 +10758,8 @@ function sqDisp(q, O) {
 INC.work = { quiet: 500, per: 4, again: 25, near: 12, road: 120, off: 16, n: 2 };
 /* is anything of the enemy of side t within r m of x z, now (not as the squads last counted it) */
 function foeIn(t, x, z, r) {
-  for (const o of S.men) if (!o.dead && o.team !== t && Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r) return true;
-  for (const o of S.units) if (!o.dead && o.team !== t && Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r) return true;
+  for (let _i = 0, _l = S.men, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== t && Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r) return true;
+  for (let _i = 0, _l = S.units, o = _l[0]; _i < _l.length; o = _l[++_i]) if (!o.dead && o.team !== t && Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r) return true;
   return false;
 }
 /* the next work a point's holders start, and who builds it */
@@ -10807,27 +10939,27 @@ const builds = (m, b) => !m.dead && m.team === b.team && Math.abs(m.x - b.x) < 3
 function supStep(dt) {
   const sim = !S.net || S.host, serve = sim && (S.supT = (S.supT || 0) - dt) <= 0;
   if (serve) S.supT = .5;
-  for (const b of S.sup) {
+  for (let _i = 0, _l = S.sup, b = _l[0]; _i < _l.length; b = _l[++_i]) {
     if (b.dead) { if (S.t - b.deadT > BLD.ruin) b.gone = true; else if (Math.random() < dt * 4) puff(b.x + rand(-3, 3), b.y + 2, b.z + rand(-3, 3), 'smoke', 1.6, 0, 5, 0); continue; }
     if (sim && b.prog < 1) {
-      let n = 0; for (const m of S.men) if (builds(m, b)) n++;
+      let n = 0; for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) if (builds(m, b)) n++;
       b.n = n = Math.min(n, BLD.max);
       if (n) { b.workT = S.t; supAt(b, Math.min(1, b.prog + (1 + BLD.help * (n - 1)) / BLD.time * dt)); }
       else if (S.t - b.workT > BLD.decay[0]) { supAt(b, b.prog - BLD.decay[1] * dt); if (b.prog <= 0) { b.dead = b.gone = true; dropObj(b.o); Net.bq = true; } }
     } else if (serve && b.prog >= 1) {
-      for (const u of S.units) if (u.ai && !u.net && !u.dead && u.team === b.team && S.t - u.hitT > 3 && (u.hp < u.max || u.mod.hurt) && hdist(u, b) < BLD.r) { u.hp = Math.min(u.max, u.hp + 7.5); mend(u, .2); u.ai.rest = S.t + 1; }
-      for (const m of S.men) if (m.ai && !m.net && !m.dead && m.team === b.team && S.t - m.hitT > 3 && hdist(m, b) < BLD.r) {
+      for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) if (u.ai && !u.net && !u.dead && u.team === b.team && S.t - u.hitT > 3 && (u.hp < u.max || u.mod.hurt) && hdist(u, b) < BLD.r) { u.hp = Math.min(u.max, u.hp + 7.5); mend(u, .2); u.ai.rest = S.t + 1; }
+      for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) if (m.ai && !m.net && !m.dead && m.team === b.team && S.t - m.hitT > 3 && hdist(m, b) < BLD.r) {
         m.hp = Math.min(m.max, m.hp + m.max * .1); m.wl = m.wa = 0; m.nades = MAN.nade.n; m.smk = MAN.smk.n; m.chg = BLD.charge.n;
         for (const a of m.arms) if (a.res < (a.d.k ? a.d.n - 1 : a.d.mags)) a.res++;
       }
     }
   }
-  if (serve) for (const u of S.units) {   // a hurt AI vehicle with nothing to fight goes back to a base on its road
+  if (serve) for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {   // a hurt AI vehicle with nothing to fight goes back to a base on its road
     const A = u.ai; if (!A || u.net || u.dead || u.fixed || u.fld || A.reloc !== null || u.hp >= u.max * BLD.ai.hp || (A.tgt && !A.tgt.dead)) continue;
     const b = S.sup.find(b => !b.dead && b.prog >= 1 && b.team === u.team && b.ri === u.ri && Math.abs(b.s - u.s) < BLD.ai.fall);
     if (b && hdist(u, b) > BLD.r * .6) A.reloc = b.s;
   }
-  for (const c of S.chg) if (S.t >= c.T) { c.gone = true; blastFx(c.x, c.y + 1, c.z, 12); if (!c.b.dead) hitObj(c.b.o, BLD.charge.dmg, c.by); }
+  for (let _i = 0, _l = S.chg, c = _l[0]; _i < _l.length; c = _l[++_i]) if (S.t >= c.T) { c.gone = true; blastFx(c.x, c.y + 1, c.z, 12); if (!c.b.dead) hitObj(c.b.o, BLD.charge.dmg, c.by); }
   if (S.chg.length) S.chg = alive(S.chg);
   if (S.sup.some(b => b.gone)) S.sup = alive(S.sup);
 }
@@ -11377,11 +11509,11 @@ function nadeStep(b, dt) {
   explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast, b.o.kg || CITY.chg.nade);
 }
 function stepShots(dt) {
-  for (const b of S.bullets) {
+  for (let _i = 0, _l = S.bullets, b = _l[0]; _i < _l.length; b = _l[++_i]) {
     const x0 = b.x, y0 = b.y, z0 = b.z;
     b.life -= dt; b.vy -= GR * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
     if (b.life <= 0) { b.gone = true; continue; }
-    if (b.cal >= MINT.cal) for (const m of S.missiles) {   // a heavy round and a missile in flight: the nearest the round came to it in this step (MINT); the round has flown it and the missile not yet (MSL.step comes after), so the missile is taken where the step leaves it
+    if (b.cal >= MINT.cal) for (let _i = 0, _l = S.missiles, m = _l[0]; _i < _l.length; m = _l[++_i]) {   // a heavy round and a missile in flight: the nearest the round came to it in this step (MINT); the round has flown it and the missile not yet (MSL.step comes after), so the missile is taken where the step leaves it
       if (m.gone || m.team === b.team) continue;
       const mv = m.v * dt, rx = m.x + m.d.x * mv - b.x, ry = m.y + m.d.y * mv - b.y, rz = m.z + m.d.z * mv - b.z, vx = b.vx - m.d.x * m.v, vy = b.vy - m.d.y * m.v, vz = b.vz - m.d.z * m.v, R = Math.max(MINT.r, b.am || 0), far = (Math.abs(vx) + Math.abs(vy) + Math.abs(vz)) * dt + R;
       if (Math.abs(rx) > far || Math.abs(ry) > far || Math.abs(rz) > far) continue;
@@ -11394,13 +11526,13 @@ function stepShots(dt) {
       const g = hgt(b.x, b.z), wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null, back = wo ? dt * RAY.t : dt, an = RAY.ax, sg = RAY.sg, we = wo && wo.B ? RAY.e : -1;
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // it stops at the wall, unless something stood in front of it
       if (b.y < g + (S.cbup ? OBJS.air : 6) || wo) {
-        for (const u of S.units) {
+        for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {
           if (u.dead || safe(u, b)) continue;
           const t = wo ? clamp(((u.x - b.x) * b.vx + (u.z - b.z) * b.vz) / (b.vx * b.vx + b.vz * b.vz || 1), -back, 0) : 0, x = b.x + b.vx * t, y = b.y + b.vy * t, z = b.z + b.vz * t;
           if (Math.abs(x - u.x) > 5.5 || Math.abs(z - u.z) > 5.5 || y > u.y + 6.5) continue;
           impact(u, HK.bullet, b.dmg, b.by, x, y, z, b.vx, b.vy, b.vz, b.sa ? -1 : b.ap); puff(x, y, z, 'spark', .5); b.gone = true; break;
         }
-        if (!b.gone) for (const m of S.men) {   // a soldier: where the round passed nearest in this step; a near miss pins an AI one
+        if (!b.gone) for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) {   // a soldier: where the round passed nearest in this step; a near miss pins an AI one
           const rx = m.x - b.x, rz = m.z - b.z;
           if (m.dead || safe(m, b) || rx * rx + rz * rz > 900) continue;
           const t = clamp((rx * b.vx + rz * b.vz) / (b.vx * b.vx + b.vz * b.vz || 1), -back, 0), d = Math.hypot(rx - b.vx * t, rz - b.vz * t), y = b.y + b.vy * t - m.y, H = STANCE[m.st].h * MAN.sc;
@@ -11417,13 +11549,13 @@ function stepShots(dt) {
         if (b.gone) { if (b.fr) explode(b.x, Math.max(b.y, g + .3), b.z, b.fr[0], b.fr[1], b.by, b.team); continue; }   // a fragmenting round bursts where it stops
       }
     }
-    for (const p of S.planes) {
+    for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) {
       if (p.dead || safe(p, b)) continue;
       const dx = p.x - b.x, dy = p.y - b.y, dz = p.z - b.z, r = Math.max(6.5, p.def.len * .5);
       if (dx * dx + dy * dy + dz * dz < r * r) { impact(p, HK.bullet, b.dmg, b.by, b.x, b.y, b.z, b.vx - p.v.x, b.vy - p.v.y, b.vz - p.v.z); b.gone = true; break; }
     }
   }
-  for (const b of S.bombs) {   // a shell is fast enough to skip a vehicle in one step, so it moves in short hops
+  for (let _i = 0, _l = S.bombs, b = _l[0]; _i < _l.length; b = _l[++_i]) {   // a shell is fast enough to skip a vehicle in one step, so it moves in short hops
     b.life -= dt;
     if (b.fz !== undefined) { nadeStep(b, dt); continue; }   // a hand grenade on its fuse
     const he = b.k === 'he', heat = b.k === 'heat', hv = b.k === 'shell' && b.o.he, sh = he || b.k === 'shell', n = sh ? Math.ceil(Math.hypot(b.vx, b.vy, b.vz) * dt / 5) : 1, h = dt / n, top = sh || heat ? 6.5 : 4;
@@ -11438,15 +11570,15 @@ function stepShots(dt) {
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // the hop ends at the wall; what stood right before it is still struck first
       let du = null, dc = null, bt = 2;
       if (Math.min(y0, b.y) < g + 10) {   // swept: the first vehicle, soldier or civilian anywhere on the hop, before the wall or the ground that ends it
-        for (const u of S.units) if (!u.dead && !safe(u, b)) { const t = hopBox(u, x0, y0, z0, b.x, b.y, b.z, 5, top); if (t >= 0 && t < bt) { bt = t; du = u; } }
+        for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) if (!u.dead && !safe(u, b)) { const t = hopBox(u, x0, y0, z0, b.x, b.y, b.z, 5, top); if (t >= 0 && t < bt) { bt = t; du = u; } }
         if (!b.smk && b.k !== 'smk') {   // a round goes through men no more than through a truck: it strikes the first one in its way
-          for (const m of S.men) if (!m.dead && !m.in && !safe(m, b)) { const t = hopMan(m, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = m; } }
-          if (S.civs) for (const c of S.civs) if (!c.dead && !c.gone && !c.in) { const t = hopMan(c, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = null; dc = c; } }   // last, so a civilian taken here is the nearest of all
+          for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) if (!m.dead && !m.in && !safe(m, b)) { const t = hopMan(m, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = m; } }
+          if (S.civs) for (let _i = 0, _l = S.civs, c = _l[0]; _i < _l.length; c = _l[++_i]) if (!c.dead && !c.gone && !c.in) { const t = hopMan(c, x0, y0, z0, b.x, b.y, b.z); if (t >= 0 && t < bt) { bt = t; du = null; dc = c; } }   // last, so a civilian taken here is the nearest of all
         }
         if (bt <= 1) { b.x = x0 + (b.x - x0) * bt; b.y = y0 + (b.y - y0) * bt; b.z = z0 + (b.z - z0) * bt; g = hgt(b.x, b.z); wo = null; }
       }
       let hit = !!(du || dc) || (!wo && (b.y <= g + .5 || b.life <= 0));
-      if (!hit && b.k !== 'bomb') for (const p of S.planes) if (!p.dead && !safe(p, b) && dist(p, b) < 9) { impact(p, HK.missile, b.o.dmg, b.by, b.x, b.y, b.z, b.vx - p.v.x, b.vy - p.v.y, b.vz - p.v.z); hit = true; break; }
+      if (!hit && b.k !== 'bomb') for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (!p.dead && !safe(p, b) && dist(p, b) < 9) { impact(p, HK.missile, b.o.dmg, b.by, b.x, b.y, b.z, b.vx - p.v.x, b.vy - p.v.y, b.vz - p.v.z); hit = true; break; }
       if (hit) wo = null; else if (!wo) continue;
       b.gone = true;
       if (wo) {
@@ -11468,16 +11600,16 @@ function stepShots(dt) {
       else { explode(b.x, Math.max(b.y, g + .5), b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, D.blast); if (b.o.mega) stkFx(b.x, Math.max(b.y, g + .5), b.z, b.o.r); }   // a strategic bomber's bomb: the crater and the cloud (STK)
     }
   }
-  for (const m of S.missiles) MSL.step(m, dt);
-  for (const f of S.flares) { f.life -= dt; f.vy -= GR * .5 * dt; f.vx *= 1 - dt; f.vz *= 1 - dt; f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt; if (f.life <= 0 || f.y < hgt(f.x, f.z)) { f.life = 0; f.gone = true; } }
-  for (const s of S.shells) {
+  for (let _i = 0, _l = S.missiles, m = _l[0]; _i < _l.length; m = _l[++_i]) MSL.step(m, dt);
+  for (let _i = 0, _l = S.flares, f = _l[0]; _i < _l.length; f = _l[++_i]) { f.life -= dt; f.vy -= GR * .5 * dt; f.vx *= 1 - dt; f.vz *= 1 - dt; f.x += f.vx * dt; f.y += f.vy * dt; f.z += f.vz * dt; if (f.life <= 0 || f.y < hgt(f.x, f.z)) { f.life = 0; f.gone = true; } }
+  for (let _i = 0, _l = S.shells, s = _l[0]; _i < _l.length; s = _l[++_i]) {
     s.t += dt;
     if (s.t < s.T) continue;
     s.gone = true; puff(s.x, s.y, s.z, 'flash', 3);
     for (let i = 0; i < 4; i++) puff(s.x + rand(-5, 5), s.y + rand(-5, 5), s.z + rand(-5, 5), 'flak', 3.2);
     const d0 = dist(s, S.ear); if (d0 < 3000) fx.boom(9, d0);
     if (s.wo) hitObj(s.wo, s.o.dmg * OBJD.flak * s.wo.K.take[2], s.by);
-    for (const p of S.planes) { if (p.dead || safe(p, s)) continue; const d = dist(p, s); if (d < s.o.r) impact(p, HK.blast, s.o.dmg * (1 - d / s.o.r), s.by, s.x, s.y, s.z); }
+    for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) { if (p.dead || safe(p, s)) continue; const d = dist(p, s); if (d < s.o.r) impact(p, HK.blast, s.o.dmg * (1 - d / s.o.r), s.by, s.x, s.y, s.z); }
   }
 }
 
@@ -11642,6 +11774,10 @@ const CLK = { h: .017, hmax: 1 / 30, catch: .25, least: .05, budget: 100, frame:
     return { n, d, g: n * d };
   },
   cost(ms, n) { if (n > 0 && ms >= 0) { const c = ms / n; CLK.c = CLK.c ? CLK.c + (c - CLK.c) * CLK.ema : c; } } };
+/* the step's hot loops (spot, the shots, the works, the supply bases, the LOD, step itself) read the world's lists by index:
+   for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) visits what for (const m of S.men) visits, the same elements in the
+   same order, the list growing or shrinking as it goes, but makes no iterator result an element where V8 runs the function below its top
+   tier (cf-lag-2: tens of MB a second of battle). tests/hot-loops.js keeps them so */
 const aiJob = (J, n) => { while (J && n-- > 0) if (J.next().done) return null; return J; };
 const aiDrain = J => { while (J && !J.next().done); return null; };
 function step(dt) {
@@ -11663,18 +11799,18 @@ function step(dt) {
   }
   S.spotJ = aiJob(S.spotJ, S.spotN);
   let a1 = AIB.now(); AIB.g += a1 - a0;
-  for (const p of S.planes) { if (p.net) { stepGhost(p, dt); continue; } if (p.ai && !p.dead) aiPlane(p, dt); stepPlane(p, dt); }
+  for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) { if (p.net) { stepGhost(p, dt); continue; } if (p.ai && !p.dead) aiPlane(p, dt); stepPlane(p, dt); }
   heliStep(dt);
-  for (const u of S.units) if (!u.dead) stepUnit(u, dt);
+  for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) if (!u.dead) stepUnit(u, dt);
   vehCol(dt);   // hull against hull, once all have moved (VCOL)
-  for (const m of S.men) { if (!m.dead) stepMan(m, dt); else if (S.t - m.deadT > MAN.body) m.gone = true; }
+  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) { if (!m.dead) stepMan(m, dt); else if (S.t - m.deadT > MAN.body) m.gone = true; }
   a0 = AIB.now(); AIB.u += a0 - a1;
   fortMen(dt);
   bldMen(dt);
   civStep(dt);
   LO.step(dt);
   a0 = AIB.now();
-  for (const q of S.squads) if (!q.net && (q.think -= dt) <= 0) { q.think = IAI.think; squadThink(q); }
+  for (let _i = 0, _l = S.squads, q = _l[0]; _i < _l.length; q = _l[++_i]) if (!q.net && (q.think -= dt) <= 0) { q.think = IAI.think; squadThink(q); }
   if ((!S.net || S.host) && !S.over) {   // the commanders, each at its own cadence (planDue: the difficulty's, W17), a piece of the plan a frame (the one that is not done when the next starts is finished first)
     if ((S.planT -= dt) <= 0) { const k = planDue(); if (k >= 0) { if (S.planJ) plan(S.planK, S.planJ, Infinity); S.planJ = plan((S.planK = k), true) || null; } }
     if (S.planJ) S.planJ = plan(S.planK, S.planJ, Math.max(1, Math.round(dt * 60 * SLICE.plan))) || null;
@@ -11686,22 +11822,22 @@ function step(dt) {
   for (let k = Math.ceil(dt / CLK.h - 1e-9), i = 0; i < k; i++) stepShots(dt / k);   // what flies (rounds, bombs, shells, missiles, flares) in hops of CLK.h at most, however long the step: a round or a missile does not skip a vehicle or a plane
   supStep(dt);
   fortStep(dt);
-  for (const q of S.parts) {
+  for (let _i = 0, _l = S.parts, q = _l[0]; _i < _l.length; q = _l[++_i]) {
     q.life -= dt; if (q.life <= 0) { q.gone = true; continue; }
     if (q.k !== 'tr') { const dr = 1 - 1.4 * dt; q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt; q.vx *= dr; q.vz *= dr; q.vy = q.vy * dr + (q.k === 'smoke' ? 2.5 : 0) * dt; }
   }
-  for (const f of S.floats) { f.life -= dt; f.y += 6 * dt; if (f.life <= 0) f.gone = true; }
-  for (const f of S.falls) f.life -= dt;
+  for (let _i = 0, _l = S.floats, f = _l[0]; _i < _l.length; f = _l[++_i]) { f.life -= dt; f.y += 6 * dt; if (f.life <= 0) f.gone = true; }
+  for (let _i = 0, _l = S.falls, f = _l[0]; _i < _l.length; f = _l[++_i]) f.life -= dt;
   if (S.falls.length && S.falls[0].life <= 0) S.falls.shift();
-  for (const b of S.debris) {   // a wing falls until it hits the ground; a turret stays where it lands
+  for (let _i = 0, _l = S.debris, b = _l[0]; _i < _l.length; b = _l[++_i]) {   // a wing falls until it hits the ground; a turret stays where it lands
     if ((b.life -= dt) <= 0) b.gone = true;
     if (b.rest || b.gone) continue;
     const k = 1 - b.drag * dt, g = hgt(b.x, b.z) + b.h;
     b.vy = (b.vy - GR * dt) * k; b.vx *= k; b.vz *= k; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt; spin(b, b.w.x, b.w.y, b.w.z, dt);
     if (b.y <= g) { b.y = g; puff(b.x, g, b.z, 'dust', 1.5); if (b.k === 'tur') b.rest = true; else b.gone = true; }
   }
-  for (const w of S.wrecks) { w.life -= dt; if (w.life > 30 && Math.random() < dt * 8) puff(w.u.x + rand(-2, 2), w.u.y + 3, w.u.z + rand(-2, 2), 'smoke', 1.6, 0, 5, 0); }
-  for (const b of S.base) b.hit = Math.max(0, b.hit - dt);
+  for (let _i = 0, _l = S.wrecks, w = _l[0]; _i < _l.length; w = _l[++_i]) { w.life -= dt; if (w.life > 30 && Math.random() < dt * 8) puff(w.u.x + rand(-2, 2), w.u.y + 3, w.u.z + rand(-2, 2), 'smoke', 1.6, 0, 5, 0); }
+  for (let _i = 0, _l = S.base, b = _l[0]; _i < _l.length; b = _l[++_i]) b.hit = Math.max(0, b.hit - dt);
   MSL.frame(P, dt);
   if (S.smokes.length && S.smokes.some(s => S.t - s.t0 > (s.L || SMOKE.life))) S.smokes = S.smokes.filter(s => S.t - s.t0 <= (s.L || SMOKE.life));
   S.shake = Math.max(0, S.shake - dt * 2);
@@ -11712,7 +11848,7 @@ function step(dt) {
   if (S.osm.length) smoulder(dt);
 
   cqStep(dt); radStep(dt); ecoStep(dt);
-  for (const f of S.feed) f.life -= dt;
+  for (let _i = 0, _l = S.feed, f = _l[0]; _i < _l.length; f = _l[++_i]) f.life -= dt;
   if (S.feed.length && S.feed.some(f => f.life <= 0)) S.feed = S.feed.filter(f => f.life > 0);
   if (S.demo && !S.watch) { demoKeepAlive(); return; }
   if (S.over) return;
@@ -12161,7 +12297,7 @@ function snipe(m, a) {
   const h = Math.atan2(-f.z, f.x) + W.x + rand(-s, s), p = Math.asin(clamp(f.y, -1, 1)) + W.y + rand(-s, s), cp = Math.cos(p), dx = Math.cos(h) * cp, dy = Math.sin(p), dz = -Math.sin(h) * cp;
   a.mag--; a.cool = w.rate; a.t = m.shotT = S.t;
   (S.slugs || (S.slugs = [])).push({ x: e.x + dx * .6, y: e.y + dy * .6, z: e.z + dz * .6, vx: dx * w.spd, vy: dy * w.spd, vz: dz * w.spd, life: SNIPE.life, team: m.team, o: w, by: m, t: 0 });
-  fx.shot(m === S.my, m);
+  fx.shot(m === S.my, m, w);
 }
 /* an anti-materiel round on a vehicle: the part on its line and the face it came through, like any hit that goes in */
 function amHit(u, b, x, y, z) {
@@ -12660,7 +12796,7 @@ const Net = {
       g = g || Net.ghosts.get(m.from);
       const w = g && g.net && g.man && !g.dead && (m.k === 1 ? MAN.nade : m.k === 2 ? MAN.smk : g.arms[1] && g.arms[1].d.k === (m.k ? 'mort' : 'heat') && g.arms[1].d);
       if (w && m.k > 2 && Array.isArray(m.p) && Array.isArray(m.v)) mortRound(g, w, m.k === 4, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]);
-      else if (w && Array.isArray(m.p) && Array.isArray(m.v)) { if (m.rb && m.k === 1) nadeTaken(m.p[0], m.p[2]); const b = lobbed(g, TOSS[m.k], w, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]); if (m.f && m.k === 1) b.fz = S.t + (Number.isFinite(m.fl) ? clamp(m.fl, 0, GRN.fuse + 1) : GRN.fuse); if (!m.k) fx.launch(false); }
+      else if (w && Array.isArray(m.p) && Array.isArray(m.v)) { if (m.rb && m.k === 1) nadeTaken(m.p[0], m.p[2]); const b = lobbed(g, TOSS[m.k], w, m.p[0], m.p[1], m.p[2], m.v[0], m.v[1], m.v[2]); if (m.f && m.k === 1) b.fz = S.t + (Number.isFinite(m.fl) ? clamp(m.fl, 0, GRN.fuse + 1) : GRN.fuse); if (!m.k) fx.launch(false, g); }
     },
     aitoss(m) { Net.rx.toss(m, Net.ai.get(m.id)); },
     ord(m) { Net.fireAs(Net.ghosts.get(m.from), m.i, m.target, m.m, m.tm); },
@@ -13300,7 +13436,7 @@ function civLook(dt) {
   S.civL = K.every;
   const obs = sdsOf().map(() => []);
   for (const l of [S.men, S.units, S.planes]) for (const o of l) if (!o.dead && !o.in && !o.drone && civT(o.team)) obs[o.team].push(o);
-  for (const c of S.civs) {
+  for (let _i = 0, _l = S.civs, c = _l[0]; _i < _l.length; c = _l[++_i]) {
     if (c.dead || c.gone || c.in || c.net) continue;
     const sn = c.sn || (c.sn = sdsOf().map(() => -1e9));
     for (const t of sdsOf()) {
@@ -13887,7 +14023,7 @@ function heliGun(p) {
   const g = p.def.gun, a = p.gf, m = heliMuzzle(p), s = g.sp + (p.ai ? HAI.sp : 0) + p.mod.disp * DMG.disp;
   p.gc = g.rate; p.ammo--; p.shotT = S.t;
   S.bullets.push({ x: m.x, y: m.y, z: m.z, vx: p.v.x + (a.x + rand(-s, s)) * g.spd, vy: p.v.y + (a.y + rand(-s, s)) * g.spd, vz: p.v.z + (a.z + rand(-s, s)) * g.spd, life: g.life, team: p.team, dmg: g.dmg, ap: g.ap, by: p, tr: 1, fr: g.fr, cal: calOf(g) });
-  fx.shot(p === S.my, p);
+  fx.shot(p === S.my, p, g);
 }
 /* a door gunner by himself: the nearest enemy soldier or soft vehicle one of the two guns bears on */
 function doorPick(p) {
@@ -16579,8 +16715,8 @@ function trenchAt(x, z, pad) {
    shows of it to aim at (m.fy), how well it is hidden, and who is in each trench (f.in, by side; f.tg: what a battery is given) */
 function fortMen(dt) {
   const TR = FORT.trench, BG = FORT.bags, T = S.T;
-  for (const f of S.forts) f.in[0] = f.in[1] = 0;
-  for (const m of S.men) {
+  for (let _i = 0, _l = S.forts, f = _l[0]; _i < _l.length; f = _l[++_i]) f.in[0] = f.in[1] = 0;
+  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) {
     if (m.dead) continue;
     let f = null, dig = 0;
     for (const q of fortsAt(m.x, m.z)) {
@@ -16635,15 +16771,15 @@ function trenchBump(u, o, cx, cz, hw, off) {
 function fortStep(dt) {
   const sim = !S.net || S.host, T = S.T;
   while (S.flog < S.olog.length) { const id = S.olog[S.flog++], o = T.byId[id]; if (o && o.k === 'tree' && id >= 30300 && S.os[id] > 1) S.wcut[nodeAt(T, o.x, o.z)]++; }
-  for (const f of S.forts) {
+  for (let _i = 0, _l = S.forts, f = _l[0]; _i < _l.length; f = _l[++_i]) {
     if (S.os[f.id] > 1) { if (sim && f.k === 6 && f.prog >= 1 && !f.dead && S.cq && ecoSim() && !S.cq.ph) S.cq.tk[f.team] -= CQ.dome; fortDrop(f); continue; }   // a dome lost: morale (D25 A)
     if (!sim || f.prog >= 1) continue;
-    let n = 0; const W = f.F.eng ? brWhole(f) : null; for (const m of S.men) if (builds(m, f)) n += f.F.eng && !m.def.sap && !W(m) ? f.F.eng : 1;   // a pontoon or a rebuild: a sapper a whole builder, any other soldier eng of one, but whole with a sapper in its squad or a truck of its side near (W20, W20b)
+    let n = 0; const W = f.F.eng ? brWhole(f) : null; for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) if (builds(m, f)) n += f.F.eng && !m.def.sap && !W(m) ? f.F.eng : 1;   // a pontoon or a rebuild: a sapper a whole builder, any other soldier eng of one, but whole with a sapper in its squad or a truck of its side near (W20, W20b)
     f.n = n = Math.min(n, f.F.max || BLD.max);
     if (n) { f.workT = S.t; fortAt(f, Math.min(1, f.prog + (1 + BLD.help * (n - 1)) / f.F.time * dt)); }
     else if (S.t - f.workT > BLD.decay[0]) { fortAt(f, f.prog - BLD.decay[1] * dt); if (f.prog <= 0) fortDrop(f); }
   }
-  if (S.forts.some(f => f.gone)) { for (const f of S.forts) if (f.gone && f.tg) for (const g of f.tg) g.dead = true; S.forts = alive(S.forts); }
+  if (S.forts.some(f => f.gone)) { for (let _i = 0, _l = S.forts, f = _l[0]; _i < _l.length; f = _l[++_i]) if (f.gone && f.tg) for (const g of f.tg) g.dead = true; S.forts = alive(S.forts); }
 }
 /* the places of a work's men: along a trench, or kneeling behind a wall. by: who has taken one, until T */
 function fortSlots(f) {
@@ -20637,14 +20773,14 @@ function droneEnd(o, how, by, u) {
 /* what a drone touches where it is: an enemy hull, a soldier, an aircraft, a supply base. Armed, its fuze reaches a little further than the body */
 function droneTouch(o) {
   const A = o.armed, r = o.def.r, db = { team: o.team, by: o.op || o, vx: 0 };
-  for (const u of S.units) {
+  for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {
     if (u.dead || safe(u, db) || Math.abs(u.x - o.x) > 9 || Math.abs(u.z - o.z) > 9 || o.y > u.y + u.def.env[4] * 2 + 1.2) continue;
     toBody(u, o.x - u.x, 0, o.z - u.z, 0);
     if (Math.abs(HB[0]) < u.def.env[3] + (A ? .8 : 0) && Math.abs(HB[2]) < u.def.env[5] + (A ? .8 : 0)) return u;
   }
-  for (const m of S.men) { const R = A ? 2.5 : MAN.r * MAN.sc + r * .5; if (!m.dead && !safe(m, db) && !m.in && Math.abs(m.x - o.x) < R && Math.abs(m.z - o.z) < R && o.y - m.y < (A ? 3.5 : STANCE[m.st].h * MAN.sc + r) && o.y > m.y - 1) return m; }
-  for (const p of S.planes) if (!p.dead && !safe(p, db) && dist(p, o) < Math.max(5, p.def.len * .4)) return p;
-  for (const b of S.sup) if (!b.dead && b.team !== o.team && hdist(b, o) < 8 && o.y < b.y + 6) return b;
+  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) { const R = A ? 2.5 : MAN.r * MAN.sc + r * .5; if (!m.dead && !safe(m, db) && !m.in && Math.abs(m.x - o.x) < R && Math.abs(m.z - o.z) < R && o.y - m.y < (A ? 3.5 : STANCE[m.st].h * MAN.sc + r) && o.y > m.y - 1) return m; }
+  for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (!p.dead && !safe(p, db) && dist(p, o) < Math.max(5, p.def.len * .4)) return p;
+  for (let _i = 0, _l = S.sup, b = _l[0]; _i < _l.length; b = _l[++_i]) if (!b.dead && b.team !== o.team && hdist(b, o) < 8 && o.y < b.y + 6) return b;
   return null;
 }
 /* one step of a flight from x0 y0 z0 to where the drone now is, taken along its path every DQ.sweep m (a fast one, or a long frame, would
@@ -21054,9 +21190,9 @@ const lsFront = t => { const fr = frontR(), my = lsRoutes(t); return !my.length 
 /* railOf on side t's own roads only (its line and its depth are measured on them); every road with two sides */
 function lsRail(t, x, z) {
   const p = railOf(x, z), my = lsRoutes(t); if (!my.length || my.includes(p.ri)) return p;
-  let b = null;
-  for (const ri of my) { const s = sOn(ri, x, z), q = routeAt(S.T.routes[ri], s), d = Math.hypot(q.x - x, q.z - z); if (!b || d < b.d) b = { d, ri, s, off: d }; }   // off: unsigned here (its callers read |off|)
-  return b;
+  let bd = 0, bri = -1, bs = 0;
+  for (const ri of my) { const s = sNear(ri, x, z), d = RIX.sd; if (bri < 0 || d < bd) { bd = d; bri = ri; bs = s; } }   // sOn off p's road, and the distance to routeAt(s), which is that sample's (cf-lag-2: railOf again and an object each road)
+  return { d: bd, ri: bri, s: bs, off: bd };   // off: unsigned here (its callers read |off|)
 }
 /* the enemy base nearest x z (side t's foe) */
 const lsFoeBase = (t, x, z) => { const l = lsFoes(t).map(s => S.base[s]).filter(Boolean); return l.reduce((a, b) => (Math.hypot(b.x - x, b.z - z) < Math.hypot(a.x - x, a.z - z) ? b : a), l[0] || S.base[1 - t]); };
@@ -28215,6 +28351,17 @@ function tmAsk(t, k) {
 genQuery = (f => (t, q) => (q && q.q === 'tmap' && isSide(t) ? tmAsk(t, q.k) || { why: 'kind' } : f(t, q)))(genQuery);
 genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && isSide(s))) return f(s, q); const r = tmAsk(s, q.k); return r ? { ok: true, why: '', id: 0, r } : { ok: false, why: 'kind', id: 0 }; })(genAnswer);
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
+/* the general's studies of a terrain, made once for every match on it, at the load (cf-lag-2) instead of inside the first plans of the
+   battle, where they stalled a step of the first seconds (the foot paths' cells, fpCells, a second and more under load): the cross-country
+   cells, where an ambush may lie on the main roads (cmdSites) and on the network (blkSites), the forward base's ground (enpGround). Each is built from
+   the terrain alone (no number drawn, the bridges standing as at the load), so the plans read the same studies; only where the AI plans */
+function planWarm(s) {
+  const T = s.T; if (!T || (s.net && !s.host)) return;
+  if (T.net) blkSites();
+  cmdSites(); if (T.mv >= 4) fpCells(T);
+  if (T.tms && ENP.on) enpGround({ nx: T.tms.nx, c: T.tms.c, k: T.tms.k });   // the forward base's ground, on the tactical map's cells (tmStatic, just made)
+}
+newState = (g => (e, m, o) => { const s = g(e, m, o); if (s) planWarm(s); return s; })(newState);
 /* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
    Four procedures of the general, made through opNew (so the person and the MCP have them too: man k=ambush | interdict | guard, x z), each
    reading only side C's tactical map C.tm (what the side knows) and its habits of the enemy (C.hu, C.hp: what the side itself has seen pass):
@@ -36352,13 +36499,15 @@ function enpFobPick(t, C, A) {
     A.fobs.map(f => ({ x: f.x, z: f.z, r: F.apart })), S.base[t] ? [{ x: S.base[t].x, z: S.base[t].z, r: F.apart }] : [],
     (A.fobNo || []).filter(f => S.t - f.T < ENP.redo).map(f => ({ x: f.x, z: f.z, r: F.bad })));   // held points only pt m (the point is the place to firm up), a site given up a while
 
-  let best = null, bs = 0;
+  let best = null, bs = 0; const Gd = enpGround(M);
   for (let q = 0; q < M.k.length; q++) {
     const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
-    if (!gMapOk(x, z) || M.l[q] < -.25 || (M.f && M.f[q] > 3)) continue;
-    const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
-    const sc = (M.k[q] >= F.choke ? 1 + M.k[q] : 0) + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
-    const v0 = sc - F.v * (M.v ? M.v[q] : 0) - .3 * Math.max(0, M.l[q] - .5); if (v0 <= bs) continue;   // the known enemy only takes from it: it cannot beat the best, so the dear tests below are not made (cf-lag: 2-4 s a call before)
+    if (M.l[q] < -.25 || (M.f && M.f[q] > 3) || !(Gd ? Gd.ok[q] : gMapOk(x, z))) continue;   // the layers before the ground (gMapOk reads the height; none of them changes anything)
+    const kc = M.k[q] >= F.choke ? 1 + M.k[q] : 0, vp = F.v * (M.v ? M.v[q] : 0), lp = .3 * Math.max(0, M.l[q] - .5);
+    if (kc + 1.8 - vp - lp <= bs) continue;   // not even the best crest (.8 + 1) would beat the best cell: its five heights are not read (cf-lag-2; v0 below is never more)
+    const crest = Gd ? Gd.cr[q] : hgt(x, z) - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
+    const sc = kc + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
+    const v0 = sc - vp - lp; if (v0 <= bs) continue;   // the known enemy only takes from it: it cannot beat the best, so the dear tests below are not made (cf-lag: 2-4 s a call before)
     const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
     const r = railOf(x, z); if (r.d > F.road) continue;
     if (mine.some(o => Math.hypot(o.x - x, o.z - z) < o.r)) continue;
@@ -36370,6 +36519,21 @@ function enpFobPick(t, C, A) {
   if (d > 60) { best.x = o.x + dx / d * 60; best.z = o.z + dz / d * 60; }
   const c = clearOf(best.x, best.z, 3, {}); best.x = Math.round(c.x); best.z = Math.round(c.z);
   return best;
+}
+/* the ground's part of a forward base's pick, once a terrain (cf-lag-2): for each cell of the tactical map, whether it is on the map and dry
+   (gMapOk) and its crest (its height over the mean of the four 150 m off), as enpFobPick reads them. Only while no bridge has fallen and no
+   pontoon is up: hgt is then the terrain's own height, so the numbers are the same; else null and the pick reads the heights as before */
+function enpGround(M) {
+  if ((S.gap && S.gap.length) || (S.pg && S.pg.length)) return null;
+  const T = S.T, G = T.fobg, n = M.k.length;
+  if (G && G.nx === M.nx && G.c === M.c && G.n === n && G.HW === S.HW) return G;
+  const ok = new Uint8Array(n), cr = new Float64Array(n);
+  for (let q = 0; q < n; q++) {
+    const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
+    if (!gMapOk(x, z)) continue;
+    ok[q] = 1; cr[q] = hgt(x, z) - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
+  }
+  return (T.fobg = { nx: M.nx, c: M.c, n, HW: S.HW, ok, cr });
 }
 function enpPlan(t, sq) {
   if (!enpOn(t)) return;
@@ -41202,14 +41366,37 @@ function crewUi() {
   BRIEF.inf = (d, o) => bi(d, o) + ' Com E você entra em carro, caminhão ou blindado sobre rodas aliado que esteja estacionado, ao volante ou na arma.';
 }
 trnUi = (f => () => { f(); crewUi(); })(trnUi);
-/* ---------- sound ---------- */
-const A = { ctx: null, on: true, last: 0, beep: 0 };
+/* ---------- sound ----------
+   All of it made here from noise and tones, no sound files. SND: what a shot sounds like and how far it carries. A shot's voice (SND.v, picked
+   by shotVoice from the weapon's calibre and kind) is a burst of noise [dur s, vol, under a cutoff of f Hz] with a low thump under the heavier
+   ones [lo Hz, lv of the vol]. Away from the ear a sound is quieter (half at ref m), duller (the cutoff halves at air m: the air takes the highs
+   of what is far) and late (c m/s: what is seen at d m is heard d / c s after it). mine: the player's own shots, k their gain, one every
+   gap s (two in one slow frame: the second a gap later, up to late s behind), never held back by anyone else's (they were: one shot of the
+   AI's 55 ms before took the player's); other: everyone else's,
+   gap s apart and at most q waiting to be heard. far: m past which a shot is not heard; launch, boom: the same for a rocket's or missile's
+   whoosh (which was as loud across the map as beside the ear) and a burst. crack: the round of a foe passing within r m of the soldier's
+   head snaps, at most one every gap s. hand: the soldier's own hands, [after s, dur s, vol, f Hz, Q] noises through a band: a magazine
+   out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. The master runs through a compressor, so that a battle's
+   bursts do not clip */
+const SND = {
+  c: 343, ref: 80, air: 700, far: 2500,
+  mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
+  launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
+  crack: { r: 6, gap: .05, vol: .14 },
+  v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
+    sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
+  hand: { out: [[0, .035, .07, 2800, 2], [.07, .05, .05, 900, 1.2]], in: [[0, .03, .09, 2400, 2], [.15, .04, .08, 3600, 3]], bolt: [[.38, .04, .07, 2200, 2], [.55, .035, .08, 3000, 2]],
+    dry: [[0, .02, .06, 3800, 4]], swap: [[0, .12, .035, 700, .7], [.1, .025, .05, 2600, 2]], tube: [[0, .08, .06, 600, 1.5], [.25, .05, .07, 1800, 2]] }
+};
+const A = { ctx: null, on: true, lm: -9, oq: [], ck: -9, beep: 0, h: null };
 function audioInit() {
   if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
   try {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const c = A.ctx = new AC();
-    A.master = c.createGain(); A.master.gain.value = A.on ? .6 : 0; A.master.connect(c.destination);
+    A.master = c.createGain(); A.master.gain.value = A.on ? .6 : 0;
+    if (c.createDynamicsCompressor) { const k = A.comp = c.createDynamicsCompressor(); k.threshold.value = -14; k.knee.value = 12; k.ratio.value = 4; k.attack.value = .003; k.release.value = .25; A.master.connect(k); k.connect(c.destination); }
+    else A.master.connect(c.destination);
     const buf = c.createBuffer(1, c.sampleRate, c.sampleRate), ch0 = buf.getChannelData(0);
     for (let i = 0; i < ch0.length; i++) ch0[i] = Math.random() * 2 - 1;
     A.noise = buf;
@@ -41220,21 +41407,61 @@ function audioInit() {
     n.connect(bp); bp.connect(g); g.connect(A.master); n.start(); A.jet = { bp, g };
   } catch (e) { A.ctx = null; }
 }
-function burst(dur, vol, freq, type) {
+/* a burst of noise dur s long through a filter at freq (Q q), starting at the context's time at (now when not given) */
+function burst(dur, vol, freq, type, at, q) {
   if (!A.ctx || !A.on || vol <= .002) return;
-  const c = A.ctx, n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), t = c.currentTime;
-  n.buffer = A.noise; f.type = type || 'lowpass'; f.frequency.value = freq;
+  const c = A.ctx, n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain(), t = Math.max(c.currentTime, at || 0);
+  n.buffer = A.noise; f.type = type || 'lowpass'; f.frequency.value = freq; if (q) f.Q.value = q;
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + dur);
   n.connect(f); f.connect(g); g.connect(A.master); n.start(t, Math.random() * .5, dur + .05);
 }
-fx.shot = (mine, p) => {
+/* a low thump under a heavy shot: a tone falling from 1.6 to 0.6 times f over dur s */
+function thump(f, dur, vol, at) {
+  if (!A.ctx || !A.on || vol <= .002) return;
+  const c = A.ctx, o = c.createOscillator(), g = c.createGain(), t = Math.max(c.currentTime, at || 0);
+  o.type = 'sine'; o.frequency.setValueAtTime(f * 1.6, t); o.frequency.exponentialRampToValueAtTime(f * .6, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.001, t + dur);
+  o.connect(g); g.connect(A.master); o.start(t); o.stop(t + dur + .05);
+}
+const sndAt = (d, ref) => 1 / (1 + d / ref), sndCut = (f, d, air, lo) => Math.max(lo, f / (1 + d / air));
+/* the voice of a shot: from the calibre (a cannon, a heavy machine gun), then the kind (a scoped rifle, a squad's machine gun, a pistol or
+   a sub-machine gun by its slow round, a bolt or battle rifle by its slow rate), a rifle on foot and a machine gun on a vehicle or aircraft */
+function shotVoice(w, p) {
+  if (!w) return p && p.man ? 'rifle' : 'mg';
+  const c = calOf(w);
+  if (c >= 20) return 'cannon';
+  if (w.snp) return 'sniper';
+  if (c >= 12) return 'hmg';
+  if (w.lmg) return 'mg';
+  if (w.spd && w.spd < 500) return w.auto ? 'smg' : 'pistol';
+  if (p && !p.man) return 'mg';
+  return w.rate >= .4 && !w.auto ? 'battle' : 'rifle';
+}
+fx.shot = (mine, p, w) => {
   if (!A.ctx || playMode !== 'play') return;
-  const t = A.ctx.currentTime; if (t - A.last < (mine ? .055 : .09)) return; A.last = t;
-  const d = dist(p, S.ear); if (d > 2500) return;
-  burst(.07, (mine ? .2 : .1) * (1 - d / 2500), 1700);
+  const now = A.ctx.currentTime, d = mine ? 0 : dist(p, S.ear); if (d > SND.far) return;
+  const M = mine ? SND.mine : SND.other; let at = now + d / SND.c;
+  if (mine) { at = Math.max(now, A.lm + M.gap); if (at - now > M.late) return; A.lm = at; }   // two in one slow frame: the second a gap later, not dropped
+  else {
+    A.oq = A.oq.filter(t => t > now - M.gap);
+    if (A.oq.length >= M.q || A.oq.some(t => Math.abs(t - at) < M.gap)) return;
+    A.oq.push(at);
+  }
+  const v = SND.v[shotVoice(w, p)], k = M.k * v[1] * (mine ? 1 : sndAt(d, SND.ref) * (1 - d / SND.far));
+  burst(v[0] * (1 + d / 4000), k, sndCut(v[2], d, SND.air, 250), 'lowpass', at);
+  if (v[3]) thump(v[3], v[0] * 1.6, k * v[4], at);
 };
-fx.boom = (r, d) => { if (playMode === 'play') burst(.4 + r / 60, clamp(r / 30, .12, .9) * (1 - d / 3500), 420); };
-fx.launch = mine => { if (playMode === 'play') burst(.6, mine ? .25 : .06, 1500, 'highpass'); };
+fx.boom = (r, d) => {
+  if (playMode !== 'play' || !A.ctx) return;
+  const at = A.ctx.currentTime + d / SND.c, k = clamp(r / 30, .12, .9) * (1 - d / 3500);
+  burst(.4 + r / 60, k, sndCut(420, d, SND.boom.air, 120), 'lowpass', at);
+  if (r >= 12) thump(48, .5 + r / 90, k * .45, at);
+};
+fx.launch = (mine, p) => {
+  if (playMode !== 'play' || !A.ctx) return;
+  const L = SND.launch, d = mine ? 0 : p ? dist(p, S.ear) : L.ref; if (d > L.far) return;
+  burst(.6, mine ? .25 : .12 * sndAt(d, L.ref) * (1 - d / L.far), sndCut(1500, d, SND.air, 300), 'highpass', A.ctx.currentTime + d / SND.c);
+};
 fx.whistle = (t, d) => {   // a falling shell: a tone that drops and swells until the burst
   if (!A.ctx || !A.on || playMode !== 'play') return;
   const o = A.ctx.createOscillator(), g = A.ctx.createGain(), now = A.ctx.currentTime, v = .16 * (1 - d / HOW.hear);
@@ -41242,13 +41469,46 @@ fx.whistle = (t, d) => {   // a falling shell: a tone that drops and swells unti
   g.gain.setValueAtTime(.001, now); g.gain.exponentialRampToValueAtTime(Math.max(.002, v), now + t * .9); g.gain.linearRampToValueAtTime(0, now + t);
   o.connect(g); g.connect(A.master); o.start(now); o.stop(now + t + .05);
 };
+/* the soldier's own hands: a noise of SND.hand */
+function clack(k) { const now = A.ctx.currentTime; for (const [t, dur, vol, f, q] of SND.hand[k]) burst(dur, vol, f, 'bandpass', now + t, q); }
+/* what the player's soldier does with the weapon in hand, heard: a reload begun and done, a bolt worked after a shot, the trigger on an
+   empty weapon, a swap. A.h: what was seen the frame before */
+function sndHands(P) {
+  const a = P.arms && P.arms[P.w]; if (!a) return;
+  if (!A.h || A.h.p !== P) A.h = { p: P, a: null, rl: false, fire: false, sw: P.swT, t: a.t };   // a new soldier starts from what he holds
+  const H = A.h, w = a.d, rl = a.rl > 0, same = H.a === a;
+  if (rl && !(same && H.rl)) clack(w.k ? 'tube' : 'out');
+  else if (!rl && same && H.rl && a.mag > 0 && !w.k) clack('in');
+  if (same && a.t !== H.t && a.mag > 0 && !w.k && !w.auto && w.rate >= 1.2) clack('bolt');
+  if (P.ctl.fire && !H.fire && a.mag <= 0 && !rl && !(a.res > 0)) clack('dry');
+  if (P.swT !== H.sw && P.swT > S.t) clack('swap');
+  H.a = a; H.rl = rl; H.fire = !!P.ctl.fire; H.sw = P.swT; H.t = a.t;
+}
+/* a foe's round passing within SND.crack.r m of the soldier's head this frame: its snap, louder the nearer, once a round */
+function sndCrack(P, dt) {
+  const C = SND.crack, now = A.ctx.currentTime; if (now - A.ck < C.gap) return;
+  const e = manEye(P), R2 = C.r * C.r, back = Math.max(dt, 1 / 30);
+  for (const L of [S.bullets, S.slugs]) if (L) for (const b of L) {
+    if (b.cr || b.team === P.team || b.by === P || b.gone) continue;
+    const vx = b.vx * back, vy = b.vy * back, vz = b.vz * back, x0 = b.x - vx, y0 = b.y - vy, z0 = b.z - vz;
+    if (Math.abs(e.x - b.x) > C.r + Math.abs(vx) || Math.abs(e.z - b.z) > C.r + Math.abs(vz)) continue;
+    const l2 = vx * vx + vy * vy + vz * vz || 1, t = clamp(((e.x - x0) * vx + (e.y - y0) * vy + (e.z - z0) * vz) / l2, 0, 1);
+    const dx = x0 + vx * t - e.x, dy = y0 + vy * t - e.y, dz = z0 + vz * t - e.z, d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 > R2) continue;
+    b.cr = 1; A.ck = now;
+    const k = C.vol * (1 - Math.sqrt(d2) / C.r) + .02, fast = l2 / (back * back) > 340 * 340;
+    if (fast) { burst(.025, k, 3200, 'highpass'); burst(.05, k * .35, 1100, 'bandpass', now + .01, 1.5); }
+    else burst(.14, k * .6, 1300, 'bandpass', now, 2);
+    return;
+  }
+}
 function audioTick(dt) {
   if (!A.ctx) return;
   const P = S.my, live = playMode === 'play' && !paused && P && !P.dead && !S.over, now = A.ctx.currentTime;
   const set = (g, v) => g.gain.setTargetAtTime(v, now, .08);
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
-  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); }
+  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
   else if (P.kind) { A.prop.o.frequency.setTargetAtTime(36 + Math.abs(P.sp) * 2.6, now, .1); set(A.prop.g, .035 + Math.abs(P.ctl.drive) * .02); set(A.jet.g, .006); }
   else if (P.def.prop) { A.prop.o.frequency.setTargetAtTime(52 + th * 38 + k * 26, now, .1); set(A.prop.g, .03 + th * .03); set(A.jet.g, .01 + k * .03); A.jet.bp.frequency.setTargetAtTime(300 + k * 500, now, .1); }
   else { A.jet.bp.frequency.setTargetAtTime(450 + th * 700 + k * 500, now, .1); set(A.jet.g, .05 + th * .08 + (P.ab ? .07 : 0)); set(A.prop.g, 0); }

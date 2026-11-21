@@ -127,6 +127,7 @@ node tests/veg-fade.js     # as árvores por distância (VEG): na troca da árvo
 node tests/sparks-light.js # a fumaça, a poeira, as cortinas de fumaça e os pontinhos dos soldados (as faíscas da cena) tomam a luz do dia e a névoa; o que brilha (fogo, clarão, traçante, chama de motor) continua aceso: a cortina não brilha mais branca à noite
 node tests/water-shore.js  # a água sabe a profundidade: o chão debaixo dela no shader é o da malha do terreno (os mesmos dois triângulos por célula), então a margem rasa e a espuma ficam na beira desenhada; a queda de uma ponte chega à textura; todo uniform que os shaders da água e do chão leem é dado
 node tests/road-look.js    # o visual das estradas: cada vértice da fita (roadRibbon) sabe sua posição através e ao longo da estrada, a ponte caída ainda acha as estradas pelo marcador, o shader declara e recebe tudo o que lê (a luz dos sinalizadores também) e, nas linhas do próprio shader, os sulcos ficam onde passam as rodas e a faixa tracejada só na estrada principal moderna
+node tests/rain-wet.js     # a chuva molha o chão: a umidade (envWet) vai até a força da chuva, depressa ao molhar e devagar ao secar, e os shaders do chão e das estradas a recebem: mais escuros, com brilho, o céu refletido de raspão e poças no plano
 node tests/oldserver.js     # a página nova contra um servidor antigo, SERVER=<server.js antigo>. Sem infantaria: sem pelotões. Sem bases: ninguém constrói e a entrada continua na estrada do meio
 ```
 

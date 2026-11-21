@@ -46022,14 +46022,15 @@ function envTerrainHook(sh) {
   Object.assign(sh.uniforms, ENV.tu);
   sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
-  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nuniform float uWet;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
   sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
 	vec2 eG = vec2( 0.0 );
 	vec2 eUv = vEnvW.xz;
+	float eWk = uWet, eRef = 0.0;
 	vec4 d1 = texture2D( tEnv, eUv * ( 1.0 / 23.0 ) );
 #if ENV_Q == 0
-	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) );
+	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) ) * ( 1.0 - 0.28 * eWk );
 #else
 	vec4 d2 = texture2D( tEnv, eUv * ( 1.0 / 181.0 ) + vec2( 0.37, 0.71 ) );
 	vec4 d3 = texture2D( tEnv, eUv * ( 1.0 / 1637.0 ) + vec2( 0.13, 0.29 ) );
@@ -46056,20 +46057,35 @@ function envTerrainHook(sh) {
 	eDet = mix( eDet, mix( 0.5, d4.r, eNear ), 0.35 );
 	eG += n4.rg * eNear * ( 1.0 - eRock ) * 0.6;
 #endif
+	eWk = uWet * ( 1.0 - eSnow ) * ( 1.0 - 0.4 * eRock );   // rain: the ground darker and glossy, and in its flat low spots puddles that mirror the sky
+	float ePud = smoothstep( 0.3, 0.8, uWet ) * smoothstep( 0.64, 0.74, d1.b * 0.6 + d2.b * 0.4 ) * smoothstep( 0.975, 0.995, vEnvN.y ) * ( 1.0 - eSand ) * ( 1.0 - eSnow ) * ( 1.0 - eWet );
+	eB *= ( 1.0 - 0.28 * eWk ) * ( 1.0 - 0.3 * ePud );
+	eRef = eWk * 0.45 + ePud; eWk = min( 1.0, eWk + ePud );
 	diffuseColor.rgb = eB * uTone * ( 0.9 + 0.2 * eDet );
 	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
-#endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif');
+#endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif')
+    .replace('#include <lights_phong_fragment>', '#include <lights_phong_fragment>\n\tmaterial.specularShininess = mix( material.specularShininess, 48.0, eWk );\n\tmaterial.specularColor = mix( material.specularColor, vec3( 0.14 ), eWk );')
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_FOG\n\tif ( eRef > 0.0 ) totalEmissiveRadiance += fogColor * pow( 1.0 - clamp( dot( normalize( cameraPosition - vEnvW ), normalize( vEnvN ) ), 0.0, 1.0 ), 3.0 ) * eRef * 0.5;\n#endif');   // the wet ground mirrors the sky (the haze\'s colour) at a grazing look
+}
+/* rain wets the ground (cf-pol-graficos 3): how wet it is goes toward the rain's strength, quickly while it rains harder (up s) and slowly
+   as it dries (dry s), by the battle's clock; a world that starts in the rain starts wet. The ground and the roads darken with it, take a
+   sharper glint of the sun, mirror the sky at a grazing look, and the flat low spots hold puddles (envTerrainHook, envRoadHook) */
+const ENVW = { up: 20, dry: 150 };
+function envWet(r) {
+  const t = S.t, dt = ENV.wt === undefined ? 0 : clamp(t - ENV.wt, 0, 1); ENV.wt = t;
+  if (ENV.wet === undefined) return (ENV.wet = r);
+  return (ENV.wet += (r - ENV.wet) * (1 - Math.exp(-dt / (r > ENV.wet ? ENVW.up : ENVW.dry))));
 }
 /* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
    the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
    uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
    off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
 function envRoadHook(sh, u) {
-  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u });
+  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u, uWet: ENV.tu.uWet || { value: 0 } });
   if (SKY3.u) sky3Ill(sh);
   sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
-  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nuniform float uWet;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	{
 		vec2 rp = vRdW.xz;
 		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
@@ -46081,8 +46097,8 @@ function envRoadHook(sh, u) {
 		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
 		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
 		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
-		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 );
-	}`);
+		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 ) * ( 1.0 - 0.32 * uWet * ( 1.0 - 0.3 * rut ) );   // rain: darker, the ruts holding water darkest
+	}`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_FOG\n\ttotalEmissiveRadiance += fogColor * uWet * ( 0.06 + 0.22 * smoothstep( 15.0, 260.0, vRdD ) );\n#endif');   // and sheen with the sky, more the flatter it is seen (farther)
 }
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
 const ENV_SKY_V = 'varying vec3 vDir;\nvoid main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }';
@@ -46146,10 +46162,10 @@ const ENV_CLOUD_F = 'uniform sampler2D tPuff; uniform vec3 uLit; uniform vec3 uS
 function envApply() {
   gfxAuto();
   const Q = GFXQ[GFX.lv], T = S.T, P = PAL[S.era], E = S.E, L = ENVL;
-  ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
+  ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.wet = ENV.wt = undefined; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
   ENVU.fp.x = 1 / L.H; ENVU.fp.y = T.WL; ENVU.fp.z = L.k; ENVU.fp.w = 1;
   const tex = envTex(); tex.anisotropy = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate = true;
-  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL } };
+  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL }, uWet: { value: 0 } };
   const clouds = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
@@ -46268,6 +46284,7 @@ skyScene = (g => () => {
     } else { m.color.setScalar(.25 + .75 * Lr); m.opacity = .7 + .25 * W.r; }
   }
   if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; ENV.wu.uRain.value = clamp(W.r, 0, 1); envBedSync(); }
+  if (ENV.tu && ENV.tu.uWet) ENV.tu.uWet.value = envWet(clamp(W.r, 0, 1));
   if (ENV.sh) {   // the shadow's box follows the camera, snapped to its texels so the edges do not crawl
     const cp = camera.position, r = GFXQ[GFX.lv].shadow, st = r * 2 / 2048, x = Math.round(cp.x / st) * st, z = Math.round(cp.z / st) * st, y = hgt(cp.x, cp.z);
     ENV.sh.target.position.set(x, y, z); ENV.sh.target.updateMatrixWorld(); ENV.sh.position.set(x + v.x * 3000, y + v.y * 3000, z + v.z * 3000);

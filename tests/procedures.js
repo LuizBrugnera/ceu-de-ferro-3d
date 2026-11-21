@@ -95,6 +95,7 @@ function field() {
   const sq = [mk(0, 0), mk(1, 40), mk(2, 80)], live = () => S.squads.filter(q => q.team === 0 && q.live > 0 && !q.state);
   /* only p1 can be drawn: the flank's limits opened, the other procedures out of reach */
   const PR = $('PR'); PR.expK = 9; PR.expAdd = 100; PR.long = 9; PR.front = 99; PR.env.r = 99; PR.pen.r = 99; PR.rec.n = 99; PR.rec.foe = 99;
+  try { $('PEL').on = 0; } catch (e) {}   // M3's own H-hour: the platoon (P8, #144) holds the assault until its base fires, which tests/brain-pelotao.js covers
   $('cmdSense')(Cm, live()); $('tmNow')(0); $('cmdAttack')(Cm, live()); $('aiDrain')($('apWork')(Cm)); $('cmdAttack')(Cm, live());
   return { C, $, S, Cm, sq, op: Cm.ops.find(o => o.k === 'atk' && !o.over), PR };
 }
@@ -119,7 +120,7 @@ console.log('-- p1, fix and flank, through its states --');
     ok(op.st === 'mv', '  the manoeuvre not there yet: still mv');
     put(man[0], a1.pos.x, a1.pos.z); $('OPS').atk(Cm, op);
     ok(op.st === 'prep' && op.H > S.t, 'the manoeuvre at its assault position: H-hour in ' + Math.round(op.H - S.t) + ' s (st ' + op.st + ')');
-    { const PEL = $('PEL'), was = PEL.on; PEL.on = 0; try { $('OPS').atk(Cm, op); op.H = S.t; op.smk = false; $('OPS').atk(Cm, op); } finally { PEL.on = was; } }   // M3's own H-hour: the platoon's gate (P8, #144: the manoeuvre waits for its base of fire) is tests/brain-pelotao.js
+    $('OPS').atk(Cm, op); op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
     ok(op.st === 'go', 'H-hour (st ' + op.st + ')');
     ok(fix.every(q => ordOf(q).k === 'overwatch' && Math.hypot(ordOf(q).x - q.fp.x, ordOf(q).z - q.fp.z) < 1) && man.every(q => ordOf(q).k === 'assault'), '  the fixing element fires from its base, the manoeuvre assaults');
   }

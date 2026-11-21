@@ -80,6 +80,7 @@ function field(o) {
 {
   const E = field(), { $, S, Cm, tg, at, mk, sq } = E;
   $('PR').on = 0;   // M2's own assault: with M3's procedures a strong point draws p12, whose recon walks to the assault positions (tests/procedures.js)
+  try { $('PEL').on = 0; } catch (e) {}   // and without the platoon (P8, #144): at H-hour it holds the assault until its base fires (tests/brain-pelotao.js)
   const a = mk('road', 0, 0), b = mk('road', 1, 40), c3 = mk('road', 2, 80), ri0 = [a.ri, b.ri, c3.ri];
   $('cmdSense')(Cm, sq()); $('tmNow')(0);
   $('cmdAttack')(Cm, sq());
@@ -100,7 +101,7 @@ function field(o) {
     ok(op.formT === Math.min($('AP').form, Math.max(CQ.form, far / $('AP').run + $('AP').slack)) && op.formT >= CQ.form && op.formT <= $('AP').form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, from ' + CQ.form + ' to AP.form ' + $('AP').form + ' s');
     ok((op.ap.length === 2) === (a.ape !== b.ape), '  ' + (op.ap.length === 2 ? 'two elements, two approaches (' + op.ap.map(x => x.ang + '°').join(' and ') + ')' : 'one element, one approach (' + op.ap[0].ang + '°)'));
     /* H-hour: along the approach, through the assault position, into the objective */
-    { const PEL = $('PEL'), was = PEL.on; PEL.on = 0; try { op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op); } finally { PEL.on = was; } }   // M2's own H-hour: the platoon's gate (P8, #144: the assault waits for its base of fire) is tests/brain-pelotao.js
+    op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
     const O = op.O;
     const as = op.sq.filter(q => q.ord.k === 'assault'), ow = op.sq.filter(q => q.ord.k === 'overwatch');
     const cut = (() => { try { return $('ORG').on ? $('ORG').poly.cut : 1; } catch (e) { return 1; } })();

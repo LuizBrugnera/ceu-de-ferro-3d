@@ -1,4 +1,4 @@
-# cf-pol-modelos: a Shilka sobre lagartas (testado em parte)
+# cf-pol-modelos: a Shilka sobre lagartas e as antiaéreas rebocadas (testado em parte)
 
 ## O que mudou
 
@@ -14,11 +14,22 @@ A torre e os canos giram onde giravam (torre no lugar do LAV, canos a `tl × 0,5
 - `hull`, `engine`, `turret`, `gun`;
 - `sight`: o radar e a mira.
 
-A bandeira dos Insurgentes continua (vem de outro wrapper). 1 244 triângulos e 12 chamadas de desenho, contra 784 antes.
+A bandeira dos Insurgentes continua (vem de outro wrapper). O embrulho dos Insurgentes punha mais quatro canos no grupo da arma da Shilka, por cima dos do modelo; tirei a Shilka (e as rebocadas) daquela linha. 1 116 triângulos e 12 chamadas de desenho, contra 784 antes.
+
+## As antiaéreas rebocadas (`TAAB`)
+
+A ZPU-4, a ZPU-2 e a DShK no reparo antiaéreo eram o corpo baixo de carro com canos espetados. Agora, com o kit:
+
+- as ZPU vão na carreta: rodas, armação com a barra de reboque e os macacos, o pedestal, o banco do atirador e as KPV aos pares com as caixas de munição;
+- a DShK vai no tripé;
+- a montagem e os canos ficam e giram onde ficavam;
+- as peças de dano são as do carro (rodas; casco).
+
+São 684, 588 e 156 triângulos.
 
 ## O que foi testado
 
-No navegador, a galeria do hangar (Shilka, LAV-25, BTR-82A), de frente e de trás.
+No navegador, a galeria do hangar (Shilka, LAV-25, BTR-82A, ZPU-4, ZPU-2, DShK), de frente e de trás.
 
 ## O que NÃO foi testado
 

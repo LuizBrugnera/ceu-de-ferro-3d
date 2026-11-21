@@ -1,7 +1,7 @@
 'use strict';
 /* the scene's road ribbons (roadRibbon, one mesh a class in buildWorld): every edge of the network draws its own ribbon. Each vertex of
    the mesh belongs to some triangle, no triangle reaches past the mesh or spans more than a ribbon's cell (~12 m along, the width across),
-   and the deck lies ROADH above the ground with the shoulders sunk into it. cf-estradas-flutuando (#100) had counted the indices from 0
+   and the deck lies ROADH above the ground the scene draws (roadG: the terrain mesh, the causeway over a river's channel; cf-pol-cenario) with the shoulders sunk into it. cf-estradas-flutuando (#100) had counted the indices from 0
    on every edge, so only the first road of each class was drawn. node tests/road-mesh.js */
 const { load, ok, done } = require('./harness.js');
 for (const era of ['ww2', 'modern']) {
@@ -23,7 +23,7 @@ for (const era of ['ww2', 'modern']) {
     ok(out === 0 && long === 0 && unused === 0, era + ' class ' + c + ': ' + es.length + ' roads, ' + nv + ' vertices, ' + idx.length / 3 + ' triangles: ' +
       unused + ' vertices in no triangle, ' + out + ' triangles past the mesh, ' + long + ' sides longer than a cell (longest ' + maxS.toFixed(1) + ' m)');
     let deck = 0, sunk = 0;   // the middle vertex of each row on the deck, the outer ones under the ground
-    for (let i = 0; i < nv; i++) { const [x, y, z] = V(i), g = C.hgt(x, z), j = i % 5; if (j === 2 && Math.abs(y - g - ROADH) > 1e-6) deck++; if ((j === 0 || j === 4) && !(y < g)) sunk++; }
+    for (let i = 0; i < nv; i++) { const [x, y, z] = V(i), g = C.roadG(T, x, z), j = i % 5; if (j === 2 && Math.abs(y - g - ROADH) > 1e-6) deck++; if ((j === 0 || j === 4) && !(y < g)) sunk++; }
     ok(!deck && !sunk, era + ' class ' + c + ': the deck ' + ROADH + ' m above the ground (' + deck + ' off), the shoulders sunk (' + sunk + ' not)');
   }
 }

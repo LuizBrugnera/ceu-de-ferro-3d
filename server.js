@@ -781,17 +781,20 @@ const partidas = () => {
    batches, and the server keeps one file a match, data/matches/<era>/<date>-<id>.ndjson.gz (ANA_DIR another folder): one JSON event a line,
    each batch a gzip member appended. id is a random name the server gives the match (online: the room's match, which a new host carries on;
    by POST: the page's own random key), never a player's id or name. ana { n the room's match, e the events, end 1 the last batch }: from the
-   host only, at most ANA.rate[0] a window of ANA.rate[1] ms, events of the known kinds, ANA.max bytes a match. At the end (an end event) a
+   host only, at most ANA.rate[0] a window of ANA.rate[1] ms (ANA_RATE, 30: a busy match's brain events fill about ten pieces of the page's
+   ANA.chunk every flush, and with 10 the flush after the end was refused), events of the known kinds, ANA.max bytes a match. At the end (an end event) a
    summary goes beside it, <date>-<id>.json (the header, the end and the review the page sent as rep). ANALYTICS=0: welcome says ana: 0 and
    nothing is written or served. Files older than ANA_DAYS days (default 90) are deleted at start and every six hours.
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [+process.env.ANA_RATE || 30, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
-/* a batch is a list of events, each an object of a known kind with its match time */
-const anaOk = e => lst(e, 2000) && e.every(o => rec(o) && o !== null && typeof o.k === 'string' && ANA.kinds.has(o.k) && num(o.t));
+/* a batch's events this server keeps: those of the known kinds with their time; null when the batch is not a list of records (refused). An event
+   of a kind it does not know, or without its time, is left out, not the whole batch: one stray event (a page newer than the server, or a brain
+   event whose payload carried its own k, cf-pol-fluxos) used to drop every batch it rode in, and with them the match's end and its summary */
+const anaEv = e => (lst(e, 2000) && e.every(o => rec(o) && o !== null) ? e.filter(o => typeof o.k === 'string' && ANA.kinds.has(o.k) && num(o.t)) : null);
 /* the rate of one sender: true when it may send now */
 function anaRate(o) {
   const now = Date.now(), r = o.anaR || (o.anaR = { t: now, n: 0 });
@@ -824,9 +827,10 @@ function anaTouch(map, k, make) {
 }
 RX.ana = (c, m) => {
   const room = c.room;
-  if (!ANA.on || !host(c) || !int(m.n, 0, 1e6) || m.n !== (room.cqn || 0) || !anaOk(m.e) || !anaRate(c)) return;
+  const e = ANA.on && host(c) && int(m.n, 0, 1e6) && m.n === (room.cqn || 0) ? anaEv(m.e) : null;
+  if (!e || (!e.length && m.end !== 1) || !anaRate(c)) return;   // nothing to keep and not the end: refused, and not counted in the rate
   if (!room.ana || room.ana.n !== m.n) room.ana = Object.assign(anaNew(Object.keys(rooms).find(k => rooms[k] === room), 'online'), { n: m.n });
-  anaWrite(room.ana, m.e, m.end === 1);
+  anaWrite(room.ana, e, m.end === 1);
 };
 /* the files older than ANA.days, gone */
 function anaPrune() {
@@ -848,10 +852,11 @@ function anaHttp(req, res) {
       if (big) return;
       let m; try { m = JSON.parse(body); } catch (e) { return out(400, { ok: 0 }); }
       const ip = req.socket.remoteAddress || '', who = anaTouch(ANA.ips, ip, () => ({}));
-      if (!m || !rec(m) || typeof m.k !== 'string' || !/^[0-9a-f]{12}$/.test(m.k) || !Object.hasOwn(MODELS, m.era) || !anaOk(m.e)) return out(400, { ok: 0 });
+      const e = m && rec(m) && typeof m.k === 'string' && /^[0-9a-f]{12}$/.test(m.k) && Object.hasOwn(MODELS, m.era) ? anaEv(m.e) : null;
+      if (!e || (!e.length && m.end !== 1)) return out(400, { ok: 0 });
       if (!anaRate(who)) return out(429, { ok: 0 });
       const M = anaTouch(ANA.keys, m.k, () => { const o = anaNew(m.era, 'local'); o.base = o.base.slice(0, 11) + m.k; return o; });
-      out(anaWrite(M, m.e, m.end === 1) ? 200 : 413, { ok: 1 });
+      out(anaWrite(M, e, m.end === 1) ? 200 : 413, { ok: 1 });
     });
     return;
   }

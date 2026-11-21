@@ -1,5 +1,16 @@
 # Miras e projéteis (remake visual): o que mudou e o que não foi testado
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok, com dois consertos
+- Navegador, 12 cenas montadas pelo atalho do console (`newState` + `buildWorld`), cada uma em 1280 e 1920 px, sem erro no console: Tiger de noite e com neblina, Abrams de noite com neblina e de dia, Hummel e Paladin no mapa de tiro, Wirbelwind de noite, Pantsir (EO), F-22 (HUD), Stuka (Revi), B-17 de noite no visor, B-2 no visor e AH-64.
+  - Óticas de 1944 de noite: o retículo do Tiger fica âmbar e aceso, sem textos, com o anel de recarga. O anel da Wirbelwind fica âmbar e sem números.
+  - Abrams: retículo vermelho aceso de noite e o círculo pequeno da queda no centro; dentro da luneta, nenhum texto.
+  - Visor do B-17 de noite: a faixa da salva tracejada e os ◇ de cada bomba, âmbar, com as bombas restantes em pontos. B-2: a tela de alvo cinza com a faixa.
+  - Mapa de tiro: prancheta em 1944, tablete hoje.
+- **Conserto 1, cabine do jato**: na cabine (assento com painel) a lista de armas começava em 170 u, 16 u dentro do painel de danos, e a 1ª linha ("BTN ESQ M61A2 480") ficava escondida sob ele. Agora a lista começa abaixo do painel, pelos números do próprio painel (`DMGP`).
+- **Conserto 2, aviões inimigos**: vários aviões juntos na tela (uma formação a 15 km) escreviam as distâncias umas sobre as outras. Agora os próximos dividem um rótulo com a menor distância e ×n ("14,3 km ×4"), com vírgula decimal. O travado continua com o rótulo próprio. Teste dos dois: `tests/hud-labels.js` (no `all.sh`).
+- Custo: `drawHud` na mesma cena do F-22, mediana de 31: 6,4 ms antes e 6,8 ms depois. Ruído da máquina cheia (outra rodada deu 13 ms).
+- **Continua sem teste:** a salva de Grad (a cena não chegou a disparar: sem solução de tiro) e o custo da fita de fumaça; luneta do sniper; lança-rojão; Javelin; drone (horizonte do OSD); câmera das armas; CCIP em mergulho; Revi com as marcas de mergulho (só a captura, não conferida de perto).
+
 Tarefa `cf-miras-impl`. O capitão escolheu uma direção por grupo no quadro das miras e disse "implemente".
 Comentários dele: tanque "pode tirar o texto, e onde vai cair pode ser um círculo menor"; antiaérea, avião e bombardeiro "sem os textos"; helicóptero "textos pequenos".
 Pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado em partida**.

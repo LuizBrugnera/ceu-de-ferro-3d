@@ -38153,6 +38153,25 @@ function baseScene(b, t) {
   });
   return g;
 }
+/* the rocks (cf-pol-modelos): every rock was the same regular dodecahedron, a die on the grass. ROCKS: n boulders (one: each rock already has
+   its own turn, width and height, which an irregular boulder shows), each the dodecahedron
+   with its corners pushed in or out (jit: the least and the most of its radius, by the dice of the boulder and the corner), its underside
+   flattened (flat: what is left of its depth under the middle), and set back in the old one's box: as wide, its top as high (top), its foot
+   bot under the ground; the same corners and faces, so no triangle more. Each rock is one of them by the dice of its id */
+const ROCKS = { n: 1, jit: [.62, 1.25], flat: .5, top: 1.45, bot: .3 };   // n 1: one instanced mesh, as before (three cost no triangle more, but a draw each, and the rocks are the dearest instanced draw of the map here)
+function rockGeo(k) {
+  const g = new THREE.DodecahedronGeometry(1, 0), P = g.attributes.position, A = P.array;
+  g.computeBoundingBox(); const b0 = g.boundingBox.clone(), key = i => Math.round(A[i] * 97) * 7919 + Math.round(A[i + 1] * 97) * 104729 + Math.round(A[i + 2] * 97);
+  for (let i = 0; i < A.length; i += 3) {   // a corner's copies (the geometry repeats it on each face) are pushed alike: same place, same dice
+    const f = ROCKS.jit[0] + (ROCKS.jit[1] - ROCKS.jit[0]) * hash2(key(i), k + 1, 41);
+    A[i] *= f; A[i + 1] *= (A[i + 1] < 0 ? ROCKS.flat : 1) * f; A[i + 2] *= f;
+  }
+  g.computeBoundingBox(); const b = g.boundingBox;
+  g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  g.scale((b0.max.x - b0.min.x) / (b.max.x - b.min.x), (ROCKS.top + ROCKS.bot) / (b.max.y - b.min.y), (b0.max.z - b0.min.z) / (b.max.z - b.min.z));
+  g.translate(0, -ROCKS.bot, 0); g.computeVertexNormals(); P.needsUpdate = true;
+  return g;
+}
 function buildWorld() {
   if (scene) scene.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   const E = S.E, W = S.W, HW = S.HW, T = S.T, N = T.N, P = PAL[S.era], c = new THREE.Color();
@@ -38204,12 +38223,12 @@ function buildWorld() {
   wo.seen = S.olog.length; wo.houses.instanceColor.needsUpdate = wo.roofs.instanceColor.needsUpdate = true;
   scene.add(wo.trees, wo.leaf, wo.houses, wo.roofs, wo.holes);
   /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
-  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1), rkg = new THREE.DodecahedronGeometry(1, 0);
-  bsg.translate(0, .55, 0); rkg.translate(0, .45, 0);
+  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1);
+  bsg.translate(0, .55, 0);
   /* map version 7 (COV7): the bushes in tiles of COV7.tile m, each an instanced mesh with its own bounds (so that the frustum leaves out what
      is not in view) and drawn only within COV7.see m of the eye (bushTiles); the rocks keep one mesh, bounded by the whole map */
-  rkg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW));
-  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr));
+  wo.rk = []; for (let k = 0; k < ROCKS.n; k++) { const rg = rockGeo(k); rg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW)); wo.rk.push(new THREE.InstancedMesh(rg, mat(P.rock), Math.max(1, nr))); }
+  wo.rocks = wo.rk[0];   // ROCKS: three boulders, each rock on one of them by the dice of its id
   const bm = bushMat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
   for (const o of cvl) if (o.k === 'bush') { const k = Math.floor(o.x / BT) * 4096 + Math.floor((o.z + HW) / BT), l = btl.get(k); if (l) l.push(o); else btl.set(k, [o]); }
   wo.bt = [];
@@ -38220,12 +38239,11 @@ function buildWorld() {
     l.forEach((o, j) => { wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); });
   }
   wo.bushes = wo.bt[0] || null;
-  let ir = 0;
-  for (const o of cvl) if (o.k === 'rock') { wo.cv[o.id] = [wo.rocks, ir++]; wo.rocks.setColorAt(ir - 1, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
-  wo.rocks.count = ir;
-  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
+  const ir = wo.rk.map(() => 0);
+  for (const o of cvl) if (o.k === 'rock') { const k = Math.min(ROCKS.n - 1, Math.floor(hash2(o.id, 3, 11) * ROCKS.n)), me = wo.rk[k], j = ir[k]++; wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
+  wo.rk.forEach((me, k) => { me.count = ir[k]; if (me.instanceColor) me.instanceColor.needsUpdate = true; });
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
-  scene.add(wo.rocks, ...wo.bt);
+  scene.add(...wo.rk, ...wo.bt);
   if (T.ug) { const g = bushGeo(0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: bushMat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
   cityScene();
   vegBuild();
@@ -45590,7 +45608,7 @@ skyScene = (g => () => {
     ENV.sh.castShadow = e > .03 && lit > .2 && wet < .4;
     if ((ENV.shT = (ENV.shT || 0) - 1) <= 0) {   // what casts: what moves and what stands, looked over twice a second
       ENV.shT = 30;
-      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, wo && wo.rocks, wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
+      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, ...(wo && wo.rk || []), wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
       if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
     }
   }

@@ -143,6 +143,8 @@ console.log('-- P4, P6a, P7: the faction --');
   const hp = { team: 0, seed: 1 }, hh = $('heliHold')(hp), hr = $('railOf')(hh.x, hh.z);
   ok(Math.hypot(hh.x - S.base[0].x, hh.z - S.base[0].z) < Math.hypot(hh.x - S.base[2].x, hh.z - S.base[2].z), 'a USA helicopter holds behind its own line, nearer its base than the Insurgents\' (road ' + hr.ri + ')');
   S.cq.fr = fr0;
+  const big = [0, 1, 2].map(t => JSON.stringify($('genAnswer')(t, { q: 'state' }).r).length);
+  ok(big.every(n => n <= 16384), 'the state each side\'s MCP general asks for fits the relay\'s 16 KB for gres (' + big.join(', ') + ' bytes; the Insurgents\' passed 23 KB and never arrived)');
   /* the general's view of side 2 (the Insurgents' player opens it with Tab): every side's points, and its ticket trend drew the clock column */
   const V2 = C.genVM(2, true);
   ok(V2.held.length === 3 && V2.f.length === 3, 'the general\'s view of side 2: the points (' + V2.held + ') and a tally of the three sides');

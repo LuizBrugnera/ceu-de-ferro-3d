@@ -6,5 +6,5 @@ Testado (cf-pol-testes-a):
 
 ## O que falta
 
-- A ponte MCP numa partida de 3 lados de verdade: `GENKEY=k node server.js`, sala de 3 lados aberta pela página e `CEU_SIDE=2 CEU_KEY=k node mcp-general.js`; `get_state` com `link.enemies`, `holder` com o nome da facção e `tickets` por facção (ou `tests/mcp-live.js` com uma passada do lado 2).
+- A ponte MCP do lado 2 numa partida de 3 lados de verdade ficou testada na rodada 4 (`tests/mcp-sides3.js`: `link` com Insurgents, 3 lados e os inimigos EUA e Rússia, `map.tickets` por facção, os pontos pelo nome do dono, a cadeira). **Conserto:** o `state` que ela pede passava de 23 KB para os Insurgentes (os blocos `icv` e `grl`, que a ponte nem lê) e o servidor só repassa `gres` até 16 KB: o general MCP dos Insurgentes nunca recebia o mapa. O `genAnswer` agora tira esses blocos (marcando `drop`) e, se ainda for grande, metade das esquadras, até caber. Falta `mcp-live.js` com uma passada do lado 2 (ele já falha em 7 pontos no `main`, com 2 lados).
 - Com 3 lados: o `cmd` de cada lado só para o próprio lado, a captura com `cs`, minas e `hlp` do lado 2, e suspender e retomar a partida de 3 lados.

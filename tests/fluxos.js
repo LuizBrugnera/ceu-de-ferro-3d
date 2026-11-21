@@ -128,6 +128,12 @@ console.log('-- the Partida panel fits a short window: its choices on one line e
   ok(!!m && /flex-direction:row/.test(m[1]) && /flex-wrap:wrap/.test(m[1]), 'at 1280 × 800 the panel ran past the bottom and the difficulty was out of sight (738 px of choices in 629): a short window lays each choice\'s name and note side by side (measured in the browser: 587 px, all of it on screen)');
 }
 
+console.log('-- the end screen fits a short window: the buttons on screen at 1280 × 720 --');
+{
+  const m = html.match(/@media \(min-width:761px\) and \(max-height:780px\)\{\.over \.sheet-in\{([^}]*)\}\.over h2\{([^}]*)\}/);
+  ok(!!m && /padding-block:4vh/.test(m[1]) && /max-width:720px/.test(m[1]) && /font-size:clamp\(28px,5\.5vh,44px\)/.test(m[2]), 'at 1280 × 720 "Voltar ao hangar" ended under the bottom edge (the sheet 783 px tall), the title on two lines: a short window starts it higher, wider and smaller');
+}
+
 console.log('-- "Onde entrar": the button names the place, and choosing stops the clock --');
 {
   const i = html.indexOf('const entryLabel = o =>'), j = html.indexOf('\n', i), k = html.indexOf('swapTouch = (f => () => { if (sw.on && sw.entry)'), l = html.indexOf('\n', k), E = vm.createContext({ sw: { on: true, entry: 12345 }, touched: 0 });

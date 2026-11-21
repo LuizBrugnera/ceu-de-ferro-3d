@@ -12,7 +12,7 @@ Na cena da #170 ("Assistir" IA × IA, moderna com três lados, qualidade Média,
 
 ## Testado
 - `tests/bridge-look.js` (meio segundo, three.js simulado): com pontes de pé, caídas, com pontão, com reconstrução e pontão livre (115 caixas, várias cores, uma peça inclinada), a malha instanciada leva exatamente as caixas que o construtor pediu, na mesma posição, tamanho, giro, inclinação e cor; uma malha só, material branco, sem corte pela esfera; reaproveitada, aumentada e escondida conforme as pontes mudam. Falha no main (lá há `new THREE.Mesh(` por caixa).
-- `tests/road-look.js` passa (o `br3Init` ainda acha o chão e as estradas).
+- `tests/road-look.js` passava (o `br3Init` ainda acha o chão e as estradas). Depois do merge com o main de 21/11 09:00Z ele quebra também no main sem esta PR: o `roadRibbon` do main chama `roadG`, que o teste não simula (`ReferenceError: roadG is not defined`).
 - Chrome com a GPU (RTX 4060, ANGLE gl-egl), mesmo quadro: capturas antes × depois idênticas nas pontes (a diferença de pixels que sobra é a folhagem pontilhada das árvores, que muda de um carregamento para outro também onde não há ponte).
 - A/B intercalado na mesma página (a forma antiga refeita a partir das matrizes da nova, alternando quadro a quadro, 300 de cada), `render3d` em ms:
 

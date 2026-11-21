@@ -18,7 +18,7 @@ Nas três condições, o teste barato de distância vem antes de `safe()`. `safe
 
 ## Testado
 - `tests/shots-safe.js` (um segundo): `safe()` em todos os casos da regra (outro lado, o próprio atirador, o veículo dele e a tripulação, amigo dentro e fora de `FF.arm`, rajada, fogo amigo desligado, online com e sem `Net.ff`), com cada objeto vigiado contra escrita: nada escrito, nenhum sorteio, a mesma resposta duas vezes; e as três condições com o teste barato primeiro. Falha no main.
-- Chrome com a GPU, cena da #170 por 60 s: a partida roda, sem erro no console do jogo; o tiro é pouco nesse começo de batalha (2% do quadro), então o ganho aparece mais tarde, no auge do combate.
+- Chrome com a GPU, cena da #170 por 60 s: 1800 quadros (60 s de jogo) sem exceção, com capturas a 1280 e 1920 px; o tiro é pouco nesse começo de batalha (2% do quadro), então o ganho aparece mais tarde, no auge do combate.
 
 ## NÃO testado
 - As suítes longas de fogo amigo e drones (`ff.js`, `drone*.js`) não rodaram (a cota de CPU da conta estava disputada por torneios); a prova é a impressão digital de 120 s, com fogo amigo ligado e drones na partida.

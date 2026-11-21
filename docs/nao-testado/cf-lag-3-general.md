@@ -11,7 +11,9 @@ Perfil de CPU sem navegador (semente 11, "Assistir" moderna com três lados, map
 
 ## Resultado (as mesmas decisões)
 - Por chamada, na batalha de verdade (40 s de jogo, 44 arestas, 40–43 unidades por lado, CPU da thread, lotes de 10, a antiga e a nova alternadas): **9,2–13,4 ms → 0,67–0,80 ms** (mediana), com `C.et` e `C.es` iguais número a número nos três lados.
-- Impressão digital de batalha (semente 11, 120 s, a cada 20 s: posições, vida e mortos de soldados e veículos, obras, esquadras, operações dos três generais, número de sorteios): ver a PR.
+- Impressão digital de batalha (semente 11, 120 s, a cada 20 s: posições, vida e mortos de soldados e veículos, obras, esquadras, operações dos três generais, número de sorteios): **idêntica** nas seis marcas.
+- Perfil de 60 a 120 s: `cmdEdges` 2153 → 156 ms de amostras (o plano inteiro 6773 → 3660 ms).
+- Chrome com a GPU, cena da #170 por 60 s: 1800 quadros sem exceção, capturas a 1280 e 1920 px; CPU do renderizador por quadro 125,5 (main) → 115,8 ms (batalhas divergem entre carregamentos).
 
 ## Testado
 - `tests/general-edges.js` (um segundo): a `cmdEdges` da página contra a antiga, escrita no teste, em 60 redes aleatórias × 3 lados (9477 arestas), com unidades em cima da linha de 300 m, um fio dentro e fora dela, na diagonal, perto, longe, mortas, de outro lado, fixas, online, em NaN e em Infinity: `C.et` e `C.es` iguais número a número; e a linha de 300 m em si (ao longo, através, na diagonal). Falha no main.

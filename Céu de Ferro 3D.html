@@ -7744,6 +7744,7 @@ function damagePlane(p, dmg, by, rx, h) {
   hitMine(p, dmg, by);
   note(p, dmg, by, h);
   if (relayed(p, dmg, by, rx, h)) return;
+  hurtMine(p, dmg, h);
   p.hitT = S.t; if (by) p.lastBy = by; puff(p.x, p.y, p.z, 'spark', .5);
   lose(p, wound(p, dmg, by, h), by);
 }
@@ -7803,12 +7804,16 @@ function killUnit(u, det) {
   if (det && u.def.t) S.debris.push({ k: 'tur', u, x: u.x, y: u.y + u.def.mh, z: u.z, vx: rand(-5, 5), vy: rand(10, 15), vz: rand(-5, 5), q: yawQ(u.h + u.ty), w: { x: rand(-3, 3), y: rand(-1, 1), z: rand(-3, 3) }, drag: 0, h: 2.2, life: 30 });
   const w = { u, life: 45, det: !!det }; S.wrecks.push(w); wreckObj(w); if (S.wrecks.length > 24) dropObj(S.wrecks.shift().o);
 }
+/* a hit on the player's own vehicle, aircraft or soldier, once the damage is his (after relayed): heard on the hull or the body (fx.hurt; cf-pol-armas) */
+const hurtMine = (o, dmg, h) => { if (o.me && (dmg > 0 || h)) fx.hurt(o, dmg, h); };
+if (!fx.hurt) fx.hurt = () => {};
 function damageUnit(u, dmg, by, rx, h) {
   if (u.dead || u.inv > 0) return;
   hitMine(u, dmg, by);
   if (u.occ) paxHit(u, dmg, by, rx, h);
   note(u, dmg, by, h);
   if (relayed(u, dmg, by, rx, h)) return;
+  hurtMine(u, dmg, h);
   u.hitT = S.t; if (by) u.lastBy = by; if (u.ai && by && by.team !== u.team) { u.ai.hurt = by; u.ai.hurtT = S.t; }
   if (dmg > 0) { u.fix = null; u.fixLock = S.t + DMG.repair.lock; }
   ruin(u, wound(u, dmg, by, h), by);
@@ -7922,6 +7927,7 @@ function strike(o, k, dmg, by, x, y, z, dx, dy, dz, ap) {
   if (k === HK.shell && FC < A.rico) {
     for (let i = 0; i < 4; i++) puff(x, y, z, 'spark', 1.5, rand(-9, 9), rand(2, 12), rand(-9, 9));
     if (by && by.me && !(o.inv > 0)) S.floats.push({ x: o.x, y: o.y + 9, z: o.z, text: 'ricochete', life: 1.4 });
+    if (o.me && !(o.inv > 0)) fx.hurt(o, 0, { k, ric: 1 });   // the plate rings on the player's own hull
     return null;
   }
   const m = A.face[f3] * (A.ang + (1 - A.ang) * FC) * (k !== HK.bullet ? 1 : ap < 0 ? A.sa : o.kind === 'tank' ? ap : 1), P = DMG.pen;
@@ -9902,6 +9908,7 @@ function damageMan(m, dmg, by, rx, h) {
   hitMine(m, dmg, by);
   if (by && by.me && h && dmg > 0 && !(S.t - m.nT < DMG.note)) { m.nT = S.t; S.floats.push({ x: m.x, y: m.y + 4, z: m.z, text: ZONE[h.pt] || ZONE[0], life: 1 }); }
   if (relayed(m, dmg, by, rx, h)) return;
+  hurtMine(m, dmg, h);
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
   if (h && h.pt === 2) m.wl += dmg; else if (h && h.pt === 3) m.wa += dmg;
   if (h && dmg > 0) m.bl = Math.min(DMG.man.cap, (m.bl || 0) + dmg * DMG.man.bleed[h.pt & 3]);
@@ -9940,6 +9947,9 @@ function manLock(m, a) {
   if (t !== a.lock) { a.lock = t; a.lockT = S.t + w.lockT; }
   return t && S.t >= a.lockT && !(dist(t, m) < w.min) ? t : null;
 }
+/* tracers (cf-pol-armas): a squad machine gun's belt carries one every lmg rounds, drawn with the glowing head of a vehicle's (b.tr); a
+   rifle's carry none. A count on the arm (a.tn), no dice: the battle is the same */
+const TRC = { lmg: 4 };
 function manFire(m, a) {
   const w = a.d, c = m.ctl, e = manEye(m), f = m.f, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
   if (w.k) {
@@ -9953,8 +9963,8 @@ function manFire(m, a) {
   }
   if (w.snp) return snipe(m, a);
   const s = (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) + c.sp) * (m.sup > S.t ? SUP.sp : 1);
-  a.mag--; a.cool = w.rate; a.t = m.shotT = S.t;
-  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
+  a.mag--; a.cool = w.rate; a.t = m.shotT = S.t; a.tn = (a.tn || 0) + 1;
+  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: w.lmg && a.tn % TRC.lmg === 0 ? 1 : 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
   fx.shot(m === S.my, m, w);
 }
 /* a hand grenade (k 1) or a smoke grenade (2), thrown along the aim and a little up */
@@ -37336,6 +37346,385 @@ genCard = (f => (t, id) => {
   return c;
 })(genCard);
 /* ---------- end of the medic (cf-medico) ---------- */
+/* ---------- GENERAL 2: régua (G0, cf-g2-g0-regua; não testado além de tests/g2-regua.js e do torneio da régua: docs/nao-testado/cf-g2-g0-regua.md) ----------
+   The captain's examples in numbers: the yardstick every package of the General 2 (cf-ia-opensource §6, G1 to G8) measures against, and the
+   combats G2 calibrates its simulation with. tools/ref/general2-base.json is today's general by it.
+   An observer, as the analytics (ANA) and the brain's measurement (MED) are: it reads the battle as it is (the truth: S.men, S.squads,
+   S.units, S.bombs, S.forts, and each side's C.known only to note when the side first knew of an enemy gun), draws no random numbers, writes
+   nothing on the battle's objects (its own state is G2S, with WeakMaps and WeakSets for what it remembers of them) and changes nothing the
+   battle reads. It decides nothing, so it is no part of the side's honesty (P7): it only measures. tests/g2-regua.js plays the same match
+   with it off and on and checks that every event but its own is the same. G2R.on 0 leaves it all out (the switch to compare). An error of its
+   own (G2S.err) turns it off for the rest of the match and never reaches the battle.
+   It runs where the analytics does (anaLive: solo, a local watch, the online host), every dt s of match time (h the s since the last look);
+   per side s, counted in s × h unless it says otherwise:
+     inf  [soldier-s of the AI on foot (not down, not aboard), in a building (bldAt, as the research's probe), in the defence of a town (within
+          its r of an urban point s holds while an enemy is within thr m of it), of those in a building, inside an urban point an enemy holds]
+     snp  [sniper-s, in a building, shots fired]           at  [AT rounds (heat, atgm) fired by soldiers of the AI, at armour (G2R.armour)]
+     km   [squad-m on foot, squad-m aboard]: each squad's leader, or the vehicle he rides, or the vehicle of its ride (rideBoard puts the men
+          aboard as gone: g2Where), from one look to the next (a jump over hop m is not a walk)
+     emb  [long walks begun, ridden]: EMB's own measure (S.emb), taken as it stands
+     df   [defender-s: men of s within dr m of a point s holds with an enemy within thr m, Σ distance to its centre, s with a mate there,
+          Σ distance to the nearest mate, s with him nn m or more]
+     dq   [threatened point-s of s, with at most one squad of s within cen m of the centre, Σ squads of s within cen m]
+     dt   [tank-s of s within tr m of a threatened point of s, with no other tank of s within tsp m]
+     sd   [assaults opened on an enemy seat (op.sede, cf-sede-ataque-defesa), those that reached H-hour (go, fight or cons), squad-s inside an
+          enemy seat town (within its ru + seatIn m)]
+     hq   [incursions into s's seat (an enemy squad or armed vehicle within its ru + seatR m; over once quiet s with none), answered (as
+          many squads and armed vehicles of s there as of the enemy's), Σ s to answer, over unanswered]
+     dm   [domes up (the most at once), s the first was up (-1 none), enemy rounds (the shells and rockets AID counts: S.bombs he with a fall
+          point) coming down within imR m of an asset of s (its seat or factory, its base, its points, its supply bases), of those before its
+          first dome, s of the 10th (-1), s s first knew of an enemy gun or launcher (C.known kind art; -1)]
+     fob  [forward bases ordered (ENP: A.fobs), up (enpFobNext)]
+     pc   a histogram (0 to 10 or more) of the works of s (built; no bridge, pontoon or radio mast: noPc) within pcR m of a point s took, pcT s after
+          it took it (a point taken in the last pcT s of the match is left out)
+     cb   [combats s was in that went out as events, combats left out past cMax]
+   Events: g2 { s, and the counters above as they stand } every ev s and at the end (the review keeps each side's last; pushed past ANA.max,
+   as sn, end and MED's cb are: a few a match); g2c, one combat, as it ends (at most cMax a match, also past ANA.max). The header carries g2
+   { on, v, u: each point urban (1) or not, in the order of hdr.pts }.
+   A combat (for G2's calibration: who was there, how long, who was left): every dt s each squad (its leader, or what he rides) and each
+   vehicle is a fighter; one with an enemy fighter within cR m is in contact; fighters in contact within cL m of one another are one fight
+   (single link), and a fight with two sides or more is a combat. It keeps its members from one look to the next (a member already in an
+   open combat brings the fight into it; two open combats that meet become the older one), and ends cEnd s after its last look in contact
+   (or with the match). It goes out when it lasted cMin s or more or anyone died in it: g2c { t its start, d s it lasted, x z where it began,
+   u 1 in a town, p [the nearest point's L within cP m, who held it at the start] or null, sd [{ s, m0 men at the start by class (g2Cls),
+   mj men who joined later, v0 vehicles at the start by kind, vj joined, me men of them fit at the end, md dead, ve vehicles left, vd lost }] }.
+   The cap of the analytics (ANA.max) counts the battle's events, not these: with the yardstick on, the battle's events kept are the same.
+   The review: R.g2 { on, v, cb (combats), side: [{ raw, f (the additive record a tournament adds up: g2Flat, with what the other events say
+   of the side's assaults, points, armour killed by its infantry and command net) } | null] }; g2Sum(f, matches) the measures, g2Rows the
+   rows a table shows, with the target of the package (G2R.goal) that each one is the number of. */
+const G2R = { on: 1, v: 1, dt: 5, bt: 1, ev: 60, thr: 600, dr: 250, cen: 30, tr: 300, nn: 5, tsp: 30, seatIn: 60, seatR: 300, quiet: 60, imR: 600,
+  pcR: 150, pcT: 300, pcN: 3, hop: 600, cR: 400, cL: 500, cEnd: 30, cMin: 10, cMax: 500, cP: 400,
+  noPc: { 7: 1, 8: 1, 9: 1, 10: 1 }, armour: { tank: 1, lav: 1 }, armed: { tank: 1, lav: 1, car: 1, aa: 1 },
+  /* the targets: section 6 of cf-ia-opensource, by package */
+  goal: { sede: '> 0 (G3)', hq: 'todas; resposta curta (G4)', net: '≥ 85% (G6)', dome: '≥ 1 antes do 10º impacto (G6)', fob: '≥ 1 por partida (G6)', pc: '≥ 60% (G6)',
+    nn: '≥ 5 m (G5)', cen: '≤ 1 esquadra a < 30 m (G5)', tank: '≥ 30 m (G5)', lost: '≤ régua × 0,8 (G5)', urb: '≥ 40% (G7)', foeT: '> 0 (G7)', urbTook: '≥ 40% (G7)',
+    at: '≥ 3 por partida (G7)', ride: '≥ 50% (G8)', go: '≥ 2 por partida (G4)', canc: '≤ 15% (G4)', want: '≤ 10 por partida (G4)', cb: 'registro para o G2' } };
+const G2K = ['inf', 'snp', 'at', 'km', 'emb', 'df', 'dq', 'dt', 'sd', 'hq', 'dm', 'fob', 'pc', 'cb'];
+const g2New = () => ({ inf: [0, 0, 0, 0, 0], snp: [0, 0, 0], at: [0, 0], km: [0, 0], emb: [0, 0], df: [0, 0, 0, 0, 0], dq: [0, 0, 0], dt: [0, 0], sd: [0, 0, 0], hq: [0, 0, 0, 0],
+  dm: [0, -1, 0, 0, -1, -1], fob: [0, 0], pc: Array(11).fill(0), cb: [0, 0] });
+let G2S = null;
+const g2On = () => !!G2R.on && !!G2S && G2S.S === S && !G2S.err && anaLive() && ANA.S === S && !S.cq.ph;
+const g2D = s => G2S.D[s] || (G2S.D[s] = g2New());
+const g2Ok = s => s >= 0 && s < anaN();
+const g2In = (o, c, r) => Math.abs(o.x - c.x) < r && Math.abs(o.z - c.z) < r && hdist(o, c) < r;
+/* a soldier's class in a combat: sniper, anti-tank, air defence, machine gun, medic, rifle */
+const g2Cls = m => { const d = m.def || {}, a = m.arms && m.arms[1] && m.arms[1].d; return d.snp ? 'snp' : a && (a.k === 'heat' || a.k === 'atgm') ? 'at' : a && a.k === 'sam' ? 'ad' : /metralh/i.test(d.role || '') ? 'mg' : d.med ? 'med' : 'rf'; };
+/* the hooks run their part guarded: an error of the yardstick's turns it off and is kept, never thrown into the battle */
+function g2Try(f) { try { f(); } catch (e) { G2S.err = String((e && e.stack) || e).split('\n').slice(0, 3).join(' | '); } }
+function g2Fresh() {
+  return { S, D: [], last: S.t, sT: S.t + G2R.dt, bT: S.t, evT: S.t + G2R.ev, end: false, err: null, nev: 0, pos: new WeakMap(), ops: new WeakSet(), opsH: new WeakSet(), bomb: new WeakSet(),
+    fob: new WeakSet(), hq: [], hold: S.cq.p.map(p => p.hold), pcq: [], as: [], mem: new WeakMap(), cmb: [], cid: 0, out: 0 };
+}
+/* where squad q is and whether it is aboard: its leader on foot, or the vehicle he rides (m.in); a squad on a ride (rideBoard: its men gone
+   aboard q.rd.u, which they follow) is where that vehicle is. null for a squad with nobody left */
+function g2Where(q) {
+  const L = anaLead(q); if (L) return { o: L.in || L, ab: !!L.in };
+  const u = q.rd && q.rd.u; return u && !u.dead && q.men.some(m => !m.dead) ? { o: u, ab: true } : null;
+}
+/* the places of side s an enemy round coming down near counts against (looked up every dt s) */
+function g2Assets(s) {
+  const l = typeof aidAreas === 'function' && S.base && S.base[s] ? aidAreas(s).slice() : [];
+  for (const p of S.cq.p) if (p.hold === s) l.push(p);
+  for (const b of S.sup || []) if (b.team === s && !b.dead) l.push(b);
+  return l;
+}
+/* the rounds of indirect fire, every bt s: where each comes down, once */
+function g2Bombs() {
+  for (const b of S.bombs) {
+    if (b.k !== 'he' || b.px === undefined || b.gone || G2S.bomb.has(b)) continue;
+    G2S.bomb.add(b);
+    const at = { x: b.px, z: b.pz };
+    for (let s = 0; s < anaN(); s++) {
+      if (s === b.team || !(G2S.as[s] || []).some(P => g2In(at, P, G2R.imR))) continue;
+      const D = g2D(s); D.dm[2]++; if (D.dm[1] < 0) D.dm[3]++; if (D.dm[2] === 10) D.dm[4] = anaR(S.t);
+    }
+  }
+}
+/* the look every dt s */
+function g2Sample(h) {
+  const n = anaN(), P = S.cq.p, sd = anaSides(n), lead = q => anaLead(q);
+  for (const s of sd) G2S.as[s] = g2Assets(s);
+  /* who is on the ground, and which held points have an enemy near */
+  const gnd = [];
+  for (const m of S.men) if (!m.dead && !m.gone && !m.in && g2Ok(m.team)) gnd.push(m);
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team)) gnd.push(u);
+  const thr = P.map(p => g2Ok(p.hold) && gnd.some(o => o.team !== p.hold && g2In(o, p, G2R.thr)));
+  /* the soldiers of the AI */
+  for (const m of S.men) {
+    if (m.dead || m.gone || m.down || m.in || !m.ai || m.net || !g2Ok(m.team)) continue;
+    const D = g2D(m.team), B = !!bldAt(m.x, m.z, .3);
+    D.inf[0] += h; if (B) D.inf[1] += h;
+    if (m.def && m.def.snp) { D.snp[0] += h; if (B) D.snp[1] += h; }
+    for (let i = 0; i < P.length; i++) {
+      const p = P[i]; if (!p.tw || !g2Ok(p.hold) || !g2In(m, p, p.r || 150)) continue;
+      if (p.hold !== m.team) D.inf[4] += h; else if (thr[i]) { D.inf[2] += h; if (B) D.inf[3] += h; }
+      break;
+    }
+  }
+  /* the defence of each threatened point */
+  for (let i = 0; i < P.length; i++) {
+    if (!thr[i]) continue;
+    const p = P[i], s = p.hold, D = g2D(s), men = gnd.filter(o => o.man && o.team === s && !o.down && g2In(o, p, G2R.dr));
+    for (const m of men) {
+      D.df[0] += h; D.df[1] += hdist(m, p) * h;
+      let nd = 1e9; for (const o of men) if (o !== m) { const d = hdist(o, m); if (d < nd) nd = d; }
+      if (nd < 1e9) { D.df[2] += h; D.df[3] += nd * h; if (nd >= G2R.nn) D.df[4] += h; }
+    }
+    let k = 0; for (const q of S.squads) { if (q.team !== s || q.net || !q.men) continue; const L = lead(q); if (L && !L.in && g2In(L, p, G2R.cen)) k++; }
+    D.dq[0] += h; if (k <= 1) D.dq[1] += h; D.dq[2] += k * h;
+    const tk = gnd.filter(u => !u.man && u.team === s && u.kind === 'tank' && g2In(u, p, G2R.tr));
+    for (const u of tk) { D.dt[0] += h; if (!tk.some(o => o !== u && g2In(o, u, G2R.tsp))) D.dt[1] += h; }
+  }
+  /* the walks and rides of every squad, and who is in each seat town */
+  const seat = sd.map(s => (typeof aidSeat === 'function' && S.T && S.T.burgs ? aidSeat(s) : null)), cnt = seat.map(() => sd.map(() => 0));
+  for (const q of S.squads) {
+    if (q.net || !q.men || !g2Ok(q.team)) continue;
+    const at = g2Where(q); if (!at) continue;
+    const o = at.o, p = G2S.pos.get(q);
+    if (p) { const d = Math.hypot(o.x - p.x, o.z - p.z); if (d < G2R.hop) g2D(q.team).km[at.ab ? 1 : 0] += d; }
+    G2S.pos.set(q, { x: o.x, z: o.z });
+    seat.forEach((w, s) => {
+      if (!w) return;
+      const d = hdist(o, w);
+      if (d < w.ru + G2R.seatR) cnt[s][q.team]++;
+      if (q.team !== s && d < w.ru + G2R.seatIn) g2D(q.team).sd[2] += h;
+    });
+  }
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team) && G2R.armed[u.kind] && u.arms && u.arms[0] && u.arms[0].d && u.arms[0].d.dmg > 0)
+    seat.forEach((w, s) => { if (w && hdist(u, w) < w.ru + G2R.seatR) cnt[s][u.team]++; });
+  seat.forEach((w, s) => {
+    if (!w) return;
+    const D = g2D(s), e = cnt[s].reduce((a, v, f) => a + (f === s ? 0 : v), 0), o = cnt[s][s], I = G2S.hq[s] || (G2S.hq[s] = { on: 0, t0: 0, ans: 0, last: 0 });
+    if (e > 0) {
+      I.last = S.t;
+      if (!I.on) { I.on = 1; I.t0 = S.t; I.ans = 0; D.hq[0]++; }
+      if (!I.ans && o >= e) { I.ans = 1; D.hq[1]++; D.hq[2] += S.t - I.t0; }
+    } else if (I.on && S.t - I.last > G2R.quiet) { I.on = 0; if (!I.ans) D.hq[3]++; }
+  });
+  /* the general's assaults on a seat, its domes, what it knows of the enemy's guns, its forward bases */
+  for (const C of S.cmd || []) {
+    if (!C || !g2Ok(C.t)) continue;
+    const D = g2D(C.t);
+    for (const op of C.ops || []) {
+      if (!op || op.k !== 'atk' || op.sede === undefined) continue;
+      if (!G2S.ops.has(op)) { G2S.ops.add(op); D.sd[0]++; }
+      if (!G2S.opsH.has(op) && (op.st === 'go' || op.st === 'fight' || op.st === 'cons')) { G2S.opsH.add(op); D.sd[1]++; }
+    }
+    if (D.dm[5] < 0 && Array.isArray(C.known) && C.known.some(o => o && !o.dead && o.kind === 'art' && o.team !== C.t)) D.dm[5] = anaR(S.t);
+    if (C.enp && Array.isArray(C.enp.fobs)) for (const f of C.enp.fobs) if (!G2S.fob.has(f)) { G2S.fob.add(f); D.fob[0]++; }
+  }
+  for (const s of sd) {
+    const D = g2D(s), k = (S.forts || []).filter(f => f.k === 6 && f.team === s && !f.gone && f.prog >= 1).length;
+    if (k > D.dm[0]) D.dm[0] = k; if (k && D.dm[1] < 0) D.dm[1] = anaR(S.t);
+  }
+  /* the points taken, and pcT s later the works by each */
+  P.forEach((p, i) => { const was = G2S.hold[i]; G2S.hold[i] = p.hold; if (p.hold !== was && g2Ok(p.hold)) G2S.pcq.push({ i, s: p.hold, t: S.t + G2R.pcT }); });
+  G2S.pcq = G2S.pcq.filter(c => {
+    if (S.t < c.t) return true;
+    const p = P[c.i]; let k = 0;
+    for (const f of S.forts || []) if (f.team === c.s && !f.gone && f.prog >= 1 && !G2R.noPc[f.k] && g2In(f, p, G2R.pcR)) k++;
+    g2D(c.s).pc[Math.min(10, k)]++; return false;
+  });
+  g2Combat(n);
+}
+/* ---- the combats ---- */
+function g2Combat(n) {
+  const F = [], R2 = G2R.cR * G2R.cR, L2 = G2R.cL * G2R.cL;
+  for (const q of S.squads) { if (q.net || !q.men || !g2Ok(q.team)) continue; const L = anaLead(q); if (!L) continue; const o = L.in || L; F.push({ o: q, s: q.team, x: o.x, z: o.z, sq: 1 }); }
+  for (const u of S.units) if (!u.dead && !u.gone && g2Ok(u.team)) F.push({ o: u, s: u.team, x: u.x, z: u.z, sq: 0 });
+  const hot = F.filter(a => F.some(b => b.s !== a.s && (a.x - b.x) ** 2 + (a.z - b.z) ** 2 < R2));
+  const par = hot.map((_, i) => i), root = i => { while (par[i] !== i) i = par[i] = par[par[i]]; return i; };
+  for (let i = 0; i < hot.length; i++) for (let j = i + 1; j < hot.length; j++) if ((hot[i].x - hot[j].x) ** 2 + (hot[i].z - hot[j].z) ** 2 < L2) par[root(i)] = root(j);
+  const G = new Map();
+  hot.forEach((f, i) => { const r = root(i); if (!G.has(r)) G.set(r, []); G.get(r).push(f); });
+  for (const l of G.values()) {
+    if (!l.some(f => f.s !== l[0].s)) continue;
+    let c = null; const more = [];
+    for (const f of l) { const x = G2S.mem.get(f.o); if (!x || x.done || x === c || more.includes(x)) continue; if (!c) c = x; else if (x.id < c.id) { more.push(c); c = x; } else more.push(x); }
+    if (!c) c = g2CbOpen(l);
+    for (const x of more) g2CbMerge(c, x);
+    for (const f of l) g2CbJoin(c, f);
+    c.tL = S.t; c.n++;
+  }
+  for (const c of G2S.cmb) if (!c.done && S.t - c.tL > G2R.cEnd) g2CbEnd(c);
+  G2S.cmb = G2S.cmb.filter(c => !c.done);
+}
+function g2CbOpen(l) {
+  let x = 0, z = 0; for (const f of l) { x += f.x; z += f.z; }
+  const c = { id: ++G2S.cid, t0: S.t, tL: S.t, n: 0, x: x / l.length, z: z / l.length, sd: new Map(), done: false, P: null };
+  let b = G2R.cP; for (const p of S.cq.p) { const d = hdist(p, c); if (d < b) { b = d; c.P = [p.L, p.hold]; } }
+  G2S.cmb.push(c); return c;
+}
+const g2CbSide = (c, s) => { if (!c.sd.has(s)) c.sd.set(s, { m0: {}, mj: {}, v0: {}, vj: {}, men: new Set(), un: new Set(), sq: new Set() }); return c.sd.get(s); };
+const g2Add = (o, k, v) => { o[k] = (o[k] || 0) + (v === undefined ? 1 : v); };
+/* a fighter into a combat: on its first look the start, after it what joined */
+function g2CbJoin(c, f) {
+  if (G2S.mem.get(f.o) === c) return;
+  G2S.mem.set(f.o, c);
+  const X = g2CbSide(c, f.s), late = c.n > 0;
+  if (f.sq) { X.sq.add(f.o); for (const m of f.o.men) if (!m.dead && !m.gone && !X.men.has(m)) { X.men.add(m); g2Add(late ? X.mj : X.m0, g2Cls(m)); } }
+  else if (!X.un.has(f.o)) { X.un.add(f.o); g2Add(late ? X.vj : X.v0, anaKind(f.o) || f.o.kind || '?'); }
+}
+/* two open combats that met: the younger into the older, as it stood */
+function g2CbMerge(c, x) {
+  x.done = true; c.t0 = Math.min(c.t0, x.t0); c.n = Math.max(c.n, x.n);
+  for (const [s, Y] of x.sd) {
+    const X = g2CbSide(c, s);
+    for (const k of ['m0', 'mj', 'v0', 'vj']) for (const j in Y[k]) g2Add(X[k], j, Y[k][j]);
+    for (const k of ['men', 'un', 'sq']) for (const o of Y[k]) X[k].add(o);
+    for (const o of Y.sq) G2S.mem.set(o, c);
+    for (const o of Y.un) G2S.mem.set(o, c);
+  }
+}
+function g2CbEnd(c) {
+  c.done = true;
+  const d = c.tL - c.t0, sd = [...c.sd.entries()].sort((a, b) => a[0] - b[0]).map(([s, X]) => {
+    const me = {}, md = {}, ve = {}, vd = {};
+    for (const m of X.men) { if (m.dead) g2Add(md, g2Cls(m)); else if (!m.down && !m.gone) g2Add(me, g2Cls(m)); }
+    for (const u of X.un) g2Add(u.dead ? vd : ve, anaKind(u) || u.kind || '?');
+    return { s, m0: X.m0, mj: X.mj, v0: X.v0, vj: X.vj, me, md, ve, vd };
+  });
+  if (sd.length < 2 || (d < G2R.cMin && !sd.some(x => Object.keys(x.md).length || Object.keys(x.vd).length))) return;
+  if (G2S.out >= G2R.cMax) { for (const x of sd) if (g2Ok(x.s)) g2D(x.s).cb[1]++; return; }
+  G2S.out++;
+  for (const x of sd) if (g2Ok(x.s)) g2D(x.s).cb[0]++;
+  const u = S.cq.p.some(p => p.tw && g2In(c, p, (p.r || 150) + 100)) ? 1 : 0;
+  const e = { k: 'g2c', t: anaR(c.t0), d: anaR(d), x: Math.round(c.x), z: Math.round(c.z), u, p: c.P, sd };
+  ANA.ev.push(e); ANA.q.push(e); G2S.nev++;   // past ANA.max, at most cMax a match
+}
+/* each side's counters as they stand, as events g2 (EMB's measure of the long walks taken as it is) */
+function g2Emit() {
+  const E = S.emb;
+  for (let s = 0; s < anaN(); s++) {
+    const D = g2D(s);
+    if (E && Array.isArray(E.legs) && Array.isArray(E.rode)) { D.emb[0] = E.legs[s] || 0; D.emb[1] = E.rode[s] || 0; }
+    const e = { k: 'g2', t: anaR(S.t), s };
+    for (const k of G2K) e[k] = D[k].map(anaR);
+    ANA.ev.push(e); ANA.q.push(e); G2S.nev++;   // past ANA.max, as sn and end: a few a match
+  }
+}
+/* the cap of the analytics counts the battle's events only: the yardstick's own (nev of them) do not bring it nearer */
+anaPush = (f => e => {
+  const k = G2S && G2S.S === S ? G2S.nev : 0;
+  if (k && ANA.ev.length >= ANA.max && ANA.ev.length - k < ANA.max) { ANA.ev.push(e); ANA.q.push(e); return; }   // f would have dropped it for the yardstick's events
+  return f(e);
+})(anaPush);
+/* ---- the hooks ---- */
+anaBegin = (g => () => {
+  g();
+  G2S = null; if (!G2R.on) return;
+  G2S = g2Fresh();
+  const h = ANA.ev.find(e => e.k === 'hdr'); if (h) h.g2 = { on: 1, v: G2R.v, u: S.cq.p.map(p => (p.tw ? 1 : 0)) };
+})(anaBegin);
+anaStep = (g => dt => {
+  g(dt);
+  if (!g2On()) return;
+  g2Try(() => {
+    if (S.t >= G2S.bT) { G2S.bT = S.t + G2R.bt; g2Bombs(); }
+    if (S.t >= G2S.sT) { const h = S.t - G2S.last; G2S.last = S.t; G2S.sT = S.t + G2R.dt; g2Sample(h); }
+    if (S.t >= G2S.evT) { G2S.evT = S.t + G2R.ev; g2Emit(); }
+  });
+})(anaStep);
+/* the end: a last look, the combats still open, and the counters, before the end event */
+cqEnd = (g => (...a) => {
+  if (g2On() && !G2S.end && !S.over) { G2S.end = true; g2Try(() => { if (S.t > G2S.last) { g2Sample(S.t - G2S.last); G2S.last = S.t; } for (const c of G2S.cmb) if (!c.done) g2CbEnd(c); g2Emit(); }); }
+  return g(...a);
+})(cqEnd);
+/* the rounds a soldier of the AI fires: a sniper's, and anti-tank ones, and at what */
+manFire = (f => (m, a) => {
+  if (!m || !m.ai || m.net || !a || !a.d || !g2On()) return f(m, a);
+  const w = a.d, n0 = a.mag, tg = m.ai.tgt;
+  f(m, a);
+  if (!(a.mag < n0) || !g2Ok(m.team)) return;
+  g2Try(() => {
+    const D = g2D(m.team);
+    if (w.snp) D.snp[2]++;
+    else if (w.k === 'heat' || w.k === 'atgm') { D.at[0]++; const t = w.lockT ? a.lock : tg; if (t && !t.man && G2R.armour[t.kind]) D.at[1]++; }
+  });
+})(manFire);
+/* a forward base up */
+enpFobNext = (f => (t, C, E) => { f(t, C, E); if (g2On() && g2Ok(t)) g2D(t).fob[1]++; })(enpFobNext);
+/* ---- the review ---- */
+function g2Raw(e) {
+  const D = g2New();
+  if (e) for (const k of G2K) if (Array.isArray(e[k])) e[k].forEach((x, i) => { if (i < D[k].length) D[k][i] = +x || 0; });
+  return D;
+}
+/* side s's additive record: its counters (D) and what the other events say of it (H the header) */
+function g2Flat(D, ev, s, H) {
+  const pts = H.pts || [], u = H.g2 && Array.isArray(H.g2.u) ? H.g2.u : [], ur = new Set(pts.filter((p, i) => u[i]).map(p => p[0]));
+  const ap = ev.filter(e => e.k === 'ap' && e.s === s), atk = ap.filter(e => !e.walk), uap = atk.filter(e => ur.has(e.L)), lg = ev.filter(e => e.k === 'lg' && e.s === s);
+  let netIn = 0, netAll = 0, ptLost = 0, ptTook = 0, armK = 0;
+  for (const e of ev) {
+    if (e.k === 'sn' && Array.isArray(e.cn) && Array.isArray(e.cn[s])) { const x = e.cn[s]; netIn += x[8] || 0; netAll += (x[8] || 0) + (x[9] || 0) + (x[10] || 0); }
+    else if (e.k === 'pt') { if (e.from === s && e.to !== s) ptLost++; if (e.to === s && e.from !== s) ptTook++; }
+    else if (e.k === 'ls' && e.s !== s && Array.isArray(e.by) && e.by[0] === s && e.by[1] === 'inf' && G2R.armour[e.u]) armK++;
+  }
+  const t10 = D.dm[4], dT = D.dm[1], app = H.era === 'modern' && D.dm[5] >= 0 && (t10 >= 0 || dT >= 0) ? 1 : 0;
+  return { n: 1, infS: D.inf[0], infB: D.inf[1], urbS: D.inf[2], urbB: D.inf[3], foeT: D.inf[4], snpS: D.snp[0], snpB: D.snp[1], snpShot: D.snp[2], atShot: D.at[0], atArm: D.at[1], armK,
+    kmF: D.km[0], kmE: D.km[1], legs: D.emb[0], rode: D.emb[1], dfS: D.df[0], dfD: D.df[1], nnS: D.df[2], nnD: D.df[3], nn5: D.df[4], dqN: D.dq[0], dq1: D.dq[1], dqSq: D.dq[2], dtN: D.dt[0], dt30: D.dt[1],
+    sdOpen: D.sd[0], sdGo: D.sd[1], sdIn: D.sd[2], hqInc: D.hq[0], hqAns: D.hq[1], hqT: D.hq[2], hqUn: D.hq[3],
+    dmMax: D.dm[0], dmUp: dT >= 0 ? 1 : 0, imp: D.dm[2], impB: D.dm[3], seen: D.dm[5] >= 0 ? 1 : 0, dmApp: app, dmOk: app && dT >= 0 && (t10 < 0 || dT <= t10) ? 1 : 0,
+    fobO: D.fob[0], fobU: D.fob[1], fobOk: D.fob[1] > 0 ? 1 : 0,
+    pcN: D.pc.reduce((a, b) => a + b, 0), pcOk: D.pc.reduce((a, b, i) => a + (i >= G2R.pcN ? b : 0), 0), pcSum: D.pc.reduce((a, b, i) => a + b * i, 0), cbN: D.cb[0], cbOut: D.cb[1],
+    asm: ap.length, atk: atk.length, go: atk.filter(e => MVA.st.indexOf(e.st) >= 3).length, canc: lg.filter(e => e.c === 'atk' && /^Reunião para .* demorou demais/.test(e.x)).length,
+    want: lg.filter(e => e.c === 'rf' && /^Sem força para atacar/.test(e.x)).length, ptLost, ptTook, urbAtk: uap.length, urbTook: uap.filter(e => e.ok).length, netIn, netAll };
+}
+/* many records added up (a tournament) */
+function g2Sums(a, b) { for (const k in b) a[k] = (a[k] || 0) + b[k]; return a; }
+/* the measures from an added record F of m matches (both sides added: a count is a match's, a share pools them) */
+function g2Sum(F, m) {
+  const sh = (a, b) => (b ? a / b : null), n = m || 1;
+  return { n, sides: F.n, inB: sh(F.infB, F.infS), urbMin: F.urbS / 60 / n, urbB: sh(F.urbB, F.urbS), foeT: F.foeT / 60 / n, snpShot: F.snpShot / n, snpB: sh(F.snpB, F.snpS),
+    atShot: F.atShot / n, atArm: F.atArm / n, armK: F.armK / n, kmF: F.kmF / 1000 / n, kmE: F.kmE / 1000 / n, kmESh: sh(F.kmE, F.kmF + F.kmE), legs: F.legs / n, rode: sh(F.rode, F.legs),
+    dfD: sh(F.dfD, F.dfS), nn: sh(F.nnD, F.nnS), nn5: sh(F.nn5, F.nnS), dfMin: F.dfS / 60 / n, dq1: sh(F.dq1, F.dqN), dqSq: sh(F.dqSq, F.dqN), dt30: sh(F.dt30, F.dtN), dtMin: F.dtN / 60 / n,
+    sdOpen: F.sdOpen / n, sdGo: F.sdGo / n, sdIn: F.sdIn / 60 / n, hqInc: F.hqInc / n, hqAns: sh(F.hqAns, F.hqAns + F.hqUn), hqT: sh(F.hqT, F.hqAns),
+    net: sh(F.netIn, F.netAll), dmUp: F.dmUp / n, imp: F.imp / n, impB: F.impB / n, dmApp: F.dmApp, dmOk: F.dmOk, seen: F.seen,
+    fobO: F.fobO / n, fobU: F.fobU / n, fobOk: sh(F.fobOk, F.n), pcN: F.pcN, pcOk: sh(F.pcOk, F.pcN), pcMean: sh(F.pcSum, F.pcN), cbN: F.cbN, cbOut: F.cbOut,
+    go: F.go / n, atk: F.atk / n, canc: sh(F.canc, F.asm), cancN: F.canc / n, want: F.want / n, ptLost: F.ptLost / n, ptTook: F.ptTook / n, urbAtk: F.urbAtk / n, urbTook: sh(F.urbTook, F.urbAtk) };
+}
+/* the rows [measure, value, target] of a summary (g2Sum): the tournament's table */
+function g2Rows(M) {
+  const d = v => String(v).replace('.', ','), f1 = v => (v === null || v === undefined ? '—' : d(Math.round(v * 10) / 10)), pc = v => (v === null || v === undefined ? '—' : Math.round(v * 100) + '%'), G = G2R.goal;
+  const m = v => (v === null || v === undefined ? '—' : f1(v) + ' m'), s = v => (v === null || v === undefined ? '—' : f1(v) + ' s');
+  return [
+    ['Sede inimiga: assaltos abertos por partida (chegaram à hora H); esquadra-min dentro da cidade-sede inimiga', f1(M.sdOpen) + ' (' + f1(M.sdGo) + '); ' + f1(M.sdIn), G.sede],
+    ['Própria sede: incursões inimigas por partida; atendidas (tantas esquadras e blindados nossos quanto deles); tempo médio até atender', f1(M.hqInc) + '; ' + pc(M.hqAns) + '; ' + s(M.hqT), G.hq],
+    ['Esquadras dentro da rede de comando (do tempo)', pc(M.net), G.net],
+    ['Cúpulas prontas por partida; impactos inimigos perto de um ativo por partida (antes da 1ª cúpula); lados-partida na moderna com canhão inimigo visto: cúpula antes do 10º impacto', f1(M.dmUp) + '; ' + f1(M.imp) + ' (' + f1(M.impB) + '); ' + M.dmOk + ' de ' + M.dmApp, G.dome],
+    ['Bases avançadas por partida: ordenadas, prontas; lados-partida com ao menos uma pronta', f1(M.fobO) + ', ' + f1(M.fobU) + '; ' + pc(M.fobOk), G.fob],
+    ['Pontos tomados com ' + G2R.pcN + ' peças ou mais a ≤ ' + G2R.pcR + ' m, ' + G2R.pcT / 60 + ' min depois (média de peças; casos)', pc(M.pcOk) + ' (' + f1(M.pcMean) + '; ' + M.pcN + ')', G.pc],
+    ['Defensores de ponto ameaçado: distância ao centro; vizinho mais perto (com ' + G2R.nn + ' m ou mais)', m(M.dfD) + '; ' + m(M.nn) + ' (' + pc(M.nn5) + ')', G.nn],
+    ['Ponto ameaçado com no máximo 1 esquadra a < ' + G2R.cen + ' m do centro (esquadras ali, média)', pc(M.dq1) + ' (' + f1(M.dqSq) + ')', G.cen],
+    ['Tanques na defesa de ponto ameaçado sem outro tanque a < ' + G2R.tsp + ' m (tanque-min por partida)', pc(M.dt30) + ' (' + f1(M.dtMin) + ')', G.tank],
+    ['Pontos perdidos por partida (tomados)', f1(M.ptLost) + ' (' + f1(M.ptTook) + ')', G.lost],
+    ['Soldado em prédio: do tempo todo; na defesa de cidade (soldado-min por partida)', pc(M.inB) + '; ' + pc(M.urbB) + ' (' + f1(M.urbMin) + ')', G.urb],
+    ['Soldado-min dentro de cidade que o inimigo segura, por partida', f1(M.foeT), G.foeT],
+    ['Assaltos a ponto urbano que tomam o ponto (assaltos por partida)', pc(M.urbTook) + ' (' + f1(M.urbAtk) + ')', G.urbTook],
+    ['Foguetes AT de soldado por partida: em blindado; todos; blindados destruídos pela infantaria', f1(M.atArm) + '; ' + f1(M.atShot) + '; ' + f1(M.armK), G.at],
+    ['Atirador de elite: tiros por partida; em prédio (do tempo)', f1(M.snpShot) + '; ' + pc(M.snpB), '—'],
+    ['Deslocamento das esquadras por partida: km a pé; km embarcado (embarcado do total)', f1(M.kmF) + '; ' + f1(M.kmE) + ' (' + pc(M.kmESh) + ')', '—'],
+    ['Caminhadas longas (≥ 1,5 km) por partida; feitas de carona', f1(M.legs) + '; ' + pc(M.rode), G.ride],
+    ['Hora H por partida (assaltos abertos)', f1(M.go) + ' (' + f1(M.atk) + ')', G.go],
+    ['Reuniões canceladas por prazo, das reuniões (por partida)', pc(M.canc) + ' (' + f1(M.cancN) + ')', G.canc],
+    ['"Sem força para atacar" por partida', f1(M.want), G.want],
+    ['Combates registrados (lados-combate; deixados de fora)', M.cbN + ' (' + M.cbOut + ')', G.cb]];
+}
+/* R.g2: each side's last g2 event, its record and its measures; the enemy's left out of a side's view of a match not over */
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  const H = ev.find(e => e.k === 'hdr') || {}, n = R.ns || 2, last = [];
+  let any = false, cb = 0;
+  for (const e of ev) { if (e.k === 'g2' && e.s >= 0 && e.s < n) { any = true; if (!last[e.s] || e.t >= last[e.s].t) last[e.s] = e; } else if (e.k === 'g2c') cb++; }
+  if (!any && !H.g2) { R.g2 = null; return R; }
+  const hide = anaHide(me, n, R.over);
+  R.g2 = { on: H.g2 ? H.g2.on : null, v: H.g2 ? H.g2.v : null, cb, side: anaSides(n).map(s => {
+    if ((hide && s !== me) || !last[s]) return null;
+    const raw = g2Raw(last[s]); return { raw, f: g2Flat(raw, ev, s, H) };   // the measures are g2Sum(f, 1): left out here, the review (rep) goes to the server under its 16 KB
+  }) };
+  return R;
+})(anaReport);
+/* ---------- end of GENERAL 2: régua ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -39312,7 +39701,7 @@ function updateCamera(dt) {
   camSt.sens = seat && p.kind ? seat.fov[zoomOf(seat)] / 58 : 1;
   if (p.man) {   // on foot: over the right shoulder, or from the eye; sighting narrows the view. A step bobs it and a shot kicks it
     const a = S.aim && p === S.my ? S.aim.d : p.f, e = manEye(p), h = Math.atan2(-a.z, a.x), sp = Math.min(1, Math.hypot(p.v.x, p.v.z) / 2.5), ts = S.t - p.shotT;
-    const bob = seat ? Math.sin(p.step * 2.3) * .045 * sp * calm : 0, kick = ts < .15 ? (1 - ts / .15) * (p.arms[p.w].d.k ? .03 : .007) * calm : 0;
+    const bob = seat ? Math.sin(p.step * 2.3) * .045 * sp * calm : 0, kick = ts < .15 ? (1 - ts / .15) * (p.arms[p.w].d.k ? .03 : .007 * vmKick(p.arms[p.w].d, 'rifle')) * calm : 0;
     camSt.ak = (camSt.ak || 0) + ((p.ctl.ads && !p.dead ? 1 : 0) - (camSt.ak || 0)) * Math.min(1, dt * 12);
     camera.up.set(0, 1, 0);
     if (p.dead) camera.lookAt(p.x, p.y + .4, p.z);
@@ -41246,7 +41635,9 @@ buildTrn = (f => (u, wreck) => {
   return g;
 })(buildTrn);
 /* the recovery vehicles, repair trucks and ambulances (REC): a car's body, and on it the tracks, the crane and the spade, the workshop with its lockers and jib,
-   or the box with its red crosses */
+   or the box with its red crosses. SVCL (cf-pol-modelos): the repair truck's and the ambulance's details are one mesh a colour (they were a mesh each:
+   13 and 7), with what they lacked: doors at the back (and the ambulance's red cross on them), bumpers, tail lights and headlights (lamp) */
+const SVCL = { lamp: 0xe9e2b4, tail: 0x9c1d18 };
 Object.assign(TLOOK, { bergep: { ax: [2.5, 1.4, .3, -.8, -1.9, -2.9], hood: 0, roof: 1 }, m32: { ax: [2.2, 1.2, .1, -1, -2.1], hood: 0, roof: 1 }, m88a2: { ax: [3.2, 2, .8, -.4, -1.6, -2.8, -3.6], hood: 0, roof: 1 },
   brem1: { ax: [2.7, 1.6, .5, -.6, -1.7, -2.8], hood: 0, roof: 1 }, kfz31: { ax: [1.7, -1.3], hood: 1.2, roof: 1 }, wc54: { ax: [1.5, -1.3], hood: 1.1, roof: 1 }, m997: { ax: [1.6, -1.6], hood: 1.4, roof: 1, slant: 1 }, uaz452: { ax: [1.4, -1.3], hood: .4, roof: 1 },
   opelw: { ax: [2.2, -1.6], hood: 1.5, roof: 1 }, gmcw: { ax: [2.5, -1.2, -2.3], hood: 1.6, roof: 1 }, m1089: { ax: [2.5, -1.4, -2.6], hood: 0, roof: 1 }, mtoub: { ax: [2.9, -1.3, -2.6], hood: 1.7, roof: 1 } });
@@ -41260,19 +41651,27 @@ buildTrn = (f => (u, wreck) => {
     box(.16, .16, W * .62, M2, L * .18 - .45, by + 2.15, 0); box(.1, 1.2, .06, dark, L * .18 - .5, by + 1.5, 0);   // its head and the hook
     box(.25, .8, W * .92, M2, -L * .5 - .12, .7, 0, -.35);   // the spade at the tail
     box(L * .25, .35, W * .7, M2, -L * .3, by + .1, 0);   // the winch
-  } else if (d.svc === 'rpr') {   // the repair truck: the workshop body, its lockers and the jib of its crane over the tail
-    const bl = L * .58, bx = -L * .5 + bl / 2 + .05, yel = mat(wreck ? 0x2a2820 : 0xc9a227);
-    box(bl, 1.35, W * .94, M2, bx, by + .55, 0);
-    for (const s of LRS) for (let i = 0; i < 3; i++) box(bl * .26, .8, .03, dark, bx - bl * .33 + i * bl * .33, by + .5, s * (W * .47 + .02));   // the tool lockers
-    for (const s of LRS) box(bl * .9, .08, .04, yel, bx, by + 1.05, s * (W * .47 + .03));   // the band that tells it from a cargo truck
-    box(.25, .9, .25, dark, -L * .5 + .3, by + 1.65, 0); box(1.9, .14, .14, dark, -L * .5 + .9, by + 2.1, 0, -.25);   // the crane's post and its jib
-    box(.05, .7, .05, dark, -L * .5 + 1.75, by + 1.9, 0);   // the hook
-    box(.18, .14, .18, mat(wreck ? 0x2a2820 : 0xd98a1a), d.cab, by + .95, 0);   // the beacon on the cab
-  } else {
-    const red = mat(wreck ? 0x2b1f1c : 0xb3201d), wh = mat(wreck ? 0x3a3a36 : 0xe8e6df), bl = L * .55, bx = -L * .5 + bl / 2 + .05;
-    box(bl, 1.25, W * .92, wh, bx, by + .5, 0);   // the box behind the cab
-    for (const s of LRS) { box(.8, .22, .02, red, bx, by + .55, s * (W * .46 + .02)); box(.22, .8, .02, red, bx, by + .55, s * (W * .46 + .02)); }
-    box(.8, .02, .22, red, bx, by + 1.14, 0); box(.22, .02, .8, red, bx, by + 1.14, 0);
+  } else {   // the repair truck and the ambulance: their details one mesh a colour (SVCL), the body a mesh of its own
+    const P = new Map(), put = (c, w, hh, dp, x, y, z, rz) => { const b = new THREE.BoxGeometry(w, hh, dp); if (rz) b.rotateZ(rz); b.translate(x, y, z); (P.get(c) || P.set(c, []).get(c)).push(b); };
+    const K = SVCL, dk = 0x1c1d1e, bl = L * (d.svc === 'rpr' ? .58 : .55), bx = -L * .5 + bl / 2 + .05, rx = bx - bl / 2 - .012, fx = L * .48 + .07, y0 = .45;
+    if (d.svc === 'rpr') {   // the workshop body, its lockers, the band that tells it from a cargo truck, the jib of its crane over the tail, the beacon
+      box(bl, 1.35, W * .94, M2, bx, by + .55, 0);
+      for (const s of LRS) for (let i = 0; i < 3; i++) put(dk, bl * .26, .8, .03, bx - bl * .33 + i * bl * .33, by + .5, s * (W * .47 + .02));
+      for (const s of LRS) put(wreck ? 0x2a2820 : 0xc9a227, bl * .9, .08, .04, bx, by + 1.05, s * (W * .47 + .03));
+      put(dk, .25, .9, .25, -L * .5 + .3, by + 1.65, 0); put(dk, 1.9, .14, .14, -L * .5 + .9, by + 2.1, 0, -.25); put(dk, .05, .7, .05, -L * .5 + 1.75, by + 1.9, 0);
+      put(wreck ? 0x2a2820 : 0xd98a1a, .18, .14, .18, d.cab, by + .95, 0);
+      put(dk, .02, 1.15, .04, rx, by + .55, 0); for (const s of LRS) put(dk, .04, .08, .16, rx - .01, by + .5, s * .22);   // the doors at the back, their seam and handles
+    } else {   // the box behind the cab with its red crosses: on each side, on the roof, and on the doors at the back
+      const red = wreck ? 0x2b1f1c : 0xb3201d;
+      box(bl, 1.25, W * .92, mat(wreck ? 0x3a3a36 : 0xe8e6df), bx, by + .5, 0);
+      for (const s of LRS) { put(red, .8, .22, .02, bx, by + .55, s * (W * .46 + .02)); put(red, .22, .8, .02, bx, by + .55, s * (W * .46 + .02)); }
+      put(red, .8, .02, .22, bx, by + 1.14, 0); put(red, .22, .02, .8, bx, by + 1.14, 0);
+      put(red, .02, .22, .8, rx, by + .55, 0); put(red, .02, .8, .22, rx, by + .55, 0);
+      for (const s of LRS) { put(dk, .02, 1.1, .03, rx, by + .5, s * W * .44); put(dk, .04, .07, .14, rx - .01, by + .02, s * .2); }   // the doors' edges, and their handles under the cross
+    }
+    put(dk, .18, .16, W * .92, -L * .48 - .08, y0 + .2, 0); put(dk, .16, .18, W * .9, L * .48 + .1, y0 + .22, 0);   // the bumpers, back and front
+    for (const s of LRS) { put(wreck ? 0x2b1f1c : K.tail, .04, .12, .16, -L * .48 - .02, y0 + .42, s * W * .38); put(wreck ? 0x2a2a26 : K.lamp, .05, .17, .24, fx, y0 + H * .62, s * W * .34); }   // tail lights and headlights
+    for (const [c, l] of P) g.add(new THREE.Mesh(vkGeo(l), c === K.lamp ? mat(c, { emissive: new THREE.Color(c).multiplyScalar(.35) }) : mat(c)));
   }
   return g;
 })(buildTrn);
@@ -41545,12 +41944,17 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
    falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
    the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
-   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed) */
+   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed). near: the
+   others heard (sndNear): the n nearest ground vehicles on the move within r m, each an engine through the same gears at vol, half at
+   ref m and duller away, a tracked hull's knocks within trk m; the n nearest aircraft within r m (a helicopter has its own, fx.rotor), a
+   jet's roar or a propeller's drone by its throttle, half at ref m, pitched by dop of its Doppler shift (within fac): a fly-by drops as it
+   passes. Each voice keeps whom it hears while that one stays among the nearest */
 const SND = {
   c: 343, ref: 80, air: 700, far: 2500,
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  near: { veh: { n: 3, r: 450, ref: 30, trk: 120, vol: .7 }, air: { n: 2, r: 3000, ref: 300, vol: .9 }, dop: .6, fac: [.6, 1.6] },
   veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
     sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
@@ -41673,6 +42077,55 @@ function sndCrack(P, dt) {
 }
 /* a ground vehicle's own sound (SND.veh), each frame; P null: the engine and the servo fall quiet. A.eng: a sawtooth and a square an octave
    under it through a low-pass, made on first use; A.vty: the turret's angle the frame before */
+/* the revs of a ground vehicle at its speed, through SND.veh's gears: 0 to 1, climbing in each gear and falling at the shift */
+function sndRpm(u) {
+  const V = SND.veh, k = clamp(Math.abs(u.sp || 0) / ((u.def && u.def.spd) || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
+  return Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w);
+}
+/* the others heard (SND.near), each frame; P null: all quiet. A.nv: the ground voices, A.na: the aircraft's, each { o, o2 | n, lp, g, u, trk } */
+function sndNear(P, dt, set, now) {
+  const N = SND.near, c = A.ctx, E = S.ear;
+  if (!A.nv) {
+    if (!P) return;
+    const voice = air => {
+      const g = c.createGain(), lp = c.createBiquadFilter(), o = c.createOscillator(), v = { g, lp, o, u: null, trk: 0 };
+      lp.type = 'lowpass'; g.gain.value = 0; o.connect(lp); lp.connect(g); g.connect(A.master); o.start();
+      if (air) { o.type = 'sawtooth'; const n = c.createBufferSource(), bp = c.createBiquadFilter(), ng = c.createGain(); n.buffer = A.noise; n.loop = true; bp.type = 'bandpass'; bp.Q.value = .7; ng.gain.value = 0; n.connect(bp); bp.connect(ng); ng.connect(g); n.start(); Object.assign(v, { bp, ng }); }
+      else { o.type = 'sawtooth'; const o2 = c.createOscillator(); o2.type = 'square'; o2.connect(lp); o2.start(); v.o2 = o2; }
+      return v;
+    };
+    A.nv = []; for (let i = 0; i < N.veh.n; i++) A.nv.push(voice(false));
+    A.na = []; for (let i = 0; i < N.air.n; i++) A.na.push(voice(true));
+  }
+  /* the nearest list of L within r of the ear that ok lets in, handed to the voices: one already on a wanted one keeps it */
+  const hand = (vs, L, r, ok) => {
+    const W = [];
+    if (P) for (const u of L) { if (u === P || u.dead || u.gone || !ok(u)) continue; const d = Math.hypot(u.x - E.x, u.y - E.y, u.z - E.z); if (d < r) W.push([d, u]); }
+    W.sort((a, b) => a[0] - b[0]); W.length = Math.min(W.length, vs.length);
+    const want = new Map(W.map(([d, u]) => [u, d]));
+    for (const v of vs) if (!want.has(v.u)) v.u = null;
+    for (const [, u] of W) if (!vs.some(v => v.u === u)) { const v = vs.find(q => !q.u); v.u = u; v.trk = 0; }
+    return want;
+  };
+  const V = SND.veh, wv = hand(A.nv, S.units || [], N.veh.r, u => u.def && Math.abs(u.sp || 0) > .3);
+  for (const v of A.nv) {
+    const u = v.u; if (!u) { set(v.g, 0); continue; }
+    const d = wv.get(u), at = sndAt(d, N.veh.ref) * (1 - d / N.veh.r), rpm = sndRpm(u), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+    v.o.frequency.setTargetAtTime(f, now, .06); v.o2.frequency.setTargetAtTime(f / 2, now, .06); v.lp.frequency.setTargetAtTime(sndCut(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, d, SND.air, 90), now, .08);
+    set(v.g, N.veh.vol * (V.g[0] + V.g[1] * rpm) * at);
+    const sp = Math.abs(u.sp || 0), T = V.trk;
+    if (d < N.veh.trk && hullTracked(u)) { v.trk += dt * Math.min(T.max, sp * T.hz); if (v.trk >= 1) { v.trk %= 1; burst(.025, T.vol * Math.min(1, sp / 4) * at, sndCut(T.f, d, SND.air, 200) * (.85 + Math.random() * .3), 'bandpass', 0, 2); } }
+  }
+  const wa = hand(A.na, S.planes || [], N.air.r, u => !u.heli && u.def && !(u.y - hgt(u.x, u.z) < 2 && (u.V || 0) < 5));   // a helicopter is heard by fx.rotor; a plane parked on the field is quiet
+  for (const v of A.na) {
+    const u = v.u; if (!u) { set(v.g, 0); continue; }
+    const d = Math.max(1, wa.get(u)), at = sndAt(d, N.air.ref) * (1 - d / N.air.r), th = u.ctl ? clamp(u.ctl.thr || 0, 0, 1) : .7, kv = clamp((u.V || 0) / (u.def.vmax || 200), 0, 1.3);
+    const vr = u.v ? -((u.x - E.x) * u.v.x + (u.y - E.y) * u.v.y + (u.z - E.z) * u.v.z) / d * ASPD : 0, fac = clamp(SND.c / Math.max(1, SND.c - vr * N.dop), N.fac[0], N.fac[1]);
+    if (u.def.prop) { v.o.frequency.setTargetAtTime((52 + th * 38 + kv * 26) * fac, now, .1); v.ng.gain.setTargetAtTime(.25, now, .1); v.bp.frequency.setTargetAtTime((300 + kv * 500) * fac, now, .1); set(v.g, N.air.vol * (.03 + th * .03) * at); }
+    else { v.o.frequency.setTargetAtTime(40 * fac, now, .1); v.ng.gain.setTargetAtTime(1, now, .1); v.bp.frequency.setTargetAtTime((450 + th * 700 + kv * 500) * fac, now, .1); set(v.g, N.air.vol * (.05 + th * .08) * at); }
+    v.lp.frequency.setTargetAtTime(sndCut(u.def.prop ? 1400 : 3000, d, SND.air, 150), now, .1);
+  }
+}
 function sndVeh(P, dt, set, now) {
   const V = SND.veh, c = A.ctx;
   if (!A.eng) {
@@ -41683,8 +42136,7 @@ function sndVeh(P, dt, set, now) {
     A.eng = { o, o2, lp, g }; A.tur = { o: t, g: tg }; A.trk = 0; A.vty = null;
   }
   if (!P) { set(A.eng.g, 0); set(A.tur.g, 0); A.vty = null; return; }
-  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
-  const rpm = Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), rpm = sndRpm(P), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
   A.eng.o.frequency.setTargetAtTime(f, now, .06); A.eng.o2.frequency.setTargetAtTime(f / 2, now, .06); A.eng.lp.frequency.setTargetAtTime(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, now, .08);
   set(A.eng.g, V.g[0] + V.g[1] * rpm + V.g[2] * th);
   set(A.jet.g, V.road.g[0] + V.road.g[1] * k); A.jet.bp.frequency.setTargetAtTime(V.road.f[0] + (V.road.f[1] - V.road.f[0]) * k, now, .1);
@@ -41698,6 +42150,7 @@ function audioTick(dt) {
   const P = S.my, live = playMode === 'play' && !paused && P && !P.dead && !S.over, now = A.ctx.currentTime;
   const set = (g, v) => g.gain.setTargetAtTime(v, now, .08);
   if (!live || !P.kind || P.man) sndVeh(null, dt, set, now);   // the engine and the servo quiet off a vehicle (a soldier's kind is inf)
+  sndNear(live && A.on ? P : null, dt, set, now);
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
   if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
@@ -41712,6 +42165,30 @@ function audioTick(dt) {
     o.type = 'square'; o.frequency.value = ml ? ((A.tr ^= 1) ? 1800 : 1250) : tone ? 820 : 1350; g.gain.value = .05; o.connect(g); g.connect(A.master); o.start(now); o.stop(now + .07);
   }
 }
+
+/* ---------- hits on the player, heard (HURT, cf-pol-armas) ----------
+   A round or a burst that lands on the player's own vehicle, aircraft or soldier (fx.hurt: from damageUnit, damagePlane and damageMan once
+   the damage is his, and from strike when a shell glances off his hull) is heard there, where until now only the view shook: armour that
+   stops it rings (a struck plate: a tone falling from ping[0] to ping[1] Hz, with a clank), one that goes in crunches (a low thud under a
+   harsh burst), a reactive plate bangs, a burst outside thuds, a round on a soft skin (an aircraft's, a truck's) or off a tank's plate
+   ticks, and a soldier hit hears a dull thud in his body. Louder with the damage (k, over a share of the hull), at most one every gap s */
+const HURT = { gap: .05, ping: [2600, 1500], vol: { ring: .14, pen: .26, era: .3, blast: .16, skin: .07, body: .14 }, k: [.5, 1.4], share: .15 };
+const hurtKind = (o, h) => (o.man ? 'body' : !h ? 'skin' : h.ric || h.res === 1 ? 'ring' : h.res === 0 || h.res === 2 ? 'pen' : h.res === 3 ? 'era' : h.k === HK.blast ? 'blast' : 'skin');
+fx.hurt = (o, dmg, h) => {
+  if (!A.ctx || !A.on || playMode !== 'play') return;
+  const c = A.ctx, now = c.currentTime; if (now - (A.hT === undefined ? -9 : A.hT) < HURT.gap) return; A.hT = now;
+  const K = hurtKind(o, h), V = HURT.vol[K], k = clamp(.5 + (dmg || 0) / ((o.max || (o.def && o.def.hp) || 100) * HURT.share), HURT.k[0], HURT.k[1]);
+  if (K === 'body') { thump(85, .14, V * k, now); burst(.06, V * .6 * k, 500, 'lowpass', now); }
+  else if (K === 'ring') {
+    const o2 = c.createOscillator(), g = c.createGain(); o2.type = 'sine'; o2.frequency.setValueAtTime(HURT.ping[0], now); o2.frequency.exponentialRampToValueAtTime(HURT.ping[1], now + .3);
+    g.gain.setValueAtTime(V, now); g.gain.exponentialRampToValueAtTime(.001, now + .35); o2.connect(g); g.connect(A.master); o2.start(now); o2.stop(now + .4);
+    burst(.05, V * .8, 1800, 'bandpass', now, 5);
+  }
+  else if (K === 'pen') { thump(60, .4, V * k, now); burst(.3, V * .8 * k, 1100, 'lowpass', now); }
+  else if (K === 'era') { burst(.35, V, 700, 'lowpass', now); thump(50, .3, V * .6, now); }
+  else if (K === 'blast') { thump(55, .3, V * k, now); burst(.2, V * .5 * k, 400, 'lowpass', now); }
+  else burst(.025, V * k, 3200, 'bandpass', now, 3);
+};
 
 /* ---------- interface ---------- */
 let matchLen = CQ.def, playMode = 'demo', paused = false, era = 'modern', overShown = false, invertY = false, ready = false, ctrl = 'mouse', cls = 'plane';
@@ -47171,8 +47648,9 @@ function vmBuild(pk) {
   hb(0, -.035, 0); vmLimb(R, [-.03, -.05, .02], [-.3, -.21, .13], .075, sleeve); vmLimb(R, [-.3, -.21, .13], [-.6, -.36, .32], .085, sleeve);
   hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
   if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
-    const f = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const f = new THREE.Sprite(vmFlashMat());
     f.position.set(V.mz[0], V.mz[1], V.mz[2] || 0); f.visible = false; turn.add(f); V.flash = f;
+    const ej = new THREE.Object3D(); ej.position.set(clamp(.12 * L, .04, .16), B.min.y + .8 * (B.max.y - B.min.y), B.max.z); turn.add(ej); V.ej = ej;   // the ejection port: a little ahead of the grip, high on the right
   }
   /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
   const ads = VMP[pk.cls][1].slice();
@@ -47189,12 +47667,62 @@ function vmGet(pk) {
   if (V) VM.M.set(pk.key, V);
   return V;
 }
+/* ---------- the weapon's shot, seen (cf-pol-armas): the flash, the brass and the kick ----------
+   The muzzle flash is a star of spikes round a white-hot core fading to nothing, drawn once on a canvas (vmFlashMat): without a map the
+   sprite drew its whole square, a pale card in front of the muzzle on every shot. A spent case flies out of the ejection port to the
+   right on each shot (vmEjectAt: at once; a bolt rifle's when its bolt is worked, VMC.bolt s after; never a launcher's or the mortar's),
+   up and back, spinning, falls out of the view and is gone in VMC.life s, at most VMC.n in the air. The kick of a rifle grows with its
+   round (vmKick: the damage over VMC.kd, within VMC.kick), and each shot throws it a little to one side and rolls it (VM.kx, VM.kz: drawn
+   anew each shot), so automatic fire does not move like one picture */
+const VMC = { n: 6, life: .6, g: 9.8, v: [1.5, 1.3, .35], jit: .35, bolt: .45, len: { rifle: .024, pistol: .014 }, kd: 8, kick: [.8, 1.8] };
+function vmFlashMat() {
+  if (!VM.ftex) {
+    const c = document.createElement('canvas'), N = 64, h = N / 2, g = c.getContext('2d'); c.width = c.height = N;
+    const grad = r => { const q = g.createRadialGradient(h, h, 0, h, h, r); q.addColorStop(0, 'rgba(255,255,236,1)'); q.addColorStop(.3, 'rgba(255,214,128,.9)'); q.addColorStop(.65, 'rgba(255,150,40,.35)'); q.addColorStop(1, 'rgba(255,120,20,0)'); return q; };
+    g.fillStyle = grad(h * .55); g.fillRect(0, 0, N, N);   // the glow
+    g.fillStyle = grad(h); g.beginPath();
+    for (let i = 0; i < 14; i++) { const a = i * Math.PI / 7 + .2, r = (i % 2 ? .2 : i % 4 ? .78 : 1) * h; g.lineTo(h + Math.cos(a) * r, h + Math.sin(a) * r); }   // seven spikes, long and short
+    g.closePath(); g.fill();
+    VM.ftex = new THREE.CanvasTexture(c);
+  }
+  return new THREE.SpriteMaterial({ map: VM.ftex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+}
+/* s after a shot that its case comes out, or -1: none */
+const vmEjectAt = (d, cls) => (!d || d.k || (cls !== 'rifle' && cls !== 'pistol') ? -1 : !d.auto && d.rate >= 1.2 ? VMC.bolt : 0);
+const vmKick = (d, cls) => (cls === 'rifle' && d && d.dmg ? clamp(d.dmg / VMC.kd, VMC.kick[0], VMC.kick[1]) : 1);
+/* a case in the air: p, v in the eye's frame (m, m/s), t s since it left; false once it is gone */
+function vmCasStep(c, dt) { c.t += dt; c.v[1] -= VMC.g * dt; c.p[0] += c.v[0] * dt; c.p[1] += c.v[1] * dt; c.p[2] += c.v[2] * dt; return c.t < VMC.life; }
+/* a new shot of the weapon in hand (a, the one seen the frame before): the kick's throw for it, and when its case comes out (VM.ej, S.t) */
+function vmShot(a, d, cls) {
+  const shot = VM.la === a && a.t !== VM.lt && a.t > 0; VM.la = a; VM.lt = a.t;
+  if (!shot) return;
+  VM.kx = Math.random() * 2 - 1; VM.kz = Math.random() * 2 - 1;
+  const e = vmEjectAt(d, cls); if (e >= 0) VM.ej = a.t + e;
+}
+/* the cases: one out of the port when its time comes, the others on their way; off: all gone (the weapon not drawn) */
+function vmCas(V, dt, off) {
+  const L = VM.cas || (VM.cas = []);
+  if (off || reduced) { for (const c of L) { c.t = VMC.life; c.m.visible = false; } VM.ej = 0; return; }
+  if (VM.ej && S.t >= VM.ej && V.ej) {
+    VM.ej = 0;
+    let c = L.find(q => q.t >= VMC.life);
+    if (!c && L.length < VMC.n) { if (!VM.casG) { VM.casG = new THREE.CylinderGeometry(.0045, .0045, 1, 6); VM.casG.userData.keep = true; VM.casM = mat(0xb5913f, { flatShading: false }); } c = { m: new THREE.Mesh(VM.casG, VM.casM), p: [0, 0, 0], v: [0, 0, 0], t: 0, w: [0, 0] }; VM.sc.add(c.m); L.push(c); }
+    if (!c) c = L.reduce((x, y) => (y.t > x.t ? y : x));
+    V.root.updateMatrixWorld(true); const w = V.ej.getWorldPosition(new THREE.Vector3()), J = VMC.jit;
+    c.p = [w.x, w.y, w.z]; c.v = [VMC.v[0] * (1 + (Math.random() - .5) * J), VMC.v[1] * (1 + (Math.random() - .5) * J), VMC.v[2]]; c.t = 0; c.w = [rand(14, 24), rand(-8, 8)];
+    c.m.scale.set(1, V.pk.cls === 'pistol' ? VMC.len.pistol : VMC.len.rifle, 1); c.m.rotation.set(0, 0, Math.PI / 2);
+  }
+  for (const c of L) {
+    if (!(c.t < VMC.life)) { c.m.visible = false; continue; }
+    c.m.visible = vmCasStep(c, dt); c.m.position.fromArray(c.p); c.m.rotation.x += c.w[0] * dt; c.m.rotation.y += c.w[1] * dt;
+  }
+}
 /* each frame, after the world (render3d): the weapon in hand, if any */
 function vmRender() {
   const now = performance.now(), dt = Math.min(.1, (now - (VM.t || now)) / 1000), P = S.my; VM.t = now; VM.on = false; VM.f = frameId;
   for (const V of VM.M.values()) V.root.visible = false;
-  if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; return; }
-  if (scoped(P) && camSt.ak > .5) return;   // the scope is the view
+  if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; VM.la = null; if (VM.cas) vmCas(null, 0, true); return; }
+  if (scoped(P) && camSt.ak > .5) { VM.la = null; if (VM.cas) vmCas(null, 0, true); return; }   // the scope is the view
   const a = P.arms[P.w], d = a && a.d, gp = slotVm(P), pk = (gp && vmGet(gp) && gp) || vmPick(d, P.def); if (!pk) return;   // a compartment's item with a model (cf-slots-arma), else the weapon of before
   for (const o of P.arms) { const q = o !== a && vmPick(o.d, P.def); if (q && q.id) packGet(q.id); }   // the other weapon too, so a swap finds it here
   const V = vmGet(pk); if (!V) return;
@@ -47215,15 +47743,16 @@ function vmRender() {
   if (VM.ph === null) { VM.ph = h; VM.pp = pt; }
   let dh = h - VM.ph; dh -= Math.round(dh / TAU) * TAU; VM.ph = h; const dp = pt - VM.pp; VM.pp = pt;
   const e = Math.exp(-dt * 9); VM.sx = clamp(VM.sx * e + dh * .5, -.09, .09); VM.sy = clamp(VM.sy * e + dp * .5, -.07, .07);
+  vmShot(a, d, cls); const kp = vmKick(d, cls);
   const T = big ? .3 : .12, rc = ts >= 0 && ts < T ? (1 - ts / T) ** 2 * calm : 0;
   const rl = a.rl > 0 && d.rl ? Math.sin(Math.PI * clamp(1 - a.rl / d.rl, 0, 1)) ** .6 : 0, sw = S.t < P.swT ? clamp((P.swT - S.t) / MAN.swap, 0, 1) : 0;
   const hip = V.hip, ads = V.ads, lerp = (i) => hip[i] + (ads[i] - hip[i]) * k, loose = (1 - .75 * k) * calm, run = VM.rn * (1 - k);
   const bx = Math.sin(ph * 1.15) * .009 * sp * loose, by = -Math.abs(Math.sin(ph * 2.3)) * .01 * sp * loose + Math.sin(S.t * 1.6) * .0018 * (1 - k) * calm;
   const R = V.root;
-  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045) * rc);
-  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose, .35 * run + .55 * rl, 'YXZ');
-  if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .07 : .12) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
-  R.visible = true;
+  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045 * kp) * rc);
+  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055 * kp) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose + (big ? 0 : .02 * (VM.kx || 0) * rc), .35 * run + .55 * rl + (big ? 0 : .045 * (VM.kz || 0) * rc), 'YXZ');
+  if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .1 : .17) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
+  R.visible = true; vmCas(V, dt);
   /* drawn over the world: its own camera and field of view, the depth cleared */
   const C = VM.cam, asp = cw / Math.max(1, ch); if (C.aspect !== asp) { C.aspect = asp; C.updateProjectionMatrix(); }
   const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth(); renderer.render(VM.sc, C); renderer.autoClear = ac;

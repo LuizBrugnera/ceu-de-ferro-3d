@@ -796,7 +796,7 @@ const partidas = () => {
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [+process.env.ANA_RATE || 30, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [+process.env.ANA_RATE || 30, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb', 'g2', 'g2c']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
 /* a batch's events this server keeps: those of the known kinds with their time; null when the batch is not a list of records (refused). An event

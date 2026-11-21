@@ -45650,10 +45650,13 @@ genPanels = (f => V => {
    sink at the nodes the match sank (S.brn), so the river is seen where it is (a road under its water). A pontoon: its deck at the road's height from the bank it was
    started on, as far as it is built, on floats down to the water. The 2D maps cross out a fallen bridge and dash a pontoon */
 const BLOOK = { stone: [0x8c8577, 0x9a9a94], dark: .62, pont: [0x5d6b47, 0x56605a], float: 0x2f3530, scaf: 0x6f5b3c, seg: 12, rail: [1.1, .5], post: [.8, 1.6], deck: .45 };
-const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), was: new Set(), box: null, mats: {} };
+/* Every box of every bridge is one instance of a single instanced mesh (im), its colour the instance's (the material white, as gFort's):
+   one draw call. A mesh a box, as before, was ~600 meshes and ~550 draw calls on map 11 whenever the river was in view, about a third of
+   the frame's calls (cf-lag-3). L: the boxes of the build under way, 9 numbers each (x, y, z, sx, sy, sz, a, hex, tilt) */
+const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), was: new Set(), box: null, mat: null, im: null, L: [] };
 function br3Init() {
   const K = BR3, T = S.T, n = (T.N + 1) * (T.N + 1);
-  K.at = scene; K.key = null; K.sunk = new Set(); K.was = new Set(); K.roads = []; K.ter = null;
+  K.at = scene; K.key = null; K.sunk = new Set(); K.was = new Set(); K.roads = []; K.ter = null; K.im = null; K.L = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
     if (!K.ter && o.geometry.attributes.position.count === n && o.material && o.material.vertexColors) K.ter = o;
@@ -45662,9 +45665,22 @@ function br3Init() {
   if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
   K.g = new THREE.Group(); scene.add(K.g);
 }
-const br3Mat = hex => BR3.mats[hex] || (BR3.mats[hex] = mat(hex));
-function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) {
-  const m = new THREE.Mesh(BR3.box, br3Mat(hex)); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(tilt || 0, a, 0, 'YXZ'); BR3.g.add(m); return m;
+function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) { BR3.L.push(x, y, z, sx, sy, sz, a, hex, tilt || 0); }
+/* the boxes of the build into the instanced mesh (made again, larger, when they outgrow it) */
+function br3Flush() {
+  const K = BR3, L = K.L, n = L.length / 9;
+  if (!K.im || K.im.userData.cap < n) {
+    if (K.im) { K.g.remove(K.im); if (K.im.dispose) K.im.dispose(); }   // its instance buffers freed (the box geometry is shared and stays)
+    const cap = Math.max(64, Math.ceil(n * 1.25)), im = new THREE.InstancedMesh(K.box, K.mat || (K.mat = mat(0xffffff)), cap);
+    im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3); im.frustumCulled = false; im.userData.cap = cap;
+    K.g.add((K.im = im));
+  }
+  const im = K.im, M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), P = new THREE.Vector3(), Z = new THREE.Vector3(), C = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const o = i * 9; Q.setFromEuler(E.set(L[o + 8], L[o + 6], 0, 'YXZ'));
+    im.setMatrixAt(i, M.compose(P.set(L[o], L[o + 1], L[o + 2]), Q, Z.set(L[o + 3], L[o + 4], L[o + 5]))); im.setColorAt(i, C.setHex(L[o + 7]));
+  }
+  im.count = n; im.visible = n > 0; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; K.L = [];
 }
 /* the ground and the roads where the match sank the grid */
 function br3Sink() {
@@ -45680,7 +45696,7 @@ function br3Sink() {
 }
 function br3Build() {
   const K = BR3, T = S.T, era = S.modern ? 1 : 0;
-  for (const c of K.g.children.slice()) K.g.remove(c);
+  K.L = [];
   for (const b of brs()) {
     const a = Math.atan2(-b.dz, b.dx), e0 = b.ends[0], e1 = b.ends[1], n = Math.max(3, Math.round(b.len / BLOOK.seg)), hd = b.o.hd, st = S.os[b.id], c0 = BLOOK.stone[era];
     const hex = st ? new THREE.Color(c0).multiplyScalar(BLOOK.dark).getHex() : c0, at = t => ({ x: e0.x + (e1.x - e0.x) * t, z: e0.z + (e1.z - e0.z) * t }), yAt = p => hgtT(T, p.x, p.z) + BRDH;
@@ -45723,6 +45739,7 @@ function br3Build() {
       else if (y > T.WL + 1) br3Box(x, (y + T.WL - 1) / 2, s.z, 1.6, y - T.WL + 1, BR.pw * 1.6, 0, BLOOK.float);
     }
   }
+  br3Flush();
 }
 function br3Scene() {
   if (!S || !S.T || !S.T.net) return;

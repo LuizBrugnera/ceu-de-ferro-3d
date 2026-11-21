@@ -38037,7 +38037,7 @@ function buildWorld() {
    tall: its height, conifer: the share of conifers on a map without its own broadleaves, tip: the grass's tips, wind: its share of the
    wind). URL: ?veg=off draws the old cones, ?vq= a level (low, mid, high), ?vs= a style */
 const VEG = {
-  on: true, q: 'mid', style: 'mista',
+  on: true, q: 'mid', style: 'mista', trench: .35,
   Q: {
     low: { near: 0, mid: 380, fade: 50, shadow: 0, grass: 0, dens: 0 },
     mid: { near: 170, mid: 700, fade: 60, shadow: 1, grass: 60, dens: .75 },
@@ -38448,6 +38448,17 @@ function vegGround(G, x, z, out) {
   for (let q = 0; q < 4; q++) { const kk = ks[q], w = ws[q]; out[0] += G.col[kk * 3] * w; out[1] += G.col[kk * 3 + 1] * w; out[2] += G.col[kk * 3 + 2] * w; out[3] += G.dens[kk] * w; out[4] += G.tall[kk] * w; }
   return out;
 }
+/* the trenches dug deep enough to be drawn as a hole (FHOLE: depth .25 m or more) within r m of x z, and whether a point is in one's cut
+   (its half length and half width, and VEG.trench m more): no grass grows in a trench (cf-pol-testes-b: the clumps stood up from its floor) */
+function vegTrenches(x, z, r) {
+  const out = []; if (!S.forts) return out;
+  for (const f of S.forts) if (f.k === 1 && !f.gone && f.o && f.prog * FORT.trench.depth >= .25 && Math.abs(f.x - x) < r + f.o.hw + 2 && Math.abs(f.z - z) < r + f.o.hw + 2) out.push(f);
+  return out;
+}
+function vegInTrench(f, x, z) {
+  const ux = -Math.sin(f.a), uz = -Math.cos(f.a), dx = x - f.x, dz = z - f.z;
+  return Math.abs(dx * ux + dz * uz) <= f.o.hw + VEG.trench && Math.abs(-dx * uz + dz * ux) <= f.o.hd + VEG.trench;
+}
 /* a chunk of grass: its clumps on a jittered grid, the same each time it is made; sorted by a rank, so that a chunk far from the eye
    draws only the first of them */
 function vegChunk(V, ci, cj) {
@@ -38456,6 +38467,7 @@ function vegChunk(V, ci, cj) {
   const burg = (T.burgs || []).find(b => Math.hypot(mx - b.x, mz - b.z) < b.ru + 60 + CS), hs = burg ? T.houses.filter(q => Math.abs(q.x - mx) < CS + q.r && Math.abs(q.z - mz) < CS + q.r) : null;
   const st = burg ? (T.streets || []).filter(l => Math.min(l[0], l[2]) < x0 + CS + 10 && Math.max(l[0], l[2]) > x0 - 10 && Math.min(l[1], l[3]) < z0 + CS + 10 && Math.max(l[1], l[3]) > z0 - 10) : null;
   const sd = (l, x, z) => { const ex = l[2] - l[0], ez = l[3] - l[1], t = clamp(((x - l[0]) * ex + (z - l[1]) * ez) / (ex * ex + ez * ez || 1), 0, 1); return Math.hypot(x - l[0] - ex * t, z - l[1] - ez * t); };
+  const tr = vegTrenches(mx, mz, CS * .75);
   for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
     const gi = ci * n + a, gj = cj * n + b, x = x0 + (a + hash2(gi, gj, 1)) * sp, z = z0 + (b + hash2(gi, gj, 2)) * sp, keep = hash2(gi, gj, 3);
     vegGround(G, x, z, out); if (keep >= out[3] * G.dm) continue;
@@ -38463,6 +38475,7 @@ function vegChunk(V, ci, cj) {
     if (nearRoad && routeDist(T, x, z) < 5.5) continue;
     if (hs && hs.some(q => footD(q, x, z) < 1.5)) continue;
     if (st && st.some(l => sd(l, x, z) < CITY.plan.street / 2)) continue;
+    if (tr.length && tr.some(f => vegInTrench(f, x, z))) continue;
     pts.push([hash2(gi, gj, 4), x, y, z, out[0], out[1], out[2], out[4]]);
   }
   pts.sort((p, q) => p[0] - q[0]);
@@ -46703,11 +46716,27 @@ function holeScene() {
   for (const f of S.forts || []) if (f.k === 1 && !f.gone && f.prog * FORT.trench.depth >= .25) sig += f.id + ':' + Math.round(f.prog * 20) + (f.tl ? (f.tl[0] ? 1 : 0) + '' + (f.tl[1] ? 1 : 0) : '') + ',';
   if (S.tun) for (const tn of S.tun) if (!tn.st) sig += 't' + tn.id + ':' + (tn.fd ? tn.fd.join('') : '') + ':' + Math.round(Math.min(1, tn.prog * 4) * 8) + (tn.prog >= 1 ? 'd' : '') + ',';
   const now = performance.now() / 1000;
-  if (sig !== gHole.sig && (now - gHole.T > FHOLE.every || sig.length !== gHole.sig.length)) { gHole.sig = sig; gHole.T = now; holeBuild(); }
+  if (sig !== gHole.sig && (now - gHole.T > FHOLE.every || sig.length !== gHole.sig.length)) { gHole.sig = sig; gHole.T = now; holeBuild(); holeGrass(); }
   const cp = camera.position, under = cp.y < meshH(cp.x, cp.z) + FHOLE.lift + .05;
   gHole.a.visible = gHole.b.visible = !under && gHole.w.visible;
 }
 fortScene = (g => () => { g(); holeScene(); })(fortScene);
+/* the grass where a trench was dug deeper, appeared or went (filled in, the world rebuilt) is made again: vegChunk leaves a cut bare and
+   grows a filled one back. Only the chunks those trenches touch; gHole.gr: each drawn trench's state the last time (its depth step) */
+function holeGrass() {
+  const V = typeof VS !== 'undefined' && VS.built, G = V && V.g, was = gHole.gr || new Map(), now = new Map(), at = [];
+  for (const f of S.forts || []) if (f.k === 1 && !f.gone && f.o && f.prog * FORT.trench.depth >= .25) now.set(f.id, [Math.round(f.prog * 20), f.x, f.z, f.o.hw]);
+  const first = !gHole.gr; gHole.gr = now; if (first) return;   // a world just built: its chunks were made with these trenches
+  for (const [id, e] of now) { const o = was.get(id); if (!o || o[0] !== e[0]) at.push(e); }
+  for (const [id, o] of was) if (!now.has(id)) at.push(o);
+  if (!G || !G.chunks || !at.length) return;
+  const CS = VEG.chunk, R = CS * .75 + 2;
+  for (const [key, ch] of [...G.chunks]) {   // made again in place, the same frame: no chunk goes missing for a moment
+    if (!at.some(e => Math.abs(ch.x - e[1]) < R + e[3] && Math.abs(ch.z - e[2]) < R + e[3])) continue;
+    const vis = ch.me.visible, n = ch.geo.instanceCount; G.free.push(ch);
+    const nc = vegChunk(V, Math.round((ch.x - CS / 2) / CS), Math.round((ch.z - CS / 2) / CS)); nc.me.visible = vis && nc.m > 0; nc.geo.instanceCount = Math.min(n, nc.m); G.chunks.set(key, nc);
+  }
+}
 /* the general's map: the side's tunnels (a dashed line between the mouths, what is dug of it) and the enemy mouths it found */
 function gTun(g, V, P) {
   if (!S || !S.tun || !S.tun.length) return;

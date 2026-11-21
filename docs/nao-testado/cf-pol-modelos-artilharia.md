@@ -1,5 +1,11 @@
 # cf-pol-modelos: modelos da artilharia (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Hangar pelos botões (Hoje): Paladin e M270 no carrossel. Na partida, de fora: Grad, Katyusha (BM-13), M270 e Panzerwerfer com os modelos novos, sem erro no console.
+- Torre girada: o lançador do Grad girado 90° fica sobre a carroceria. O da Katyusha virado para trás (3 rad) também. Não vi o lançador cruzando a cabine.
+- **Salva do Grad**: com o mapa de tiro (M), o lançador aponta em 2 s, e 34 foguetes ficam no ar ao mesmo tempo, sem erro. Na visão de fora, o sopro no chão ao sair. A fita de fumaça não se vê a essa distância.
+- **Continua sem teste:** o obuseiro atirando visto de perto, um destruído no meio da batalha, a luneta de dentro.
+
 ## O que mudou
 
 Os nove modelos da classe Artilharia eram todos o mesmo casco de lagartas com uma caixa aberta (ou fechada) e um cano; os lançadores de foguetes não tinham tubo nem trilho nenhum, só a caixa vazia. Agora cada um tem o seu (bloco `ARTB` no começo da parte 3D, logo depois de `buildUnit`):

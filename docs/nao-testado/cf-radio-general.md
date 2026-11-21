@@ -1,5 +1,10 @@
 # cf-radio-general: o general fica sem rede e não expande a zona de rádio (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/radio-general.js`: passa inteiro.
+- `tests/radio.js` (83 min com a máquina cheia): 55 ok e 3 falhas. Duas são de custo (a olhada da rede, 6,5–11 ms por chamada, com a máquina cheia). **A terceira era o risco deste documento**: a mensagem `gen` da Visão de General do anfitrião chegava a 8.867 bytes numa batalha moderna, acima do limite de 8.192 do servidor, que a descarta sem aviso; a visão do convidado parava. A maior parte (4,9 KB) eram as posições de defesa (`dfp`, do `CEREBRO: defesa`). **Consertado** fora das seções do cérebro: `genMsg` (no ENET, ao lado do `glogFit`) corta primeiro as camadas opcionais maiores, e o núcleo sempre vai. Teste: `tests/gen-cap.js` (no `all.sh`); o `radio.js` agora mede a mensagem como é enviada, em bytes.
+- **Continua sem teste:** a antena pronta depois da caminhada longa numa partida inteira, a nota na Visão de General no navegador, o convidado online.
+
 Pedido do capitão: "general sempre ficando sem rede e sem expandir a zona de radio".
 
 Entregue pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado").

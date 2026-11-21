@@ -7459,10 +7459,12 @@ function gpHeli(t, D) {
 }
 
 /* ---------- effects ---------- */
-function puff(x, y, z, k, s, vx, vy, vz) {
+/* e: what leaves it behind as it moves (a plane, a missile, a rocket, a burning vehicle), so that the view can join its puffs into one trail;
+   nothing in the simulation reads it */
+function puff(x, y, z, k, s, vx, vy, vz, e) {
   if (S.parts.length > 900) return;
   const life = k === 'smoke' ? rand(1.2, 2.4) : k === 'fuel' ? rand(.9, 1.5) : k === 'flak' ? rand(2.5, 4) : k === 'dust' ? rand(.6, 1.2) : k === 'flash' ? .12 : rand(.3, .6);
-  S.parts.push({ k, x, y, z, vx: (vx || 0) + rand(-3, 3) * s, vy: (vy || 0) + rand(-1, 4) * s, vz: (vz || 0) + rand(-3, 3) * s, life, max: life, r: rand(2.5, 4.5) * s });
+  S.parts.push({ k, x, y, z, vx: (vx || 0) + rand(-3, 3) * s, vy: (vy || 0) + rand(-1, 4) * s, vz: (vz || 0) + rand(-3, 3) * s, life, max: life, r: rand(2.5, 4.5) * s, e: e || null });
 }
 function blastFx(x, y, z, r) {
   if (!fx.blast(x, y, z, r)) {   // the view draws the burst by its size (XFX); without one (the harness, the headless tools) these few puffs
@@ -7897,8 +7899,8 @@ function fumes(o, dt) {
   if (!(o.burn || M.smoke || M.leak) || (o.fumeT -= dt) > 0) return;
   o.fumeT = .06;
   const c = k ? Math.cos(o.h) : 0, s = k ? Math.sin(o.h) : 0, x = k ? o.x + c * b[0] : o.x + f.x * b[0], y = k ? o.y + 1.5 + b[1] + b[4] : o.y + f.y * b[0], z = k ? o.z - s * b[0] : o.z + f.z * b[0], up = k ? 5 : 0;
-  if (o.burn) { puff(x, y, z, 'fire', k ? 1.1 : .55, v.x * .85, v.y * .85 + up, v.z * .85); puff(x, y, z, 'smoke', 1.3, v.x * .3, v.y * .3 + up, v.z * .3); }   // the flames keep most of the vehicle's speed, so they lick along it
-  else if (M.smoke) puff(x, y, z, 'smoke', .8, 0, up, 0);
+  if (o.burn) { puff(x, y, z, 'fire', k ? 1.1 : .55, v.x * .85, v.y * .85 + up, v.z * .85); puff(x, y, z, 'smoke', 1.3, v.x * .3, v.y * .3 + up, v.z * .3, o); }   // the flames keep most of the vehicle's speed, so they lick along it
+  else if (M.smoke) puff(x, y, z, 'smoke', .8, 0, up, 0, o);
   if (M.leak) puff(o.x - f.x * 2, o.y - f.y * 2 - .5, o.z - f.z * 2, 'fuel', .7);
 }
 /* field repair: stopped, the crew puts out a fire and then mends one part at a time, back to a working fraction: by group in the order of
@@ -8587,7 +8589,7 @@ function wreckFall(p, dt) {
   const v = p.v;
   v.y -= GR * dt; v.x *= 1 - .15 * dt; v.z *= 1 - .15 * dt;
   p.x += v.x * ASPD * dt; p.y += v.y * ASPD * dt; p.z += v.z * ASPD * dt; spin(p, p.sp.x, p.sp.y, p.sp.z, dt); axes(p);
-  p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .04; puff(p.x, p.y, p.z, 'smoke', 1.3); if (Math.random() < .5) puff(p.x, p.y, p.z, 'fire', .7); }
+  p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .04; puff(p.x, p.y, p.z, 'smoke', 1.3, 0, 0, 0, p); if (Math.random() < .5) puff(p.x, p.y, p.z, 'fire', .7); }
   const g = hgt(p.x, p.z), o = p.y < g + OBJS.air ? ray(p.x - v.x * dt, p.y - v.y * dt, p.z - v.z * dt, p.x, p.y, p.z, 2) : null;
   if (o && !p.net) hitObj(o, OBJD.crash, p.lastBy);
   if (o || p.y <= g + 2) { blastFx(p.x, p.y + 2, p.z, 30); p.gone = true; }
@@ -8651,7 +8653,7 @@ function stepPlane(p, dt) {
   }
   fumes(p, dt); if (p.burn) burn(p, dt);
   if (p.dead) return;
-  if (p.hp < d.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .08; puff(p.x - f.x * 4, p.y - f.y * 4, p.z - f.z * 4, 'smoke', .9); } }
+  if (p.hp < d.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .08; puff(p.x - f.x * 4, p.y - f.y * 4, p.z - f.z * 4, 'smoke', .9, 0, 0, 0, p); } }
   if (p.fire && p.gcool <= 0 && p.ammo > 0 && Q.gun) fireGun(p);
   if (d.rearGun && p.rcool <= 0) {
     for (const q of S.planes) {
@@ -8682,7 +8684,7 @@ function stepGhost(p, dt) {
   q.x += (sq.x * sg - q.x) * k; q.y += (sq.y * sg - q.y) * k; q.z += (sq.z * sg - q.z) * k; q.w += (sq.w * sg - q.w) * k;
   const l = Math.hypot(q.x, q.y, q.z, q.w) || 1; q.x /= l; q.y /= l; q.z /= l; q.w /= l;
   axes(p); p.V = vlen(v) || 1;
-  if (p.dead || p.hp < p.def.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = p.dead ? .04 : .08; puff(p.x, p.y, p.z, 'smoke', p.dead ? 1.3 : .9); } }
+  if (p.dead || p.hp < p.def.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = p.dead ? .04 : .08; puff(p.x, p.y, p.z, 'smoke', p.dead ? 1.3 : .9, 0, 0, 0, p); } }
   if (p.fire && !p.dead && p.gcool <= 0) fireGun(p);
   if (!p.dead) fumes(p, dt);
 }
@@ -11215,7 +11217,7 @@ const MSL = {
       if (!hit && m.gnd) for (const u of S.units) if (u.team === m.team && !u.dead && !safe(u, m) && Math.abs(u.x - m.x) < 5 && Math.abs(u.z - m.z) < 5 && m.y < u.y + 6.5) { hit = u; break; }
       if (hit) { m.gone = true; impact(hit, HK.missile, m.o.dmg, m.by, m.x, m.y, m.z, m.d.x, m.d.y, m.d.z); if (m.gnd) explode(m.x, m.y, m.z, m.o.r, m.o.dmg, m.by, m.team); else blastFx(m.x, m.y, m.z, 14); return; }
     }
-    if (burn || (!m.bomb && Math.random() < .2)) puff(m.x, m.y, m.z, 'smoke', burn ? .45 : .25);
+    if (burn || (!m.bomb && Math.random() < .2)) puff(m.x, m.y, m.z, 'smoke', burn ? .45 : .25, 0, 0, 0, m);
     const gy = hgt(m.x, m.z), wo = m.y > gy && m.y < gy + OBJS.air ? ray(x0, y0, z0, m.x, m.y, m.z, 0) : null;
     if (wo) {
       const P = shotObj(wo, m, m.gnd ? 0 : m.o.dmg * OBJD.aam, x0 + (m.x - x0) * RAY.t, y0 + (m.y - y0) * RAY.t, z0 + (m.z - z0) * RAY.t, m.d.x, m.d.y, m.d.z);
@@ -11425,7 +11427,7 @@ function stepShots(dt) {
     const he = b.k === 'he', heat = b.k === 'heat', hv = b.k === 'shell' && b.o.he, sh = he || b.k === 'shell', n = sh ? Math.ceil(Math.hypot(b.vx, b.vy, b.vz) * dt / 5) : 1, h = dt / n, top = sh || heat ? 6.5 : 4;
     if (he) incoming(b, dt);
     for (let i = 0; i < n && !b.gone; i++) {
-      if (b.k === 'rocket' || heat) { b.vy -= GR * .25 * h; if (Math.random() < .7) puff(b.x, b.y, b.z, 'smoke', .35); } else { if (he) b.y += .5 * GR * h * h; b.vy -= GR * h; }   // a howitzer round keeps to its exact arc, whatever the step
+      if (b.k === 'rocket' || heat) { b.vy -= GR * .25 * h; if (Math.random() < .7) puff(b.x, b.y, b.z, 'smoke', .35, 0, 0, 0, b); } else { if (he) b.y += .5 * GR * h * h; b.vy -= GR * h; }   // a howitzer round keeps to its exact arc, whatever the step
       const x0 = b.x, y0 = b.y, z0 = b.z;
       b.x += b.vx * h; b.y += b.vy * h; b.z += b.vz * h;
       let g = hgt(b.x, b.z); const D = OBJD[hv ? 'he' : b.k];
@@ -14006,7 +14008,7 @@ function stepHeli(p, dt) {
   }
   fumes(p, dt); if (p.burn) burn(p, dt);
   if (p.dead) return;
-  if (p.hp < d.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .08; puff(p.x - f.x * 4, p.y - f.y * 4 + 1, p.z - f.z * 4, 'smoke', .9); } }
+  if (p.hp < d.hp * .45) { p.smoke -= dt; if (p.smoke <= 0) { p.smoke = .08; puff(p.x - f.x * 4, p.y - f.y * 4 + 1, p.z - f.z * 4, 'smoke', .9, 0, 0, 0, p); } }
   /* the gun: the pilot's aim, or for a door gun with nothing asked of it the gunner's own target */
   const g = d.gun; let aim = c.aim, fire = p.fire;
   if (g.door) {
@@ -37121,7 +37123,7 @@ const FRIEND = '#6fc3b2', FOE = '#e2604f';
 const FOEC = ['#8f86ff', '#e2604f', '#d9a441'], foeCol = s => (S && NSD() > 2 && FOEC[s]) || FOE;
 let renderer, scene, camera, cw = 1, ch = 1, dpr = 1, frameId = 0;
 let gPlanes, gUnits, gWrecks, gDebris, gBombs, gMissiles, gFlares, gSup, gEco, gGhost, tracers, sparks, skyDome, shadows = [];
-const MAXB = 700, MAXP = 1500;
+const MAXB = 700, MAXP = 5000, MAXPR = 2200;   // MAXPR: the sparks kept for the soldiers' specks and the smoke screens, drawn after the rounds' trails
 /* view state. mode: 0 chase, then the seats of the vehicle. hy hp head yaw and pitch, gl rl grey-out and red-out, sens mouse scale under zoom */
 const camSt = { mode: 0, init: false, zoom: 0, zt: 0, hy: 0, hp: 0, gl: 0, rl: 0, sens: 1, body: false, filter: '', scan: null, ex: 0, ey: 0, eye: { x: 0, y: 0, z: 0 } };
 const mat = (c, o) => new THREE.MeshPhongMaterial(Object.assign({ color: c, flatShading: true, shininess: 6 }, o || {}));
@@ -38004,16 +38006,19 @@ function buildWorld() {
   pg.setAttribute('size', new THREE.BufferAttribute(new Float32Array(MAXP), 1));
   /* what glows (fire, flashes, tracers, a motor's flame: red at full, pc.r 1) is drawn as it is; the rest (smoke, dust, a smoke screen, a
      soldier's speck) takes the day's light (amb, as the bursts' smoke of XFX) and the haze (fC from fN to fF m), so that a smoke screen
-     does not glow white at night nor stand sharp in the fog (skyScene sets them each frame) */
-  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 }, amb: { value: 1 }, fC: { value: new THREE.Color() }, fN: { value: 1e9 }, fF: { value: 2e9 } },
-    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; varying float vd; uniform float scale; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); vd = -mv.z; gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
-    fragmentShader: 'varying vec4 vc; varying float vd; uniform float amb, fN, fF; uniform vec3 fC; void main(){ float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard; float lit = step(vc.r, 0.98); vec3 c = mix(vc.rgb, vc.rgb * amb, lit); c = mix(c, fC, smoothstep(fN, fF, vd) * lit); gl_FragColor = vec4(c, vc.a * smoothstep(0.5, 0.15, d)); }' }));
+     does not glow white at night nor stand sharp in the fog (skyScene sets them each frame).
+     The lit ones are shaded as balls by the sun (sunW, the sun's direction in the world; sunK, how much it shines: none at night or under rain),
+     so that smoke has a bright side and a dark one instead of reading as flat discs */
+  sparks = new THREE.Points(pg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, uniforms: { scale: { value: 500 }, amb: { value: 1 }, fC: { value: new THREE.Color() }, fN: { value: 1e9 }, fF: { value: 2e9 }, sunW: { value: new THREE.Vector3(0, 1, 0) }, sunK: { value: 0 } },
+    vertexShader: 'attribute float size; attribute vec4 pc; varying vec4 vc; varying float vd; varying vec3 vSun; uniform float scale; uniform vec3 sunW; void main(){ vc = pc; vec4 mv = modelViewMatrix * vec4(position, 1.0); vd = -mv.z; vSun = normalize((viewMatrix * vec4(sunW, 0.0)).xyz); gl_PointSize = min(420.0, size * scale / -mv.z); gl_Position = projectionMatrix * mv; }',
+    fragmentShader: 'varying vec4 vc; varying float vd; varying vec3 vSun; uniform float amb, fN, fF, sunK; uniform vec3 fC; void main(){ vec2 p = (gl_PointCoord - 0.5) * 2.0; float d = length(p) * 0.5; if (d > 0.5) discard; float lit = step(vc.r, 0.98);' +
+      ' float sh = mix(1.0, 0.56 + 0.64 * (dot(vec3(p.x, -p.y, sqrt(max(0.0, 1.0 - 4.0 * d * d))), vSun) * 0.5 + 0.5), sunK); vec3 c = mix(vc.rgb, vc.rgb * amb * sh, lit); c = mix(c, fC, smoothstep(fN, fF, vd) * lit); gl_FragColor = vec4(c, vc.a * smoothstep(0.5, 0.15, d)); }' }));
   sparks.frustumCulled = false; scene.add(sparks);
   shadows = [];
   for (let i = 0; i < 14; i++) {
-    const sg2 = new THREE.CircleGeometry(1, 14); sg2.rotateX(-Math.PI / 2);
-    const sm = new THREE.Mesh(sg2, new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: .3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
-    sm.visible = false; scene.add(sm); shadows.push(sm);
+    const sg2 = new THREE.PlaneGeometry(1, 1); sg2.rotateX(-Math.PI / 2);
+    const sm = new THREE.Mesh(sg2, new THREE.MeshBasicMaterial({ map: pshTex(0), transparent: true, opacity: .3, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+    sm.visible = false; sm.renderOrder = 1; scene.add(sm); shadows.push(sm);
   }
   camSt.init = false; buildMap();
 }
@@ -38731,8 +38736,11 @@ function poseMan(m, put) {
    (teardrop with a finned tail), a launcher's rocket (body, nose and four fins), a missile (the same, white and longer). The light and the
    smoke go in the sparks pool, never a puff per round: a flame at the tail while the motor burns, and a ribbon of PJ.n points of smoke
    behind a rocket or a missile, taken every PJ.every s and fading over PJ.life s (kept in a WeakMap, so the sim's objects carry nothing).
-   burn: s a launcher's rocket burns (a missile reads its own motor, D.mot) */
-const PJ = { geo: {}, n: 12, every: .07, life: 2.6, burn: 1.8, tr: new WeakMap() };
+   burn: s a launcher's rocket burns (a missile reads its own motor, D.mot); a: a trail puff's opacity, gap, px and sub: how the trail is filled
+   between its samples (pjRibbon). The sim's smoke puffs that carry what left them (puff's e: a smoking plane's, a missile's, a burning
+   vehicle's) are joined the same way, to the one before from the same source (pt, made each frame): fill [the overlap that keeps a puff's own
+   opacity, at most so many between two, only when born within s of each other, and closer than so many widths] */
+const PJ = { geo: {}, n: 12, every: .07, life: 2.6, burn: 1.8, a: .22, gap: .34, sub: 48, px: 2, tr: new WeakMap(), pt: new Map(), fill: [.8, 10, .3, 12] };
 function pjGeo(k) {
   if (PJ.geo[k]) return PJ.geo[k];
   const lathe = (pts, seg) => { const g = new THREE.LatheGeometry(pts.map(p => new THREE.Vector2(p[0], p[1])), seg); g.rotateZ(-Math.PI / 2); return g; };
@@ -38759,6 +38767,38 @@ function pjMesh(k) {
 const pjKind = b => (b.o && b.o.sal ? 'rkt' : b.by && b.by.man ? 'mort' : 'shell');
 /* the round's tail: where a flame and the ribbon start, len m behind its centre along v */
 function pjTail(o, vx, vy, vz, len) { const V = Math.hypot(vx, vy, vz) || 1; return [o.x - vx / V * len, o.y - vy / V * len, o.z - vz / V * len]; }
+/* the trail's puffs, oldest first, as put(x, y, z, age): its samples (t, taken at most PJ.n, PJ.every s apart) and, between two of them, as many
+   as make one band, each PJ.gap of its width (pjRw) from the next, but never closer than PJ.px pixels on the screen (cam, the eye; mpp, m a
+   pixel at 1 m) and PJ.sub at most; while the motor burns, tl (the tail now) closes it */
+const pjRw = age => 1.1 + age * 2.4;
+function pjRibbon(t, tl, now, put, cam, mpp) {
+  let ox = 0, oy = 0, oz = 0, oa = -1;
+  const seg = (x, y, z, age) => {
+    if (oa >= 0) {
+      const L = Math.hypot(x - ox, y - oy, z - oz), d = cam ? Math.max(1, Math.hypot((x + ox) / 2 - cam.x, (y + oy) / 2 - cam.y, (z + oz) / 2 - cam.z)) : 1;
+      const m = Math.min(PJ.sub, Math.floor(L / (pjRw(Math.min(age, oa)) * PJ.gap)), cam ? Math.floor(L / (mpp * d * PJ.px)) : PJ.sub);
+      for (let i = 1; i <= m; i++) { const f = i / (m + 1); put(ox + (x - ox) * f, oy + (y - oy) * f, oz + (z - oz) * f, oa + (age - oa) * f); }
+    }
+    put(x, y, z, age); ox = x; oy = y; oz = z; oa = age;
+  };
+  for (let j = 0; j < t.n; j++) {
+    const q = ((t.i - t.n + j) % PJ.n + PJ.n) % PJ.n * 4, age = now - t.a[q + 3];
+    if (age < PJ.life) seg(t.a[q], t.a[q + 1], t.a[q + 2], age);
+  }
+  if (tl && oa >= 0) seg(tl[0], tl[1], tl[2], 0);
+}
+/* a sim smoke puff's width as drawn, and the join of puff q to o, the one before it from the same source: put(x, y, z, alpha, size) for the
+   puffs between (as many as make one band, PJ.fill[1] at most, when born within PJ.fill[2] s of each other and closer than PJ.fill[3] widths);
+   returns what q's own opacity is multiplied by, less the more the band is filled (1 when nothing goes between) */
+const pjSz = q => q.r * (5 - 2.8 * q.life / q.max);
+function pjJoin(o, q, put) {
+  const F = PJ.fill; if ((o.max - o.life) - (q.max - q.life) >= F[2]) return 1;
+  const a = q.life / q.max, ao = o.life / o.max, sz = pjSz(q), so = pjSz(o), L = Math.hypot(q.x - o.x, q.y - o.y, q.z - o.z), sm = (sz + so) / 2, n = Math.min(F[1], Math.floor(L / (sm * PJ.gap)));
+  if (n <= 0 || L >= sm * F[3]) return 1;
+  const kk = clamp(L / (n + 1) / (sm * F[0]), .3, 1);
+  for (let i = 1; i <= n; i++) { const f = i / (n + 1); put(o.x + (q.x - o.x) * f, o.y + (q.y - o.y) * f, o.z + (q.z - o.z) * f, (ao + (a - ao) * f) * .5 * kk, so + (sz - so) * f); }
+  return kk;
+}
 function pjTrail(o, p, on) {
   let t = PJ.tr.get(o);
   if (!t) { t = { a: new Float32Array(PJ.n * 4), i: 0, n: 0, at: -1 }; PJ.tr.set(o, t); }
@@ -38803,9 +38843,9 @@ function syncScene(dt) {
   sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : b.o && b.o.vis ? cylX(b.o.vis[0], b.o.vis[0], b.o.vis[1], 5) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
-  let n = 0; const bp = tracers.geometry.attributes.position.array;
+  let n = 0; const bp = tracers.geometry.attributes.position.array; PJ.pt.clear();
   let k = 0; const pp = sparks.geometry.attributes.position.array, pc = sparks.geometry.attributes.pc.array, ps = sparks.geometry.attributes.size.array;
-  const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value;
+  const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value, TB = MAXP - MAXPR;
   for (const b of S.bullets) {
     if (n >= MAXB) break;
     const tl = b.tr ? .05 : .028; bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); n++;
@@ -38819,7 +38859,11 @@ function syncScene(dt) {
     if (q.k === 'tr') { if (n < MAXB) { bp.set([q.x, q.y, q.z, q.x2, q.y2, q.z2], n * 6); n++; } continue; }
     if (k >= MAXP) break;
     pp.set([q.x, q.y, q.z], k * 3);
-    if (q.k === 'smoke') { pc.set([.2, .2, .19, a * .5], k * 4); ps[k] = q.r * (5 - 2.8 * a); }
+    if (q.k === 'smoke') {   // a puff left by something on the move (q.e) is joined to the one before it from the same source (pjJoin)
+      const o = q.e && PJ.pt.get(q.e); if (q.e) PJ.pt.set(q.e, q);
+      const kk = o ? pjJoin(o, q, (x, y, z, al, s) => { if (k >= TB - 1) return; pp.set([x, y, z], k * 3); pc.set([.2, .2, .19, al], k * 4); ps[k++] = s; }) : 1;
+      pp.set([q.x, q.y, q.z], k * 3); pc.set([.2, .2, .19, a * .5 * kk], k * 4); ps[k] = pjSz(q);
+    }
     else if (q.k === 'flak') { pc.set([.09, .09, .09, a * .8], k * 4); ps[k] = q.r * (5.5 - 2 * a); }
     else if (q.k === 'fire') { pc.set([1, .42 + .45 * a, .15, a * .9], k * 4); ps[k] = q.r * 3.4; }
     else if (q.k === 'fuel') { pc.set([.9, .93, .88, a * .55], k * 4); ps[k] = q.r * (4 - 1.8 * a); }
@@ -38828,13 +38872,10 @@ function syncScene(dt) {
     else { pc.set([1, .93, .6, a], k * 4); ps[k] = 2.2; }
     k++;
   }
-  const ribbon = t => {   // a round's smoke ribbon, oldest first: thin and dense near the tail, wide and thin as it ages
-    for (let j = 0; j < t.n && k < MAXP; j++) {
-      const q = ((t.i - t.n + j) % PJ.n + PJ.n) % PJ.n * 4, age = S.t - t.a[q + 3], a = 1 - age / PJ.life;
-      if (a <= 0) continue;
-      pp.set([t.a[q], t.a[q + 1], t.a[q + 2]], k * 3); pc.set([.8, .79, .76, a * .5], k * 4); ps[k++] = 1.1 + age * 2.4;
-    }
-  };
+  /* a round's smoke trail, oldest first: thin and dense near the tail, wide and faint as it ages. The samples are PJ.every s apart (20 m and more
+     for a missile), so between two of them go as many puffs as make one band (each PJ.gap of its width from the next, PJ.sub at most), and
+     while the motor burns (tl, the tail now) the last stretch reaches the round; MAXPR sparks stay for the soldiers and the smoke screens */
+  const ribbon = (t, tl) => pjRibbon(t, tl, S.t, (x, y, z, age) => { if (k >= TB) return; pp.set([x, y, z], k * 3); pc.set([.8, .79, .76, (1 - age / PJ.life) * PJ.a], k * 4); ps[k++] = pjRw(age); }, cam, 1 / sparks.material.uniforms.scale.value);
   const flame = (p, r) => {   // the motor's flame: a hot core over an orange halo, never below a few pixels
     if (k >= MAXP - 1) return;
     const sz = Math.max(r, px * 1.4 * Math.hypot(p[0] - cam.x, p[1] - cam.y, p[2] - cam.z));
@@ -38842,10 +38883,10 @@ function syncScene(dt) {
   };
   for (const b of S.bombs) {   // a howitzer round is a speck that never shrinks below a few pixels, so its arc can be followed; a rocket burns and smokes
     if (k >= MAXP) break;
-    if (b.k === 'rocket') { const tl = pjTail(b, b.vx, b.vy, b.vz, 1.4); flame(tl, .5); ribbon(pjTrail(b, tl, true)); continue; }
+    if (b.k === 'rocket') { const tl = pjTail(b, b.vx, b.vy, b.vz, 1.4); flame(tl, .5); ribbon(pjTrail(b, tl, true), tl); continue; }
     if (b.k !== 'he') continue;
     const kind = pjKind(b), d = Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z);
-    if (kind === 'rkt') { const on = b.t < PJ.burn, tl = pjTail(b, b.vx, b.vy, b.vz, 1.6); if (on) flame(tl, .7); ribbon(pjTrail(b, tl, on)); if (on) continue; }
+    if (kind === 'rkt') { const on = b.t < PJ.burn, tl = pjTail(b, b.vx, b.vy, b.vz, 1.6); if (on) flame(tl, .7); ribbon(pjTrail(b, tl, on), on && tl); if (on) continue; }
     if (k >= MAXP) break;
     pp.set([b.x, b.y, b.z], k * 3); pc.set(b.t < .6 && kind !== 'rkt' ? [1, .8, .45, 1] : kind === 'mort' ? [.16, .18, .13, .95] : [.12, .12, .11, .95], k * 4); ps[k++] = Math.max(1.2, px * .9 * d);
   }
@@ -38853,7 +38894,7 @@ function syncScene(dt) {
     if (k >= MAXP) break;
     const D = m.D, mot = D && D.mot, on = !m.gone && (!mot || m.age < mot[0] + (mot[3] ? mot[2] : 0)), d = m.d || { x: 1, y: 0, z: 0 }, tl = pjTail(m, d.x, d.y, d.z, 2.2);
     if (on) flame(tl, .6);
-    ribbon(pjTrail(m, tl, on));
+    ribbon(pjTrail(m, tl, on), on && tl);
   }
   for (const m of S.men) {   // far off a soldier is a dark speck that never shrinks below a couple of pixels, so a squad can be made out
     const d = Math.hypot(m.x - cam.x, m.y - cam.y, m.z - cam.z), sz = px * .75 * d;
@@ -38870,11 +38911,43 @@ function syncScene(dt) {
   }
   tracers.geometry.setDrawRange(0, n * 2); tracers.geometry.attributes.position.needsUpdate = true;
   const ga = sparks.geometry; ga.setDrawRange(0, k); ga.attributes.position.needsUpdate = ga.attributes.pc.needsUpdate = ga.attributes.size.needsUpdate = true;
+  pshFrame();
+}
+/* the aircraft's shadows on the ground (PSH): where it was a hard round disc right under each one, a soft silhouette of the plane (a cross of
+   fuselage, wings and tail; a helicopter's round rotor) turned to its heading, cast along the sun (its height over the ground / the sun's
+   height, the sun no lower than sun), laid on the slope, faint without sun (k: at night or under rain) and fading out by far m over the ground;
+   none where the Alta quality's real shadows reach (the plane casts its own there) */
+const PSH = { far: 1800, a: .34, k: .15, sun: .35, lift: 2.6, sz: 1.23, tex: [], q: null, q2: null, n: null };
+function pshTex(heli) {
+  if (PSH.tex[heli]) return PSH.tex[heli];
+  const N = 128, c = document.createElement('canvas'); c.width = c.height = N; const g = c.getContext('2d');
+  g.filter = 'blur(' + (heli ? 4 : 2.5) + 'px)'; g.fillStyle = '#000';
+  if (heli) { g.globalAlpha = .45; g.beginPath(); g.arc(64, 64, 52, 0, TAU); g.fill(); g.globalAlpha = 1; g.fillRect(22, 58, 70, 12); g.beginPath(); g.ellipse(76, 64, 20, 11, 0, 0, TAU); g.fill(); }
+  else {   // the nose to +x (the plane's own forward), the wings across
+    g.beginPath(); g.ellipse(64, 64, 52, 6.5, 0, 0, TAU); g.fill();
+    g.beginPath(); g.moveTo(74, 61); g.lineTo(58, 10); g.lineTo(48, 10); g.lineTo(52, 61); g.lineTo(52, 67); g.lineTo(48, 118); g.lineTo(58, 118); g.lineTo(74, 67); g.closePath(); g.fill();
+    g.beginPath(); g.moveTo(26, 62); g.lineTo(16, 42); g.lineTo(10, 42); g.lineTo(13, 62); g.lineTo(13, 66); g.lineTo(10, 86); g.lineTo(16, 86); g.lineTo(26, 66); g.closePath(); g.fill();
+  }
+  const t = new THREE.CanvasTexture(c); return (PSH.tex[heli] = t);
+}
+function pshFrame() {
+  if (!PSH.q) { PSH.q = new THREE.Quaternion(); PSH.q2 = new THREE.Quaternion(); PSH.n = new THREE.Vector3(); PSH.Y = new THREE.Vector3(0, 1, 0); }
+  const sun = typeof SKY3 === 'object' && SKY3.sun, sk = sun && SKY3.base ? clamp(sun.intensity / (SKY3.base.sun || 1), 0, 1) : 0, Q = typeof GFXQ === 'object' && GFXQ[gfxLevel()], cp = camera.position;
+  let sx = 0, sy = 1, sz = 0; if (sun) { const v = sun.position, l = v.length() || 1; sx = v.x / l; sy = Math.max(PSH.sun, v.y / l); sz = v.z / l; }
   shadows.forEach((s, i) => {
     const p = S.planes[i];
     if (!p || p.gone) { s.visible = false; return; }
-    const g = hgt(p.x, p.z), agl = p.y - g;
-    s.visible = agl < 1800; s.position.set(p.x, g + 2.6, p.z); s.scale.setScalar(p.def.len * .55 * MS); s.material.opacity = .34 * clamp(1 - agl / 1800, 0, 1);
+    let x = p.x, z = p.z, g = hgt(x, z);
+    for (let j = 0; j < 2; j++) { const d = Math.max(0, p.y - g) / sy; x = p.x - sx * d; z = p.z - sz * d; g = hgt(x, z); }
+    const agl = p.y - g, R = p.def.len * PSH.sz * MS * .5;
+    s.visible = agl < PSH.far && !(Q && Q.shadow && Math.hypot(x - cp.x, z - cp.z) < Q.shadow * .8);
+    if (!s.visible) return;
+    const heli = p.heli ? 1 : 0; if (s.material.map !== pshTex(heli)) { s.material.map = pshTex(heli); s.material.needsUpdate = true; }
+    const q = p.q, fx = 1 - 2 * (q.y * q.y + q.z * q.z), fz = 2 * (q.x * q.z - q.w * q.y);
+    PSH.n.set(-(hgt(x + R, z) - hgt(x - R, z)) / (2 * R), 1, -(hgt(x, z + R) - hgt(x, z - R)) / (2 * R)).normalize();
+    s.quaternion.setFromUnitVectors(PSH.Y, PSH.n).multiply(PSH.q2.setFromAxisAngle(PSH.Y, Math.atan2(-fz, fx)));
+    s.position.set(x, g + PSH.lift, z); s.scale.setScalar(R * 2);
+    s.material.opacity = PSH.a * clamp(1 - agl / PSH.far, 0, 1) * (PSH.k + (1 - PSH.k) * sk);
   });
 }
 
@@ -45234,6 +45307,7 @@ skyScene = (g => () => {
   if (!u || !u.amb || !S || !S.sky || !scene) return;
   u.amb.value = .16 + .84 * clamp(S.sky.L, 0, 1);
   if (scene.fog) { u.fN.value = scene.fog.near; u.fF.value = scene.fog.far; u.fC.value.copy(scene.fog.color); } else { u.fN.value = 1e9; u.fF.value = 2e9; }
+  if (u.sunW) { const s = SKY3.sun; if (s) u.sunW.value.copy(s.position).normalize(); u.sunK.value = s && SKY3.base ? clamp(s.intensity / (SKY3.base.sun || 1), 0, 1) : 0; }   // the smoke's sunny side
 })(skyScene);
 /* the renderer's pixels: the level's most per CSS pixel */
 resize = (g => () => { g(); const d = Math.min(dpr, GFXQ[GFX.lv].dpr); if (renderer && d !== renderer.getPixelRatio()) { renderer.setPixelRatio(d); renderer.setSize(cw, ch, false); } })(resize);
@@ -45725,7 +45799,7 @@ syncScene = (g => dt => { g(dt); try { stkScene(); } catch (e) { /* a crater tha
    bomb, 3 a heavy bomb, a shahed, 4 a 2000 lb bomb, a truck bomb. Each class sets: a flash (a sprite, and a point light on Média and Alta,
    lights[]), a fireball (fire), embers, dirt thrown up that falls back (dirt, up: how high), a plume of earth (plume), a dust ring that runs
    over the ground (ring), a shock shell (a fresnel sphere, shell x r, class 2 and up), a smoke column that rises and drifts with the wind
-   (smoke, smL s; S.wx), a mark on the ground (a scorch with a pit, mark x r, markL s, for every size), a fire that lingers in the crater
+   (smoke, smL s; S.wx; on the ground most of it the brown of the earth thrown up, kind 8, the rest the black of the charge), a mark on the ground (a scorch with a pit, mark x r, markL s, for every size), a fire that lingers in the crater
    (burn s) and, class 3 and up, a mushroom cloud mH x r high that rises and stays mL s, drawn from its age each frame (no particles).
    On water a column of spray and no mark; in the air no dirt, ring or mark. What was hit smokes by its damage: a vehicle under hurt[0] of
    its hull grey smoke, under hurt[1] black smoke and flames (unless it already burns: the simulation's fire); a wreck burns for wreck s of its
@@ -45748,15 +45822,19 @@ const XFX = {
 const XST = 16;   // a particle's floats: x y z, vx vy vz, t, L, s0 s1 (its size from and to), k (its kind), g (gravity; < 0 rises), dr (drag), w (wind), gy (it dies under), sd
 const XNR = 4, XNS = 20, XNV = 1 + XNR * XNS;   // a mark's disc: rings and sectors
 const xCls = r => { const c = XFX.cut; return r < c[0] ? 0 : r < c[1] ? 1 : r < c[2] ? 2 : r < c[3] ? 3 : 4; };
-const XV = 'attribute float size; attribute float sd; attribute vec4 pc; varying vec4 vc; varying float vs; varying float vf; uniform float scale; uniform float fN; uniform float fF;' +
-  'void main(){ vc = pc; vs = sd; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(size * scale / max(-mv.z, 0.1), 1.5, 640.0); vf = smoothstep(fN, fF, -mv.z); gl_Position = projectionMatrix * mv; }';
-const XF = add => 'varying vec4 vc; varying float vs; varying float vf; uniform vec3 fC; uniform float amb;' +
+const XV = 'attribute float size; attribute float sd; attribute vec4 pc; varying vec4 vc; varying float vs; varying float vf; varying vec3 vSun; uniform float scale; uniform float fN; uniform float fF; uniform vec3 sunW;' +
+  'void main(){ vc = pc; vs = sd; vec4 mv = modelViewMatrix * vec4(position, 1.0); vSun = normalize((viewMatrix * vec4(sunW, 0.0)).xyz); gl_PointSize = clamp(size * scale / max(-mv.z, 0.1), 1.5, 640.0); vf = smoothstep(fN, fF, -mv.z); gl_Position = projectionMatrix * mv; }';
+/* the smoke and the dust: a ball lit by the sun (sunK of it; the old light from above at night and under rain), its normal bent by the puff's own
+   noise so that it billows, and darker where it is thick */
+const XF = add => 'varying vec4 vc; varying float vs; varying float vf; varying vec3 vSun; uniform vec3 fC; uniform float amb; uniform float sunK;' +
   'float xh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }' +
   'float xn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(xh(i), xh(i + vec2(1.0, 0.0)), f.x), mix(xh(i + vec2(0.0, 1.0)), xh(i + vec2(1.0, 1.0)), f.x), f.y); }' +
   'void main(){ vec2 p = gl_PointCoord - 0.5; float d = length(p) * 2.0; if (d > 1.0) discard;' +
   ' float n = 0.62 * xn(p * 4.0 + vs * 17.0) + 0.38 * xn(p * 9.0 - vs * 11.0);' +
   (add ? ' float a = vc.a * (1.0 - smoothstep(0.0, 1.0, d)) * (0.7 + 0.6 * n); gl_FragColor = vec4(vc.rgb * (1.0 - vf * 0.85), a); }'
-    : ' float a = vc.a * (1.0 - smoothstep(0.25 + 0.35 * n, 1.0, d)) * (0.55 + 0.75 * n); vec3 c = vc.rgb * amb * (1.12 - 0.4 * gl_PointCoord.y); gl_FragColor = vec4(mix(c, fC, vf), min(a, 1.0)); }');
+    : ' float a = vc.a * (1.0 - smoothstep(0.25 + 0.35 * n, 1.0, d)) * (0.55 + 0.75 * n);' +
+      ' vec3 nn = normalize(vec3(p.x * 2.0 + (n - 0.5) * 0.9, -p.y * 2.0 + (n - 0.5) * 0.9, sqrt(max(0.0, 1.0 - d * d)) + 0.2)); float w = dot(nn, vSun) * 0.5 + 0.5;' +
+      ' vec3 c = vc.rgb * amb * mix(1.12 - 0.4 * gl_PointCoord.y, (0.5 + 0.72 * w) * (1.08 - 0.16 * n), sunK); gl_FragColor = vec4(mix(c, fC, vf), min(a, 1.0)); }');
 /* the scorch: a dark pit, a lighter lip of thrown earth, rays of soot past it; one texture for every mark, made once */
 function xTex() {
   if (XFX.tex) return XFX.tex;
@@ -45780,7 +45858,7 @@ function xPts(n, add, u) {
   ge.setAttribute('size', new THREE.BufferAttribute(T.sz, 1)); ge.setAttribute('sd', new THREE.BufferAttribute(T.sd, 1));
   for (const k of ['position', 'pc', 'size', 'sd']) ge.attributes[k].setUsage(THREE.DynamicDrawUsage);
   const m = new THREE.Points(ge, new THREE.ShaderMaterial({ transparent: true, depthWrite: false, fog: false, blending: add ? THREE.AdditiveBlending : THREE.NormalBlending,
-    uniforms: { scale: sparks.material.uniforms.scale, fN: u.fN, fF: u.fF, fC: u.fC, amb: u.amb }, vertexShader: XV, fragmentShader: XF(add) }));
+    uniforms: { scale: sparks.material.uniforms.scale, fN: u.fN, fF: u.fF, fC: u.fC, amb: u.amb, sunW: sparks.material.uniforms.sunW || { value: new THREE.Vector3(0, 1, 0) }, sunK: sparks.material.uniforms.sunK || { value: 0 } }, vertexShader: XV, fragmentShader: XF(add) }));
   m.frustumCulled = false; m.renderOrder = add ? 3 : 2; T.m = m; return T;
 }
 /* the pools of this scene, by the hangar's quality */
@@ -45841,8 +45919,8 @@ function xBlast(x, y, z, r) {
     xp(wet ? 6 : 4, x + Math.cos(a) * r * .15, (wet ? S.T.WL : gy) + 1.2, z + Math.sin(a) * r * .15, Math.cos(a) * v, rand(.3, 1.5), Math.sin(a) * v, rand(1.4, 2.4) + c * .5, r * .18, r * rand(.6, .85), 0, 2.6, .5);
   }
   if (wet) for (let i = 0, m = n(F.dirt); i < m; i++) { const D = xDir(true), vy = vu * rand(.6, 1.1), vh = vu * rand(.05, .25); xp(6, x, S.T.WL + .5, z, D[0] * vh, vy, D[2] * vh, 2 * vy / GR + .4, r * .06 + .5, r * .2, GR, .4, 0); }
-  for (let i = 0, m = n(F.smoke); i < m; i++) {   // the column: staggered so that it keeps rising a while after the burst
-    xp(3, x + rand(-.2, .2) * r, y + r * .15, z + rand(-.2, .2) * r, rand(-1, 1) * r * .05, gnd ? rand(2, 5) + r * .08 : rand(-1, 2), rand(-1, 1) * r * .05,
+  for (let i = 0, m = n(F.smoke); i < m; i++) {   // the column: staggered so that it keeps rising a while after the burst; on the ground two puffs in three are of earth (8)
+    xp(gnd && !wet && i % 3 ? 8 : 3, x + rand(-.2, .2) * r, y + r * .15, z + rand(-.2, .2) * r, rand(-1, 1) * r * .05, gnd ? rand(2, 5) + r * .08 : rand(-1, 2), rand(-1, 1) * r * .05,
       F.smL[c] * rand(.75, 1.25), r * .3, r * rand(1, 1.5) * (c >= 3 ? .8 : 1), gnd ? -(1.2 + .5 * c) : -.5, .7, 1, -rand(0, .25 + .35 * c));
   }
   if (F.L.length && d < 3000) {   // the light of the flash: the free one, or the faintest
@@ -45913,6 +45991,7 @@ function xFrame() {
     else if (k === 4) xPut(B, x, y, z, .55, .47, .35, .6 * sstep(0, .05, v) * Math.pow(1 - v, 1.2), s0 + (s1 - s0) * Math.sqrt(v), sd);
     else if (k === 5) xPut(B, x, y, z, .19, .15, .1, v > .85 ? .95 * (1 - v) / .15 : .95, s0, sd);
     else if (k === 6) xPut(B, x, y, z, .86, .9, .93, .75 * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
+    else if (k === 8) { const e = Math.min(1, v * 2.2); xPut(B, x, y, z, xMix(.24, .52, e), xMix(.19, .48, e), xMix(.13, .43, e), .8 * sstep(0, .06, v) * Math.pow(1 - v, 1.3), s0 + (s1 - s0) * Math.sqrt(v), sd); }
     else xPut(B, x, y, z, xMix(.42, .62, v), xMix(.41, .62, v), xMix(.4, .6, v), .5 * sstep(0, .1, v) * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
   }
   const q = F.q[F.lv];

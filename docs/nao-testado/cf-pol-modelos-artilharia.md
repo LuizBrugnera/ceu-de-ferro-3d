@@ -17,7 +17,7 @@ Os nove modelos da classe Artilharia eram todos o mesmo casco de lagartas com um
 
 ## O que NÃO foi testado
 
-- Não vi nenhum desses veículos numa partida de verdade: andando, atirando a salva, girando a torre (o lançador do BM-13 e do Grad atravessa a cabine se a torre girar para a frente: a simulação deixa girar a volta toda), destruído no meio da batalha.
+- Visto depois (GPU de verdade, demonstração): um BM-21 da IA atirando a salva na cidade, com o lançador levantado e os foguetes saindo (imagem na #178). Não vi os outros oito atirando, nem a torre girando por cima da cabine (o lançador do BM-13 e do Grad atravessa a cabine se a torre girar para a frente: a simulação deixa girar a volta toda), nem um destruído no meio da batalha.
 - As rodas e lagartas não giram (nem antes giravam).
 - O jogador dentro de um desses (visão externa e a luneta) não foi conferido com o modelo novo.
 

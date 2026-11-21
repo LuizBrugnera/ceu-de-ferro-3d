@@ -26,10 +26,10 @@ Nos mapas com pedras (versão 6 em diante), toda pedra era o mesmo dodecaedro re
   - com as pedras: main 46,8 / 54,6 / 46,1 / 52,6 / 46,7 / 54,6 fps (média 50,2); aqui 49,5 / 48,5 / 51,9 / 44,6 / 47,1 / 50,7 fps (média 48,7);
   - sem as pedras, os trechos variam de 38 a 58 fps nos dois.
   - A diferença fica no ruído da cena.
+- Visto depois, numa partida (GPU de verdade): uma pedra derrubada (`S.os` 2) fica achatada com a forma nova. A escala de altura vai de 1,67 para 0,50 e a largura de 1,71 para 2,05; de pé de novo, ela volta.
 
 ## O que NÃO foi testado
 
-- A pedra destruída (achatada) com a forma nova.
 - As sombras de verdade (qualidade Alta) da pedra nova.
 
 ## Como testar depois

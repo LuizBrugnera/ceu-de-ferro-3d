@@ -1,5 +1,10 @@
 # cf-vbied: carro-bomba, caminhão-bomba e homem-bomba disfarçado dos Insurgentes
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, o jogador no Carro-bomba (VBIED): ao entrar, a faixa "5 detona (raio de 70 m) · explode sozinho com inimigo a 12 m ou numa batida forte". Apertar 5 antes de armar dá "Carga armando: 2 s"; depois de 3 s, 5 detona: veículo destruído, nuvem de poeira, uma cratera, e o fogo amigo avisado ("Carro-bomba (VBIED) abateu um aliado"). Sem erro no console.
+- Observação para o capitão (não é defeito do código): depois de detonar, o motorista sai a pé, vivo ("Veículo destruído · Você saiu a pé").
+- **Continua sem teste:** a batida forte detonando, os modelos (picape com tambores, caminhão), o civil disfarçado, a IA mandando o carro-bomba pelo caminho menos vigiado, a reação dos regulares a um suspeito, o online e o MCP.
+
 Pedidos do capitão: "faltou o carro bomba e caminhão bomba para os insurgentes" e "deve ter uma classe de homem bomba insurgente que se disfarça de civil".
 
 ## O que já existia (e o que faltava)

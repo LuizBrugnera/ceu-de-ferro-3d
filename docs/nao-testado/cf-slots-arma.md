@@ -1,5 +1,11 @@
 # Compartimentos da infantaria (1 a 5) e explosivos como "armas" (cf-slots-arma) — não testado
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Plantador de IED: 3 → Granada ×2, 3 de novo → Fumaça ×1, 4 → IED de placa de pressão ×3, 4 de novo → IED antipessoal de comando ×5, 5 → Celular, 1 → de volta ao AKM.
+- Homem-bomba: 3 e 4 como acima (Carga de demolição ×1), 5 → Colete explosivo, com "COLETE EXPLOSIVO · ARMADO / Clique: detonar (raio de 32 m). Com inimigo a 8 m ele explode sozinho" e a linha "5 ▸ [Colete explosivo]" no HUD. 1 → Makarov.
+- Com o colete na mão, a 1ª pessoa ainda mostra a pistola. Sem erro no console.
+- **Continua sem teste:** o clique usando cada item (armar a mina, plantar o IED, o celular detonando os IEDs no alcance), o modelo da granada e da mina na mão, o online.
+
 Pedido do capitão: "na infantaria, trocar de arma com 1, 2, 3 e por exemplo os sapper e ied, homem bomba, ser nas armas deles o ngc de plantar e explodir coisas".
 
 ## O que mudou

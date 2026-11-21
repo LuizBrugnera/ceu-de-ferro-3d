@@ -37430,7 +37430,7 @@ function vkit() {
     done(pm, wreck, spin) {   // spin: the uniform the model's wheels turn by (none on a wreck)
       const W = new THREE.Color(VKC.wreck), C = new THREE.Color();
       for (const e of B.values()) {
-        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex), ge = vkGeo(e.l); m.userData.c = hex;
+        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex, { flatShading: false }), ge = vkGeo(e.l); m.userData.c = hex;   // smooth: only the round pieces show it (a box's, a prism's and a disc's normals are their faces')
         if (spin && ge.attributes.aWheel) spinMat(m, spin);
         const me = new THREE.Mesh(ge, m); e.to.add(me); if (e.pid) (pm[e.pid] || (pm[e.pid] = [])).push(me);
       }
@@ -37442,15 +37442,15 @@ function vkit() {
 /* running gear. Wheels on axles x (r, w wide; w2 the rear ones, twin tyres), at ±z, each side filed under pL and pR; a track run from x0 to
    x1 at ±z, tw wide and h high, with n road wheels, a sprocket at the front and an idler at the back, the side's wheels and belt under pL, pR */
 function vkWheels(K, g, P2, ax, z, r, w, w2, pL, pR) {
-  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 10, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 6, x, r, s * z); K.W = null; } });
+  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 14, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 10, x, r, s * z); K.W = null; } });
 }
 function vkTracks(K, g, P2, x0, x1, z, tw, h, n, pL, pR) {
   const L = x1 - x0, rr = h / 2, cx = (x0 + x1) / 2;
   for (const s of LRS) {
     const p = s < 0 ? pL : pR, Z = s * z;
     K.box(g, p, VKC.dk, L - h, .1, tw, cx, h - .05, Z).box(g, p, VKC.dk, L - h, .1, tw, cx, .05, Z);   // the upper and the lower run
-    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 8, x, rr, Z).dz(g, p, P2, rr * f, 6, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
-    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 8, x, h * .4, Z).dz(g, p, P2, h * .3, 6, x, h * .4, Z + s * (tw * .35 + .01), s); }
+    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 10, x, rr, Z).dz(g, p, P2, rr * f, 8, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
+    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 10, x, h * .4, Z).dz(g, p, P2, h * .3, 8, x, h * .4, Z + s * (tw * .35 + .01), s); }
     K.W = null;
   }
 }
@@ -38686,27 +38686,48 @@ function lookSup(b, m) {
 /* a site of the economy, in buildSup's style: boxes in the side's colours, rising with its progress. usina: a slab, a boiler house, two
    chimneys and a transformer yard; mina: a headframe, a wheel, a spoil heap and a shed; fabrica: a hall with a sawtooth roof, a chimney and a yard.
    U.rise: [mesh, bottom, height] scaled from the ground up with the build; U.late: from half built; U.roof: from .85; U.mast: when finished.
-   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site */
+   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site.
+   ECOL (cf-pol-modelos): the chimneys round and tapered, with a dark rim at the top; the mine's headframe braced (its four posts and the
+   crosses of each face one mesh) under a spoked wheel on two legs (one mesh), which comes and goes with the deck it stands on (U.roof), and
+   its spoil a heap where it was a slab */
+const ECOL = { brick: 0x5b4334, rim: 0x2c2623, steel: 0x34372f, spoil: 0x625646, seg: 12 };
 function buildEco(e) {
   const g = new THREE.Group(), [w, d, h] = ECO.site[e.k].box, sd = S.E.sides[S.fac[e.team]], U = g.userData, R = (U.R = new THREE.Group());
   let to = R; g.add(R);
   const box = (sx, sy, sz, x, y, z, c) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat(c)); m.position.set(x, y, z); to.add(m); return m; };
   const rise = (sx, sy, sz, x, y, z, c) => { const m = box(sx, sy, sz, x, y + sy / 2, z, c); (U.rise || (U.rise = [])).push([m, y, sy]); return m; };
+  const one = (l, c, x, y, z, o) => { const m = new THREE.Mesh(vkGeo(l), mat(c, o)); m.position.set(x, y, z); to.add(m); return m; };   // pieces placed about x y z, one mesh
+  const piece = (ge, x, y, z, rx, ry, rz) => { if (rx) ge.rotateX(rx); if (ry) ge.rotateY(ry); if (rz) ge.rotateZ(rz); ge.translate(x, y, z); return ge; };
+  /* a chimney: r0 at the foot, r1 at the top, a dark rim round its mouth */
+  const chimney = (r0, r1, ch, x, y, z) => one([piece(new THREE.CylinderGeometry(r1, r0, ch - .5, ECOL.seg), 0, (ch - .5) / 2, 0), piece(new THREE.CylinderGeometry(r1 * 1.12, r1 * 1.12, .5, ECOL.seg), 0, ch - .25, 0)], ECOL.brick, x, y, z, { flatShading: false });
   U.late = []; U.roof = []; U.posts = [];
   box(w + 2, .5, d + 2, 0, .05, 0, 0x6b5f47);
   if (e.k === 'pow') {
     rise(w * .55, h * .7, d * .6, -w * .12, .3, 0, sd.col);
     U.roof.push(box(w * .6, .4, d * .65, -w * .12, h * .7 + .5, 0, sd.col2));
-    U.late.push(box(1.4, h * 1.5, 1.4, w * .25, .3 + h * .75, d * .2, 0x4a4034), box(1.2, h * 1.8, 1.2, w * .25, .3 + h * .9, -d * .2, 0x4a4034));
+    U.late.push(chimney(.85, .55, h * 1.5, w * .25, .3, d * .2), chimney(.75, .48, h * 1.8, w * .25, .3, -d * .2));
     for (let i = 0; i < 3; i++) U.late.push(box(1.6, 1.4, 1.2, -w / 2 + 1.4 + i * 2, .9, d / 2 - 1.2, 0x55633a));
   } else if (e.k === 'mine') {
-    for (const [i, j] of CORN) U.posts.push(box(.4, h, .4, i * 2, h / 2 + .3, j * 2, 0x4a4034));
+    /* the headframe: four posts, and on each face two crosses one over the other */
+    const fr = CORN.map(([i, j]) => piece(new THREE.BoxGeometry(.4, h, .4), i * 2, h / 2 + .3, j * 2)), L = Math.hypot(4, h / 2), an = Math.atan2(h / 2, 4);
+    for (let f = 0; f < 4; f++) for (let k = 0; k < 2; k++) for (const s of [1, -1]) {
+      const t = f * Math.PI / 2, ge = piece(new THREE.BoxGeometry(L, .16, .16), 0, 0, 0, 0, 0, s * an); ge.rotateY(t);   // in its face, out on that face's side
+      fr.push(ge.translate(2 * Math.sin(t), .3 + h / 4 + k * h / 2, 2 * Math.cos(t)));
+    }
+    U.posts.push(one(fr, 0x4a4034, 0, 0, 0));
     U.roof.push(box(5, .5, 5, 0, h + .55, 0, sd.col2));
-    U.late.push(box(.5, 2.4, 2.4, 0, h + 1.5, 0, 0x34372f), box(w * .9, 1.6, w * .6, -w * .9, .9, w * .2, 0x6b5f47), box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
+    /* the wheel over the shaft, its axle along x, on two legs from the deck */
+    const wr = 1.1, wy = h + .8 + wr + .35, wl = [piece(new THREE.TorusGeometry(wr, .13, 6, 18), 0, 0, 0, 0, Math.PI / 2), piece(new THREE.CylinderGeometry(.2, .2, .7, 8), 0, 0, 0, 0, 0, Math.PI / 2)];
+    for (let k = 0; k < 3; k++) wl.push(piece(new THREE.BoxGeometry(.1, wr * 2, .1), 0, 0, 0, k * Math.PI / 3));
+    for (const s of [1, -1]) wl.push(piece(new THREE.BoxGeometry(.16, wr + .35, .16), s * .4, -(wr + .35) / 2, 0));
+    U.roof.push(one(wl, ECOL.steel, 0, wy, 0));   // with the deck it stands on: not before it, and not over a wrecked mine's bare ground (it hung in the air)
+    /* the spoil heap, low and long */
+    const hp = new THREE.ConeGeometry(1, 1, 8); hp.scale(w * .5, 2.4, w * .34); const heap = new THREE.Mesh(hp, mat(ECOL.spoil)); heap.position.set(-w * .9, .3 + 1.2, w * .2); to.add(heap);
+    U.late.push(heap, box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
   } else {
     rise(w * .8, h * .8, d * .7, 0, .3, 0, sd.col);
     for (let i = 0; i < 3; i++) { const m = box(w * .24, .4, d * .72, (i - 1) * w * .26, h * .8 + .9, 0, sd.col2); m.rotation.z = .35; U.roof.push(m); }
-    U.late.push(box(1.6, h * 1.8, 1.6, w * .38, .3 + h * .9, -d * .25, 0x4a4034), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
+    U.late.push(chimney(.95, .6, h * 1.8, w * .38, .3, -d * .25), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
   }
   U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 4.2, d / 2 + .7, e.team === S.me ? 0x6fc3b2 : 0xe2604f)];
   if (e.lot >= 0) {   // a shed or a block of the town: plaster walls, a tiled gable roof
@@ -48071,7 +48092,8 @@ buildTrn = (f => (u, wreck) => {
   const L = [];
   for (const c of g.children) {
     const ge = c.geometry, q = ge && ge.parameters; if (!c.isMesh || ge.type !== 'CylinderGeometry' || Math.abs(c.rotation.x - Math.PI / 2) > 1e-6 || c.rotation.z || q.radiusTop !== q.radiusBottom || q.radialSegments !== 12) continue;
-    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 6); if (s < 0) h.rotateY(Math.PI);
+    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 10); if (s < 0) h.rotateY(Math.PI);
+    if (c.material.flatShading) { c.material.flatShading = false; c.material.needsUpdate = true; }   // the tyre round, as the kit's
     h.translate(c.position.x, c.position.y, c.position.z + s * (q.height / 2 + .012)); h.userData.wheel = [c.position.x, c.position.y, c.position.z, r]; L.push(h);
   }
   if (!L.length) return g;

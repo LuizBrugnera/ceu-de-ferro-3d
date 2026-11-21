@@ -11588,7 +11588,7 @@ function stepShots(dt) {
         }
         if (!b.gone) for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) {   // a soldier: where the round passed nearest in this step; a near miss pins an AI one
           const rx = m.x - b.x, rz = m.z - b.z;
-          if (m.dead || safe(m, b) || rx * rx + rz * rz > 900) continue;
+          if (m.dead || rx * rx + rz * rz > 900 || safe(m, b)) continue;   // the 30 m first: safe() only reads (team, shooter, FF), so the order is free, and it was called for every soldier on the map, ~45 000 times a step in a fight (cf-lag-3)
           const t = clamp((rx * b.vx + rz * b.vz) / (b.vx * b.vx + b.vz * b.vz || 1), -back, 0), d = Math.hypot(rx - b.vx * t, rz - b.vz * t), y = b.y + b.vy * t - m.y, H = STANCE[m.st].h * MAN.sc;
           if (d < MAN.r * MAN.sc && y > -.3 && y < H) { impact(m, HK.bullet, b.dmg, b.by, b.x + b.vx * t, b.y + b.vy * t, b.z + b.vz * t, b.vx, b.vy, b.vz); b.gone = true; break; }
           if (d < SUP.r && y < H + SUP.r && m.ai && !m.net) { if (!(m.sq && m.sq.ord && m.sq.ord.k === 'assault' && b.by && hdist(b.by, m) > IAI.fire)) m.sup = S.t + SUP.t; drInc(m, b.by, b.vx, b.vz, 1); }   // an assault is not pinned by fire from beyond a rifle's reach; its squad still hears it (its drill wants more of it)
@@ -20828,11 +20828,11 @@ function droneEnd(o, how, by, u) {
 function droneTouch(o) {
   const A = o.armed, r = o.def.r, db = { team: o.team, by: o.op || o, vx: 0 };
   for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {
-    if (u.dead || safe(u, db) || Math.abs(u.x - o.x) > 9 || Math.abs(u.z - o.z) > 9 || o.y > u.y + u.def.env[4] * 2 + 1.2) continue;
+    if (u.dead || Math.abs(u.x - o.x) > 9 || Math.abs(u.z - o.z) > 9 || o.y > u.y + u.def.env[4] * 2 + 1.2 || safe(u, db)) continue;   // the box first: safe() only reads (cf-lag-3)
     toBody(u, o.x - u.x, 0, o.z - u.z, 0);
     if (Math.abs(HB[0]) < u.def.env[3] + (A ? .8 : 0) && Math.abs(HB[2]) < u.def.env[5] + (A ? .8 : 0)) return u;
   }
-  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) { const R = A ? 2.5 : MAN.r * MAN.sc + r * .5; if (!m.dead && !safe(m, db) && !m.in && Math.abs(m.x - o.x) < R && Math.abs(m.z - o.z) < R && o.y - m.y < (A ? 3.5 : STANCE[m.st].h * MAN.sc + r) && o.y > m.y - 1) return m; }
+  for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) { const R = A ? 2.5 : MAN.r * MAN.sc + r * .5; if (!m.dead && !m.in && Math.abs(m.x - o.x) < R && Math.abs(m.z - o.z) < R && o.y - m.y < (A ? 3.5 : STANCE[m.st].h * MAN.sc + r) && o.y > m.y - 1 && !safe(m, db)) return m; }   // safe() last: it only reads (cf-lag-3)
   for (let _i = 0, _l = S.planes, p = _l[0]; _i < _l.length; p = _l[++_i]) if (!p.dead && !safe(p, db) && dist(p, o) < Math.max(5, p.def.len * .4)) return p;
   for (let _i = 0, _l = S.sup, b = _l[0]; _i < _l.length; b = _l[++_i]) if (!b.dead && b.team !== o.team && hdist(b, o) < 8 && o.y < b.y + 6) return b;
   return null;
@@ -21010,7 +21010,7 @@ function droneShots(dt) {
     const vx = b.vx * dt, vy = b.vy * dt, vz = b.vz * dt, vv = vx * vx + vy * vy + vz * vz || 1;
     for (const o of L) {
       const rx = o.x - b.x, ry = o.y - b.y, rz = o.z - b.z;
-      if (o.dead || o.gone || safe(o, b) || Math.abs(rx) > 40 || Math.abs(ry) > 40 || Math.abs(rz) > 40) continue;
+      if (Math.abs(rx) > 40 || Math.abs(ry) > 40 || Math.abs(rz) > 40 || o.dead || o.gone || safe(o, b)) continue;   // the box first: safe() only reads (cf-lag-3)
       const t = clamp((rx * vx + ry * vy + rz * vz) / vv, 0, 1);
       if (Math.hypot(rx - vx * t, ry - vy * t, rz - vz * t) < o.def.r) { droneHit(o, b.dmg, b.by); b.gone = true; b.life = 0; break; }
     }
@@ -43936,9 +43936,18 @@ function gUnitsL(g, V, P, now) {
   }
   if (V.me && !V.u.some(u => u.me)) { gStar(g, P.X(V.me.x), P.Y(V.me.z) - 12, 6 * k, '#ffffff'); }
 }
-/* the place names always, then the units' tags where they sit on no other text of the map (gPut; cf-pol-hud: a town full of squads was a blot) */
+/* the place names always, then the units' tags where they sit on no other text of the map (gPut; cf-pol-hud: a town full of squads was a blot).
+   A place's name goes under its ring, or above it, right or left of it where that is the first spot with no text of the map yet (GV.lr:
+   the towns' names and the names before it, with a gap of m px on each side); with none free, under it. Two points 1.6 km apart (Travessia and Vila do Moinho) wrote their
+   names over each other at the zoom the view opens with (cf-pol-cenario; tests/map-labels.js) */
 function gLabels(g, V, P) {
-  for (const p of V.pts) if (p.name && gOn(P, p.x, p.z, 80)) gTxt(g, p.name, P.X(p.x), P.Y(p.z) + Math.max(9 * P.k, (p.r || 60) * P.s) + 13 * P.k, 11 * P.k, '#ece6d6', 'center');
+  for (const p of V.pts) if (p.name && gOn(P, p.x, p.z, 80)) {
+    const x = P.X(p.x), y = P.Y(p.z), r = Math.max(9 * P.k, (p.r || 60) * P.s), sz = 11 * P.k; g.font = gMono(sz);
+    const w = g.measureText(p.name).width + 4, at = [[x, y + r + 13 * P.k, 'center'], [x, y - r - 5 * P.k, 'center'], [x + r + 5 * P.k, y + sz * .35, 'left'], [x - r - 5 * P.k, y + sz * .35, 'right']];
+    const m = 8 * P.k, free = ([sx, sy, al]) => { const x0 = (al === 'center' ? sx - w / 2 : al === 'right' ? sx - w : sx) - 2, y0 = sy - sz; return !GV.lr.some(q => x0 - m < q[0] + q[2] && x0 + w + m > q[0] && y0 < q[1] + q[3] && y0 + sz + 3 > q[1]); };   // m: a gap, so that two names side by side do not read as one
+    const s = at.find(free) || at[0];
+    gTxt(g, p.name, s[0], s[1], sz, '#ece6d6', s[2]);
+  }
   if (GV.sc < GV.fit * 1.2 && V.u.length > 60) return;
   for (const u of V.u) { if (!u.tag || !gOn(P, u.x, u.z, 20)) continue; gPut(g, u.tag, P.X(u.x), P.Y(u.z) + 20 * P.k, 9.5 * P.k, gCol(V, u.t)); }
 }

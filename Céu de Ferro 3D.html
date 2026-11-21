@@ -7000,16 +7000,127 @@ function addUnit(kind, team, x, z, id, fixed, ri, s, lane, ci) {
 }
 /* the nearest road to a point: route ri, distance s along it and the signed offset to its side */
 function railOf(x, z) {
-  let b = { d: 1e9 };
-  const R = S.T.routes;
+  const R = S.T.routes, X = rixOf(R);
+  if (!rixNear(X, x, z, rixScan)) return railAll(R, x, z);   // off the grid, or not a number: every segment, as before
+  const g = RIX.q.g; if (g < 0) return { d: 1e9 };
+  const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), ox = x - ax - ex * t, oz = z - az - ez * t;
+  return { d: RIX.q.d, ri: X.li[g], s: X.as[g] + L * t, off: (oz * ex - ox * ez) / L };
+}
+/* railOf over every segment of every road (the loop before RIX): off the grid, and the reference RIX answers as */
+function railAll(R, x, z) {
+  let bd = 1e9, bri = -1, bs = 0, bo = 0;
   for (let ri = 0; ri < R.length; ri++) {
     const r = R[ri];
     for (let i = 1; i < r.length; i++) {
       const a = r[i - 1], ex = r[i].x - a.x, ez = r[i].z - a.z, L = Math.sqrt(ex * ex + ez * ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), ox = x - a.x - ex * t, oz = z - a.z - ez * t, d = Math.sqrt(ox * ox + oz * oz);   // sqrt, not Math.hypot: 3x dearer (cf-lag)
-      if (d < b.d) b = { d, ri, s: a.s + L * t, off: (oz * ex - ox * ez) / L };
+      if (d < bd) { bd = d; bri = ri; bs = a.s + L * t; bo = (oz * ex - ox * ez) / L; }   // the numbers, and one object at the end (cf-lag-2: an object for each nearer segment before)
     }
   }
-  return b;
+  return bri < 0 ? { d: 1e9 } : { d: bd, ri: bri, s: bs, off: bo };
+}
+/* RIX (cf-lag-2): the segments of a set of polylines in squares of c m, so that the nearest-road questions read the few segments round a
+   point instead of every point of every road (a forward base's pick read them all in each cell of the map). Two sets: the main roads
+   (S.T.routes, railOf) and the edges of the network (T.net.e, netNear). Built the first time a set is asked for (a terrain is shared by
+   every match on its map and its roads do not move), again when it changes. Segment g is (line li, point i), numbered in that order, with
+   the numbers the old loops computed (a the first point, e the step, L its length: Math.sqrt for railOf, Math.hypot for netNear, as a.s),
+   so the answers are the same numbers, and on a tie the first segment, as the loops gave. The same for the points of a road's 50 m samples
+   (sOn's walk along a road, sNear). The grid covers the terrain's ground (and the roads'
+   box); a point off it is answered by the old loop over every segment. dk: how many squares from each square to the nearest one with a
+   segment (the rings inside are empty, so the search starts there: a point 3 km from every road reads a few rings, not fifteen). sm: the 50 m samples of a road for sOn (as
+   routeAt gives them) */
+const RIX = { c: 200, w: new WeakMap(), sm: new WeakMap(), q: { d: 1e9, g: -1 } };
+/* the grid of polylines Ls (arrays of points with s) over terrain T's ground and the polylines' box; hyp: lengths by Math.hypot */
+function rixBuild(Ls, hyp, T) {
+  let n = 0, x0 = T.x0, z0 = T.z0, x1 = T.x0 + T.N * T.cx, z1 = T.z0 + T.N * T.cz;
+  for (const r of Ls) { n += Math.max(0, r.length - 1); for (const p of r) { x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); z0 = Math.min(z0, p.z); z1 = Math.max(z1, p.z); } }
+  const X = rixGrid(n, x0, z0, x1, z1);
+  Object.assign(X, { hyp, ax: new Float64Array(n), az: new Float64Array(n), ex: new Float64Array(n), ez: new Float64Array(n), L: new Float64Array(n), as: new Float64Array(n), li: new Int32Array(n) });
+  const c = RIX.c, cells = Array.from({ length: X.nx * X.nz }, () => []); let g = 0;
+  for (let li = 0; li < Ls.length; li++) {
+    const r = Ls[li];
+    for (let i = 1; i < r.length; i++, g++) {
+      const a = r[i - 1], b = r[i], ex = b.x - a.x, ez = b.z - a.z;
+      X.ax[g] = a.x; X.az[g] = a.z; X.ex[g] = ex; X.ez[g] = ez; X.L[g] = (hyp ? Math.hypot(ex, ez) : Math.sqrt(ex * ex + ez * ez)) || 1; X.as[g] = a.s; X.li[g] = li;
+      const i0 = Math.floor((Math.min(a.x, b.x) - X.x0) / c), i1 = Math.floor((Math.max(a.x, b.x) - X.x0) / c), j0 = Math.floor((Math.min(a.z, b.z) - X.z0) / c), j1 = Math.floor((Math.max(a.z, b.z) - X.z0) / c);
+      for (let j = j0; j <= j1; j++) for (let k = i0; k <= i1; k++) cells[j * X.nx + k].push(g);   // every square its box touches: the one of its nearest point to anywhere among them
+    }
+  }
+  return rixCells(X, cells);
+}
+/* the grid of points (xs, zs: the samples of a road) over terrain T's ground and the points' box, a point in the square it lies in */
+function rixPts(xs, zs, T) {
+  const n = xs.length; let x0 = T.x0, z0 = T.z0, x1 = T.x0 + T.N * T.cx, z1 = T.z0 + T.N * T.cz;
+  for (let i = 0; i < n; i++) { x0 = Math.min(x0, xs[i]); x1 = Math.max(x1, xs[i]); z0 = Math.min(z0, zs[i]); z1 = Math.max(z1, zs[i]); }
+  const X = Object.assign(rixGrid(n, x0, z0, x1, z1), { px: xs, pz: zs }), c = RIX.c, cells = Array.from({ length: X.nx * X.nz }, () => []);
+  for (let i = 0; i < n; i++) cells[Math.floor((zs[i] - X.z0) / c) * X.nx + Math.floor((xs[i] - X.x0) / c)].push(i);
+  return rixCells(X, cells);
+}
+/* the squares over a box, one more round it (none when there is nothing to hold) */
+const rixGrid = (n, x0, z0, x1, z1) => ({ x0: x0 - RIX.c, z0: z0 - RIX.c, nx: n ? Math.ceil((x1 - x0) / RIX.c) + 3 : 0, nz: n ? Math.ceil((z1 - z0) / RIX.c) + 3 : 0 });
+/* the squares' lists packed (at: where square k's starts in sg), and dk */
+function rixCells(X, cells) {
+  X.at = new Int32Array(cells.length + 1); for (let k = 0; k < cells.length; k++) X.at[k + 1] = X.at[k] + cells[k].length;
+  X.sg = new Int32Array(X.at[cells.length]); for (let k = 0; k < cells.length; k++) X.sg.set(cells[k], X.at[k]);
+  const nx = X.nx, nz = X.nz, dk = (X.dk = new Int32Array(nx * nz)), BIG = nx + nz + 2;   // the chessboard distance to a square with something, two passes
+  for (let k = 0; k < dk.length; k++) dk[k] = cells[k].length ? 0 : BIG;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; let v = dk[k]; if (i) v = Math.min(v, dk[k - 1] + 1); if (j) { v = Math.min(v, dk[k - nx] + 1); if (i) v = Math.min(v, dk[k - nx - 1] + 1); if (i < nx - 1) v = Math.min(v, dk[k - nx + 1] + 1); } dk[k] = v; }
+  for (let j = nz; j--;) for (let i = nx; i--;) { const k = j * nx + i; let v = dk[k]; if (i < nx - 1) v = Math.min(v, dk[k + 1] + 1); if (j < nz - 1) { v = Math.min(v, dk[k + nx] + 1); if (i < nx - 1) v = Math.min(v, dk[k + nx + 1] + 1); if (i) v = Math.min(v, dk[k + nx - 1] + 1); } dk[k] = v; }
+  return X;
+}
+/* the main roads' grid, again if a road is added or one is not the same */
+function rixOf(R) {
+  let X = RIX.w.get(R), ok = !!X && X.nr === R.length;
+  for (let ri = 0; ok && ri < R.length; ri++) ok = X.rs[ri] === R[ri] && X.np[ri] === R[ri].length;
+  if (ok) return X;
+  X = Object.assign(rixBuild(R, false, S.T), { nr: R.length, np: R.map(r => r.length), rs: R.slice() });
+  RIX.w.set(R, X);
+  return X;
+}
+/* the network's grid: its edges up to ne (the bridges' pontoons add edges after the terrain's and take them away again: those after ne are
+   read one by one, after the grid, as the loop read them) */
+function rixNet(N, T) {
+  const E = N.e; let X = RIX.w.get(N);
+  if (X && X.e === E && E.length >= X.ne && E[X.ne - 1] === X.last) return X;
+  X = Object.assign(rixBuild(E.map(e => e.p), true, T), { e: E, ne: E.length, last: E[E.length - 1] });
+  RIX.w.set(N, X);
+  return X;
+}
+/* the nearest segment (or point) of grid X to x z by scan, in RIX.q (d, g; g -1 none), ring by ring of squares round the point's from the
+   first that can hold one (dk): every one whose nearest point lies beyond ring k is k * c m away or more. False when x z is off the grid (or
+   not a number): the caller reads them all, as before */
+function rixNear(X, x, z, scan) {
+  const c = RIX.c, cx = Math.floor((x - X.x0) / c), cz = Math.floor((z - X.z0) / c), nx = X.nx, nz = X.nz;
+  if (!(cx >= 0 && cx < nx && cz >= 0 && cz < nz)) return false;
+  const Q = RIX.q, K = Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz); Q.d = 1e9; Q.g = -1;
+  for (let k = X.dk[cz * nx + cx]; k <= K; k++) {
+    for (let j = Math.max(0, cz - k), jb = Math.min(nz - 1, cz + k); j <= jb; j++) {
+      if (j === cz - k || j === cz + k) { for (let i = Math.max(0, cx - k), ib = Math.min(nx - 1, cx + k); i <= ib; i++) scan(X, j * nx + i, x, z); }
+      else { if (cx - k >= 0) scan(X, j * nx + cx - k, x, z); if (k && cx + k < nx) scan(X, j * nx + cx + k, x, z); }
+    }
+    if (Q.g >= 0 && Q.d < k * c - 1e-3) break;
+  }
+  return true;
+}
+/* the segments of square k against the nearest so far (RIX.q: d, g): the arithmetic of railOf's loop, the lower g on a tie */
+function rixScan(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) {
+    const g = sg[n], ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), ox = x - ax - ex * t, oz = z - az - ez * t, d = Math.sqrt(ox * ox + oz * oz);
+    if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
+  }
+}
+/* the points of square k (a road's samples, rixPts) against the nearest so far: Math.hypot, as sOn's walk, the lower index on a tie */
+function rixScanP(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) { const i = sg[n], d = Math.hypot(X.px[i] - x, X.pz[i] - z); if (d < Q.d || (d === Q.d && i < Q.g)) { Q.d = d; Q.g = i; } }
+}
+/* the same with netNear's arithmetic (the point on the segment, then Math.hypot to it) */
+function rixScanN(X, k, x, z) {
+  const Q = RIX.q, sg = X.sg;
+  for (let n = X.at[k], e = X.at[k + 1]; n < e; n++) {
+    const g = sg[n], ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1), d = Math.hypot(x - (ax + ex * t), z - (az + ez * t));
+    if (d < Q.d || (d === Q.d && g < Q.g)) { Q.d = d; Q.g = g; }
+  }
 }
 /* ---------- path-finding on the road network (map version 2; nothing in the game calls it yet) ----------
    netNear: the nearest point of any edge. netPath: the cheapest way between two nodes (Dijkstra, ties by index); cost(e) defaults to the edge's
@@ -7017,12 +7128,20 @@ function railOf(x, z) {
    point by the network (start, its projection on the nearest edge, the path, the target's projection, the target), with ri and s1 when the end
    lies on a main road (a vehicle or a squad rides it as it rides the route) */
 function netNear(x, z, T) {
-  T = T || S.T; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
-  for (const E of T.net.e) for (let i = 1; i < E.p.length; i++) {
-    const a = E.p[i - 1], ex = E.p[i].x - a.x, ez = E.p[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
-    if (d < b.d) b = { e: E.i, s: a.s + L * t, d, x: px, z: pz };
+  T = T || S.T; const N = T.net, X = rixNet(N, T);
+  if (!rixNear(X, x, z, rixScanN)) return netAll(N.e, 0, x, z, { e: -1, s: 0, d: 1e9, x: 0, z: 0 });   // off the grid, or not a number: every edge, as before
+  const g = RIX.q.g; let b = { e: -1, s: 0, d: 1e9, x: 0, z: 0 };
+  if (g >= 0) { const ax = X.ax[g], az = X.az[g], ex = X.ex[g], ez = X.ez[g], L = X.L[g], t = clamp(((x - ax) * ex + (z - az) * ez) / (L * L), 0, 1); b = { e: N.e[X.li[g]].i, s: X.as[g] + L * t, d: RIX.q.d, x: ax + ex * t, z: az + ez * t }; }
+  return X.ne < N.e.length ? netAll(N.e, X.ne, x, z, b) : b;   // the pontoons' edges after the grid's
+}
+/* netNear's loop over the edges from e0 on, against the nearest so far b (the loop before RIX) */
+function netAll(E, e0, x, z, b) {
+  let bd = b.d, be = -1, bs = 0, bx = 0, bz = 0;
+  for (let k = e0; k < E.length; k++) for (let i = 1, P = E[k].p; i < P.length; i++) {
+    const a = P[i - 1], ex = P[i].x - a.x, ez = P[i].z - a.z, L = Math.hypot(ex, ez) || 1, t = clamp(((x - a.x) * ex + (z - a.z) * ez) / (L * L), 0, 1), px = a.x + ex * t, pz = a.z + ez * t, d = Math.hypot(x - px, z - pz);
+    if (d < bd) { bd = d; be = E[k].i; bs = a.s + L * t; bx = px; bz = pz; }
   }
-  return b;
+  return be < 0 ? b : { e: be, s: bs, d: bd, x: bx, z: bz };
 }
 function netPath(a, b, cost, mode, T) {
   T = T || S.T; mode = mode || 'veh';
@@ -10567,9 +10686,20 @@ function holdPt(C, p, q) {
 /* the s on road ri nearest x z */
 function sOn(ri, x, z) {
   const p = railOf(x, z); if (p.ri === ri) return p.s;
-  const r = S.T.routes[ri]; let bs = 0, bd = 1e9;
-  for (let s = 0; s <= r.len; s += 50) { const q = routeAt(r, s), d = Math.hypot(q.x - x, q.z - z); if (d < bd) { bd = d; bs = s; } }
-  return bs;
+  return sNear(ri, x, z);
+}
+/* sOn off the nearest road: the s of road ri's 50 m sample nearest x z (the first on a tie), and its distance in RIX.sd. The samples are
+   routeAt's, kept once a road (RIX.sm, cf-lag-2: a binary search and an object each, 200-300 of them a call, before) */
+function sNear(ri, x, z) {
+  const r = S.T.routes[ri]; let M = RIX.sm.get(r);
+  if (!M || M.len !== r.len || M.np !== r.length) {
+    const xs = [], zs = []; for (let s = 0; s <= r.len; s += 50) { const q = routeAt(r, s); xs.push(q.x); zs.push(q.z); }
+    M = { len: r.len, np: r.length, x: Float64Array.from(xs), z: Float64Array.from(zs) }; M.g = rixPts(M.x, M.z, S.T); RIX.sm.set(r, M);
+  }
+  let bs = 0, bd = 1e9, kb = 0;
+  if (rixNear(M.g, x, z, rixScanP)) { kb = RIX.q.g; bs = kb * 50; }   // through the grid of the samples (cf-lag-2: every sample of the road before), s = 50 kb as the walk adds it
+  else for (let k = 0, s = 0; k < M.x.length; k++, s += 50) { const d = Math.hypot(M.x[k] - x, M.z[k] - z); if (d < bd) { bd = d; bs = s; kb = k; } }
+  RIX.sd = Math.hypot(M.x[kb] - x, M.z[kb] - z); return bs;   // bd, or NaN as routeAt(r, 0) gave for a point that is not a number
 }
 /* the dispersed elements (INC.disp): rec, small teams that go ahead of the line and out to its flanks from one hidden place to the next
    (on to another after move s at most), watching and not fighting; lp, a listening post off the flank of the foremost point a side holds
@@ -10593,7 +10723,7 @@ function hideAt(x, z, r) {
 }
 /* the post of the k-th team of a dispersed job */
 function postDisp(t, job, k) {
-  const R = S.T.routes, ds = t ? 1 : -1, G = INC.disp, ri = (frontR() + k) % R.length, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);
+  const R = S.T.routes, my = myRoutes(t), f = frontR(t), ri = my.length ? my[(Math.max(0, my.indexOf(f)) + k) % my.length] : (f + k) % R.length, ds = dsOf(t, ri), G = INC.disp, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);   // 3 sides: only the side's own roads, each its own way (with two, (front + k) % 3 as before)
   let x, z;
   if (job === 'rec') { const s = clamp(ls + ds * rand(G.rec.ahead[0], G.rec.ahead[1]), 0, r.len), p = routeAt(r, s), off = sd * rand(G.rec.side[0], G.rec.side[1]); x = p.x - p.dz * off; z = p.z + p.dx * off; }
   else {
@@ -10868,14 +10998,14 @@ function spawnBase() {
 /* where the AI would build next: behind its line on a road that has no base of its side yet, the front road first, then behind a town it
    holds; beside the road, on the first place that siteWhy lets through */
 function aiSite(t) {
-  const A = BLD.ai, R = S.T.routes, ds = t ? 1 : -1, fr = frontR(), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];
+  const A = BLD.ai, R = S.T.routes, ds = ri => dsOf(t, ri), fr = frontR(t), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];   // 3 sides: its own front and roads, each its own way
   if ((S.net && !Net.sb) || mine.length >= supBots(t)) return null;
   const bk = S.fld[t].bk || 0;   // after a loss the next one lies farther back
   for (const l of S.T.lots || []) if (l.team === t && l.k === 'dep' && !siteWhy(t, l.x, l.z, l.a)) { const p = railOf(l.x, l.z); return { k: 'build', ri: p.ri, s: p.s, x: l.x, z: l.z, a: l.a, R: 9 }; }   // the seat town's depot lot first
-  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
+  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
   tries.push(...bmrSupTries(t, mine));   // then behind the points it holds, the most forward first (BMR)
-  for (const ri of axesFrom(fr)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds * (A.back + bk + k * 70), sd * A.off]);
-  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);
+  for (const ri of axesFrom(fr, t)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds(ri) * (A.back + bk + k * 70), sd * A.off]);
+  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);
   for (const [ri, s, off] of tries) {
     const p = routeAt(R[ri], clamp(s, 0, R[ri].len)), x = p.x - p.dz * off, z = p.z + p.dx * off, a = Math.atan2(-p.dz, p.dx);
     if (!siteWhy(t, x, z, a)) return { k: 'build', ri, s, x, z, a, R: 9 };
@@ -14155,7 +14285,7 @@ function heliBP(p, t) {
   }
   return Object.assign(best || open || { x: p.x, z: p.z, pop: HAI.pop[1], open: 1 }, { of: t, tx: t.x, tz: t.z });
 }
-const heliHold = p => { const fr = frontR(), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - (p.team ? 1 : -1) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
+const heliHold = p => { const fr = frontR(p.team), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - dsOf(p.team, fr) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
 function heliExpo(A) { if (A.t0) { (S.hx || (S.hx = [])).push(+(S.t - A.t0).toFixed(2)); if (S.hx.length > 400) S.hx.shift(); A.t0 = 0; } }
 function aiAttack(p, A, dt, msl) {
   const d = p.def, c = p.ctl, agl = p.y - hgt(p.x, p.z) - d.gh, pad = A.pad || (A.pad = heliPad(p.team, 3));
@@ -14205,7 +14335,7 @@ function aiAttack(p, A, dt, msl) {
 }
 /* a flat clear place near the side's line with no enemy close */
 function heliLZ(team) {
-  const Z = HAI.lift.lz, fr = frontR(), r = S.T.routes[fr], ds = team ? 1 : -1, s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
+  const Z = HAI.lift.lz, fr = frontR(team), r = S.T.routes[fr], ds = dsOf(team, fr), s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
   for (let i = 0; i < 16; i++) {
     const o = (i % 2 ? 1 : -1) * rand(Z[1], Z[2]), a = rand(-150, 150), x = q.x - q.dz * o + q.dx * a, z = q.z + q.dx * o + q.dz * a, g = hgt(x, z);
     if (g <= S.T.WL + 1 || kindAt(x, z) === 1 || Math.max(Math.abs(hgt(x + 8, z) - hgt(x - 8, z)), Math.abs(hgt(x, z + 8) - hgt(x, z - 8))) / 16 > Z[3] || near(x, z, 30).some(solid)) continue;
@@ -15419,8 +15549,12 @@ function daLock(p) {
 }
 /* an aircraft's drill steers only while its controller is not breaking from a foe on its tail or turning a missile it knows of onto the beam */
 const daFree = p => S.t >= p.brk && !S.missiles.some(m => m.target === p && !m.gone && dist(m, p) < PAI.msl);
-/* an aircraft's drill flies dir as aiPlane would: off the map's edge, the ground and the hills ahead first */
+/* an aircraft's drill flies dir as aiPlane would: off the map's edge, the ground and the hills ahead first. Not a strategic bomber lining up
+   or on its bomb run (STK, stkFly: straight and high, no break, no beam): the radar drill dived and turned the B-2 off its line near the
+   target, so it went round again or laid its stick 170 m beside it. Its flares still go (act) */
+const daHeld = p => p.role === 'strat' && !!p.bs && (p.bs.st === 'in' || p.bs.st === 'run');
 function daFly(p, dir) {
+  if (daHeld(p)) return;
   const M = PAI.edge[0] + p.V * ASPD * PAI.edge[1]; if (p.x < M || p.x > S.W - M || Math.abs(p.z) > S.HW - M) dir = toward(p, S.W / 2, 0, hgt(p.x, p.z) + 700);
   const hf = Math.hypot(p.f.x, p.f.z) || 1, fx0 = p.f.x / hf, fz0 = p.f.z / hf, wv = vel(p), agl = p.y - hgt(p.x, p.z), ahead = p.y - hgt(p.x + wv.x * 3, p.z + wv.z * 3);
   const far = Math.max(hgt(p.x + wv.x * 8, p.z + wv.z * 8), hgt(p.x + wv.x * 14, p.z + wv.z * 14)) + 180 - p.y;
@@ -20326,7 +20460,7 @@ function cmdReq(C) {
   C.wantT = W ? C.wantT || S.t : 0;
   if (!Q || Q.ph || !cqSim() || S.t < (C.rqT || 0)) return;
   C.rqT = S.t + G.every;
-  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR();
+  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR(t);   // its own front road (3 sides: the Insurgents' AA came on road 0, the USA's)
   const put = (kind, id, ri) => genCmd(t, { c: 'req', k: kind, ri }, 'ai', { id }).ok;
   if (mine.some(u => u.ai.air > S.t)) C.airT = S.t;
   if (genBy(t, 'sup') !== 'ai') return;
@@ -20337,7 +20471,7 @@ const rqPick = pick;   // the model of a tank a person requisitions (the general
 /* a requisition filled (the AI's, and the general's own order): false when rqAI finds nothing */
 function reqOpen(C, kind, id, ri) {
   const t = C.t, Q = S.cq;
-  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, (t ? 1 : -1) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
+  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, dsOf(t, ri) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
 }
 Net.ui.req = () => {};
 Net.rx.req = m => {
@@ -20401,7 +20535,7 @@ function radScan() {
     const id = S.E.sides[S.fac[t]].rad, have = S.units.reduce((n, u) => n + (u.def.rad && u.team === t && !u.dead && !!u.ai && !u.ai.park ? 1 : 0), 0);
     if (have >= RAD.ai.n) { T[t] = Math.max(T[t], S.t + RAD.ai.again); continue; }
     if (!id || S.t < T[t]) continue;
-    const ri = frontR(), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's
+    const ri = frontR(t), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's, on its own front road
     addUnit('car', t, 0, 0, id, false, ri, e.s, 5, 9).rqa = 1; T[t] = S.t + RAD.ai.again;
   }
 }
@@ -21050,9 +21184,9 @@ const lsFront = t => { const fr = frontR(), my = lsRoutes(t); return !my.length 
 /* railOf on side t's own roads only (its line and its depth are measured on them); every road with two sides */
 function lsRail(t, x, z) {
   const p = railOf(x, z), my = lsRoutes(t); if (!my.length || my.includes(p.ri)) return p;
-  let b = null;
-  for (const ri of my) { const s = sOn(ri, x, z), q = routeAt(S.T.routes[ri], s), d = Math.hypot(q.x - x, q.z - z); if (!b || d < b.d) b = { d, ri, s, off: d }; }   // off: unsigned here (its callers read |off|)
-  return b;
+  let bd = 0, bri = -1, bs = 0;
+  for (const ri of my) { const s = sNear(ri, x, z), d = RIX.sd; if (bri < 0 || d < bd) { bd = d; bri = ri; bs = s; } }   // sOn off p's road, and the distance to routeAt(s), which is that sample's (cf-lag-2: railOf again and an object each road)
+  return { d: bd, ri: bri, s: bs, off: bd };   // off: unsigned here (its callers read |off|)
 }
 /* the enemy base nearest x z (side t's foe) */
 const lsFoeBase = (t, x, z) => { const l = lsFoes(t).map(s => S.base[s]).filter(Boolean); return l.reduce((a, b) => (Math.hypot(b.x - x, b.z - z) < Math.hypot(a.x - x, a.z - z) ? b : a), l[0] || S.base[1 - t]); };
@@ -37434,7 +37568,7 @@ function vkit() {
     done(pm, wreck, spin) {   // spin: the uniform the model's wheels turn by (none on a wreck)
       const W = new THREE.Color(VKC.wreck), C = new THREE.Color();
       for (const e of B.values()) {
-        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex), ge = vkGeo(e.l); m.userData.c = hex;
+        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex, { flatShading: false }), ge = vkGeo(e.l); m.userData.c = hex;   // smooth: only the round pieces show it (a box's, a prism's and a disc's normals are their faces')
         if (spin && ge.attributes.aWheel) spinMat(m, spin);
         const me = new THREE.Mesh(ge, m); e.to.add(me); if (e.pid) (pm[e.pid] || (pm[e.pid] = [])).push(me);
       }
@@ -37446,15 +37580,15 @@ function vkit() {
 /* running gear. Wheels on axles x (r, w wide; w2 the rear ones, twin tyres), at ±z, each side filed under pL and pR; a track run from x0 to
    x1 at ±z, tw wide and h high, with n road wheels, a sprocket at the front and an idler at the back, the side's wheels and belt under pL, pR */
 function vkWheels(K, g, P2, ax, z, r, w, w2, pL, pR) {
-  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 10, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 6, x, r, s * z); K.W = null; } });
+  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 14, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 10, x, r, s * z); K.W = null; } });
 }
 function vkTracks(K, g, P2, x0, x1, z, tw, h, n, pL, pR) {
   const L = x1 - x0, rr = h / 2, cx = (x0 + x1) / 2;
   for (const s of LRS) {
     const p = s < 0 ? pL : pR, Z = s * z;
     K.box(g, p, VKC.dk, L - h, .1, tw, cx, h - .05, Z).box(g, p, VKC.dk, L - h, .1, tw, cx, .05, Z);   // the upper and the lower run
-    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 8, x, rr, Z).dz(g, p, P2, rr * f, 6, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
-    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 8, x, h * .4, Z).dz(g, p, P2, h * .3, 6, x, h * .4, Z + s * (tw * .35 + .01), s); }
+    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 10, x, rr, Z).dz(g, p, P2, rr * f, 8, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
+    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 10, x, h * .4, Z).dz(g, p, P2, h * .3, 8, x, h * .4, Z + s * (tw * .35 + .01), s); }
     K.W = null;
   }
 }
@@ -38690,27 +38824,48 @@ function lookSup(b, m) {
 /* a site of the economy, in buildSup's style: boxes in the side's colours, rising with its progress. usina: a slab, a boiler house, two
    chimneys and a transformer yard; mina: a headframe, a wheel, a spoil heap and a shed; fabrica: a hall with a sawtooth roof, a chimney and a yard.
    U.rise: [mesh, bottom, height] scaled from the ground up with the build; U.late: from half built; U.roof: from .85; U.mast: when finished.
-   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site */
+   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site.
+   ECOL (cf-pol-modelos): the chimneys round and tapered, with a dark rim at the top; the mine's headframe braced (its four posts and the
+   crosses of each face one mesh) under a spoked wheel on two legs (one mesh), which comes and goes with the deck it stands on (U.roof), and
+   its spoil a heap where it was a slab */
+const ECOL = { brick: 0x5b4334, rim: 0x2c2623, steel: 0x34372f, spoil: 0x625646, seg: 12 };
 function buildEco(e) {
   const g = new THREE.Group(), [w, d, h] = ECO.site[e.k].box, sd = S.E.sides[S.fac[e.team]], U = g.userData, R = (U.R = new THREE.Group());
   let to = R; g.add(R);
   const box = (sx, sy, sz, x, y, z, c) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat(c)); m.position.set(x, y, z); to.add(m); return m; };
   const rise = (sx, sy, sz, x, y, z, c) => { const m = box(sx, sy, sz, x, y + sy / 2, z, c); (U.rise || (U.rise = [])).push([m, y, sy]); return m; };
+  const one = (l, c, x, y, z, o) => { const m = new THREE.Mesh(vkGeo(l), mat(c, o)); m.position.set(x, y, z); to.add(m); return m; };   // pieces placed about x y z, one mesh
+  const piece = (ge, x, y, z, rx, ry, rz) => { if (rx) ge.rotateX(rx); if (ry) ge.rotateY(ry); if (rz) ge.rotateZ(rz); ge.translate(x, y, z); return ge; };
+  /* a chimney: r0 at the foot, r1 at the top, a dark rim round its mouth */
+  const chimney = (r0, r1, ch, x, y, z) => one([piece(new THREE.CylinderGeometry(r1, r0, ch - .5, ECOL.seg), 0, (ch - .5) / 2, 0), piece(new THREE.CylinderGeometry(r1 * 1.12, r1 * 1.12, .5, ECOL.seg), 0, ch - .25, 0)], ECOL.brick, x, y, z, { flatShading: false });
   U.late = []; U.roof = []; U.posts = [];
   box(w + 2, .5, d + 2, 0, .05, 0, 0x6b5f47);
   if (e.k === 'pow') {
     rise(w * .55, h * .7, d * .6, -w * .12, .3, 0, sd.col);
     U.roof.push(box(w * .6, .4, d * .65, -w * .12, h * .7 + .5, 0, sd.col2));
-    U.late.push(box(1.4, h * 1.5, 1.4, w * .25, .3 + h * .75, d * .2, 0x4a4034), box(1.2, h * 1.8, 1.2, w * .25, .3 + h * .9, -d * .2, 0x4a4034));
+    U.late.push(chimney(.85, .55, h * 1.5, w * .25, .3, d * .2), chimney(.75, .48, h * 1.8, w * .25, .3, -d * .2));
     for (let i = 0; i < 3; i++) U.late.push(box(1.6, 1.4, 1.2, -w / 2 + 1.4 + i * 2, .9, d / 2 - 1.2, 0x55633a));
   } else if (e.k === 'mine') {
-    for (const [i, j] of CORN) U.posts.push(box(.4, h, .4, i * 2, h / 2 + .3, j * 2, 0x4a4034));
+    /* the headframe: four posts, and on each face two crosses one over the other */
+    const fr = CORN.map(([i, j]) => piece(new THREE.BoxGeometry(.4, h, .4), i * 2, h / 2 + .3, j * 2)), L = Math.hypot(4, h / 2), an = Math.atan2(h / 2, 4);
+    for (let f = 0; f < 4; f++) for (let k = 0; k < 2; k++) for (const s of [1, -1]) {
+      const t = f * Math.PI / 2, ge = piece(new THREE.BoxGeometry(L, .16, .16), 0, 0, 0, 0, 0, s * an); ge.rotateY(t);   // in its face, out on that face's side
+      fr.push(ge.translate(2 * Math.sin(t), .3 + h / 4 + k * h / 2, 2 * Math.cos(t)));
+    }
+    U.posts.push(one(fr, 0x4a4034, 0, 0, 0));
     U.roof.push(box(5, .5, 5, 0, h + .55, 0, sd.col2));
-    U.late.push(box(.5, 2.4, 2.4, 0, h + 1.5, 0, 0x34372f), box(w * .9, 1.6, w * .6, -w * .9, .9, w * .2, 0x6b5f47), box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
+    /* the wheel over the shaft, its axle along x, on two legs from the deck */
+    const wr = 1.1, wy = h + .8 + wr + .35, wl = [piece(new THREE.TorusGeometry(wr, .13, 6, 18), 0, 0, 0, 0, Math.PI / 2), piece(new THREE.CylinderGeometry(.2, .2, .7, 8), 0, 0, 0, 0, 0, Math.PI / 2)];
+    for (let k = 0; k < 3; k++) wl.push(piece(new THREE.BoxGeometry(.1, wr * 2, .1), 0, 0, 0, k * Math.PI / 3));
+    for (const s of [1, -1]) wl.push(piece(new THREE.BoxGeometry(.16, wr + .35, .16), s * .4, -(wr + .35) / 2, 0));
+    U.roof.push(one(wl, ECOL.steel, 0, wy, 0));   // with the deck it stands on: not before it, and not over a wrecked mine's bare ground (it hung in the air)
+    /* the spoil heap, low and long */
+    const hp = new THREE.ConeGeometry(1, 1, 8); hp.scale(w * .5, 2.4, w * .34); const heap = new THREE.Mesh(hp, mat(ECOL.spoil)); heap.position.set(-w * .9, .3 + 1.2, w * .2); to.add(heap);
+    U.late.push(heap, box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
   } else {
     rise(w * .8, h * .8, d * .7, 0, .3, 0, sd.col);
     for (let i = 0; i < 3; i++) { const m = box(w * .24, .4, d * .72, (i - 1) * w * .26, h * .8 + .9, 0, sd.col2); m.rotation.z = .35; U.roof.push(m); }
-    U.late.push(box(1.6, h * 1.8, 1.6, w * .38, .3 + h * .9, -d * .25, 0x4a4034), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
+    U.late.push(chimney(.95, .6, h * 1.8, w * .38, .3, -d * .25), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
   }
   U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 4.2, d / 2 + .7, e.team === S.me ? 0x6fc3b2 : 0xe2604f)];
   if (e.lot >= 0) {   // a shed or a block of the town: plaster walls, a tiled gable roof
@@ -41768,7 +41923,7 @@ const WHY = { server: 'O servidor desta sala ainda não troca veículos no meio 
    front road, or why it is not offered. S.spawnAt is the choice, 0 the main base */
 const SPWHY = { site: 'em obra', unsafe: 'inimigo a menos de ' + BLD.safe + ' m', gone: 'destruída', fight: 'em disputa', foe: 'do inimigo' };
 function spawnOpts() {
-  const me = S.me, fr = frontR(), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
+  const me = S.me, fr = frontR(me), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
   return [{ id: 0, x: S.base[me].x, z: S.base[me].z, text: 'Base principal · ' + km(routeAt(S.T.routes[ri], endS(me, ri, SPAWN.tank))), why: '' }]
     .concat(S.sup.filter(b => b.team === me && !b.dead).map((b, i) => { const w = spawnWhy(b, me); return { id: b.id, n: i + 1, x: b.x, z: b.z, text: 'Base de suprimento ' + (i + 1) + ' · ' + (w ? SPWHY[w] : km(b)), why: w }; }))
     .concat(S.cq ? S.cq.p.filter(o => o.base < 0 && o.hold === me).map(o => { const w = cqSpawnWhy(o, me); return { id: o.i + 1, tag: o.L, x: o.x, z: o.z, text: 'Ponto ' + o.L + ' · ' + o.name + ' · ' + (w ? SPWHY[w] : km(o)), why: w }; }) : [])
@@ -42122,7 +42277,9 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
     x += w + g;
   }
   let xt = x + 5 * u;
-  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); xt += tw + 8 * u; }
+  const sn = t => { const n = S.E.sides[S.fac[t]].name.toUpperCase(); return n.length > 6 ? n.slice(0, 3) + '.' : n; };   // with three sides, whose tickets each number is: the side's name under it ("1944 1944" side by side said nothing)
+  if (many) txt(sn(me), x0 + tw, y0 + h + 7 * u, 9 * u, FRIEND, 'right');
+  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); if (many) txt(sn(t), xt, y0 + h + 7 * u, 9 * u, cqCol(t), 'left'); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
   let y = y0 + h + 26 * u + (S.sky ? 12 * u : 0);   // under the clock's line (skyHud: the hour, day or night, the weather) when it shows: the point's name was written over it (cf-pol-fluxos)
   const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere() : null;
@@ -48075,7 +48232,8 @@ buildTrn = (f => (u, wreck) => {
   const L = [];
   for (const c of g.children) {
     const ge = c.geometry, q = ge && ge.parameters; if (!c.isMesh || ge.type !== 'CylinderGeometry' || Math.abs(c.rotation.x - Math.PI / 2) > 1e-6 || c.rotation.z || q.radiusTop !== q.radiusBottom || q.radialSegments !== 12) continue;
-    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 6); if (s < 0) h.rotateY(Math.PI);
+    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 10); if (s < 0) h.rotateY(Math.PI);
+    if (c.material.flatShading) { c.material.flatShading = false; c.material.needsUpdate = true; }   // the tyre round, as the kit's
     h.translate(c.position.x, c.position.y, c.position.z + s * (q.height / 2 + .012)); h.userData.wheel = [c.position.x, c.position.y, c.position.z, r]; L.push(h);
   }
   if (!L.length) return g;

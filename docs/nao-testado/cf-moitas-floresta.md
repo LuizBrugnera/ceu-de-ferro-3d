@@ -1,5 +1,9 @@
 # cf-moitas-floresta: mato dentro e em volta das florestas, e infantaria andando por ele (não testado)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): parte
+- Navegador, Assistir em Hoje (mapa 11, 3 lados): `S.T.ug` tem 88.165 células de mato e 380 faixas (o mapa cresceu desde as contas do mapa 10: 60 mil e 286). De perto, numa célula de densidade 0,79 na orla, as moitas baixas aparecem no chão. Aos 68 s, `S.hws.go` = 5 (esquadras pelo caminho escondido), e os soldados andando ficam a uma mediana de 22 m do eixo da estrada (p90 88 m). Nenhum erro no console.
+- **Continua sem teste:** a parcela de tempo da infantaria na mata antes × depois, o A/B de partidas, o custo no quadro e o online.
+
 ## Por que a infantaria quase não anda pela floresta (lido no código, sem medir)
 - As esquadras andam pelo "trilho" da estrada (`q.ri`/`q.s`); só saem dele numa viagem (`q.tp`). O caminho escondido (`HIDE`, #62) só vale quando o inimigo conhecido passa de 0,12 a até 1200 m do trajeto. Fora disso ("calm") vai pela estrada.
 - Os caminhos do comandante (`O.wp`, de `footPath`/`tmWalk`) são feitos em células de 600 m e 200 m: não conseguem seguir uma faixa de moita de 30 m nem entrar na mata pela borda escondida.

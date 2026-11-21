@@ -6268,7 +6268,7 @@ Object.assign(TRUCK, { parts: Object.assign([], { ix: {}, pos: [] }), tx: 0, env
 for (const d of [...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS), TRUCK]) { d.hitR = 8; d.crewI = -1; }
 for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS)]) d.hot = d.parts.find(p => p.burn).box;   // where fire and engine smoke come out
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
-const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, blast() { return false; } };   // blast: the view's look of a burst (XFX), true when it drew one
+const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, hit() {}, blast() { return false; } };   // hit: the player's own hit on a foe, marked by the view (HM)   // blast: the view's look of a burst (XFX), true when it drew one
 let S = null;
 /* a side's name after "de" and "por" with the article its name asks for: 'da Rússia', 'dos EUA', 'pela Luftwaffe', 'pelos Aliados' */
 const SIDEPL = { EUA: 1, Aliados: 1, Insurgentes: 1 }, daDe = n => (SIDEPL[n] ? 'dos ' : 'da ') + n, pelaDe = n => (SIDEPL[n] ? 'pelos ' : 'pela ') + n;
@@ -7704,8 +7704,11 @@ function relayed(o, dmg, by, rx, h) {
   if (o.net && by && (by.me || (o.pid && by.aid && !by.net))) { Net.hit(o, dmg, by, h); if (by.me) puff(o.x, o.y + (o.kind ? 3 : 0), o.z, 'spark', .5); }
   return !!(o.net || (by && by.net));
 }
+/* a hit of the player's own on a foe, for the mark the view puts on it (fx.hit, HM; cf-pol-armas) */
+const hitMine = (o, dmg, by) => { if (by && by.me && dmg > 0 && by.team !== o.team) fx.hit(o); };
 function damagePlane(p, dmg, by, rx, h) {
   if (p.dead || p.inv > 0) return;
+  hitMine(p, dmg, by);
   note(p, dmg, by, h);
   if (relayed(p, dmg, by, rx, h)) return;
   p.hitT = S.t; if (by) p.lastBy = by; puff(p.x, p.y, p.z, 'spark', .5);
@@ -7769,6 +7772,7 @@ function killUnit(u, det) {
 }
 function damageUnit(u, dmg, by, rx, h) {
   if (u.dead || u.inv > 0) return;
+  hitMine(u, dmg, by);
   if (u.occ) paxHit(u, dmg, by, rx, h);
   note(u, dmg, by, h);
   if (relayed(u, dmg, by, rx, h)) return;
@@ -9862,6 +9866,7 @@ function manHit(m, k, dmg, x, y, z, dx, dz) {
 function damageMan(m, dmg, by, rx, h) {
   if (m.dead || m.inv > 0) return;
   if (m.in && !rx && !PAX.on) return;
+  hitMine(m, dmg, by);
   if (by && by.me && h && dmg > 0 && !(S.t - m.nT < DMG.note)) { m.nT = S.t; S.floats.push({ x: m.x, y: m.y + 4, z: m.z, text: ZONE[h.pt] || ZONE[0], life: 1 }); }
   if (relayed(m, dmg, by, rx, h)) return;
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
@@ -38151,8 +38156,27 @@ function baseScene(b, t) {
       const L = [box(16.6, .8, 16.6, 0, 33.6, 0), box(17.2, 1, 17.2, 0, 42.5, 0), box(.25, 6, .25, 4, 46, 4)];
       for (const [i, j2] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) L.push(box(.35, 8, .35, i * 7.55, 38, j2 * 7.55));
       one(L, c);
-    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? foeCol(t) : FRIEND }), x + 8, y + hh - 4, z)); }
+    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); const fl = flagMesh(t !== S.me ? foeCol(t) : FRIEND, 15.6, 8, false); fl.position.set(x + .4, y + hh - 4, z); g.add(fl); ms.push(fl); }
   });
+  return g;
+}
+/* the rocks (cf-pol-modelos): every rock was the same regular dodecahedron, a die on the grass. ROCKS: n boulders (one: each rock already has
+   its own turn, width and height, which an irregular boulder shows), each the dodecahedron
+   with its corners pushed in or out (jit: the least and the most of its radius, by the dice of the boulder and the corner), its underside
+   flattened (flat: what is left of its depth under the middle), and set back in the old one's box: as wide, its top as high (top), its foot
+   bot under the ground; the same corners and faces, so no triangle more. Each rock is one of them by the dice of its id */
+const ROCKS = { n: 1, jit: [.62, 1.25], flat: .5, top: 1.45, bot: .3 };   // n 1: one instanced mesh, as before (three cost no triangle more, but a draw each, and the rocks are the dearest instanced draw of the map here)
+function rockGeo(k) {
+  const g = new THREE.DodecahedronGeometry(1, 0), P = g.attributes.position, A = P.array;
+  g.computeBoundingBox(); const b0 = g.boundingBox.clone(), key = i => Math.round(A[i] * 97) * 7919 + Math.round(A[i + 1] * 97) * 104729 + Math.round(A[i + 2] * 97);
+  for (let i = 0; i < A.length; i += 3) {   // a corner's copies (the geometry repeats it on each face) are pushed alike: same place, same dice
+    const f = ROCKS.jit[0] + (ROCKS.jit[1] - ROCKS.jit[0]) * hash2(key(i), k + 1, 41);
+    A[i] *= f; A[i + 1] *= (A[i + 1] < 0 ? ROCKS.flat : 1) * f; A[i + 2] *= f;
+  }
+  g.computeBoundingBox(); const b = g.boundingBox;
+  g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  g.scale((b0.max.x - b0.min.x) / (b.max.x - b.min.x), (ROCKS.top + ROCKS.bot) / (b.max.y - b.min.y), (b0.max.z - b0.min.z) / (b.max.z - b.min.z));
+  g.translate(0, -ROCKS.bot, 0); g.computeVertexNormals(); P.needsUpdate = true;
   return g;
 }
 function buildWorld() {
@@ -38206,12 +38230,12 @@ function buildWorld() {
   wo.seen = S.olog.length; wo.houses.instanceColor.needsUpdate = wo.roofs.instanceColor.needsUpdate = true;
   scene.add(wo.trees, wo.leaf, wo.houses, wo.roofs, wo.holes);
   /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
-  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1), rkg = new THREE.DodecahedronGeometry(1, 0);
-  bsg.translate(0, .55, 0); rkg.translate(0, .45, 0);
+  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1);
+  bsg.translate(0, .55, 0);
   /* map version 7 (COV7): the bushes in tiles of COV7.tile m, each an instanced mesh with its own bounds (so that the frustum leaves out what
      is not in view) and drawn only within COV7.see m of the eye (bushTiles); the rocks keep one mesh, bounded by the whole map */
-  rkg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW));
-  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr));
+  wo.rk = []; for (let k = 0; k < ROCKS.n; k++) { const rg = rockGeo(k); rg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW)); wo.rk.push(new THREE.InstancedMesh(rg, mat(P.rock), Math.max(1, nr))); }
+  wo.rocks = wo.rk[0];   // ROCKS: three boulders, each rock on one of them by the dice of its id
   const bm = bushMat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
   for (const o of cvl) if (o.k === 'bush') { const k = Math.floor(o.x / BT) * 4096 + Math.floor((o.z + HW) / BT), l = btl.get(k); if (l) l.push(o); else btl.set(k, [o]); }
   wo.bt = [];
@@ -38222,12 +38246,11 @@ function buildWorld() {
     l.forEach((o, j) => { wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); });
   }
   wo.bushes = wo.bt[0] || null;
-  let ir = 0;
-  for (const o of cvl) if (o.k === 'rock') { wo.cv[o.id] = [wo.rocks, ir++]; wo.rocks.setColorAt(ir - 1, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
-  wo.rocks.count = ir;
-  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
+  const ir = wo.rk.map(() => 0);
+  for (const o of cvl) if (o.k === 'rock') { const k = Math.min(ROCKS.n - 1, Math.floor(hash2(o.id, 3, 11) * ROCKS.n)), me = wo.rk[k], j = ir[k]++; wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
+  wo.rk.forEach((me, k) => { me.count = ir[k]; if (me.instanceColor) me.instanceColor.needsUpdate = true; });
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
-  scene.add(wo.rocks, ...wo.bt);
+  scene.add(...wo.rk, ...wo.bt);
   if (T.ug) { const g = bushGeo(0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: bushMat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
   cityScene();
   vegBuild();
@@ -38890,6 +38913,24 @@ function debrisMesh(o) {
 /* --- soldiers: one instanced box per limb, posed on a rig that is reused for each of them. MCOL: uniform and helmet by era and side --- */
 const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = Math.max(IAI.cap, GP.capMax) + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
 let gMen = null, rig = null;
+/* ---------- the flags (cf-pol-modelos): cloth that waves, where they were stiff boards (an airfield's, a supply base's, a site's of the
+   economy). A flag is a plane of FLAG.seg strips from its staff (x 0) to its free end (x 1), scaled to its length, its height and, across,
+   its length again, so that the wave is as deep for every size; the vertex shader moves it across by a wave (k: how many to the length,
+   speed) that runs out along it, growing from the staff (amp at the free end), the end sagging a little, its phase by where the flag
+   stands; flat shaded, so that each strip is lit as it is turned and the folds show (lit: a flag that was lit; the airfield's was not,
+   and glows more of its own colour). One program for every flag; FLAG.t the time, from syncScene ---------- */
+const FLAG = { seg: 10, amp: .14, k: 8, speed: 3.4, sag: .04, t: { value: 0 } };
+function flagMesh(col, L, H, lit) {
+  const g = new THREE.PlaneGeometry(1, 1, FLAG.seg, 1); g.translate(.5, 0, 0);
+  const c = new THREE.Color(col), m = mat(c.getHex(), { side: THREE.DoubleSide, emissive: c.clone().multiplyScalar(lit ? .08 : .14) });   // shaded flat: the folds show, each strip lit as it is turned
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uFlag = FLAG.t;
+    sh.vertexShader = 'uniform float uFlag;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.z += sin(position.x * ' + FLAG.k.toFixed(2) + ' - uFlag * ' + FLAG.speed.toFixed(2) + ' + modelMatrix[3][0] * .07 + modelMatrix[3][2] * .05) * ' + FLAG.amp.toFixed(3) + ' * position.x;\n  transformed.y -= ' + FLAG.sag.toFixed(3) + ' * position.x * position.x;');
+  };
+  m.customProgramCacheKey = () => 'cf-flag';
+  const me = new THREE.Mesh(g, m); me.scale.set(L, H, L); return me;
+}
+syncScene = (g0 => dt => { g0(dt); FLAG.t.value += dt || 0; })(syncScene);
 /* a supply base: the pad and the corner posts of a site, walls that rise as it is built, then the roof, the stores beside it, the sandbags
    and a mast with a flag in the colour of friend or foe; burnt and flat when it is destroyed */
 function buildSup(b) {
@@ -38900,7 +38941,8 @@ function buildSup(b) {
   U.walls = box(w - .5, h * .8, d - .5, 0, h * .4, 0, sd.col); U.roof = box(w + .6, .4, d + .6, 0, h * .84, 0, sd.col2);
   U.stores = [box(1.7, 1.3, 1.7, w / 2 + 2, .65, -1.6, 0x55633a), box(1.7, 1.3, 1.7, w / 2 + 2, .65, .5, 0x55633a), box(1.5, 1.1, 1.5, w / 2 + 2, 1.85, -.5, 0x6d5a3a), box(2.6, .9, 1.1, -w / 2 - 2, .45, 0, 0x3f4a3a)];
   U.bags = [box(w + 4, 1, .9, 0, .5, d / 2 + 1.9, 0x8a7d5c), box(w + 4, 1, .9, 0, .5, -d / 2 - 1.9, 0x8a7d5c)];
-  U.mast = [box(.2, h + 6, .2, -w / 2 + .5, (h + 6) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 5.2, d / 2 + .7, b.team === S.me ? 0x6fc3b2 : 0xe2604f)];
+  const fl = flagMesh(b.team === S.me ? 0x6fc3b2 : 0xe2604f, 2.2, 1.3, true); fl.position.set(-w / 2 + .5, h + 5.2, d / 2 - .4); fl.rotation.y = -Math.PI / 2; g.add(fl);   // its free end toward +z, as the board was
+  U.mast = [box(.2, h + 6, .2, -w / 2 + .5, (h + 6) / 2, d / 2 - .5, 0x34372f), fl];
   return g;
 }
 function lookSup(b, m) {
@@ -38957,7 +38999,8 @@ function buildEco(e) {
     for (let i = 0; i < 3; i++) { const m = box(w * .24, .4, d * .72, (i - 1) * w * .26, h * .8 + .9, 0, sd.col2); m.rotation.z = .35; U.roof.push(m); }
     U.late.push(chimney(.95, .6, h * 1.8, w * .38, .3, -d * .25), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
   }
-  U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 4.2, d / 2 + .7, e.team === S.me ? 0x6fc3b2 : 0xe2604f)];
+  const fl = flagMesh(e.team === S.me ? 0x6fc3b2 : 0xe2604f, 2.2, 1.3, true); fl.position.set(-w / 2 + .5, h + 4.2, d / 2 - .4); fl.rotation.y = -Math.PI / 2; to.add(fl);
+  U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), fl];
   if (e.lot >= 0) {   // a shed or a block of the town: plaster walls, a tiled gable roof
     to = U.F = new THREE.Group(); g.add(to);
     box(w * .9, h, d * .85, 0, h / 2 + .3, 0, e.k === 'fab' ? 0x8d8d84 : 0xb9ad94);
@@ -40827,6 +40870,31 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
   if (nS) txt('G FUMAÇA ×' + P.smk + (P.smk && P.smkT > S.t ? '  ' + Math.ceil(P.smkT - S.t) + ' s' : ''), L, y + 2 * u, 12.5 * u, P.smk ? ink : FOE);
   if (w.k === 'sam' && !P.dead && !S.lockAir && !S.noLos) txt('SEM ALVO NA MIRA', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
 }
+/* ---------- hit marks (HM, cf-pol-armas): the player's own hits, seen and heard ----------
+   A round, rocket, shell or bomb of the player's that hurts a foe (fx.hit, from damageMan, damageUnit and damagePlane) puts four short
+   strokes round the foe on the screen, white, for t s, fading; if the foe is dead by the time it is drawn (also online, where a ghost dies
+   when its owner says so) they turn red and larger and hold k s. One mark at a time, the last; a tick for the hit (at most one every gap s)
+   and a lower one for the kill. Off with localStorage cf-hm 0 ---------- */
+const HM = { on: true, t: .3, k: .7, gap: .06, o: null, at: -9, kill: false, snd: -9 };
+try { HM.on = localStorage.getItem('cf-hm') !== '0'; } catch (e) {}
+fx.hit = o => {
+  if (!HM.on) return;
+  if (HM.o !== o || !HM.kill) { HM.o = o; HM.at = S.t; HM.kill = false; }
+  if (A.ctx && A.on && playMode === 'play' && S.t - HM.snd >= HM.gap) { HM.snd = S.t; burst(.018, .06, 3400, 'bandpass'); }
+};
+function hmDraw() {
+  const o = HM.o; if (!o || playMode !== 'play' || !S.my) return;
+  if (o.dead && !HM.kill) { HM.kill = true; HM.at = S.t; if (A.ctx && A.on) burst(.07, .09, 1100, 'bandpass'); }
+  const age = S.t - HM.at, life = HM.kill ? HM.k : HM.t;
+  if (age > life || age < 0) { HM.o = null; return; }
+  const s = proj(o.x, bodyY(o), o.z); if (!onScr(s)) return;
+  const u = hudU(), k = HM.kill ? 1.4 : 1, r0 = 4 * u * k, r1 = 9.5 * u * k;
+  hx.save(); hx.globalAlpha = 1 - age / life; hx.lineCap = 'round'; hx.beginPath();
+  for (const [dx, dy] of CORN) { hx.moveTo(s.x + dx * r0, s.y + dy * r0); hx.lineTo(s.x + dx * r1, s.y + dy * r1); }
+  hx.lineWidth = 4.2 * u; hx.strokeStyle = 'rgba(0,0,0,.5)'; hx.stroke();
+  hx.lineWidth = 2 * u; hx.strokeStyle = HM.kill ? '#ff4a36' : '#f4f1e8'; hx.stroke(); hx.restore();
+}
+drawHud = (g => () => { g(); hmDraw(); })(drawHud);
 /* ---------- damage panel: the vehicle from above, nose up, each part in the colour of its state; beside it what is hurt, worst first,
    with the seconds left of what is running out, the crew by seat, and under it fire, leak, jammed controls, the extinguishers and the
    field repair with what waits behind it. Bottom left, lifted over the touch stick or a seat's own corner; in a cockpit it takes the top
@@ -41525,12 +41593,16 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    whoosh (which was as loud across the map as beside the ear) and a burst. crack: the round of a foe passing within r m of the soldier's
    head snaps, at most one every gap s. hand: the soldier's own hands, [after s, dur s, vol, f Hz, Q] noises through a band: a magazine
    out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. The master runs through a compressor, so that a battle's
-   bursts do not clip */
+   bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
+   falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
+   the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
+   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed) */
 const SND = {
   c: 343, ref: 80, air: 700, far: 2500,
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
     sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
   hand: { out: [[0, .035, .07, 2800, 2], [.07, .05, .05, 900, 1.2]], in: [[0, .03, .09, 2400, 2], [.15, .04, .08, 3600, 3]], bolt: [[.38, .04, .07, 2200, 2], [.55, .035, .08, 3000, 2]],
@@ -41650,14 +41722,37 @@ function sndCrack(P, dt) {
     return;
   }
 }
+/* a ground vehicle's own sound (SND.veh), each frame; P null: the engine and the servo fall quiet. A.eng: a sawtooth and a square an octave
+   under it through a low-pass, made on first use; A.vty: the turret's angle the frame before */
+function sndVeh(P, dt, set, now) {
+  const V = SND.veh, c = A.ctx;
+  if (!A.eng) {
+    if (!P) return;
+    const g = c.createGain(), lp = c.createBiquadFilter(), o = c.createOscillator(), o2 = c.createOscillator(), tg = c.createGain(), t = c.createOscillator();
+    o.type = 'sawtooth'; o2.type = 'square'; lp.type = 'lowpass'; lp.frequency.value = V.lp[0]; g.gain.value = 0; tg.gain.value = 0; t.type = 'triangle';
+    o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(A.master); t.connect(tg); tg.connect(A.master); o.start(); o2.start(); t.start();
+    A.eng = { o, o2, lp, g }; A.tur = { o: t, g: tg }; A.trk = 0; A.vty = null;
+  }
+  if (!P) { set(A.eng.g, 0); set(A.tur.g, 0); A.vty = null; return; }
+  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
+  const rpm = Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+  A.eng.o.frequency.setTargetAtTime(f, now, .06); A.eng.o2.frequency.setTargetAtTime(f / 2, now, .06); A.eng.lp.frequency.setTargetAtTime(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, now, .08);
+  set(A.eng.g, V.g[0] + V.g[1] * rpm + V.g[2] * th);
+  set(A.jet.g, V.road.g[0] + V.road.g[1] * k); A.jet.bp.frequency.setTargetAtTime(V.road.f[0] + (V.road.f[1] - V.road.f[0]) * k, now, .1);
+  const T = V.trk;
+  if (hullTracked(P) && sp > .3) { A.trk += dt * Math.min(T.max, sp * T.hz); if (A.trk >= 1) { A.trk %= 1; burst(.025, T.vol * Math.min(1, sp / 4), T.f * (.85 + Math.random() * .3), 'bandpass', 0, 2); } } else A.trk = 0;
+  const ty = P.ty || 0, sl = (d.sl || 0) * (P.mod ? P.mod.slew : 1), turn = A.vty === null || !sl || !(dt > 0) ? 0 : clamp(Math.abs(wrap(ty - A.vty)) / dt / sl, 0, 1); A.vty = ty;
+  A.tur.o.frequency.setTargetAtTime(V.tur.f[0] + (V.tur.f[1] - V.tur.f[0]) * turn, now, .05); set(A.tur.g, V.tur.vol * turn);
+}
 function audioTick(dt) {
   if (!A.ctx) return;
   const P = S.my, live = playMode === 'play' && !paused && P && !P.dead && !S.over, now = A.ctx.currentTime;
   const set = (g, v) => g.gain.setTargetAtTime(v, now, .08);
+  if (!live || !P.kind || P.man) sndVeh(null, dt, set, now);   // the engine and the servo quiet off a vehicle (a soldier's kind is inf)
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
   if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
-  else if (P.kind) { A.prop.o.frequency.setTargetAtTime(36 + Math.abs(P.sp) * 2.6, now, .1); set(A.prop.g, .035 + Math.abs(P.ctl.drive) * .02); set(A.jet.g, .006); }
+  else if (P.kind) { set(A.prop.g, 0); sndVeh(P, dt, set, now); }
   else if (P.def.prop) { A.prop.o.frequency.setTargetAtTime(52 + th * 38 + k * 26, now, .1); set(A.prop.g, .03 + th * .03); set(A.jet.g, .01 + k * .03); A.jet.bp.frequency.setTargetAtTime(300 + k * 500, now, .1); }
   else { A.jet.bp.frequency.setTargetAtTime(450 + th * 700 + k * 500, now, .1); set(A.jet.g, .05 + th * .08 + (P.ab ? .07 : 0)); set(A.prop.g, 0); }
   A.siren.o.frequency.setTargetAtTime(380 + k * 420, now, .15); set(A.siren.g, P.siren ? .06 : 0);
@@ -45702,7 +45797,7 @@ skyScene = (g => () => {
     ENV.sh.castShadow = e > .03 && lit > .2 && wet < .4;
     if ((ENV.shT = (ENV.shT || 0) - 1) <= 0) {   // what casts: what moves and what stands, looked over twice a second
       ENV.shT = 30;
-      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, wo && wo.rocks, wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
+      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, ...(wo && wo.rk || []), wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
       if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
     }
   }

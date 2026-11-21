@@ -9,7 +9,7 @@ function blocks(name) {
   const a = html.indexOf('/* ---------- the vehicle kit (VK'), b = html.indexOf('const ' + name + ' = {');
   if (a < 0 || b < 0) return null;
   const end = html.indexOf('buildUnit = (f => (u, wreck) => {', b);
-  const ctx = vm.createContext({ LRS: [-1, 1], console, buildUnit: () => null });
+  const ctx = vm.createContext({ LRS: [-1, 1], console, buildUnit: () => null, syncScene: () => null });   // the wrappers the section installs, on stubs
   vm.runInContext(html.slice(a, end) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'vk.js' });
   return ctx.$(name);
 }

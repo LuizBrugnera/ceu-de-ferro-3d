@@ -37237,22 +37237,49 @@ function buildUnit(u, wreck) {
    and one colour into one mesh with a material of its own, files it under its part (pm) for damageLook, and darkens every colour on a
    wreck. A model of fifty pieces costs a dozen draw calls ---------- */
 const VKC = { rub: 0x1b1c1b, dk: 0x1c1d1e, glass: 0x27323a, steel: 0x3a3c37, wreck: 0x1f1f1c };
-function vkGeo(list) {   // pieces already placed, as one indexed geometry (position and normal; the material shades it flat)
+function vkGeo(list) {   // pieces already placed, as one indexed geometry (position and normal; the material shades it flat; aWheel where a piece is a wheel)
   let nv = 0, ni = 0; for (const g of list) { nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
-  const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), I = new (nv > 65535 ? Uint32Array : Uint16Array)(ni); let v = 0, i = 0;
+  const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), I = new (nv > 65535 ? Uint32Array : Uint16Array)(ni), WH = list.some(g => g.userData.wheel) ? new Float32Array(nv * 4) : null; let v = 0, i = 0;
   for (const g of list) {
     const p = g.attributes.position, n = g.attributes.normal; P.set(p.array.subarray(0, p.count * 3), v * 3); if (n) N.set(n.array.subarray(0, p.count * 3), v * 3);
+    if (WH && g.userData.wheel) for (let k = 0; k < p.count; k++) WH.set(g.userData.wheel, (v + k) * 4);
     if (g.index) for (let k = 0; k < g.index.count; k++) I[i++] = g.index.array[k] + v; else for (let k = 0; k < p.count; k++) I[i++] = v + k;
     v += p.count; g.dispose();
   }
   const ge = new THREE.BufferGeometry(); ge.setAttribute('position', new THREE.BufferAttribute(P, 3)); ge.setAttribute('normal', new THREE.BufferAttribute(N, 3)); ge.setIndex(new THREE.BufferAttribute(I, 1)); ge.computeBoundingSphere();
+  if (WH) ge.setAttribute('aWheel', new THREE.BufferAttribute(WH, 4));
   return ge;
 }
+/* ---------- the wheels that roll (cf-pol-modelos), with no draw call more: a wheel's vertices carry its middle and radius (aWheel: x, y, z,
+   r; r 0 for the rest), and the vertex shader turns them about the axle (z) by uSpin / r, uSpin the distance the vehicle has gone in the
+   geometry's units, which syncScene adds up each frame from where the vehicle has moved along its heading (WSPIN.jump: more than that in a
+   frame is a jump, not a drive). The kit's wheels, road wheels, sprockets and idlers; the pack's wheels and the road wheels of its tracks
+   (packSpin finds them: the round pieces of those parts). The tracks' belts stay as they are ---------- */
+const WSPIN = { jump: 12 };
+function spinMat(m, U) {
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uSpin = U;
+    sh.vertexShader = 'attribute vec4 aWheel;\nuniform float uSpin;\n' + sh.vertexShader
+      .replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\nfloat wA = aWheel.w > 0. ? -uSpin / aWheel.w : 0., wC = cos(wA), wS = sin(wA);\nobjectNormal = vec3(wC * objectNormal.x - wS * objectNormal.y, wS * objectNormal.x + wC * objectNormal.y, objectNormal.z);')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nif (aWheel.w > 0.) { vec3 wD = transformed - aWheel.xyz; transformed = aWheel.xyz + vec3(wC * wD.x - wS * wD.y, wS * wD.x + wC * wD.y, wD.z); }');
+  };
+  m.customProgramCacheKey = () => 'wheelspin';
+  return m;
+}
+syncScene = (g0 => dt => {
+  g0(dt);
+  for (const u of S.units) {
+    const m = u.m, U = m && m.userData; if (!U || !U.spin) continue;
+    const dx = u.x - (U.wx === undefined ? u.x : U.wx), dz = u.z - (U.wz === undefined ? u.z : U.wz), d = dx * Math.cos(u.h) - dz * Math.sin(u.h);
+    U.wx = u.x; U.wz = u.z; if (Math.abs(d) < WSPIN.jump) U.spin.value += d / GS * (U.spinK || 1);
+  }
+})(syncScene);
 function vkit() {
   const B = new Map(), E = new THREE.Euler(), Q = new THREE.Quaternion(), V = new THREE.Vector3(), ONE = new THREE.Vector3(1, 1, 1), M4 = new THREE.Matrix4();
   const K = {
+    W: null,   // the wheel the next pieces belong to ([x, y, z, r]), so that they roll with it
     put(to, pid, col, ge, x, y, z, rx, ry, rz) {
-      ge.applyMatrix4(M4.compose(V.set(x || 0, y || 0, z || 0), Q.setFromEuler(E.set(rx || 0, ry || 0, rz || 0)), ONE));
+      ge.applyMatrix4(M4.compose(V.set(x || 0, y || 0, z || 0), Q.setFromEuler(E.set(rx || 0, ry || 0, rz || 0)), ONE)); if (K.W) ge.userData.wheel = K.W;
       const k = to.uuid + '|' + (pid || '') + '|' + col; let e = B.get(k); if (!e) B.set(k, (e = { to, pid, col, l: [] })); e.l.push(ge); return K;
     },
     box: (to, pid, col, w, h, d, x, y, z, rx, ry, rz) => K.put(to, pid, col, new THREE.BoxGeometry(w, h, d), x, y, z, rx, ry, rz),
@@ -37267,11 +37294,12 @@ function vkit() {
     dx: (to, pid, col, r, seg, x, y, z) => { const g = new THREE.CircleGeometry(r, seg); g.rotateY(Math.PI / 2); return K.put(to, pid, col, g, x, y, z); },
     /* a prism: its side drawn in x, y (pts), d wide across z, centred */
     pr: (to, pid, col, pts, d, x, y, z) => { const s = new THREE.Shape(); pts.forEach((p, i) => (i ? s.lineTo(p[0], p[1]) : s.moveTo(p[0], p[1]))); s.closePath(); const g = new THREE.ExtrudeGeometry(s, { depth: d, bevelEnabled: false }); g.translate(0, 0, -d / 2); return K.put(to, pid, col, g, x, y, z); },
-    done(pm, wreck) {
+    done(pm, wreck, spin) {   // spin: the uniform the model's wheels turn by (none on a wreck)
       const W = new THREE.Color(VKC.wreck), C = new THREE.Color();
       for (const e of B.values()) {
-        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex); m.userData.c = hex;
-        const me = new THREE.Mesh(vkGeo(e.l), m); e.to.add(me); if (e.pid) (pm[e.pid] || (pm[e.pid] = [])).push(me);
+        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex), ge = vkGeo(e.l); m.userData.c = hex;
+        if (spin && ge.attributes.aWheel) spinMat(m, spin);
+        const me = new THREE.Mesh(ge, m); e.to.add(me); if (e.pid) (pm[e.pid] || (pm[e.pid] = [])).push(me);
       }
       B.clear();
     }
@@ -37281,16 +37309,16 @@ function vkit() {
 /* running gear. Wheels on axles x (r, w wide; w2 the rear ones, twin tyres), at ±z, each side filed under pL and pR; a track run from x0 to
    x1 at ±z, tw wide and h high, with n road wheels, a sprocket at the front and an idler at the back, the side's wheels and belt under pL, pR */
 function vkWheels(K, g, P2, ax, z, r, w, w2, pL, pR) {
-  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.cz(g, p, VKC.rub, r, ww, 10, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 6, x, r, s * z); } });
+  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 10, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 6, x, r, s * z); K.W = null; } });
 }
 function vkTracks(K, g, P2, x0, x1, z, tw, h, n, pL, pR) {
   const L = x1 - x0, rr = h / 2, cx = (x0 + x1) / 2;
   for (const s of LRS) {
     const p = s < 0 ? pL : pR, Z = s * z;
     K.box(g, p, VKC.dk, L - h, .1, tw, cx, h - .05, Z).box(g, p, VKC.dk, L - h, .1, tw, cx, .05, Z);   // the upper and the lower run
-    K.cz(g, p, VKC.dk, rr, tw, 8, x1 - rr, rr, Z).cz(g, p, VKC.dk, rr, tw, 8, x0 + rr, rr, Z);   // round the sprocket and the idler
-    K.dz(g, p, P2, rr * .75, 6, x1 - rr, rr, Z + s * (tw / 2 + .01), s).dz(g, p, P2, rr * .68, 6, x0 + rr, rr, Z + s * (tw / 2 + .01), s);
-    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.cz(g, p, VKC.rub, h * .4, tw * .7, 8, x, h * .4, Z).dz(g, p, P2, h * .3, 6, x, h * .4, Z + s * (tw * .35 + .01), s); }
+    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 8, x, rr, Z).dz(g, p, P2, rr * f, 6, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
+    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 8, x, h * .4, Z).dz(g, p, P2, h * .3, 6, x, h * .4, Z + s * (tw * .35 + .01), s); }
+    K.W = null;
   }
 }
 
@@ -37438,7 +37466,7 @@ buildUnit = (f => (u, wreck) => {
   const g = new THREE.Group(), tur = new THREE.Group(), gun = new THREE.Group(), pm = (g.userData.pm = {}), K = vkit(), [tl, tw, th, tx] = d.t;
   const col = u.col || [0x6a6f62, 0x4d5247], c = { P: col[0], P2: col[1], dk: VKC.dk, glass: VKC.glass, rk: d.era === 'ww2' ? 0x5a604a : 0x6c705e, wh: 0x3a3d35, tl, tw, th, g: d.g, hh: d.hh };
   tur.add(gun); g.add(tur); tur.position.set(tx, .5 + d.hh + th / 2, 0); gun.position.x = -tl / 2;
-  ARTB[id](K, g, tur, gun, c); K.done(pm, wreck);
+  ARTB[id](K, g, tur, gun, c); K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 }));
   g.userData.tur = tur; g.userData.gun = gun;
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
@@ -37520,7 +37548,7 @@ buildUnit = (f => (u, wreck) => {
   const c = { P: col[0], P2: col[1], dk: VKC.dk, glass: VKC.glass };
   tur.add(gun); g.add(tur);
   if (d.era === 'modern') { tur.position.set(-1.3, 1.6, 0); gun.position.y = 1; } else { tur.position.y = 2.3; gun.position.y = .6; }
-  AAB[id](K, g, tur, gun, c); K.done(pm, wreck);
+  AAB[id](K, g, tur, gun, c); K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 }));
   g.userData.tur = tur; g.userData.gun = gun;
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
@@ -45728,6 +45756,39 @@ function packFix(id, P) {
   }
   return P;
 }
+/* the pack's rolling wheels (cf-pol-modelos, WSPIN): in the parts that hold them (wheels, trackL, trackR), the round pieces (connected
+   triangles, the vertices at one place taken as one, as wide as high, every vertex within PSPIN.rim radii of the middle seen from the side, and
+   at least PSPIN.min of the model's height) are wheels: their
+   vertices get their middle and radius (aWheel), once per geometry; the belts and the rest stay (where a model's road wheels are one
+   piece with its belt, as in the Quaternius tanks, they stay too). A vehicle built with them turns its
+   wheels' materials by its own uniform, in the pack's units (spinK: the pack's units a model unit, 1 / the length's scale) */
+const PSPIN = { parts: ['wheels', 'trackL', 'trackR'], min: .12, round: .25, rim: 1.12 };
+function packSpinGeo(ge, H) {
+  if (ge.userData.spun !== undefined) return ge.userData.spun;
+  const p = ge.attributes.position, I = ge.index && ge.index.array, n = p.count; if (!I) return (ge.userData.spun = false);
+  const par = new Int32Array(n); for (let i = 0; i < n; i++) par[i] = i;
+  const find = i => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; }, uni = (a, b) => { a = find(a); b = find(b); if (a !== b) par[a] = b; };
+  const at = new Map(); for (let i = 0; i < n; i++) { const k = Math.round(p.getX(i) * 500) + ',' + Math.round(p.getY(i) * 500) + ',' + Math.round(p.getZ(i) * 500), j = at.get(k); if (j === undefined) at.set(k, i); else uni(i, j); }
+  for (let t = 0; t < I.length; t += 3) { uni(I[t], I[t + 1]); uni(I[t], I[t + 2]); }
+  const box = new Map();
+  for (let i = 0; i < n; i++) { const r = find(i); let b = box.get(r); if (!b) box.set(r, (b = [1e9, 1e9, 1e9, -1e9, -1e9, -1e9])); const x = p.getX(i), y = p.getY(i), z = p.getZ(i); b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.min(b[2], z); b[3] = Math.max(b[3], x); b[4] = Math.max(b[4], y); b[5] = Math.max(b[5], z); }
+  /* round: as wide as high, and every vertex within PSPIN.rim radii of the middle seen from the side (a square plate's corners are not) */
+  for (let i = 0; i < n; i++) { const b = box.get(find(i)); b[6] = Math.max(b[6] || 0, Math.hypot(p.getX(i) - (b[0] + b[3]) / 2, p.getY(i) - (b[1] + b[4]) / 2)); }
+  const A = new Float32Array(n * 4); let any = false;
+  for (let i = 0; i < n; i++) {
+    const b = box.get(find(i)), sx = b[3] - b[0], sy = b[4] - b[1];
+    if (sy > PSPIN.min * H && Math.abs(sx - sy) < PSPIN.round * sy && b[6] <= PSPIN.rim * sy / 2) { A.set([(b[0] + b[3]) / 2, (b[1] + b[4]) / 2, (b[2] + b[5]) / 2, sy / 2], i * 4); any = true; }
+  }
+  if (any) ge.setAttribute('aWheel', new THREE.BufferAttribute(A, 4));
+  return (ge.userData.spun = any);
+}
+packSkin = (f => (g, P, d, col, wreck, keepTur) => {
+  const r = f(g, P, d, col, wreck, keepTur), U = g.userData; if (wreck) return r;
+  const H = P.dims[2] || 1;
+  for (const pid of PSPIN.parts) for (const me of (U.pm && U.pm[pid]) || []) if (me.geometry && me.material && packSpinGeo(me.geometry, H)) spinMat(me.material, U.spin || (U.spin = { value: 0 }));
+  if (U.spin) U.spinK = P.dims[0] / d.l;
+  return r;
+})(packSkin);
 /* the model id, or null while it is not here (the first ask starts the fetch; a failure is remembered and never retried) */
 function packGet(id) {
   if (!PACK.on || !id) return null;

@@ -9,7 +9,7 @@ console.log('page: ' + H.PAGE);
 if (a < 0 || b < 0) { console.log('no pack colour fixes (packFix): a page before them'); process.exit(0); }
 class Attr { constructor(array, itemSize, normalized) { this.array = array; this.itemSize = itemSize; this.normalized = !!normalized; this.count = array.length / itemSize; } }
 class Geo { constructor() { this.attributes = {}; this.index = null; this.userData = {}; } setAttribute(n, at) { this.attributes[n] = at; } setIndex(at) { this.index = at; } computeBoundingSphere() {} computeBoundingBox() {} }
-const ctx = vm.createContext({ console, PACK: {}, THREE: { BufferAttribute: Attr, BufferGeometry: Geo }, packNorm: arr => (arr instanceof Uint8Array ? 255 : arr instanceof Uint16Array ? 65535 : 1) });
+const ctx = vm.createContext({ console, PACK: {}, packSkin: () => null, THREE: { BufferAttribute: Attr, BufferGeometry: Geo }, packNorm: arr => (arr instanceof Uint8Array ? 255 : arr instanceof Uint16Array ? 65535 : 1) });
 vm.runInContext(html.slice(a, b) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'packfix.js' });
 const PACK = ctx.$('PACK'), packFix = ctx.$('packFix');
 

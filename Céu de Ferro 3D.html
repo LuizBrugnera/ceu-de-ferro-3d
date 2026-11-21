@@ -10588,7 +10588,7 @@ function hideAt(x, z, r) {
 }
 /* the post of the k-th team of a dispersed job */
 function postDisp(t, job, k) {
-  const R = S.T.routes, ds = t ? 1 : -1, G = INC.disp, ri = (frontR() + k) % R.length, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);
+  const R = S.T.routes, my = myRoutes(t), f = frontR(t), ri = my.length ? my[(Math.max(0, my.indexOf(f)) + k) % my.length] : (f + k) % R.length, ds = dsOf(t, ri), G = INC.disp, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);   // 3 sides: only the side's own roads, each its own way (with two, (front + k) % 3 as before)
   let x, z;
   if (job === 'rec') { const s = clamp(ls + ds * rand(G.rec.ahead[0], G.rec.ahead[1]), 0, r.len), p = routeAt(r, s), off = sd * rand(G.rec.side[0], G.rec.side[1]); x = p.x - p.dz * off; z = p.z + p.dx * off; }
   else {
@@ -10863,14 +10863,14 @@ function spawnBase() {
 /* where the AI would build next: behind its line on a road that has no base of its side yet, the front road first, then behind a town it
    holds; beside the road, on the first place that siteWhy lets through */
 function aiSite(t) {
-  const A = BLD.ai, R = S.T.routes, ds = t ? 1 : -1, fr = frontR(), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];
+  const A = BLD.ai, R = S.T.routes, ds = ri => dsOf(t, ri), fr = frontR(t), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];   // 3 sides: its own front and roads, each its own way
   if ((S.net && !Net.sb) || mine.length >= supBots(t)) return null;
   const bk = S.fld[t].bk || 0;   // after a loss the next one lies farther back
   for (const l of S.T.lots || []) if (l.team === t && l.k === 'dep' && !siteWhy(t, l.x, l.z, l.a)) { const p = railOf(l.x, l.z); return { k: 'build', ri: p.ri, s: p.s, x: l.x, z: l.z, a: l.a, R: 9 }; }   // the seat town's depot lot first
-  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
+  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
   tries.push(...bmrSupTries(t, mine));   // then behind the points it holds, the most forward first (BMR)
-  for (const ri of axesFrom(fr)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds * (A.back + bk + k * 70), sd * A.off]);
-  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);
+  for (const ri of axesFrom(fr, t)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds(ri) * (A.back + bk + k * 70), sd * A.off]);
+  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);
   for (const [ri, s, off] of tries) {
     const p = routeAt(R[ri], clamp(s, 0, R[ri].len)), x = p.x - p.dz * off, z = p.z + p.dx * off, a = Math.atan2(-p.dz, p.dx);
     if (!siteWhy(t, x, z, a)) return { k: 'build', ri, s, x, z, a, R: 9 };
@@ -14150,7 +14150,7 @@ function heliBP(p, t) {
   }
   return Object.assign(best || open || { x: p.x, z: p.z, pop: HAI.pop[1], open: 1 }, { of: t, tx: t.x, tz: t.z });
 }
-const heliHold = p => { const fr = frontR(), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - (p.team ? 1 : -1) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
+const heliHold = p => { const fr = frontR(p.team), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - dsOf(p.team, fr) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
 function heliExpo(A) { if (A.t0) { (S.hx || (S.hx = [])).push(+(S.t - A.t0).toFixed(2)); if (S.hx.length > 400) S.hx.shift(); A.t0 = 0; } }
 function aiAttack(p, A, dt, msl) {
   const d = p.def, c = p.ctl, agl = p.y - hgt(p.x, p.z) - d.gh, pad = A.pad || (A.pad = heliPad(p.team, 3));
@@ -14200,7 +14200,7 @@ function aiAttack(p, A, dt, msl) {
 }
 /* a flat clear place near the side's line with no enemy close */
 function heliLZ(team) {
-  const Z = HAI.lift.lz, fr = frontR(), r = S.T.routes[fr], ds = team ? 1 : -1, s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
+  const Z = HAI.lift.lz, fr = frontR(team), r = S.T.routes[fr], ds = dsOf(team, fr), s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
   for (let i = 0; i < 16; i++) {
     const o = (i % 2 ? 1 : -1) * rand(Z[1], Z[2]), a = rand(-150, 150), x = q.x - q.dz * o + q.dx * a, z = q.z + q.dx * o + q.dz * a, g = hgt(x, z);
     if (g <= S.T.WL + 1 || kindAt(x, z) === 1 || Math.max(Math.abs(hgt(x + 8, z) - hgt(x - 8, z)), Math.abs(hgt(x, z + 8) - hgt(x, z - 8))) / 16 > Z[3] || near(x, z, 30).some(solid)) continue;
@@ -20318,7 +20318,7 @@ function cmdReq(C) {
   C.wantT = W ? C.wantT || S.t : 0;
   if (!Q || Q.ph || !cqSim() || S.t < (C.rqT || 0)) return;
   C.rqT = S.t + G.every;
-  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR();
+  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR(t);   // its own front road (3 sides: the Insurgents' AA came on road 0, the USA's)
   const put = (kind, id, ri) => genCmd(t, { c: 'req', k: kind, ri }, 'ai', { id }).ok;
   if (mine.some(u => u.ai.air > S.t)) C.airT = S.t;
   if (genBy(t, 'sup') !== 'ai') return;
@@ -20329,7 +20329,7 @@ const rqPick = pick;   // the model of a tank a person requisitions (the general
 /* a requisition filled (the AI's, and the general's own order): false when rqAI finds nothing */
 function reqOpen(C, kind, id, ri) {
   const t = C.t, Q = S.cq;
-  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, (t ? 1 : -1) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
+  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, dsOf(t, ri) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
 }
 Net.ui.req = () => {};
 Net.rx.req = m => {
@@ -20393,7 +20393,7 @@ function radScan() {
     const id = S.E.sides[S.fac[t]].rad, have = S.units.reduce((n, u) => n + (u.def.rad && u.team === t && !u.dead && !!u.ai && !u.ai.park ? 1 : 0), 0);
     if (have >= RAD.ai.n) { T[t] = Math.max(T[t], S.t + RAD.ai.again); continue; }
     if (!id || S.t < T[t]) continue;
-    const ri = frontR(), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's
+    const ri = frontR(t), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's, on its own front road
     addUnit('car', t, 0, 0, id, false, ri, e.s, 5, 9).rqa = 1; T[t] = S.t + RAD.ai.again;
   }
 }
@@ -41732,7 +41732,7 @@ const WHY = { server: 'O servidor desta sala ainda não troca veículos no meio 
    front road, or why it is not offered. S.spawnAt is the choice, 0 the main base */
 const SPWHY = { site: 'em obra', unsafe: 'inimigo a menos de ' + BLD.safe + ' m', gone: 'destruída', fight: 'em disputa', foe: 'do inimigo' };
 function spawnOpts() {
-  const me = S.me, fr = frontR(), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
+  const me = S.me, fr = frontR(me), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
   return [{ id: 0, x: S.base[me].x, z: S.base[me].z, text: 'Base principal · ' + km(routeAt(S.T.routes[ri], endS(me, ri, SPAWN.tank))), why: '' }]
     .concat(S.sup.filter(b => b.team === me && !b.dead).map((b, i) => { const w = spawnWhy(b, me); return { id: b.id, n: i + 1, x: b.x, z: b.z, text: 'Base de suprimento ' + (i + 1) + ' · ' + (w ? SPWHY[w] : km(b)), why: w }; }))
     .concat(S.cq ? S.cq.p.filter(o => o.base < 0 && o.hold === me).map(o => { const w = cqSpawnWhy(o, me); return { id: o.i + 1, tag: o.L, x: o.x, z: o.z, text: 'Ponto ' + o.L + ' · ' + o.name + ' · ' + (w ? SPWHY[w] : km(o)), why: w }; }) : [])

@@ -22,10 +22,10 @@
   - numa partida moderna, os dois Pantsir e os dois NASAMS da batalha giraram o radar (+2,08 rad cada um em 4 s);
   - a peça de asa do Bf 109, do Spitfire e do B-17 com 1 malha e nenhuma insígnia na main, e com a asa e a insígnia aqui.
 - FPS na GPU de verdade, cena fixa sobre a cidade na batalha de demonstração, 3 rodadas alternadas de 15 s: main 46,8 / 41,1 / 55,5 fps (média 47,8), aqui 40,5 / 45,9 / 52,1 fps (média 46,2). Os pares vão para os dois lados (−6,3, +4,8, −3,4): fica no ruído.
+- Visto depois, numa partida moderna (GPU de verdade): com o radar de busca de um NASAMS destruído (`radarS` a 0), o radar dele parou (0 rad), e os outros três giraram 13,48 rad no mesmo tempo.
 
 ## O que NÃO foi testado
 
-- O radar parando quando o radar de busca é destruído numa partida (a regra está no código: `pst(u, radarS) < 3`).
 - A asa arrancada vista voando numa partida.
 
 ## Como testar depois

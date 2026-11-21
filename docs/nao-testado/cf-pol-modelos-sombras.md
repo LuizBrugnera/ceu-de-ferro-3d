@@ -1,5 +1,9 @@
 # cf-pol-modelos: sombra de contato sob os veículos (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje: a mancha de contato sob o veículo que estava no chão mais inclinado da partida (o DShK no reparo, 0,82 m de desnível em 8 m) deita na encosta, sem furar o chão.
+- **Continua sem teste:** ponte, água e crista, e o helicóptero pousado.
+
 ## O que mudou
 
 Fora do Alta (o único nível com a sombra de verdade do sol), os veículos não tinham sombra nenhuma e pareciam flutuar sobre o chão. Só os aviões tinham uma mancha.

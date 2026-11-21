@@ -157,6 +157,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .hg-dock p#briefing{-webkit-line-clamp:3}
 .hg-dock .net{max-width:380px}   /* the briefing beside it keeps room for its sentence at 1280 px */
 @media (max-height:820px){.hg-dock .net .net-about{display:none}}   /* a short screen (1280×720): the vehicle and its sheet keep the height; the room's word stays on the button and the name */
+@media (max-height:820px){.hg-dock .net #netStatus:empty{display:none}.hg-dock .net #susNote{grid-column:1;-webkit-line-clamp:1}.hg-dock .net #btnFresh{grid-column:2;justify-self:end}}   /* and a suspended match's line and its button share one row, the whole sentence in the note's title (cf-pol-testes-b: they took three rows, and the carousel shrank to a 98 px model under its own name) */
 .hg-dock p#packCred{max-width:none;-webkit-line-clamp:3}   /* the models' credits whole: the CC-BY names and the licence */
 .launch{background:var(--accent);color:var(--accent-ink);border:0;border-radius:3px;padding:13px 30px;font-family:var(--f-display);font-size:24px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;transition:background-color .3s,filter .15s}
 .launch:hover{filter:brightness(1.1)}
@@ -7631,7 +7632,7 @@ function blastFx(x, y, z, r) {
     for (let i = 0; i < n; i++) { puff(x, y, z, 'fire', r / 14, rand(-12, 12), rand(0, 18), rand(-12, 12)); puff(x, y, z, 'smoke', r / 11, rand(-7, 7), rand(2, 12), rand(-7, 7)); }
   }
   const d = Math.hypot(x - S.ear.x, y - S.ear.y, z - S.ear.z);
-  if (d < 3500) { S.shake = Math.max(S.shake, r / 60 * (1 - d / 3500)); fx.boom(r, d); }
+  if (d < 3500) { S.shake = Math.max(S.shake, r / 60 * (1 - d / 3500)); fx.boom(r, d, 1); }   // 1: a burst, not a muzzle's boom (it can deafen: SND.deaf)
 }
 /* ob: the share of the burst the world objects take (OBJD), all of it when not given. A wall between the burst and a body shields it */
 /* friendly fire. on: the rule (the player's choice; online the room's, Net.ff); k, bl: the share of a friend's direct hit and of its blast that lands;
@@ -8158,6 +8159,7 @@ function dropFlare(p) {
   for (let n = Math.min(flarePair(p), p.flares); n > 0; n--) {
     p.flares--; MSL.flare(p);
   }
+  fx.launch(p === S.my, p);   // the cartridges' hiss (cf-pol-armas: they went silent)
   return true;
 }
 
@@ -8555,7 +8557,7 @@ const ARMK = {
     if (!R) { const t = lockOn(u, S.planes, w.range, .25), r = t ? dist(t, u) : 0; R = t ? r / (1 - ((t.x - u.x) * t.v.x + (t.y - u.y) * t.v.y + (t.z - u.z) * t.v.z) / (r * w.spd)) : 1200; }
     const s = { x: m.x + d.x * R, y: m.y + d.y * R, z: m.z + d.z * R, t: 0, T: R / w.spd, o: w, team: u.team, by: u };
     if ((s.wo = ray(m.x, m.y, m.z, s.x, s.y, s.z, 0))) { const k = Math.max(0, RAY.t - OBJS.back / R); s.x = m.x + d.x * R * k; s.y = m.y + d.y * R * k; s.z = m.z + d.z * R * k; s.T *= k; }   // a wall on the way: it bursts on it
-    S.shells.push(s); puff(m.x, m.y, m.z, 'spark', 1); return s;
+    S.shells.push(s); puff(m.x, m.y, m.z, 'spark', 1); fx.shot(u === S.my, u, w); return s;   // the gun is heard, not only its burst (cf-pol-armas)
   } },
   rkt: { fire(u, w, m, d) {   // an unguided rocket from a vehicle's pod: the aircraft's rocket (S.bombs k rocket), which bursts on what it strikes
     const b = { k: 'rocket', x: m.x, y: m.y, z: m.z, vx: d.x * w.spd, vy: d.y * w.spd, vz: d.z * w.spd, o: w, team: u.team, by: u, life: w.life || 4 };
@@ -22199,6 +22201,22 @@ const enetWho = (k, s) => (k === 0 ? 'IA' : k === 2 ? 'modelo (MCP)' : (Net.play
 function enetCtlSync() {
   for (const s of lsN()) { const k = Net.gk[s] || 0; genCtl(s, enetCtl[k] || 'ai', (S.gast || [])[s], enetWho(k, s)); }
 }
+/* the general's view message within the relay's cap for gen (server.js BIG.gen, 8192 bytes): over GENCAP bytes, the largest of the optional
+   layers (GENOPT) is halved when it is a list, else left out, the biggest first, and last the squads' rows, until it fits; the core (the ops,
+   posts, roads, doctrine) always goes. cf-pol-testes-b: in a modern AI battle the defence plans (dfp) alone took 4.9 KB of a message of
+   8.9 KB, which the relay drops without a word, so a guest's view stopped. Bytes as UTF-8 (the relay counts the frame's) */
+const GENCAP = 7800, GENOPT = ['dfp', 'pris', 'sede', 'kz', 'ev', 'mev', 'thb', 'cn'];
+const utf8Len = s => s.length + (s.match(/[\u0080-\u07ff]/g) || []).length + 2 * (s.match(/[\u0800-\uffff]/g) || []).length;
+function genMsg(s, T) {
+  const m = { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) };
+  for (let i = 0; i < 24 && utf8Len(JSON.stringify(Object.assign({ t: 'gen' }, m))) > GENCAP; i++) {
+    let k = null, n = 0; for (const f of GENOPT) if (m.v[f] !== undefined && m.v[f] !== null) { const l = JSON.stringify(m.v[f]).length; if (l > n) { n = l; k = f; } }
+    if (k) { const x = m.v[k]; if (Array.isArray(x) && x.length > 1) m.v[k] = x.slice(0, x.length >> 1); else delete m.v[k]; continue; }
+    if (m.q.length >= 12) { m.q = m.q.slice(0, Math.floor(m.q.length / 12) * 6); continue; }
+    break;
+  }
+  return m;
+}
 /* log rows within the relay's size for glog: the oldest go first */
 function glogFit(rows) { while (rows.length > 1 && JSON.stringify(rows).length > 7000) rows = rows.slice(Math.ceil(rows.length / 8)); return rows; }
 function enetTick(dt) {
@@ -22215,7 +22233,7 @@ function enetTick(dt) {
   }
   if (Net.gen) {
     enetCtlSync();
-    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of lsN()) Net.send('gen', { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) }); }
+    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of lsN()) Net.send('gen', genMsg(s, T)); }
     if ((N.glog += dt) >= ENET.glog) {
       N.glog = 0;
       if (Net.glS !== S.glog) { Net.glS = S.glog; Net.gl = lsN().map(() => null); }
@@ -38554,7 +38572,7 @@ const bushMat = hex => mat(hex, { vertexColors: true, flatShading: false, map: b
    AFL, the look: a modern hangar's hall with doors on its front (toward the runway) and an edge round its roof; an old one's round arch
    with its ribs and its doors; the tower's glass cab with its floor, its roof, its frames and a mast; the hideout's sheds (its hangars)
    with a pitched roof, a door and windows, and its low bunker (its ctl) with a slab and a firing slit. The details of each building are
-   one mesh; the runway's markings too ---------- */
+   one mesh; the runway's markings too: its middle line, its edge lines and the threshold bars at each end ---------- */
 const AFL = { run: 0x3a3c3b, mark: 0xd8d3bd, hall: 0x70756f, door: 0x3c403e, arch: 0x5b5f4d, rib: 0x3a3c33, cab: 0x7ea2ae, shed: [0x8b8069, 0x9a8f78], roof: [0x6b6e66, 0x7a5038], dark: 0x2b2a26, bunker: 0x7d7460, slab: 0x6a624f };
 function baseScene(b, t) {
   const g = new THREE.Group(), gy = hgt(b.x, b.z), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
@@ -38563,6 +38581,8 @@ function baseScene(b, t) {
   if (t < 2) {
     add(new THREE.BoxGeometry(1100, 1, 44), mat(AFL.run), 0, 2, 150);
     const L = []; for (let i = -480; i <= 480; i += 120) L.push(box(40, 1.1, 2, i, 0, 0));
+    for (const z of [-20.6, 20.6]) L.push(box(1080, 1.1, .8, 0, 0, z));   // the edge lines
+    for (const e of [-1, 1]) for (let k = 0; k < 8; k++) L.push(box(30, 1.1, 1.8, e * 525, 0, -15.75 + k * 4.5));   // the threshold bars at each end
     add(vkGeo(L), mat(AFL.mark), 0, 2.1, 150);
   }
   (t > 1 ? BASE.ins : BASE[S.era]).forEach(([k, x, z, w, d, hh], j) => {
@@ -38754,7 +38774,7 @@ function buildWorld() {
    tall: its height, conifer: the share of conifers on a map without its own broadleaves, tip: the grass's tips, wind: its share of the
    wind). URL: ?veg=off draws the old cones, ?vq= a level (low, mid, high), ?vs= a style */
 const VEG = {
-  on: true, q: 'mid', style: 'mista',
+  on: true, q: 'mid', style: 'mista', trench: .35,
   Q: {
     low: { near: 0, mid: 380, fade: 50, shadow: 0, grass: 0, dens: 0 },
     mid: { near: 170, mid: 700, fade: 60, shadow: 1, grass: 60, dens: .75 },
@@ -39168,6 +39188,17 @@ function vegGround(G, x, z, out) {
   for (let q = 0; q < 4; q++) { const kk = ks[q], w = ws[q]; out[0] += G.col[kk * 3] * w; out[1] += G.col[kk * 3 + 1] * w; out[2] += G.col[kk * 3 + 2] * w; out[3] += G.dens[kk] * w; out[4] += G.tall[kk] * w; }
   return out;
 }
+/* the trenches dug deep enough to be drawn as a hole (FHOLE: depth .25 m or more) within r m of x z, and whether a point is in one's cut
+   (its half length and half width, and VEG.trench m more): no grass grows in a trench (cf-pol-testes-b: the clumps stood up from its floor) */
+function vegTrenches(x, z, r) {
+  const out = []; if (!S.forts) return out;
+  for (const f of S.forts) if (f.k === 1 && !f.gone && f.o && f.prog * FORT.trench.depth >= .25 && Math.abs(f.x - x) < r + f.o.hw + 2 && Math.abs(f.z - z) < r + f.o.hw + 2) out.push(f);
+  return out;
+}
+function vegInTrench(f, x, z) {
+  const ux = -Math.sin(f.a), uz = -Math.cos(f.a), dx = x - f.x, dz = z - f.z;
+  return Math.abs(dx * ux + dz * uz) <= f.o.hw + VEG.trench && Math.abs(-dx * uz + dz * ux) <= f.o.hd + VEG.trench;
+}
 /* a chunk of grass: its clumps on a jittered grid, the same each time it is made; sorted by a rank, so that a chunk far from the eye
    draws only the first of them */
 function vegChunk(V, ci, cj) {
@@ -39176,6 +39207,7 @@ function vegChunk(V, ci, cj) {
   const burg = (T.burgs || []).find(b => Math.hypot(mx - b.x, mz - b.z) < b.ru + 60 + CS), hs = burg ? T.houses.filter(q => Math.abs(q.x - mx) < CS + q.r && Math.abs(q.z - mz) < CS + q.r) : null;
   const st = burg ? (T.streets || []).filter(l => Math.min(l[0], l[2]) < x0 + CS + 10 && Math.max(l[0], l[2]) > x0 - 10 && Math.min(l[1], l[3]) < z0 + CS + 10 && Math.max(l[1], l[3]) > z0 - 10) : null;
   const sd = (l, x, z) => { const ex = l[2] - l[0], ez = l[3] - l[1], t = clamp(((x - l[0]) * ex + (z - l[1]) * ez) / (ex * ex + ez * ez || 1), 0, 1); return Math.hypot(x - l[0] - ex * t, z - l[1] - ez * t); };
+  const tr = vegTrenches(mx, mz, CS * .75);
   for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
     const gi = ci * n + a, gj = cj * n + b, x = x0 + (a + hash2(gi, gj, 1)) * sp, z = z0 + (b + hash2(gi, gj, 2)) * sp, keep = hash2(gi, gj, 3);
     vegGround(G, x, z, out); if (keep >= out[3] * G.dm) continue;
@@ -39183,6 +39215,7 @@ function vegChunk(V, ci, cj) {
     if (nearRoad && routeDist(T, x, z) < 5.5) continue;
     if (hs && hs.some(q => footD(q, x, z) < 1.5)) continue;
     if (st && st.some(l => sd(l, x, z) < CITY.plan.street / 2)) continue;
+    if (tr.length && tr.some(f => vegInTrench(f, x, z))) continue;
     pts.push([hash2(gi, gj, 4), x, y, z, out[0], out[1], out[2], out[4]]);
   }
   pts.sort((p, q) => p[0] - q[0]);
@@ -42042,7 +42075,7 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    gap s apart and at most q waiting to be heard. far: m past which a shot is not heard; launch, boom: the same for a rocket's or missile's
    whoosh (which was as loud across the map as beside the ear) and a burst. crack: the round of a foe passing within r m of the soldier's
    head snaps, at most one every gap s. hand: the soldier's own hands, [after s, dur s, vol, f Hz, Q] noises through a band: a magazine
-   out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. The master runs through a compressor, so that a battle's
+   out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. deaf: a burst close by (sndDeaf). The master runs through a compressor, so that a battle's
    bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
    falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
    the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
@@ -42056,6 +42089,7 @@ const SND = {
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  deaf: { r0: 5, near: 1.6, big: 30, min: .35, in: .4, s0: .12, f: [650, 20000], t: 2.2, tone: 3700, vol: .03 },
   near: { veh: { n: 3, r: 450, ref: 30, trk: 120, vol: .7 }, air: { n: 2, r: 3000, ref: 300, vol: .9 }, dop: .6, fac: [.6, 1.6] },
   veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
@@ -42070,8 +42104,9 @@ function audioInit() {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const c = A.ctx = new AC();
     A.master = c.createGain(); A.master.gain.value = A.on ? .6 : 0;
-    if (c.createDynamicsCompressor) { const k = A.comp = c.createDynamicsCompressor(); k.threshold.value = -14; k.knee.value = 12; k.ratio.value = 4; k.attack.value = .003; k.release.value = .25; A.master.connect(k); k.connect(c.destination); }
-    else A.master.connect(c.destination);
+    const ear = A.ear = c.createBiquadFilter(); ear.type = 'lowpass'; ear.frequency.value = SND.deaf.f[1]; A.master.connect(ear);   // the ear: open, until a burst close by deafens it (SND.deaf)
+    if (c.createDynamicsCompressor) { const k = A.comp = c.createDynamicsCompressor(); k.threshold.value = -14; k.knee.value = 12; k.ratio.value = 4; k.attack.value = .003; k.release.value = .25; ear.connect(k); k.connect(c.destination); }
+    else ear.connect(c.destination);
     const buf = c.createBuffer(1, c.sampleRate, c.sampleRate), ch0 = buf.getChannelData(0);
     for (let i = 0; i < ch0.length; i++) ch0[i] = Math.random() * 2 - 1;
     A.noise = buf;
@@ -42104,7 +42139,7 @@ const sndAt = (d, ref) => 1 / (1 + d / ref), sndCut = (f, d, air, lo) => Math.ma
 function shotVoice(w, p) {
   if (!w) return p && p.man ? 'rifle' : 'mg';
   const c = calOf(w);
-  if (c >= 20) return 'cannon';
+  if (c >= 20 || w.k === 'flak') return 'cannon';
   if (w.snp) return 'sniper';
   if (c >= 12) return 'hmg';
   if (w.lmg) return 'mg';
@@ -42126,12 +42161,27 @@ fx.shot = (mine, p, w) => {
   burst(v[0] * (1 + d / 4000), k, sndCut(v[2], d, SND.air, 250), 'lowpass', at);
   if (v[3]) thump(v[3], v[0] * 1.6, k * v[4], at);
 };
-fx.boom = (r, d) => {
+fx.boom = (r, d, hit) => {
   if (playMode !== 'play' || !A.ctx) return;
   const at = A.ctx.currentTime + d / SND.c, k = clamp(r / 30, .12, .9) * (1 - d / 3500);
   burst(.4 + r / 60, k, sndCut(420, d, SND.boom.air, 120), 'lowpass', at);
   if (r >= 12) thump(48, .5 + r / 90, k * .45, at);
+  if (hit) sndDeaf(r, d);
 };
+/* a burst close by deafens the ear for a moment (SND.deaf): strength s by how near it was against its size (within near radii of it) and
+   how big (r over big, at least min of it), less inside armour (in); past s0 the world's sound falls to a low-pass at f[0] Hz (all of it
+   at s 1) and opens again over t s, under a ring at tone Hz that fades with it. A stronger burst while deaf deafens again */
+function sndDeaf(r, d) {
+  const D = SND.deaf, P = S.my; if (!A.ear || !A.on || !P || P.dead || r < D.r0) return;
+  let s = clamp(1 - d / (r * D.near), 0, 1) * clamp(r / D.big, D.min, 1); if (P.kind && !P.man) s *= D.in;
+  const c = A.ctx, now = c.currentTime; if (s < D.s0 || (A.deaf && now < A.deaf.t && s <= A.deaf.s)) return;
+  const T = D.t * s + .4, f = D.f[0] + (D.f[1] - D.f[0]) * (1 - s) ** 3;
+  A.ear.frequency.cancelScheduledValues && A.ear.frequency.cancelScheduledValues(now);
+  A.ear.frequency.setValueAtTime(f, now); A.ear.frequency.exponentialRampToValueAtTime(D.f[1], now + T);
+  const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = D.tone; g.gain.setValueAtTime(D.vol * s, now); g.gain.exponentialRampToValueAtTime(.001, now + T);
+  o.connect(g); g.connect(A.comp || c.destination); o.start(now); o.stop(now + T + .05);   // the ring is in the head: past the ear's filter
+  A.deaf = { t: now + T, s };
+}
 fx.launch = (mine, p) => {
   if (playMode !== 'play' || !A.ctx) return;
   const L = SND.launch, d = mine ? 0 : p ? dist(p, S.ear) : L.ref; if (d > L.far) return;
@@ -42959,7 +43009,7 @@ function susFill() {
   $('#btnFresh').hidden = $('#susNote').hidden = !q;
   L.textContent = q ? 'Continuar' : 'Entrar na sala';
   L.title = q ? 'Continuar: retomar a partida suspensa desta sala, de onde parou, com o veículo escolhido' : 'Jogar: entrar na sala com o veículo escolhido';
-  if (q) $('#susNote').textContent = 'Partida suspensa nesta sala' + (q.ph ? ', já encerrada' : t ? ', com ' + Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') + ' no relógio' : '') + '. Fica guardada por mais ' + Math.ceil(q.s / 60) + ' min.';
+  if (q) $('#susNote').title = $('#susNote').textContent = 'Partida suspensa nesta sala' + (q.ph ? ', já encerrada' : t ? ', com ' + Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') + ' no relógio' : '') + '. Fica guardada por mais ' + Math.ceil(q.s / 60) + ' min.';
 }
 function susPoll() {
   if (typeof fetch !== 'function' || hangar.hidden) return;
@@ -47947,11 +47997,27 @@ function holeScene() {
   for (const f of S.forts || []) if (f.k === 1 && !f.gone && f.prog * FORT.trench.depth >= .25) sig += f.id + ':' + Math.round(f.prog * 20) + (f.tl ? (f.tl[0] ? 1 : 0) + '' + (f.tl[1] ? 1 : 0) : '') + ',';
   if (S.tun) for (const tn of S.tun) if (!tn.st) sig += 't' + tn.id + ':' + (tn.fd ? tn.fd.join('') : '') + ':' + Math.round(Math.min(1, tn.prog * 4) * 8) + (tn.prog >= 1 ? 'd' : '') + ',';
   const now = performance.now() / 1000;
-  if (sig !== gHole.sig && (now - gHole.T > FHOLE.every || sig.length !== gHole.sig.length)) { gHole.sig = sig; gHole.T = now; holeBuild(); }
+  if (sig !== gHole.sig && (now - gHole.T > FHOLE.every || sig.length !== gHole.sig.length)) { gHole.sig = sig; gHole.T = now; holeBuild(); holeGrass(); }
   const cp = camera.position, under = cp.y < meshH(cp.x, cp.z) + FHOLE.lift + .05;
   gHole.a.visible = gHole.b.visible = !under && gHole.w.visible;
 }
 fortScene = (g => () => { g(); holeScene(); })(fortScene);
+/* the grass where a trench was dug deeper, appeared or went (filled in, the world rebuilt) is made again: vegChunk leaves a cut bare and
+   grows a filled one back. Only the chunks those trenches touch; gHole.gr: each drawn trench's state the last time (its depth step) */
+function holeGrass() {
+  const V = typeof VS !== 'undefined' && VS.built, G = V && V.g, was = gHole.gr || new Map(), now = new Map(), at = [];
+  for (const f of S.forts || []) if (f.k === 1 && !f.gone && f.o && f.prog * FORT.trench.depth >= .25) now.set(f.id, [Math.round(f.prog * 20), f.x, f.z, f.o.hw]);
+  const first = !gHole.gr; gHole.gr = now; if (first) return;   // a world just built: its chunks were made with these trenches
+  for (const [id, e] of now) { const o = was.get(id); if (!o || o[0] !== e[0]) at.push(e); }
+  for (const [id, o] of was) if (!now.has(id)) at.push(o);
+  if (!G || !G.chunks || !at.length) return;
+  const CS = VEG.chunk, R = CS * .75 + 2;
+  for (const [key, ch] of [...G.chunks]) {   // made again in place, the same frame: no chunk goes missing for a moment
+    if (!at.some(e => Math.abs(ch.x - e[1]) < R + e[3] && Math.abs(ch.z - e[2]) < R + e[3])) continue;
+    const vis = ch.me.visible, n = ch.geo.instanceCount; G.free.push(ch);
+    const nc = vegChunk(V, Math.round((ch.x - CS / 2) / CS), Math.round((ch.z - CS / 2) / CS)); nc.me.visible = vis && nc.m > 0; nc.geo.instanceCount = Math.min(n, nc.m); G.chunks.set(key, nc);
+  }
+}
 /* the general's map: the side's tunnels (a dashed line between the mouths, what is dug of it) and the enemy mouths it found */
 function gTun(g, V, P) {
   if (!S || !S.tun || !S.tun.length) return;

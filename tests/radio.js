@@ -182,7 +182,7 @@ for (const era of ['modern', 'ww2']) {
     if (!S.cn || S.t % 5 > 1 / 60) return;
     for (const t of [0, 1]) { const Cm = S.cmd[t]; gaps = Math.max(gaps, (Cm.cnGap || []).length); fixes = Math.max(fixes, (Cm.cnFix || []).length); }
     for (const f of S.forts) if (f.k === 8) rels.add(f);
-    for (const s of [0, 1]) big = Math.max(big, JSON.stringify({ t: 'gen', s, T: 1, v: C.genPick(C.genVM(s, false)), q: [] }).length);
+    for (const s of [0, 1]) big = Math.max(big, Buffer.byteLength(JSON.stringify(Object.assign({ t: 'gen' }, C.genMsg ? C.genMsg(s, 1) : { s, T: 1, v: C.genPick(C.genVM(s, false)), q: [] })), 'utf8'));   // the message as the host sends it (genMsg fits it, cf-pol-testes-b), in bytes as the relay counts
   });
   const st = CNB.stat(), L = [0, 1].map(t => radio(S, t)).flat();
   ok(!H.nan(S), era + ': no NaN');

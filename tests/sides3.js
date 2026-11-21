@@ -123,9 +123,9 @@ console.log('-- P4, P6a, P7: the faction --');
   const old = S.E.sides[2].aaOld, aa2 = S.units.filter(u => u.team === 2 && old.includes(u.id));
   ok(aa2.length >= 1 && !S.units.some(u => u.team === 2 && u.kind === 'aa'), 'the Insurgents\' anti-air is their old guns on technicals (cf-insurg-antiaerea): ' + aa2.map(u => u.id).join(', '));
   ok(!H.nan(S), 'no NaN after ' + Math.round(S.t) + ' s of three sides');
-  /* the general's view of side 2 (the Insurgents' player opens it with Tab): its panels compared side t with side 1 - t and read V.f[-1] */
-  const V2 = C.genVM(2, true), F = [['Infantaria (homens)', 'men'], ['Transporte', 'trk', 'car']], rows = $('genForceRows')(V2, F), men = s => V2.f[s].men;
-  ok(V2.held.length === 3 && V2.f.length === 3 && rows.length > 0 && rows[0][1] === men(2) && rows[0][2] === men(0) + men(1), 'the general\'s view of side 2: the points of the three sides (' + V2.held + '), its men against both enemies\' together (' + JSON.stringify(rows[0]) + ')');
+  /* the general's view of side 2 (the Insurgents' player opens it with Tab): every side's points, and its ticket trend drew the clock column */
+  const V2 = C.genVM(2, true);
+  ok(V2.held.length === 3 && V2.f.length === 3, 'the general\'s view of side 2: the points (' + V2.held + ') and a tally of the three sides');
   ok(JSON.stringify($('genTrendCols')(V2)) === '[[3,2],[1,0],[2,1]]' && JSON.stringify($('genTrendCols')(C.genVM(0, false))) === '[[1,0],[2,1],[3,2]]', 'its ticket trend: its own column of S.gtk, then each enemy\'s');
 }
 

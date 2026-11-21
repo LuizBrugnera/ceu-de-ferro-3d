@@ -5,7 +5,7 @@ Testado (cf-pol-testes-a):
 - `tests/sides3-online.js`: um jogador entra como Insurgente de T-55 numa sala de 3 lados (`ns` 3) e fica no lado 2; uma página que pede "Dois" numa sala de 3 é recusada (`sides`).
 - No navegador (Chromium sem janela, 1280 e 1920 px): a fileira EUA / Rússia / Insurgentes aparece na Frente atual; com Insurgentes as classes são Tanque, Artilharia, Infantaria e Transporte (sem Avião, Helicóptero nem Antiaérea) e o primeiro cartão é o T-55A (capturado); o lado fica guardado ao recarregar (`ceu-de-ferro-3d-lado`); "Dois" no painel Partida esconde os Insurgentes e volta aos EUA, "Três" os traz de volta; sem rolagem horizontal e sem erro na página.
 
-**Conserto (cf-pol-testes-a):** o texto da missão dizia "Você entra pela Insurgentes", "decola pela EUA": agora "pelos Insurgentes", "pelos EUA", "pela Rússia", "pela Luftwaffe", "pelos Aliados" (`pelaDe`).
+**Visto (cf-pol-testes-a):** o texto da missão dizia "Você entra pela Insurgentes", "decola pela EUA"; o polimento do HUD (#172) já o trocou por "pelos Insurgentes", "pelos EUA" (`pelaDe`).
 
 ## O que falta
 
@@ -13,4 +13,4 @@ Testado (cf-pol-testes-a):
 - Capturar uma técnica insurgente com um russo online (`cs`).
 - O general insurgente sem aviação na economia (ponte aérea e evacuação negadas por `ecoUse`).
 - O balanço do M1A1 e do M109A7 em jogo; a tela de toque e o celular.
-- Visto no hangar: a técnica com Type 63 (107 mm) aparece como blocos sem rodas no cartão (modelo de artilharia genérico): caso para quem cuida dos modelos.
+- Visto no hangar antes do merge com o #173: a técnica com Type 63 (107 mm) aparecia como blocos sem rodas no cartão (o #173 deu modelos próprios à artilharia e à antiaérea: conferir no hangar).

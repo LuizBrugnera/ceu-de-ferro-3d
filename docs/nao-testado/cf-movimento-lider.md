@@ -1,5 +1,9 @@
 # cf-movimento-lider: o movimento orgânico por equipe e por técnica (não testado)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados), 68 s: as três técnicas em uso (`mvTec`: desloc 52, vig 20, lances 17 esquadras). 268 soldados com abrigo escolhido em contato (`m.mvCv`). Na câmera de comandante, o quadro de uma esquadra mostra a técnica (desloc) e as equipes A e B. Nenhum erro no console.
+- **Continua sem teste:** as suítes antigas com `MV.on` 0 × 1, os lances vistos na tela com "Avançar!"/"Cobrindo!", noite e mata, e o A/B.
+
 Pedido do capitão: refazer o movimento orgânico (#68) para que ele obedeça ao líder da esquadra, como a pesquisa do cérebro dos soldados definiu (um líder por esquadra, equipes, serviço de abrigo). "O melhor jeito de implementar isso, em vez de fazer gambiarras." Pela regra do capitão, nenhuma suíte foi rodada. Tudo abaixo está sem teste, salvo o smoke do fim.
 
 ## Referência
@@ -59,27 +63,13 @@ Nada usa `Math.random`: tudo vem de `hash2` e do estado. Duas execuções com a 
 
 Evento novo do ANA: `cb`, com `{ st: 'tec', q: <id da esquadra>, v: <técnica> }`, quando a técnica de uma esquadra muda.
 
-## O que rodou (smoke de ~1 min por época, sem tela)
+## O que NÃO foi testado (o que ainda falta)
 
-Pelo harness (`load({ mapv: 10, seed: 7 })`, `watch`, 60 s com dt de 0,1 s). Os scripts estão em `/home/luiz/secondmate/data/cf-movimento-lider/` (`smoke.js` e `probe.js`).
-
-- **Moderno**: sem NaN; 37 esquadras; técnicas vistas: desloc 59 e vig 69. Duas execuções deram o mesmo hash das posições. O tempo foi de 26,0 s com `MV.on = 1` contra 24,7 s com `MV.on = 0`.
-- **WW2**: sem NaN.
-- **Lances**: a distância de cada homem ao líder ao longo de um ciclo ficou entre 13 e 68 m e é contínua (sem saltos).
-- **Viagem de 1,2 km refeita pelo `mvWay`**: 1301 m, 17 ms, e o cache do `tripOf` ficou intacto. Nesse trecho não havia mato nem crista para desviar.
-- `tests/sim-split.js` passou.
-
-## O que NÃO foi testado
-
-- Nenhuma suíte (`tests/*.js`) além do `sim-split`, nenhuma partida longa, nenhum A/B de baixas ou de tempo de chegada.
-- Não foi visto na tela nem online.
-- Não foi verificado se:
-  - os lances, com equipes que correm 60 m enquanto a âncora anda 30, atrasam a esquadra demais. A âncora espera o líder;
-  - o encaixe no abrigo em contato (`cvPick` a cada 2 s por homem) pesa numa batalha grande;
-  - o custo extra da crista e do aberto deixa os caminhos do comandante (`O.wp`) e os escondidos longos demais. O `ugPoly` ainda corta em 1,5× o caminho dado;
-  - as equipes do `q.eq` (P0) casam com o índice `A.i` do `slot` quando o P0 chegar;
-  - `MV.pos` (P2) é o nome que o cf-p2-posicao vai usar. Ele precisa registrar a função ali.
-  - o abrigo das trincheiras (#128, `ABRT` no formato do P2 e `shelters(m, r, o)`): o `cvPick` já lê trincheiras e sacos pelo `fortSlots`. Ainda não lê os pontos do registro `ABRT` direto. Quando o P2 chegar, o `MV.pos` deve passar por esse registro.
+- Se os lances (equipes que correm 60 m enquanto a âncora anda 30) atrasam a esquadra demais.
+- O custo do encaixe no abrigo em contato (`cvPick` a cada 2 s por homem) numa batalha grande.
+- Se o custo da crista e do aberto deixa os caminhos do comandante (`O.wp`) e os escondidos longos demais (o `ugPoly` corta em 1,5×).
+- Se as equipes do `q.eq` (P0) casam com o índice `A.i` do `slot`; se `MV.pos` é o nome que o P2 registra; o abrigo das trincheiras pelo registro `ABRT`.
+- Online.
 
 ## Riscos
 

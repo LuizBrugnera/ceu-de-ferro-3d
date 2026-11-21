@@ -1,5 +1,11 @@
 # Obras: entrar, usar e sair (torre de sniper e revisão de todas) — não testado no jogo
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): parte
+- Navegador, Assistir em Hoje (3 lados), com o pack: sacos de areia, ninho de metralhadora e ouriços vistos de perto na partida, cor de areia e de metal, nenhum branco.
+- `tests/posts.js`: passa inteiro (tudo do posto, da torre nas duas épocas, da beira da estrada e da obra em cima de veículo).
+- Achado para o `cf-trincheiras-tuneis`: a grama nasce dentro do buraco da trincheira (as folhas aparecem no fundo dela).
+- **Continua sem teste:** a torre de sniper no navegador (E para subir e descer), a saída do anel de muros pela IA, `postGoal` com um construtor de passagem, o soldado saindo da água e o online.
+
 Tarefa `cf-obras-sair`. Pedidos do capitão: "torre de sniper ta bugada não tem como sair dela, revise as outras contruções" e "mesmo em lugares que da pra construir, aparece q estou em cima de uma estrada" (PR #163); depois, "SACOS DE AREIA E ALGUMAS CONSTRUÇÕES ESTÃO BRANCAS" (segundo PR).
 
 ## O que mudou

@@ -88,7 +88,21 @@ Antes é o main `ab57ded`; depois, o ramo em `6da6b39` (o G1 sem o merge do #168
 | Entropia das chegadas | 0,1 bit | 0,1 bit |
 | Tíquetes: sangria | 68% | 68% |
 
-A época moderna (sementes 7 a 12) ainda está rodando: PENDENTE.
+Hoje (as 6 últimas):
+
+| Hoje, 6 partidas Curtas | Antes (main `ab57ded`) | Depois (G1 ligado) |
+| --- | --- | --- |
+| Partidas idênticas evento a evento (sem o cabeçalho) | — | **6 de 6** |
+| Vitórias: lado 0, lado 1 | 1, 5 | 1, 5 |
+| Como acabaram | tempo: 6 | tempo: 6 |
+| Assaltos por partida (hora H, tomaram, recuaram) | 0,7 (0,3, 0,2, 0,3) | 0,7 (0,3, 0,2, 0,3) |
+| Taxa de flanco; fora do eixo | 0%; 21% | 0%; 21% |
+| Assaltos com manobra | 25% | 25% |
+| "Sem força para atacar" por partida | 73,5 | 73,5 |
+| Emboscadas por partida: armadas, disparadas | 4,7, 1,2 | 4,7, 1,2 |
+| Tíquetes: sangria | 18% | 18% |
+
+**No total, as 12 partidas são idênticas evento a evento.** Os relatórios de `balance.js` das duas metades só mudam a ordem de linhas empatadas.
 
 É o que se espera de um pacote que ninguém lê ainda: o G1 não muda a partida. O torneio mostra que ele não quebra nada nem desvia a simulação. Ele não mede o que o G1 vai valer quando o G3 e o G4 o usarem.
 

@@ -37113,6 +37113,331 @@ genCard = (f => (t, id) => {
   return c;
 })(genCard);
 /* ---------- end of the medic (cf-medico) ---------- */
+/* ---------- CEREBRO: urbano (G7 do General 2, cf-g2-g7-urbano; NÃO TESTADO além do exercício e do torneio, see docs/nao-testado/cf-g2-g7-urbano.md) ----------
+   The infantry among houses, the anti-tank man and the sniper (cf-ia-opensource §2.4, §5.1 and package G7 of §6). The exercise without a
+   screen of §2.4 found four dead paths in real matches: no anti-tank rocket fired by the AI's infantry (the gunner ran after a point beside a
+   tank that moves, and fired only from its flank or after 40 s in range, never while running), no soldier of ours inside a town the enemy
+   holds (the assault goes for the middle), the sniper walking in his squad's slot (0 to 8 shots a match), and men in a building 13-19% of the
+   time. This is the leader's and the soldier's part of the answer; getting the assault to the town is the general's (G4). Each part is a hook
+   on the old code (manThink, aiMan, sqMore, dfpTeam, sqBound), and URB.on 0 leaves every one as it was: the same battle as before it, to the
+   bit (tests/urbano.js), so a tournament plays the same seeds with it off and on (tools/balance.js --set URB.on=0|1).
+   - The anti-tank man, a hunter (URB.at; LAMBS's tacticsAssess, the man with the launcher kneels and fires in seconds; OpenXcom's ambush
+     on the way the enemy will come): with a rocket launcher in hand and armour as his own target (manThink's, from what he perceives) he is
+     the squad's hunter. The exercise in a match showed what held him: the leader's 'reagir' had begun on the first contact and kept him as
+     one of the base of fire (aguentar: in cover where he was, drGo), so the 'anticarro' method never came and a Panzerfaust of 70 m never got
+     in range. Now the squad's drills that hold a man as one of the rest (at.free: reagir, fixar, lances...) leave him be while he hunts;
+     armour his squad knows of (its beliefs, recognised, fresh within at.bel s, within at.k of his range and at.far m) but he does not see
+     he goes toward, to at.lat of his range from it in cover, unless an enemy soldier is within at.man m of him (the exercise in a match:
+     most of the time near armour the anti-tank man had no sight of it, and none was ever in his range); once he sees it,
+     a tank that stands he works round as before (stalk); one that moves he meets on its way: ahead of it, at.lat of his range off its track
+     on his side, when that is within at.reach m of him and he runs there (at.run m/s) before it comes (at.slack s), else he waits in
+     cover by his place. Within at.fire of his
+     range, with a line of fire, he kneels where he is and, loaded, fires when he sees it: at once off its front arc (stalk's own test), within at.close of the range, or
+     when it drives at him; else after at.wait s in range (the old wait was 40: a moving tank is never in range that long). He stops for it
+     on the move under the commander's order too, but not when the squad routs or holds its fire, nor when a reflex or a break of his own
+     has him (a grenade, pinned in the open), nor pinned or in panic (P1's morale); a friend in the way still holds his fire (ffHeld). The
+     defence plan (DFP) already gives the anti-tank men the places nearest the road of each entry: there they now fire.
+   - The sniper's own post (URB.snp; OpenXcom's setupAmbush: a hide the enemy does not see that looks over the ground it will come by): when
+     his squad holds a place, or assaults within snp.ovw[1] m of its objective, he asks P2's position service (the profile atirador: lying,
+     out of doors, high, hidden, with a line of fire: indoors he may not lie down, bldPose, and he fires lying only) for a post within snp.r
+     m of a point toward the threat: at snp.edge of a town's radius from its middle (among the houses he sees nothing), snp.back m behind
+     any other place, snp.ovw[0] m short of the objective in an assault; looking at the ground snp.aim m beyond it. The threat is what his
+     squad knows (its board, P0, then its beliefs), else what the side knows (ptThreat). When the ground there has no post, he tries
+     snp.turn rad to one side of the threat, then to the other, then keeps his slot for snp.keep s. The post is his place in the squad
+     (q.bg, read by slot) for snp.keep s; after his shots (the old shoot and move) he takes another snp.zone m or more from the one he left.
+     When the squad moves on, his slot again. A garrison's sniper was put at a window by the defence plan, where he may not lie down and so
+     never fired. A post's garrison (a sniper's tower, an anti-tank post: q.wpost) keeps the work's own places, and its men are no hunters.
+   - The garrison of a town (URB.gar; LAMBS's taskGarrison): a post of the defence plan (CEREBRO: defesa) of a town point its squads hold
+     takes the windows of the gar.n nearest buildings of the town within gar.bld m that look toward its kill zone, every storey, gar.wins a
+     building, before the works, the cover points and the line in the open that the plan gives elsewhere; its reserve, when the plan found
+     no building within 40 m of its place, the bays of the town's building nearest it within gar.res m.
+   - Clearing a town (URB.cqb; LAMBS's taskCQB, "cleared by side X", and OpenCombat's bounds: one team moves, the other covers): a squad
+     assaulting a town point, within cqb.near m of its circle, goes building by building: its moving team goes into the nearest building of
+     the point the side has not cleared (weighed toward the middle), a grenade through the door first (bAtk, as the bounds), while the other
+     team covers from where it stands; the teams swap at each building. A building is cleared for the side (S.urbClr: by building, when,
+     for cqb.keep s) when the team has been inside it cqb.clr s with no fresh contact in it (the leader's board and his men's own targets:
+     what they perceive, never who is in it), or after cqb.max s at it. With every building of the point cleared, the bounds as before
+     (INC.bound) and the middle. The general's view, the log and the MCP see it in the squad's card (genCard: "limpando ...").
+   Honest: the man's target and his squad's board and beliefs, the side's knowledge (ptThreat), the map's roads and buildings. Draws no
+   random number of its own (ffHeld and coverSpot, which it calls, may), and changes the battle only where URB.on. */
+const URB = { on: 1,
+  at: { fire: .92, close: .55, wait: 10, mov: 1.5, lat: .6, run: 4, slack: 4, reach: 150, bel: 8, far: 300, k: 3, man: 60, free: ['reagir', 'fixar', 'lances', 'contato', 'tanque', 'fogo-distante', 'perimetro'] },
+  snp: { r: 110, back: 40, edge: .7, turn: .9, aim: 250, ovw: [220, 650], keep: 120, zone: 25, again: 6 },
+  gar: { bld: 60, n: 3, wins: 4, res: 90 },
+  cqb: { near: 140, clr: 6, max: 50, keep: 600, hot: 8 } };
+const urbOn = () => !!URB.on && !!BRAIN.on && brainSim();
+const URBA = { tank: 1, lav: 1 };   // armour, what the anti-tank man is for
+const urbHeat = m => { const s = m.arms && m.arms[1]; return !!s && !!s.d && s.d.k === 'heat' && s.mag + s.res > 0 ? s : null; };
+/* he cannot choose for himself now: his squad routs or holds its fire, a reflex of his own has him, he breaks for cover (a grenade, pinned in the open), pinned or in panic */
+const urbBusy = (m, q) => (q && (q.state === 1 || q.hf)) || (m.rf && m.rf.k && S.t <= (m.rf.ate || 0)) || (m.ai.brk > S.t && m.ai.drb !== m.ai.brk) || (m.mo && (m.mo.est === 'pregado' || m.mo.est === 'panico'));   // a drill's hold (drGo: drb) is not his own break
+/* ---- the anti-tank man ---- */
+/* he hunts armour: a rocket launcher with rounds in hand, his own target (manThink's, from what he perceives) a tank or light armour */
+const urbHunt = m => { const t = m.ai && m.ai.tgt; return !!t && !t.dead && !!URBA[t.kind] && m.ctl.w === 1 && !!urbHeat(m) && !(m.pa && m.fc && m.fc.gm === m) && !(m.sq && m.sq.wpost); };   // a gun's crew and a post's garrison are POSTS'
+/* the armour his squad knows of (its beliefs: what its men made out and told) near enough for his launcher, recognised and fresh */
+const urbBel = (m, q, rng) => (q && q.bel ? belTop(q, b => drArm(b) && b.g >= 2 && drFresh(b, URB.at.bel) && Math.hypot(b.x - m.x, b.z - m.z) < Math.min(URB.at.far, rng * URB.at.k)) : null);
+/* the squad's drills that would hold him as one of the rest (a base of fire, a bound, cover): not while he hunts (in sight, or his squad's) */
+const urbHunting = m => urbHunt(m) || (!!m.ai && S.t - (m.ai.urbH || -9) < 1.5);
+for (const D of DRILLS) if (D.cls === 'inf' && URB.at.free.includes(D.id) && typeof D.man === 'function') D.man = (f => (q, d, m, A, best) => (urbOn() && urbHunting(m) ? undefined : f(q, d, m, A, best)))(D.man);
+/* where he goes: kneeling where he is in range; a tank that stands, worked round as before (stalk); one that moves, met on its way */
+manThink = (g => m => {
+  g(m);
+  const A = m.ai; if (!A || !urbOn() || m.net) return;
+  if (!urbHunt(m)) {   // no armour of his own in sight: the armour his squad knows of, toward it in cover until he sees it (no enemy soldier close to him first)
+    const sp = urbHeat(m), q = m.sq, t0 = A.tgt; A.urbH = 0;
+    if (!sp || !q || q.wpost || urbBusy(m, q) || A.dsc > S.t || (m.pa && m.fc && m.fc.gm === m) || (t0 && t0.man && !t0.dead && hdist(t0, m) < URB.at.man)) return;
+    const b = urbBel(m, q, sp.d.rng); if (!b) return;
+    const d = Math.hypot(b.x - m.x, b.z - m.z) || 1, R = sp.d.rng * URB.at.lat, p = d > R ? covBest(b.x + (m.x - b.x) / d * R, b.z + (m.z - b.z) / d * R, 10, b) : covBest(m.x, m.z, 8, b);
+    A.gx = p.x; A.gz = p.z; A.run = hdist(m, p) > 6; A.mv = false; A.st = A.run ? 0 : 1; A.urbH = S.t;
+    return;
+  }
+  if (urbBusy(m, m.sq) || A.dsc > S.t) return;   // the anticarro drill's move after a shot is its own
+  const t = A.tgt, q = m.sq, rng = m.arms[1].d.rng, U = URB.at, r = hdist(m, t);
+  if (r < rng * U.fire && A.los) { A.gx = m.x; A.gz = m.z; A.run = A.mv = false; if (A.st !== 2) A.st = 1; return; }   // in range with a line of fire: here (without one, stalk's way round)
+  const v = vel(t), sv = Math.hypot(v.x, v.z); if (sv <= U.mov) return;
+  const ux = v.x / sv, uz = v.z / sv, ax = m.x - t.x, az = m.z - t.z, ah = ax * ux + az * uz, lat = az * ux - ax * uz, sd = lat >= 0 ? 1 : -1, off = Math.min(Math.abs(lat), rng * U.lat);
+  let p = null;
+  if (ah > 0 && Math.abs(lat) - off < U.reach && (Math.abs(lat) - off) / U.run < ah / sv + U.slack) p = covBest(t.x + ux * ah - uz * sd * off, t.z + uz * ah + ux * sd * off, 10, t);   // ahead of it, near enough, and he gets there first: beside its way
+  if (!p) p = coverSpot(m, q ? slot(q, A.i) : { x: m.x, z: m.z }, t);   // else in cover by his place, the way it comes
+  A.gx = p.x; A.gz = p.z; A.run = hdist(m, p) > 6; A.mv = false; A.st = A.run ? 0 : 1;
+})(manThink);
+/* the shot: in range and in sight, after the brain's own layers (the last word on his hands) */
+aiMan = (g => (m, dt) => {
+  g(m, dt);
+  const A = m.ai; if (!A) return;
+  if (!urbOn() || m.net || m.dead || m.down || m.in || m.sur || !urbHunt(m) || urbBusy(m, m.sq)) { A.urbAt = 0; return; }
+  const c = m.ctl, t = A.tgt, a = m.arms[1], rng = a.d.rng, U = URB.at, r = hdist(m, t);
+  if (r > rng * U.fire) { A.urbAt = 0; return; }
+  if (!(A.mem && A.mem.of === t && A.mem.t === S.t) || !A.los || !c.aim) return;   // sight() saw it this beat, and a line of fire
+  A.urbAt = A.urbAt || S.t;
+  const v = vel(t), hx = Math.cos(t.h), hz = -Math.sin(t.h), rx = m.x - t.x, rz = m.z - t.z, dl = r || 1;
+  const side = (rx * hx + rz * hz) / dl < IAI.at.side, close = (v.x * rx + v.z * rz) / dl > U.mov;   // off its front arc (stalk's test); driving at him
+  if (!(side || r < rng * U.close || close || S.t - A.urbAt > U.wait) || !(a.mag > 0) || a.rl > 0 || A.dsc > S.t) return;   // loaded, and not on the drill's move after a shot
+  c.mx = c.mz = 0; c.run = false; if (c.st !== 2) c.st = 1;
+  c.fire = dot(m.f, c.aim) > .9995 && !ffHeld(m, t);
+})(aiMan);
+/* ---- the sniper's own post ---- */
+TPS.P.atirador = { st: 2, r: URB.snp.r, alto: 1, need: 'lof', w: { prot: 20, out: 5, lof: 30, ocul: 25, alt: 25, morte: 20 } };
+/* where he looks over: from what his squad knows, else the side's threat to its place; k the try (the ground had no post at the first:
+   the next looks snp.turn rad to one side of the threat, then to the other) */
+function urbSnpWhere(m, q, k) {
+  const O = q.ord, U = URB.snp; if (!O || O.x === undefined) return null;
+  const L = q.lid && brainUp(q.lid) ? q.lid : m, as = O.k === 'assault';
+  if (as) { const d = Math.hypot(O.x - L.x, O.z - L.z); if (d > U.ovw[1] || d < U.ovw[0] * .5) return null; }
+  else if (O.k !== 'hold' || !(q.at || Math.hypot(O.x - L.x, O.z - L.z) < 150)) return null;
+  let th = as ? { x: O.x, z: O.z } : tpsThreats(m)[0] || null;
+  if (!th) th = ptThreat(m.team, O.tw && O.tw.r ? O.tw : null, O.x, O.z);
+  if (!th) return null;
+  const ox = as ? L.x : O.x, oz = as ? L.z : O.z, a = Math.atan2(th.z - oz, th.x - ox) + (k ? (k & 1 ? 1 : -1) * U.turn : 0), ux = Math.cos(a), uz = Math.sin(a);
+  const R = O.tw && O.tw.r ? O.tw.r * U.edge : -U.back;   // a town: its edge toward the threat (from the middle among houses nothing is seen); else behind the place
+  const at = as ? { x: O.x - ux * U.ovw[0], z: O.z - uz * U.ovw[0] } : { x: O.x + ux * R, z: O.z + uz * R };
+  const ad = as ? U.ovw[0] : U.aim;
+  return { at, o: { x: O.x, z: O.z }, aim: { x: at.x + ux * ad, z: at.z + uz * ad, man: 0 } };
+}
+function urbSnp(q, live) {
+  for (const m of live) {
+    if (!m.def.snp || !m.ai || m.net) continue;
+    const A = m.ai, P = m.urbS, W = urbSnpWhere(m, q, P && P.k || 0);
+    if (!W) { if (P) { m.urbS = null; tpsFree(m); } continue; }
+    if (P && P.x !== undefined && S.t < P.T && Math.hypot(P.o.x - W.o.x, P.o.z - W.o.z) < 40 && !((A.rx || A.rz) && P.n !== A.n)) { (q.bg || (q.bg = []))[A.i] = P; continue; }
+    const r = tpsRes(m, 'atirador');
+    if (P && P.ask && r && r.t >= P.ask) {   // the answer came: his post, or his slot when the ground has none
+      if (r.none) { const k = (P.k || 0) + 1; m.urbS = { T: S.t + (k < 3 ? .1 : URB.snp.keep), o: W.o, none: 1, k: k < 3 ? k : 0 }; continue; }   // none here: the next try to one side, then the other, then his slot for keep s
+      A.rx = A.rz = 0; m.urbS = { x: r.x, z: r.z, y: r.y, T: S.t + URB.snp.keep, o: W.o, n: A.n };
+      tpsHold(m, { x: r.x, z: r.z, pt: r.pt || null }, URB.snp.keep);
+      (q.bg || (q.bg = []))[A.i] = m.urbS; brainEv('atirador-posto', m.team, { q: q.id });
+      continue;
+    }
+    if (P && (P.ask || P.none) && S.t < (P.T || 0)) continue;   // asked, or the ground had none a moment ago
+    const zonas = P && P.x !== undefined ? [{ x: P.x, z: P.z, r: URB.snp.zone }] : undefined;
+    tpsAsk(m, 'atirador', { at: W.at, r: URB.snp.r, alvo: W.aim, zonas, fora: 1 });   // outdoors: indoors he may not lie down (bldPose), and he fires lying only
+    m.urbS = { ask: S.t, T: S.t + URB.snp.again, o: W.o, k: P ? P.k || 0 : 0 };
+  }
+}
+/* ---- the garrison of a town ---- */
+let URBG = null;   // the town point whose defence the plan is placing now (dfpPts, for dfpTeam)
+dfpPts = (g => (q, O) => { URBG = urbOn() && O && O.tw && O.tw.tw && O.tw.r ? O.tw : null; try { return g(q, O); } finally { URBG = null; } })(dfpPts);
+dfpTeam = (g => (t, p, n, used) => {
+  const P = URBG; if (!P || !p || (p.k !== 'posto' && !(p.k === 'reserva' && !p.bl))) return g(t, p, n, used);
+  const U = URB.gar, K = { x: p.kx, z: p.kz }, gp = DFP.post.gap, out = [];
+  const free = (x, z) => { for (const u of used) if (Math.abs(u.x - x) < gp && Math.abs(u.z - z) < gp && Math.hypot(u.x - x, u.z - z) < gp) return false; return true; };
+  const take = w => { if (out.length < n && free(w.x, w.z)) { out.push(Object.create(w)); used.push({ x: w.x, z: w.z }); } };
+  const bs = near(p.x, p.z, p.k === 'reserva' ? U.res : U.bld).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - t]) && Math.hypot(o.x - P.x, o.z - P.z) < P.r).sort((a, b) => hdist(a, p) - hdist(b, p));
+  if (p.k === 'reserva') { if (bs[0]) for (const w of bldBays(bs[0], p.x, p.z)) take(w); }   // the reserve: the bays of the town's building nearest its place (the plan found none within 40 m)
+  else for (const o of bs.slice(0, U.n)) for (const w of bldWins(o, K.x - o.x, K.z - o.z).slice(0, U.wins)) take(w);
+  if (out.length < n) for (const o of g(t, p, n - out.length, used)) out.push(o);
+  for (const o of out) { o.sa = -p.a; o.sw = p.w; o.dk = p.k; if (p.k === 'reserva') o.res = 1; }
+  return out;
+})(dfpTeam);
+/* ---- clearing a town ---- */
+const urbClr = () => S.urbClr || (S.urbClr = new Map());
+const urbDone = (o, t) => { const c = urbClr().get(o.id); return !!c && c[t] !== undefined && S.t - c[t] < URB.cqb.keep; };
+/* a fresh contact in building o: on the leader's board, or the target of one of his men */
+function urbHot(q, o, men) {
+  const k = URB.cqb.hot;
+  if (q.bb && q.bb.cont.size) for (const c of q.bb.cont.values()) if (S.t - c.t < k && footD(o, c.x, c.z) < 2) return true;
+  for (const m of men) { const g = m.ai && m.ai.tgt; if (g && g.man && !g.dead && footD(o, g.x, g.z) < 2) return true; }
+  return false;
+}
+function urbCqb(q, L, O, P, live) {
+  const U = URB.cqb, t = q.team;
+  let D = q.bd;
+  if (!D || !D.urb) D = q.bd = { t: 0, T: 0, b: null, clr: 0, n: 0, urb: 1, in0: 0 };
+  q.halt = false;
+  if (D.T) {   // is the building cleared: the team inside it clr s with nothing seen in it, or max s at it
+    const mv = live.filter(m => (m.ai.i & 1) === D.t), b = D.b && S.os[D.b.id] < 2 ? D.b : null;
+    if (b) {
+      const inn = mv.some(m => m.cbo === b && m.cbin);
+      D.in0 = inn && !urbHot(q, b, live) ? D.in0 || S.t : 0;
+      const ok = D.in0 && S.t - D.in0 >= U.clr, late = S.t > D.T + U.max;
+      if (!ok && !late) return true;
+      const c = urbClr().get(b.id) || []; c[t] = S.t; urbClr().set(b.id, c);
+      brainEv(ok ? 'urb-limpo' : 'urb-desiste', t, { q: q.id });
+    }
+    D.t ^= 1;
+  }
+  const go = live.filter(m => (m.ai.i & 1) === D.t), stay = live.filter(m => (m.ai.i & 1) !== D.t);
+  if (!go.length || !stay.length) { q.bd = null; q.bg = null; q.urbB = null; return false; }
+  let cx = 0, cz = 0; for (const m of go) { cx += m.x; cz += m.z; } cx /= go.length; cz /= go.length;
+  let nb = null, ns = 1e9;
+  for (const o of near(P.x, P.z, P.r)) if (drBldOk(o) && o !== D.b && !urbDone(o, t) && Math.hypot(o.x - P.x, o.z - P.z) < P.r) { const s = Math.hypot(o.x - cx, o.z - cz) + Math.hypot(o.x - P.x, o.z - P.z) * .3; if (s < ns) { ns = s; nb = o; } }
+  if (!nb) { q.bd = null; q.bg = null; q.urbB = null; return false; }   // all cleared: the bounds as before, and the middle
+  const bg = (q.bg = []);
+  for (const m of stay) bg[m.ai.i] = m.cbin && m.cbo ? { x: m.x, z: m.z, b: m.cbo, l: m.cbl | 0 } : { x: m.x, z: m.z };   // the cover team stays where it is
+  D.b = nb; D.T = S.t; D.n++; D.in0 = 0; D.clr = 0; q.urbB = { b: nb, P };
+  const bays = bldBays(nb, cx, cz); go.forEach((m, k) => { bg[m.ai.i] = bays[k % bays.length]; });
+  if (q.fd < INC.bound.smk) { const ux = nb.x - cx, uz = nb.z - cz, ul = Math.hypot(ux, uz) || 1, s = go.find(m => m.smk > 0); if (s && !smokeAt(s.x + ux / ul * 15, s.z + uz / ul * 15, 25, 4)) s.ctl.nade = 2; }   // smoke over the bound
+  sqSync(q, stay);
+  return true;
+}
+sqBound = (g => (q, L, O, live) => {
+  const P = O && O.k === 'assault' && O.tw && O.tw.tw && O.tw.r ? O.tw : null;
+  if (!urbOn() || q.net || !P || q.state || live.length < 3 || Math.hypot(L.x - P.x, L.z - P.z) > P.r + URB.cqb.near) {
+    if (q.bd && q.bd.urb) { q.bd = null; q.bg = null; q.urbB = null; }
+    return g(q, L, O, live);
+  }
+  return urbCqb(q, L, O, P, live) || g(q, L, O, live);
+})(sqBound);
+/* the squad's layer: the sniper's post goes in after the rest (his place in q.bg, which slot reads first) */
+sqMore = (g => (q, L, O, live) => {
+  g(q, L, O, live);
+  if (!urbOn() || q.net || q.wpost || !live.some(m => m.def.snp)) return;   // a post's garrison (a sniper's tower) has the work's own places (POSTS)
+  urbSnp(q, live);
+})(sqMore);
+/* the unit card: the building the squad clears, the sniper's post */
+genCard = (f => (t, id) => {
+  const c = f(t, id); if (!c || !urbOn()) return c;
+  const q = S.squads.find(o => o.team === t && o.id === id); if (!q) return c;
+  if (q.urbB && q.urbB.b) c.decide.push('Limpando ' + gName(q.urbB.P) + ' prédio por prédio (' + [...urbClr().values()].filter(v => v[t] !== undefined && S.t - v[t] < URB.cqb.keep).length + ' prédios limpos pelo lado)');
+  const s = q.men.find(m => !m.dead && m.urbS && m.urbS.x !== undefined); if (s) c.decide.push('Atirador de elite no posto dele, ' + Math.round(hdist(s, s.urbS)) + ' m do lugar');
+  return c;
+})(genCard);
+/* ---------- end of CEREBRO: urbano ---------- */
+/* ---------- CEREBRO: urbano-medicao (G7, cf-g2-g7-urbano; NÃO TESTADO além do torneio, see docs/nao-testado/cf-g2-g7-urbano.md) ----------
+   The numbers of package G7 (cf-ia-opensource §6: "soldado-min em prédio, em defesa urbana, ≥ 40%; tiros AT em blindado por partida ≥ 3;
+   assaltos a cidade que tomam o ponto ≥ 40%") and the dead paths of §2.4. An observer, as CEREBRO: medicao is: it reads the battle as it
+   is (S.men, S.units, the truth), draws no random number and changes nothing the battle reads; it runs where the brain's meters run (medOn:
+   the analytics of a simulated match, or S.med). The honesty test leaves it out (its OBSERVERS) and tests/urbano.js checks the battle is the
+   same with it. The meters, by side (S.urbD[s]), every URBM.dt s of the AI's soldiers on foot (not down, not aboard, not a captive):
+     bd [soldier-s, of them in a building (m.cbin)]
+     ud [soldier-s inside the circle of a town point the side holds with the squad holding (the defence of a town), of them in a building]
+     ft [soldier-s inside the circle of a town point another side holds, of them in a building]
+     ar [soldier-s of men with an anti-tank weapon and rounds within URBM.ar m of an enemy tank or light armour, within his weapon's range
+        of one (the chances)]
+     at [anti-tank rounds (heat, atgm) the AI's infantry fired at a vehicle, at armour (tank, lav), all of them]
+     sn [rounds the AI's snipers fired, sniper-s, of them in a building or high (URBM.high m over the ground)]
+     ta [assaults on a town point that ended, that reached H-hour (go and after), that took it; occupations of a town point, taken]
+   Event cb st 'urb' with them, at medEmit's times (every MED.ev s and at the end); the review keeps each side's last (R.urb), and urbSum
+   and urbRows say them beside their targets for the review and tools/balance.js. The header carries urb, URB.on when the match began. */
+const URBM = { dt: 1, ar: 350, high: 2.5,
+  goal: { ud: '≥ 40%', at: '≥ 3 por partida', ta: '≥ 40%', ft: '> 0', sn: 'sobe', bd: 'sobe (13-19% na régua da §2.4)', ar: '—' } };
+const URBK = ['bd', 'ud', 'ft', 'ar', 'at', 'sn', 'ta'];
+const urbNew = () => ({ bd: [0, 0], ud: [0, 0], ft: [0, 0], ar: [0, 0], at: [0, 0, 0], sn: [0, 0, 0], ta: [0, 0, 0, 0, 0] });
+const urbD = s => { const L = S.urbD || (S.urbD = []); return L[s] || (L[s] = urbNew()); };
+function urbSample(h) {
+  const P = S.cq ? S.cq.p : null, arm = [];
+  for (const u of S.units) if (!u.dead && URBA[u.kind]) arm.push(u);
+  for (const m of S.men) {
+    if (m.dead || m.down || m.in || m.net || !m.ai || m.sur || !(m.team >= 0) || m.def.drone) continue;
+    const D = urbD(m.team), b = !!m.cbin;
+    D.bd[0] += h; if (b) D.bd[1] += h;
+    if (m.def.snp) { D.sn[1] += h; if (b || m.y - hgt(m.x, m.z) > URBM.high) D.sn[2] += h; }
+    if (P) for (const p of P) {
+      if (!p.tw || !(p.hold >= 0)) continue;
+      const dx = m.x - p.x, dz = m.z - p.z; if (dx * dx + dz * dz > p.r * p.r) continue;
+      if (p.hold === m.team) { const O = m.sq && m.sq.ord; if (O && O.k === 'hold') { D.ud[0] += h; if (b) D.ud[1] += h; } }
+      else { D.ft[0] += h; if (b) D.ft[1] += h; }
+      break;
+    }
+    const s = m.arms[1];
+    if (arm.length && s && s.d && (s.d.k === 'heat' || s.d.k === 'atgm') && s.mag + s.res > 0) {
+      let d = 1e9; for (const u of arm) if (u.team !== m.team && Math.abs(u.x - m.x) < URBM.ar && Math.abs(u.z - m.z) < URBM.ar) d = Math.min(d, Math.hypot(u.x - m.x, u.z - m.z));
+      if (d < URBM.ar) { D.ar[0] += h; if (d < s.d.rng) D.ar[1] += h; }
+    }
+  }
+}
+step = (g => dt => { g(dt); if (S && S.medOk && MED.on && (S.urbA = (S.urbA || 0) + dt) >= URBM.dt) { const h = S.urbA; S.urbA = 0; urbSample(h); } })(step);
+/* a round fired by a soldier of the AI: an anti-tank round and what it was aimed at, a sniper's */
+manFire = (f => (m, a) => {
+  const n0 = a ? a.mag : 0; f(m, a);
+  if (!m || !m.ai || m.net || !a || !a.d || !(a.mag < n0) || !medOn()) return;
+  const w = a.d;
+  if (w.k === 'heat' || w.k === 'atgm') { const D = urbD(m.team), t = m.ai.tgt; D.at[2]++; if (t && t.kind) { D.at[0]++; if (URBA[t.kind]) D.at[1]++; } }
+  else if (w.snp) urbD(m.team).sn[0]++;
+})(manFire);
+/* an assault (or an occupation) of a town point that ended, or the match did */
+anaMvEnd = (f => R => {
+  const op = R && R.op, P = op && op.k === 'atk' && op.O && op.O.tw && op.O.tw.tw ? op.O.tw : null;
+  f(R);
+  if (!P || !MED.on || !S.medOk) return;
+  const D = urbD(R.t), ok = P.hold === R.t;
+  if (R.walk0) { D.ta[3]++; if (ok) D.ta[4]++; } else { D.ta[0]++; if (R.st >= 3) D.ta[1]++; if (ok) D.ta[2]++; }
+})(anaMvEnd);
+/* the meters of each side, as events cb st 'urb', with the brain's */
+medEmit = (f => () => {
+  f();
+  if (!S.urbD) return;
+  S.urbD.forEach((D, s) => { if (!D) return; const e = { k: 'cb', t: anaR(S.t), s, st: 'urb' }; for (const k of URBK) e[k] = D[k].map(anaR); ANA.ev.push(e); ANA.q.push(e); });
+})(medEmit);
+anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) h.urb = URB.on ? 1 : 0; })(anaBegin);
+/* the review's: a side's raw counters from its last event, many added up, and what they say */
+function urbRaw(e) {
+  const D = urbNew();
+  if (e) for (const k of URBK) { const v = e[k]; if (Array.isArray(v)) v.forEach((x, i) => { if (i < D[k].length) D[k][i] = +x || 0; }); }
+  return D;
+}
+function urbAdd(a, b) { for (const k of URBK) b[k].forEach((x, i) => { a[k][i] += x; }); return a; }
+/* the measures from raw counters; n the matches they come from */
+function urbSum(D, n) {
+  const sh = (a, b) => (b ? a / b : null), m = n || 1;
+  return { bdSh: sh(D.bd[1], D.bd[0]), udMin: D.ud[0] / 60 / m, udSh: sh(D.ud[1], D.ud[0]), ftMin: D.ft[0] / 60 / m, ftSh: sh(D.ft[1], D.ft[0]), arMin: D.ar[0] / 60 / m, arRng: D.ar[1] / 60 / m,
+    atArm: D.at[1] / m, atVeh: D.at[0] / m, atAll: D.at[2] / m, sn: D.sn[0] / m, snMin: D.sn[1] / 60 / m, snHi: sh(D.sn[2], D.sn[1]),
+    ta: D.ta[0] / m, taGo: D.ta[1] / m, taTook: D.ta[2] / m, taSh: sh(D.ta[2], D.ta[0]), taGoSh: sh(D.ta[2], D.ta[1]), occ: D.ta[3] / m, occTook: D.ta[4] / m, n: m };
+}
+/* the rows [measure, value, target] */
+function urbRows(M) {
+  const d = v => String(v).replace('.', ','), f1 = v => (v === null || v === undefined ? '—' : d(Math.round(v * 10) / 10)), pc = v => (v === null || v === undefined ? '—' : Math.round(v * 100) + '%'), G = URBM.goal;
+  return [
+    ['Soldado-min em prédio, em defesa urbana (soldado-min por partida dentro de ponto-cidade próprio, segurando)', pc(M.udSh) + ' (' + f1(M.udMin) + ')', G.ud],
+    ['Foguetes anticarro da infantaria em blindado por partida (em veículo; todos)', f1(M.atArm) + ' (' + f1(M.atVeh) + '; ' + f1(M.atAll) + ')', G.at],
+    ['Assaltos a ponto-cidade que tomam o ponto (por partida: assaltos, chegaram à hora H, tomaram; dos que chegaram)', pc(M.taSh) + ' (' + f1(M.ta) + ', ' + f1(M.taGo) + ', ' + f1(M.taTook) + '; ' + pc(M.taGoSh) + ')', G.ta],
+    ['Ocupações de ponto-cidade vazio por partida (tomadas)', f1(M.occ) + ' (' + f1(M.occTook) + ')', '—'],
+    ['Soldado-min por partida dentro de ponto-cidade do inimigo (em prédio)', f1(M.ftMin) + ' (' + pc(M.ftSh) + ')', G.ft],
+    ['Soldados da IA em prédio (do tempo a pé)', pc(M.bdSh), G.bd],
+    ['Atirador de elite: tiros por partida; em prédio ou no alto (do tempo dele)', f1(M.sn) + '; ' + pc(M.snHi) + ' (' + f1(M.snMin) + ' min)', G.sn],
+    ['Chances: soldado-min por partida de anticarro a ≤ ' + URBM.ar + ' m de blindado inimigo (ao alcance da própria arma)', f1(M.arMin) + ' (' + f1(M.arRng) + ')', G.ar]];
+}
+/* R.urb { on: URB.on of the match (null: before it), side: [raw | null] }; the brain's own events leave 'urb' out */
+anaReport = (g => (ev, me) => {
+  const R = g(ev, me); if (!R) return R;
+  const H = ev.find(e => e.k === 'hdr') || {}, n = R.ns || 2, last = [];
+  for (const e of ev) if (e.k === 'cb' && e.st === 'urb' && e.s >= 0 && e.s < n && (!last[e.s] || e.t >= last[e.s].t)) last[e.s] = e;
+  if (R.brain && R.brain.side) for (const x of R.brain.side) if (x && x.ev) delete x.ev.urb;
+  if (!last.some(Boolean)) { R.urb = null; return R; }
+  const hide = anaHide(me, n, R.over);
+  R.urb = { on: H.urb === undefined ? null : H.urb, side: anaSides(n).map(s => ((hide && s !== me) || !last[s] ? null : urbRaw(last[s]))) };
+  return R;
+})(anaReport);
+/* ---------- end of CEREBRO: urbano-medicao ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

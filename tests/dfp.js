@@ -1,7 +1,7 @@
 'use strict';
 /* CEREBRO: defesa (DFP, cf-defesa-posicoes): the defence of a point by its terrain and its threat, a short headless exercise on the sandbox.
-   NOT RUN when it was written (the captain's rule for Céu de Ferro: implement without tests, document what was not tested; see
-   docs/nao-testado/cf-defesa-posicoes.md). What it measures, the brief's "medição curta": a point held by 2 squads and 2 tanks, with the enemy
+   Written untested with cf-defesa-posicoes; first run in cf-pol-testes-a (the tanks were added with no model id, now the side's first tank),
+   passes with MAPV 4, 10 and 11. What it measures, the brief's "medição curta": a point held by 2 squads and 2 tanks, with the enemy
    known on one side:
    - no two men's places within 3 m of each other;
    - the two squads on different posts (not stacked), their sectors crossing on a road in;
@@ -29,7 +29,7 @@ if (pl) {
   const out = all.filter(p => Math.hypot(p.x - P.x, p.z - P.z) > P.r && p.dk !== 'vigia').length;
   ok(out === 0, 'everybody but the watch inside the point (' + out + ' outside)');
   /* two tanks */
-  const tk = [0, 1].map(k => { const p = $('routeAt')(r, r.len * .35 - 300 - 40 * k), u = C.addUnit('tank', 0, p.x, p.z, null, false, 0, r.len * .35 - 300 - 40 * k, 1, k); return u; });
+  const tk = [0, 1].map(k => { const p = $('routeAt')(r, r.len * .35 - 300 - 40 * k), u = C.addUnit('tank', 0, p.x, p.z, S.E.sides[S.fac[0]].tanks[0], false, 0, r.len * .35 - 300 - 40 * k, 1, k); return u; });
   const n = $('dfpTkGo')(0, pl, 2, 'me');
   ok(n === 2, n + ' tanks sent to the point\'s places');
   const sp = tk.map(u => u.ai && u.ai.dfp).filter(Boolean);

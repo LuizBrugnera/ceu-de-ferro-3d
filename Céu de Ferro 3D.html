@@ -5951,7 +5951,7 @@ function roadRibbon(E, hw, pos, idx, rd) {
     const p = routeAt(r, i * st);
     for (let j = 0; j < NC; j++) {
       const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
-      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z); if (rd) rd.push(o, i * st);
+      pos.push(x, roadG(S.T, x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z); if (rd) rd.push(o, i * st);   // on the ground the scene draws (roadG), not the blend under it
     }
     if (i < n) { const k = b + i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
   }
@@ -6683,6 +6683,41 @@ function hgtT(T, x, z) {
   return Math.max(T.WL, a + (b - a) * (gz - j));
 }
 function hgt(x, z) { const h = hgtT(S.T, x, z); return S.gap || S.pg ? brH(x, z, h) : h; }   // S.gap: the crossings a bridge's fall has opened in the river (bridges, W20)
+/* the ground as the scene draws it (cf-pol-cenario). The match stands on hgtT, the four corners of a cell blended; flat triangles cannot
+   draw that blend, and the two triangles a cell the mesh had stood up to 46 m off it on the hills: about 2000 trees a map floated over the
+   drawn ground or sank into it, rocks and bushes floated up to 9 m, and a road ribbon laid on hgtT was buried under the drawn ground or flew
+   over it on one sample in seven. fanMesh draws each cell as four triangles round its middle, which stands at the blend's own middle (the
+   mean of the four corners), a quarter of the old error at worst; meshT is that drawn ground, where the scene stands what does not move
+   (trees, rocks, bushes, grass, roads, streets, marks). pos: the (N + 1)^2 nodes of the grid in its order (k = j (N + 1) + i, so that the
+   bridges' sunk nodes keep their index), then the N^2 middles (k = (N + 1)^2 + j N + i); idx: four triangles a cell, facing up */
+function fanMesh(T) {
+  const N = T.N, N1 = N + 1, NN = N1 * N1, pos = new Float32Array((NN + N * N) * 3), idx = new Uint32Array(N * N * 12), h = T.h;
+  for (let j = 0, k = 0; j <= N; j++) for (let i = 0; i <= N; i++, k++) pos.set([T.x0 + i * T.cx, h[k], T.z0 + j * T.cz], k * 3);
+  for (let j = 0, q = 0; j < N; j++) for (let i = 0; i < N; i++, q++) {
+    const a = j * N1 + i, b = a + N1, d = a + 1, c = b + 1, m = NN + q;
+    pos.set([T.x0 + (i + .5) * T.cx, (h[a] + h[b] + h[c] + h[d]) / 4, T.z0 + (j + .5) * T.cz], m * 3);
+    idx.set([a, m, d, d, m, c, c, m, b, b, m, a], q * 12);
+  }
+  return { pos, idx, NN };
+}
+/* the drawn ground at x z (not clamped to the water): the triangle of fanMesh's cell that holds the point. H: the height of node n, by default T.h */
+function meshT(T, x, z, H) {
+  const N = T.N, gx = clamp((x - T.x0) / T.cx, 0, N - .001), gz = clamp((z - T.z0) / T.cz, 0, N - .001), i = gx | 0, j = gz | 0, u = gx - i, v = gz - j, k = j * (N + 1) + i;
+  const a = H ? H(k) : T.h[k], d = H ? H(k + 1) : T.h[k + 1], b = H ? H(k + N + 1) : T.h[k + N + 1], c = H ? H(k + N + 2) : T.h[k + N + 2], m = (a + b + c + d) / 4;
+  if (v <= u && v <= 1 - u) return a + (d - a) * u + (m - (a + d) / 2) * 2 * v;   // the triangle on the cell's side z0 (nodes a d), then x1 (d c), z1 (b c), x0 (a b)
+  if (u >= v && u >= 1 - v) return d + (c - d) * v + (m - (d + c) / 2) * 2 * (1 - u);
+  if (v >= u && v >= 1 - u) return b + (c - b) * u + (m - (b + c) / 2) * 2 * (1 - v);
+  return a + (b - a) * v + (m - (a + b) / 2) * 2 * u;
+}
+/* the deck of a road ribbon (roadRibbon): the drawn ground, but over a river's channel at a crossing the match's own ground (hgtT: the
+   causeway the bridge stands on, which the drawn ground dips under), blended into the drawn one over a cell of the grid on each bank */
+function roadG(T, x, z) {
+  const g = Math.max(T.WL, meshT(T, x, z));
+  if (!T.net || !T.rx) return g;
+  let w = 0;
+  for (const b of brOf(T)) if (z > b.z0 - T.cz && z < b.z1 + T.cz) w = Math.max(w, clamp((b.gw + T.cx - Math.abs(x - T.rx(z))) / T.cx, 0, 1));
+  return w ? g + (Math.max(g, hgtT(T, x, z)) - g) * w : g;
+}
 /* ---------- world objects: the list, the grid and the queries (the table is OBJ) ----------
    An object is a box, half sizes hw hd turned by a, or with rd a round post; y the ground under it, h its height, r the circle around it */
 function addObj(T, id, k, x, z, w, d, h, a, rd) {
@@ -37585,7 +37620,7 @@ syncScene = (g0 => dt => {
   const put = (x, z, h, d, far, man) => {
     if (n >= CSHAD.max || !d) return; const dx = x - c.x, dz = z - c.z; if (dx * dx + dz * dz > (far ? far * far : F2)) return;
     const e = !man && d.env, hl = man ? man[0] : e ? e[3] : (d.l || 4) * GS / 2, hw = man ? man[1] : e ? e[5] : (d.w || 2) * GS / 2, fx = Math.cos(h), fz = -Math.sin(h);
-    const yf = hgt(x + fx * hl, z + fz * hl), yb = hgt(x - fx * hl, z - fz * hl), yl = hgt(x - fz * hw, z + fx * hw), yr = hgt(x + fz * hw, z - fx * hw), y0 = Math.max(hgt(x, z), (yf + yb) / 2, (yl + yr) / 2);
+    const G = (x, z) => Math.max(gndY(x, z), hgt(x, z)), yf = G(x + fx * hl, z + fz * hl), yb = G(x - fx * hl, z - fz * hl), yl = G(x - fz * hw, z + fx * hw), yr = G(x + fz * hw, z - fx * hw), y0 = Math.max(G(x, z), (yf + yb) / 2, (yl + yr) / 2);   // over the drawn ground and the match's (a bridge's deck), whichever is higher
     CSH.x.set(fx * 2 * hl, yf - yb, fz * 2 * hl).normalize(); CSH.z.set(-fz * 2 * hw, yl - yr, fx * 2 * hw).normalize(); CSH.y.crossVectors(CSH.z, CSH.x).normalize(); CSH.z.crossVectors(CSH.x, CSH.y);
     CSH.m.makeBasis(CSH.x, CSH.y, CSH.z); CSH.q.setFromRotationMatrix(CSH.m);
     me.setMatrixAt(n++, CSH.m.compose(CSH.v.set(x, y0 + CSHAD.lift, z), CSH.q, CSH.s.set(hl * 2 * (man ? 1 : CSHAD.grow[0]), 1, hw * 2 * (man ? 1 : CSHAD.grow[1]))));
@@ -38207,13 +38242,13 @@ function buildWorld() {
   for (let i = 0; i < sg.attributes.position.count; i++) { c.copy(horizon).lerp(zenith, clamp(sg.attributes.position.getY(i) / 26000 * 2.2, 0, 1)); sc.set([c.r, c.g, c.b], i * 3); }
   sg.setAttribute('color', new THREE.BufferAttribute(sc, 3));
   skyDome = new THREE.Mesh(sg, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false })); scene.add(skyDome);
-  /* terrain straight from the height grid, so vehicles and collisions match what is drawn */
-  const lx = T.cx * N, lz = T.cz * N, tg = new THREE.PlaneGeometry(lx, lz, N, N);
-  tg.rotateX(-Math.PI / 2); tg.translate(T.x0 + lx / 2, 0, T.z0 + lz / 2);
-  const tp = tg.attributes.position, tc = new Float32Array(tp.count * 3);
-  for (let k = 0; k < tp.count; k++) { tp.setY(k, T.h[k]); groundColor(k, tp.getX(k), tp.getZ(k), c); tc.set([c.r, c.g, c.b], k * 3); }
-  tg.setAttribute('color', new THREE.BufferAttribute(tc, 3)); tg.computeVertexNormals();
-  { const tm = new THREE.Mesh(tg, mat(0xffffff, { vertexColors: true })); tm.renderOrder = -10; scene.add(tm); }   // drawn first: the trenches' holes are cut into it (FHOLE)
+  /* terrain from the height grid, four triangles a cell round its middle (fanMesh), so that it stays near the ground vehicles and soldiers
+     stand on (hgtT), and what does not move stands on it exactly (meshT). userData.ground: the scene's ground mesh, for whoever looks for it */
+  const lx = T.cx * N, lz = T.cz * N, FM = fanMesh(T), tg = new THREE.BufferGeometry(), tc = new Float32Array(FM.pos.length);
+  for (let k = 0; k < FM.NN; k++) { groundColor(k, FM.pos[k * 3], FM.pos[k * 3 + 2], c); tc.set([c.r, c.g, c.b], k * 3); }
+  for (let j = 0, m = FM.NN; j < N; j++) for (let i = 0; i < N; i++, m++) for (let q = 0, a = j * (N + 1) + i; q < 3; q++) tc[m * 3 + q] = (tc[a * 3 + q] + tc[(a + 1) * 3 + q] + tc[(a + N + 1) * 3 + q] + tc[(a + N + 2) * 3 + q]) / 4;   // a middle in its corners' colour
+  tg.setAttribute('position', new THREE.BufferAttribute(FM.pos, 3)); tg.setAttribute('color', new THREE.BufferAttribute(tc, 3)); tg.setIndex(new THREE.BufferAttribute(FM.idx, 1)); tg.computeVertexNormals();
+  { const tm = new THREE.Mesh(tg, mat(0xffffff, { vertexColors: true })); tm.renderOrder = -10; tm.userData.ground = 1; scene.add(tm); }   // drawn first: the trenches' holes are cut into it (FHOLE)
   const wg = new THREE.PlaneGeometry(lx, lz); wg.rotateX(-Math.PI / 2);
   const water = new THREE.Mesh(wg, new THREE.MeshPhongMaterial({ color: P.water, shininess: 90, transparent: true, opacity: .9 }));
   water.position.set(T.x0 + lx / 2, T.WL, T.z0 + lz / 2); scene.add(water);
@@ -38603,8 +38638,8 @@ function vegBuild() {
     V.SM = new Float32Array(n * 16); const nn = new THREE.Vector3(), qq = new THREE.Quaternion(), p = new THREE.Vector3();
     for (const o of tl) {
       const i = vegRow(V, o), s = o.sc || 1, e = 3;
-      nn.set(hgt(o.x - e, o.z) - hgt(o.x + e, o.z), 2 * e, hgt(o.x, o.z - e) - hgt(o.x, o.z + e)).normalize(); qq.setFromUnitVectors(Y, nn);
-      const r = (V.sp[i] ? 15 : 12) * s; p.set(o.x + 1.2 * s, hgt(o.x, o.z) + .25, o.z + .8 * s);
+      nn.set(gndY(o.x - e, o.z) - gndY(o.x + e, o.z), 2 * e, gndY(o.x, o.z - e) - gndY(o.x, o.z + e)).normalize(); qq.setFromUnitVectors(Y, nn);   // the shadow on the drawn ground, as the tree (gndY)
+      const r = (V.sp[i] ? 15 : 12) * s; p.set(o.x + 1.2 * s, gndY(o.x, o.z) + .25, o.z + .8 * s);
       M.compose(p, qq, sc.set(r, 1, r)); M.toArray(V.SM, i * 16);
     }
   }
@@ -38745,7 +38780,7 @@ function vegChunk(V, ci, cj) {
   for (let b = 0; b < n; b++) for (let a = 0; a < n; a++) {
     const gi = ci * n + a, gj = cj * n + b, x = x0 + (a + hash2(gi, gj, 1)) * sp, z = z0 + (b + hash2(gi, gj, 2)) * sp, keep = hash2(gi, gj, 3);
     vegGround(G, x, z, out); if (keep >= out[3] * G.dm) continue;
-    const y = hgt(x, z); if (y < T.WL + 3) continue;
+    const y = gndY(x, z); if (y < T.WL + 3) continue;   // a clump on the drawn ground
     if (nearRoad && routeDist(T, x, z) < 5.5) continue;
     if (hs && hs.some(q => footD(q, x, z) < 1.5)) continue;
     if (st && st.some(l => sd(l, x, z) < CITY.plan.street / 2)) continue;
@@ -38825,7 +38860,7 @@ const WLOOK = [1, .6, .44], WM = typeof THREE !== 'undefined' ? { mx: new THREE.
 function treeAt(o, a, k) {   // k: 0 standing to 1 down, toward a
   const s = o.sc, f = k * 1.48, dx = Math.cos(a), dz = Math.sin(a), M = WM;
   M.q.setFromAxisAngle(M.ax.set(dz, 0, -dx), f);
-  M.mx.compose(M.v.set(o.x + dx * Math.sin(f) * 12 * s, o.y + Math.cos(f) * 12 * s + Math.sin(f) * 3.4 * s, o.z + dz * Math.sin(f) * 12 * s), M.q, M.s.set(s, s, s));
+  M.mx.compose(M.v.set(o.x + dx * Math.sin(f) * 12 * s, meshH(o.x, o.z) + Math.cos(f) * 12 * s + Math.sin(f) * 3.4 * s, o.z + dz * Math.sin(f) * 12 * s), M.q, M.s.set(s, s, s));
   const me = wtree(o); me.setMatrixAt(wo.at[o.id], M.mx); me.instanceMatrix.needsUpdate = true;
 }
 const wtree = o => (o.v ? wo.leaf : wo.trees);   // the mesh a tree is drawn in: a conifer, or on map 6 a broadleaf (TREES)
@@ -38833,7 +38868,7 @@ function lookObj(o, live) {
   const st = S.os[o.id], M = WM, i = wo.at[o.id], R = o.K.ruin, roof = PAL[S.era].roof;
   if (wo.cv[o.id]) {   // a rock or a bush: standing, or gone flat when it is down
     const [me, j] = wo.cv[o.id], r = o.rd, h = o.h * .9, dn = st > 1 ? (o.k === 'bush' ? .12 : .3) : 1;
-    M.q.setFromAxisAngle(M.up, o.a); M.mx.compose(M.v.set(o.x, o.y - .25, o.z), M.q, M.s.set(r * (st > 1 ? 1.2 : 1), h * dn, r * (o.k === 'rock' ? .85 : 1) * (st > 1 ? 1.2 : 1)));
+    M.q.setFromAxisAngle(M.up, o.a); M.mx.compose(M.v.set(o.x, meshH(o.x, o.z) - .25, o.z), M.q, M.s.set(r * (st > 1 ? 1.2 : 1), h * dn, r * (o.k === 'rock' ? .85 : 1) * (st > 1 ? 1.2 : 1)));
     me.setMatrixAt(j, M.mx); me.instanceMatrix.needsUpdate = true;
   } else if (o.k === 'tree') {
     const a = S.ofa.has(o.id) ? S.ofa.get(o.id) : o.id * 2.399;
@@ -39392,7 +39427,7 @@ function ugTiles() {
       const d = U.d[gj * U.nx + gi] / 255; if (d < .12) continue;
       const m = Math.floor(d * D.per * (UG.q[gfxLevel()] || 1) + hash2(gi, gj, 151));   // fewer at Baixa (UG.q)
       for (let e = 0; e < m; e++) {
-        const h = s => hash2(gi * 7 + e, gj * 5 + s, 152), x = (gi + h(1)) * U.c, z = -HW + (gj + h(2)) * U.c, y = hgt(x, z);
+        const h = s => hash2(gi * 7 + e, gj * 5 + s, 152), x = (gi + h(1)) * U.c, z = -HW + (gj + h(2)) * U.c, y = gndY(x, z);   // on the drawn ground
         if (y < WL + .3) continue;
         L.push([x, y, z, (D.r[0] + (D.r[1] - D.r[0]) * h(3)) * (.6 + .5 * d), (D.h[0] + (D.h[1] - D.h[0]) * h(4)) * (.7 + .5 * d), h(5) * 6.283, .72 + .36 * h(6)]);
       }
@@ -39800,7 +39835,7 @@ function cityScene() {
     for (const l of T.lanes) for (let k = 0, s = 0; k < l.length; k++) {
       const a = l[Math.max(0, k - 1)], e = l[Math.min(l.length - 1, k + 1)], d = Math.hypot(e.x - a.x, e.z - a.z) || 1, nx = -(e.z - a.z) / d * w, nz = (e.x - a.x) / d * w, n = pos.length / 3;
       if (k) s += Math.hypot(l[k].x - l[k - 1].x, l[k].z - l[k - 1].z);
-      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz); rd.push(w, s, -w, s);
+      pos.push(l[k].x + nx, gndY(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, gndY(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz); rd.push(w, s, -w, s);   // on the drawn ground (gndY)
       if (k) idx.push(n - 2, n - 1, n, n - 1, n + 1, n);
     }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); g.setAttribute('rd', new THREE.BufferAttribute(new Float32Array(rd), 2));
@@ -45252,7 +45287,7 @@ function sky3Init() {
   /* the ground, the trees and the houses glow where a flare lights them: up to 4 lights, nearest the camera first, in uniforms they share */
   K.u = K.u || { uIll: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uIllK: { value: 0 } };
   const lit = [];
-  scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.geometry.type === 'PlaneGeometry') lit.push(o.material); });
+  scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.userData.ground) lit.push(o.material); });
   if (wo) for (const k of ['trees', 'houses', 'roofs']) if (wo[k]) lit.push(wo[k].material);
   for (const m of lit) { m.onBeforeCompile = sky3Ill; m.needsUpdate = true; }
 }
@@ -45582,7 +45617,7 @@ function envApply() {
   const clouds = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
-    if (o.material.vertexColors && o.geometry.type === 'PlaneGeometry') ENV.terrain = o;
+    if (o.material.vertexColors && o.userData.ground) ENV.terrain = o;
     else if (o.geometry.type === 'PlaneGeometry' && o.material.isMeshPhongMaterial && o.material.transparent && Math.abs(o.position.y - T.WL) < .01) ENV.water = o;
     else if (o.geometry.type === 'IcosahedronGeometry' && o.material.opacity === .7) clouds.push(o);
   });
@@ -45590,10 +45625,11 @@ function envApply() {
   if (ENV.terrain) {
     const g = ENV.terrain.geometry, n = g.attributes.position.count, s = new Float32Array(n * 2), col = g.attributes.color.array, c = ENV.c.a;
     for (let k = 0; k < n; k++) {
-      const h = T.h[k], hc = clamp(h, T.WL + 4.01, 640);
+      const h = g.attributes.position.getY(k), hc = clamp(h, T.WL + 4.01, 640), node = k < T.h.length;   // the grid's nodes, then the cells' middles (fanMesh)
       s[k * 2] = clamp((T.WL + 6 - h) / 4, 0, 1); s[k * 2 + 1] = clamp((h - 640) / 160, 0, 1);
-      if (hc !== h) { T.h[k] = hc; groundColor(k, g.attributes.position.getX(k), g.attributes.position.getZ(k), c); T.h[k] = h; col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b; }
+      if (node && hc !== h) { T.h[k] = hc; groundColor(k, g.attributes.position.getX(k), g.attributes.position.getZ(k), c); T.h[k] = h; col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b; }
     }
+    for (let k = T.h.length, N = T.N, q = 0; k < n; k++, q++) for (let e = 0, a = Math.floor(q / N) * (N + 1) + q % N; e < 3; e++) col[k * 3 + e] = (col[a * 3 + e] + col[(a + 1) * 3 + e] + col[(a + N + 1) * 3 + e] + col[(a + N + 2) * 3 + e]) / 4;   // a middle, its corners' colour again
     g.setAttribute('envS', new THREE.BufferAttribute(s, 2)); g.attributes.color.needsUpdate = true;
     const m = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 3, specular: 0x0c0c0c });
     m.onBeforeCompile = envTerrainHook; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv;
@@ -45809,11 +45845,11 @@ genPanels = (f => V => {
 const BLOOK = { stone: [0x8c8577, 0x9a9a94], dark: .62, pont: [0x5d6b47, 0x56605a], float: 0x2f3530, scaf: 0x6f5b3c, seg: 12, rail: [1.1, .5], post: [.8, 1.6], deck: .45 };
 const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), was: new Set(), box: null, mats: {} };
 function br3Init() {
-  const K = BR3, T = S.T, n = (T.N + 1) * (T.N + 1);
+  const K = BR3;
   K.at = scene; K.key = null; K.sunk = new Set(); K.was = new Set(); K.roads = []; K.ter = null;
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
-    if (!K.ter && o.geometry.attributes.position.count === n && o.material && o.material.vertexColors) K.ter = o;
+    if (!K.ter && o.userData.ground) K.ter = o;
     else if (o.userData.road !== undefined) K.roads.push(o);   // buildWorld marks its road meshes (their material is lit since cf-pol-graficos 2)
   });
   if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
@@ -45827,7 +45863,14 @@ function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) {
 function br3Sink() {
   const K = BR3, T = S.T, L = brs().filter(b => brDown(b) || K.was.has(b.i));   // K.was: fallen once in this scene, so a bridge built again raises its road back (W20b)
   for (const b of L) K.was.add(b.i);
-  if (K.ter && S.brn) { const tp = K.ter.geometry.attributes.position; let n = 0; for (const [k, h] of S.brn) if (!K.sunk.has(k)) { K.sunk.add(k); tp.setY(k, h); n++; } for (const k of K.sunk) if (!S.brn.has(k)) { K.sunk.delete(k); tp.setY(k, T.h[k]); n++; } if (n) { tp.needsUpdate = true; K.ter.geometry.computeVertexNormals(); } }
+  if (K.ter && S.brn) {
+    const tp = K.ter.geometry.attributes.position, moved = [];
+    for (const [k, h] of S.brn) if (!K.sunk.has(k)) { K.sunk.add(k); tp.setY(k, h); moved.push(k); }
+    for (const k of K.sunk) if (!S.brn.has(k)) { K.sunk.delete(k); tp.setY(k, T.h[k]); moved.push(k); }
+    const N = T.N, N1 = N + 1, NN = N1 * N1;   // the middles of the cells round a moved node follow their corners (fanMesh)
+    for (const k of moved) for (let j = Math.floor(k / N1) - 1; j <= Math.floor(k / N1); j++) for (let i = k % N1 - 1; i <= k % N1; i++) if (i >= 0 && j >= 0 && i < N && j < N) { const a = j * N1 + i; tp.setY(NN + j * N + i, (tp.getY(a) + tp.getY(a + 1) + tp.getY(a + N1) + tp.getY(a + N1 + 1)) / 4); }
+    if (moved.length) { tp.needsUpdate = true; K.ter.geometry.computeVertexNormals(); }
+  }
   const at = b => (x, z) => z > b.z0 - T.cz && z < b.z1 + T.cz && Math.abs(x - T.rx(z)) < b.gw + T.cx, inL = L.map(at), inD = L.filter(brDown).map(at);
   for (const r of K.roads) {
     const p = r.geometry.attributes.position, y0 = r.y0 || (r.y0 = new Map()); let n = 0;
@@ -46343,12 +46386,13 @@ function xMark(x, z, r, c) {
     if (left < best) { best = left; s = m; }
   }
   if (!s) return;
-  const ge = s.geometry, P = ge.attributes.position.array, U = ge.attributes.uv.array, y0 = hgt(x, z), rot = Math.random() * TAU, lift = .12 + R * .006, flat = R < 8;
-  let gx = 0, gz = 0; if (flat) { gx = (hgt(x + R, z) - hgt(x - R, z)) / (2 * R); gz = (hgt(x, z + R) - hgt(x, z - R)) / (2 * R); }
+  const ge = s.geometry, P = ge.attributes.position.array, U = ge.attributes.uv.array, G = (x, z) => Math.max(gndY(x, z), hgt(x, z)), y0 = G(x, z), rot = Math.random() * TAU,   // G: the drawn ground, or a bridge's deck over it
+    lift = .12 + R * .006, flat = R < 8;
+  let gx = 0, gz = 0; if (flat) { gx = (G(x + R, z) - G(x - R, z)) / (2 * R); gz = (G(x, z + R) - G(x, z - R)) / (2 * R); }
   P[0] = 0; P[1] = lift; P[2] = 0; U[0] = .5; U[1] = .5;
   for (let j = 1; j <= XNR; j++) for (let k = 0; k < XNS; k++) {
     const v = 1 + (j - 1) * XNS + k, f = j / XNR, a = k / XNS * TAU, w = R * f * (1 + .08 * Math.sin(a * 3 + rot)), px = Math.cos(a) * w, pz = Math.sin(a) * w;
-    P[v * 3] = px; P[v * 3 + 2] = pz; P[v * 3 + 1] = (flat ? gx * px + gz * pz : hgt(x + px, z + pz) - y0) + lift;
+    P[v * 3] = px; P[v * 3 + 2] = pz; P[v * 3 + 1] = (flat ? gx * px + gz * pz : G(x + px, z + pz) - y0) + lift;
     U[v * 2] = .5 + .5 * f * Math.cos(a + rot); U[v * 2 + 1] = .5 + .5 * f * Math.sin(a + rot);
   }
   ge.attributes.position.needsUpdate = ge.attributes.uv.needsUpdate = true; ge.boundingSphere.radius = R * 1.15 + 4;
@@ -47181,12 +47225,10 @@ function vmRender() {
    anyway. bot: the floor's width over the lip's (the walls lean in) */
 const FHOLE = { on: 1, lift: .22, seg: 2, every: .4, wall: [0x6a593f, 0x3a3024], floor: 0x2a2219, board: .86, log: 0x4d3d2a, mouth: [1.6, 1.6, 2.4], bot: .82 };
 let gHole = null;
-/* the ground as the terrain mesh draws it (two triangles a cell, as THREE.PlaneGeometry splits it), not as hgt() blends it */
-function meshH(x, z) {
-  const T = S.T, N = T.N, gx = clamp((x - T.x0) / T.cx, 0, N - .001), gz = clamp((z - T.z0) / T.cz, 0, N - .001), i = gx | 0, j = gz | 0, u = gx - i, v = gz - j, k = j * (N + 1) + i, h = T.h;
-  const h00 = h[k], h10 = h[k + 1], h01 = h[k + N + 1], h11 = h[k + N + 2];
-  return u + v <= 1 ? h00 + (h10 - h00) * u + (h01 - h00) * v : h11 + (h01 - h11) * (1 - u) + (h10 - h11) * (1 - v);
-}
+/* the ground as the terrain mesh draws it (fanMesh: four triangles a cell round its middle; meshT), not as hgt() blends it, with the nodes a
+   fallen bridge sank (S.brn, as br3Sink sinks them); gndY: the same, or the water over it */
+function meshH(x, z) { const M = S.brn, T = S.T; return meshT(T, x, z, M && M.size ? n => (M.has(n) ? M.get(n) : T.h[n]) : null); }   // where the trees, rocks and bushes stand (treeAt, lookObj): one whose drawn ground is under the river is drawn in it, not afloat
+const gndY = (x, z) => Math.max(S.T.WL, meshH(x, z));
 function holeInit() {
   const lidA = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, side: THREE.DoubleSide, fog: false, stencilWrite: true, stencilRef: 1, stencilFunc: THREE.AlwaysStencilFunc,
     stencilFail: THREE.KeepStencilOp, stencilZFail: THREE.KeepStencilOp, stencilZPass: THREE.ReplaceStencilOp });

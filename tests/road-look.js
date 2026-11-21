@@ -83,6 +83,9 @@ console.log('-- the road shader: every uniform and attribute it reads is given -
   ok(/attribute vec2 rd;/.test(sh.vertexShader) && /vRd = rd;/.test(sh.vertexShader) && /varying vec2 vRd;/.test(sh.fragmentShader), 'the rd attribute passed to the fragment');
   ok(/uIll\[i\]/.test(sh.fragmentShader) && /vIllW = /.test(sh.vertexShader), 'a flare lights the road as it lights the ground');
   ok(/diffuseColor\.rgb = mix\( rc,/.test(sh.fragmentShader), 'the surface sets the diffuse colour, which the light then shades');
+  /* three.js r128 sets cameraPosition only for shader, Phong, toon and standard materials (or one with an envMap): in a Lambert one it is
+     0, 0, 0, so a fade by distance(.., cameraPosition) took every road for far and dropped its grain and dashes */
+  ok(!/cameraPosition/.test(sh.fragmentShader.split('#include <color_fragment>')[1] || '') && /vRdD = length\( \( modelViewMatrix/.test(sh.vertexShader), 'the distance from the eye comes from the vertex shader, not cameraPosition (unset on a Lambert material)');
   const sh0 = run(null);
   ok(!/uIll/.test(sh0.fragmentShader), 'before the sky has its flares\' uniforms, the hook does not ask for them');
 }

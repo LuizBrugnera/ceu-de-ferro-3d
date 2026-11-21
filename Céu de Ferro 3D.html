@@ -44260,17 +44260,17 @@ function envTerrainHook(sh) {
 /* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
    the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
    uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
-   off where it would shimmer (cf-pol-graficos 2) */
+   off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
 function envRoadHook(sh, u) {
   Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u });
   if (SKY3.u) sky3Ill(sh);
-  sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\n' + sh.vertexShader.replace('#include <begin_vertex>',
-    '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
-  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	{
 		vec2 rp = vRdW.xz;
 		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
-		float u = abs( vRd.x ) / uRd.x, far = smoothstep( 70.0, 180.0, distance( vRdW, cameraPosition ) );
+		float u = abs( vRd.x ) / uRd.x, far = smoothstep( 70.0, 180.0, vRdD );
 		vec3 rc = diffuseColor.rgb * ( 0.86 + 0.26 * mix( n1.r, 0.5, far ) ) * ( 0.94 + 0.12 * smoothstep( 0.3, 0.8, n2.a ) );
 		rc = mix( vec3( dot( rc, vec3( 0.3, 0.59, 0.11 ) ) ), rc, uSat ) * uTone;
 		float rut = uRd.y * smoothstep( 0.42, 0.12, abs( abs( vRd.x ) - 0.95 + ( n2.r - 0.5 ) * 0.3 ) ) * ( 0.6 + 0.4 * n1.g );
@@ -44278,7 +44278,7 @@ function envRoadHook(sh, u) {
 		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
 		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
 		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
-		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.7 );
+		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 );
 	}`);
 }
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */

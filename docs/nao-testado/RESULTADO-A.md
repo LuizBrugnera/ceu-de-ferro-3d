@@ -42,3 +42,17 @@ Testes novos: `tests/sides3.js` (o "como testar" de P0 a P9 numa partida de 3 la
 Também consertado neste lote: a **Visão de General com 3 lados** só tinha as abas EUA e Rússia, o relógio mostrava 2 tíquetes e 2 placares, e a tabela de forças do lado 2 lia `V.f[-1]` (o painel quebrava para um jogador insurgente). Agora há a aba (e a tecla 3) dos Insurgentes, o relógio mostra os 3 lados, "Inimigo" soma os dois inimigos e a curva de tíquetes desenha cada inimigo na sua cor. Teste em `tests/sides3.js` (`genForceRows`, `genTrendCols`, `held` com 3 lados).
 
 Achado e não consertado (seção CEREBRO, outra frente): a defesa por posições (DFP) sobrescreve o texto comum da recusa `far` ("Longe demais do ponto"), então toda ordem recusada por distância (a economia, as obras) mostra esse texto; `tests/mcp-general.js` acusa isso (a única falha que resta nele).
+
+## Lote 3: cf-engenharia-pontos a cf-general-constroi
+
+| Documento | Resultado | Evidência | Conserto e teste |
+|---|---|---|---|
+| cf-engenharia-pontos | em parte; **falhou** a medição | os muros param fuzil e .50 (0 de 30 tiros atrás deles, 30 de 30 sem), cortam a visada, caem com explosivos e aparecem certos nas duas épocas; numa partida de 400 s a engenharia sai aos 41–52 s mas fica em "aguarda energia e metal" de 128 a 355 s: só 2 peças de pé aos 380 s | não consertado (precisa de medição da economia no começo); documentado |
+| cf-era-padrao | **passou** (apagado) | no navegador abre em Hoje, troca para 1944 e volta, "Assistir" em 1944 roda a IA × IA local, "Entrar na sala" em 1944 entra online | — |
+| cf-estradas-chao | em parte | 11 e 13 estradas de terra, custos, caminhão a 0,7 na terra (tanque não perde), pontes +1/+4; `tests/roads8-gen.js` refaz as tabelas da página | — |
+| cf-estradas-flutuando | **falhou**, consertado | em Hoje quase nenhuma estrada aparecia em 3D fora das vilas: desde #100 o índice da fita contava do zero em cada aresta e só a primeira estrada de cada classe era desenhada | `roadRibbon` (o índice conta do que a malha já tem); `tests/road-mesh.js`: 8 falhas antes, passa depois; o mesmo número de triângulos (o custo por quadro não muda) |
+| cf-explosoes | em parte | as três explosões aparecem sem erro (bola de fogo, onda, fumaça, começo do cogumelo) | — |
+| cf-folego | **passou** (apagado) | corrida a 5,6 m/s sem cansar, o atirador prende o fôlego 20 s sem tremer, 60 s de IA × IA sem ninguém cansado, sem barra de fôlego no HUD | `tests/folego.js` novo |
+| cf-foguete-tecnica | em parte | `tests/foguete-tecnica.js` passa | — |
+| cf-gbu-lock | em parte | a trava escolhe o alvo mais perto ao alcance, "FORA DE ALCANCE" além dele, o morro bloqueia, jogador e IA concordam (o buscador só vê 6,5 km) | `tests/gbu-lock.js` novo |
+| cf-general-constroi | em parte | nível 1 aos ~120 s, antiaérea fixa de 1 a 3 por lado, 1–2 ninhos, 14 e 7 minas, a poupança no diário | — |

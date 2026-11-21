@@ -29,12 +29,12 @@ Nos aviões e helicópteros feitos pelos números (todos menos o F-22 e o A-10, 
   - **GPU de verdade**, cena fixa sobre a cidade na batalha de demonstração (só fuselagens e pontas), 3 rodadas alternadas de 15 s: main 44,4 / 44,7 / 50,2 fps (média 46,4), aqui 55,7 / 41,1 / 50,2 fps (média 49,0). O quadro mediano foi de 16,7 ms nos dois.
   - **SwiftShader**, cena com 28 aeronaves: mesmas chamadas (792); triângulos de 24 024 para 29 656 (de +112 no Su-57 a +336 no B-17; +152 a +184 num helicóptero). Na máquina carregada, rodadas iguais variam ±10 ms: a main teve média de 70,6 ms (9 rodadas) e esta versão 75,8 ms (4 rodadas). No processador sem GPU (SwiftShader), uma cena só de aviões pode ficar uns 5 ms mais lenta.
 - Numa partida de verdade, um Spitfire em voo visto de fora, antes e depois (imagens na PR).
+- Visto depois, na página (GPU de verdade): com a ponta direita do Spitfire perdida (`tipR` a 0, `damageLook`), a asa arredondada encolhe a 0,58 do comprimento e fica com a insígnia.
+- E com a ponta do Stuka perdida, o painel de fora some com a insígnia e o painel de dentro, de ponta reta, fica à mostra, como previsto.
 
 ## O que NÃO foi testado
 
 - O avião em voo com GPU de verdade (a partida foi vista no SwiftShader), e os jatos e helicópteros em voo.
-- A asa cortada pela metade com a ponta arredondada: ela encolhe junto (`scale.z`), então a ponta continua redonda e mais curta, mas não foi vista.
-- O Stuka com o painel de fora perdido: o painel de dentro, reto, fica à mostra.
 
 ## Como testar depois
 

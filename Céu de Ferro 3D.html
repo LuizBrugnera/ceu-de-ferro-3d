@@ -39634,7 +39634,7 @@ function hudFly(P, u, ink, acc, disp, blink, seat) {
     txt('VEL ' + Math.round(P.V * 3.6) + ' km/h', L, y, 14 * u, ink); y += 17 * u;
     txt('ALT ' + Math.max(0, Math.round(P.y - hgt(P.x, P.z))) + ' m', L, y, 14 * u, ink); y += 17 * u;
     txt('G ' + P.g.toFixed(1) + '  AoA ' + Math.round(P.aoa * 57.3) + '°' + (P.ctl.brake && d.brake ? '  FREIO' : ''), L, y, 12.5 * u, Math.abs(P.g) > d.gmax * .9 ? FOE : ink); y += 21 * u;
-  } else y = 170 * u;   // in a cockpit the damage panel sits here first
+  } else y = (DMGP.y + DMGP.h + 10) * u;   // in a cockpit the damage panel sits here first: the list starts under it (it started at 170 u, 16 u inside the panel)
   {   // weapons with what fires each, always on, cockpit included
     const row = (k, t, ok) => { txt(k, L, y + 1.5 * u, 10 * u, acc); txt(t, L + 54 * u, y, 12.5 * u, ok ? ink : FOE); y += 16 * u; };
     row(S.aim ? 'BTN ESQ' : 'ESPAÇO', d.gun.name + '  ' + P.ammo, P.ammo);
@@ -39837,9 +39837,10 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
    field repair with what waits behind it. Bottom left, lifted over the touch stick or a seat's own corner; in a cockpit it takes the top
    left, which the gauges leave free, and oil on the windscreen or a cracked panel are drawn over the view ---------- */
 const DCOL = ['rgba(111,195,178,.6)', '#ffd84a', '#f5762b', '#e2604f'], OUTL = { hull: 1, wingL: 1, wingR: 1, tipL: 1, tipR: 1, stabL: 1, stabR: 1, fin: 1, rotor: 1 };
+const DMGP = { w: 190, h: 150, y: 36 };   // the damage panel's size, and its top in a cockpit (u); hudFly starts the weapons list under it
 function dmgPanel(P, u, ink, acc, seat, blink) {
-  const D = P.def.parts, I = D.ix, W = 190 * u, H = 150 * u, x0 = 14;
-  const y0 = seat && seat.inst && cw >= 620 && ch >= 400 ? 36 * u : ch - 14 - H - (coarse ? 150 : seat && seat.lift ? seat.lift * u : 0);   // in a cockpit with its gauges up, where the text panel was
+  const D = P.def.parts, I = D.ix, W = DMGP.w * u, H = DMGP.h * u, x0 = 14;
+  const y0 = seat && seat.inst && cw >= 620 && ch >= 400 ? DMGP.y * u : ch - 14 - H - (coarse ? 150 : seat && seat.lift ? seat.lift * u : 0);   // in a cockpit with its gauges up, where the text panel was
   if (!D.length) return;
   const st = D.map((d, i) => pst(P, i));
   if (seat && seat.inst) glassFx(P, D, st);
@@ -39946,14 +39947,15 @@ function drawHud() {
     txt('SEM LINHA DE VISADA', cw / 2, ch * .5 + 60 * u, 12 * u, amb, 'center');
   }
   if (!P.dead) dmgPanel(P, u, ink, acc, seat, blink);
-  const cut = sightClip(seat);
+  const cut = sightClip(seat), airT = [];
   for (const q of S.planes) {
     if (q === P || q.dead || smoked(cp.x, cp.y, cp.z, q.x, q.y, q.z)) continue;
     const s = proj(q.x, q.y, q.z), rng = dist(q, P), foe = q.team !== me;
     if (onScr(s)) {
       if (foe) {
         const lock = q === S.lockAir; bracket(s.x, s.y, lock ? 20 : 13, FOE);
-        txt((lock ? lockName + ' ' : '') + (rng / 1000).toFixed(1) + ' km', s.x, s.y + (lock ? 23 : 16), 11 * u, FOE, 'center');
+        if (lock) txt(lockName + ' ' + (rng / 1000).toFixed(1).replace('.', ',') + ' km', s.x, s.y + 23, 11 * u, FOE, 'center');
+        else { let b = airT.find(o => Math.abs(o.x - s.x) < 30 * u && Math.abs(o.y - s.y) < 16 * u); if (!b) airT.push(b = { x: s.x, y: s.y, n: 0, r: rng }); b.n++; if (rng < b.r) b.r = rng; }   // aircraft close on the screen share one label (cf-pol-testes-b: a flight at 15 km was a smear of distances)
       } else tri(s.x, s.y - 16, Math.PI / 2, 6, FRIEND);
       if (q.pid) txt(q.name, s.x, s.y - 26 - 12 * u, 12 * u, foe ? FOE : FRIEND, 'center');
     } else if (foe) {
@@ -39962,6 +39964,7 @@ function drawHud() {
       tri(cw / 2 + dx * k, ch / 2 + dy * k, Math.atan2(dy, dx), 9, FOE);
     }
   }
+  for (const b of airT) txt((b.r / 1000).toFixed(1).replace('.', ',') + ' km' + (b.n > 1 ? ' ×' + b.n : ''), b.x, b.y + 16, 11 * u, FOE, 'center');   // the nearest of the group
   for (const g of S.units) {
     if (g === P) continue;
     const s = proj(g.x, g.y + 5, g.z), foe = g.team !== me;

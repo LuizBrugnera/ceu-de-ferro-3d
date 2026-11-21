@@ -1,5 +1,11 @@
 # cf-pol-modelos: modelos da artilharia (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Hangar pelos botões (Hoje): Paladin e M270 no carrossel. Na partida, de fora: Grad, Katyusha (BM-13), M270 e Panzerwerfer com os modelos novos, sem erro no console.
+- Torre girada: o lançador do Grad girado 90° fica sobre a carroceria. O da Katyusha virado para trás (3 rad) também. Não vi o lançador cruzando a cabine.
+- **Salva do Grad**: com o mapa de tiro (M), o lançador aponta em 2 s, e 34 foguetes ficam no ar ao mesmo tempo, sem erro. Na visão de fora, o sopro no chão ao sair. A fita de fumaça não se vê a essa distância.
+- **Continua sem teste:** o obuseiro atirando visto de perto, um destruído no meio da batalha, a luneta de dentro.
+
 ## O que mudou
 
 Os nove modelos da classe Artilharia eram todos o mesmo casco de lagartas com uma caixa aberta (ou fechada) e um cano; os lançadores de foguetes não tinham tubo nem trilho nenhum, só a caixa vazia. Agora cada um tem o seu (bloco `ARTB` no começo da parte 3D, logo depois de `buildUnit`):
@@ -17,7 +23,7 @@ Os nove modelos da classe Artilharia eram todos o mesmo casco de lagartas com um
 
 ## O que NÃO foi testado
 
-- Não vi nenhum desses veículos numa partida de verdade: andando, atirando a salva, girando a torre (o lançador do BM-13 e do Grad atravessa a cabine se a torre girar para a frente: a simulação deixa girar a volta toda), destruído no meio da batalha.
+- Visto depois (GPU de verdade, demonstração): um BM-21 da IA atirando a salva na cidade, com o lançador levantado e os foguetes saindo (imagem na #178). Vi também um M270 destruído na batalha, escuro entre as árvores caídas. Não vi os outros oito atirando, nem a torre girando por cima da cabine (o lançador do BM-13 e do Grad atravessa a cabine se a torre girar para a frente: a simulação deixa girar a volta toda), nem um destruído no meio da batalha.
 - As rodas e lagartas não giram (nem antes giravam).
 - O jogador dentro de um desses (visão externa e a luneta) não foi conferido com o modelo novo.
 

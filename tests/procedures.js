@@ -94,6 +94,7 @@ function field() {
   const sq = [mk(0, 0), mk(1, 40), mk(2, 80)], live = () => S.squads.filter(q => q.team === 0 && q.live > 0 && !q.state);
   /* only p1 can be drawn: the flank's limits opened, the other procedures out of reach */
   const PR = $('PR'); PR.expK = 9; PR.expAdd = 100; PR.long = 9; PR.front = 99; PR.env.r = 99; PR.pen.r = 99; PR.rec.n = 99; PR.rec.foe = 99;
+  try { $('PEL').on = 0; } catch (e) {}   // M3's own H-hour: the platoon (P8, #144) holds the assault until its base fires, which tests/brain-pelotao.js covers
   $('cmdSense')(Cm, live()); $('tmNow')(0); $('cmdAttack')(Cm, live()); $('aiDrain')($('apWork')(Cm)); $('cmdAttack')(Cm, live());
   return { C, $, S, Cm, sq, op: Cm.ops.find(o => o.k === 'atk' && !o.over), PR };
 }

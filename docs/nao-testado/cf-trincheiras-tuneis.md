@@ -1,5 +1,11 @@
 # cf-trincheiras-tuneis: trincheira como buraco e corredor, túneis, mais mato, abrigo para o cérebro (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok, com um conserto
+- Navegador (Chrome headless com GPU, ANGLE Vulkan), Assistir em 1944, câmera de comandante a 9 m de uma trincheira cavada: o buraco aparece (paredes de terra, as tábuas de 1944, o fundo), o chão por cima não é desenhado, e o saco de areia ao lado fica de pé. Nenhum erro no console.
+- **Conserto, capim no fundo da trincheira**: o capim perto do olho é feito em pedaços (`vegChunk`) que pulavam estrada, água e casa, mas não trincheira, e não eram refeitos quando uma trincheira era cavada. Na mesma trincheira eram 56 tufos dentro do buraco; agora 0. `vegChunk` deixa de fora o corte de uma trincheira desenhada como buraco, e quando uma trincheira é cavada, aparece ou some, `holeGrass` refaz no lugar, no mesmo quadro, só os pedaços que ela toca. Numa trincheira cavada no meio da partida, 90 tufos com ela rasa e 0 depois de cavada. Teste: `tests/trench-grass.js` (no `all.sh`).
+- Custo: a mesma cena, mediana de 21 quadros, 24–35 ms depois e 29–41 ms antes.
+- **Continua sem teste:** uma esquadra atravessando o túnel, a boca achada pelo inimigo vista na tela, as sombras no Alta, placas sem stencil.
+
 Entregue sem testes, pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"). Segue a arquitetura da pesquisa `cf-cerebro-pesquisa` (item cf-trincheiras-tuneis da 3.3): este pacote **produz** abrigo e rota para o cérebro; não decide onde cavar nem como o soldado se comporta.
 
 ## O que mudou

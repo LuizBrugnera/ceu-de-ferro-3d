@@ -19,10 +19,10 @@ As bandeiras eram placas duras: a do aeródromo, a da base de suprimento e a de 
 - Numa partida: 18 bandeiras desenhadas pelo programa da bandeira, e o tempo da onda subindo com o jogo.
 - `airfields` e `eco-looks` passam com a bandeira no lugar da placa.
 - FPS na GPU de verdade, cena fixa sobre a cidade na batalha de demonstração, 3 rodadas alternadas de 15 s: main 38,4 / 43,8 / 40,0 fps (média 40,7), aqui 50,6 / 42,0 / 51,7 fps (média 48,1). Não há queda.
+- Visto depois, numa partida moderna (GPU de verdade): 17 bandeiras desenhadas, o tempo da onda subindo 5,2 s, e a bandeira do aeródromo em dois quadros a 0,6 s um do outro, com a onda em outro lugar (imagem na PR das bandeiras verificadas).
 
 ## O que NÃO foi testado
 
-- A onda vista em movimento por um jogador (a imagem é um quadro).
 - A bandeira com sombras de verdade (qualidade Alta).
 
 ## Como testar depois

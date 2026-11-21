@@ -1,5 +1,11 @@
 # cf-radio-rede: antenas de rádio e brechas na rede de comando (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados): a IA do lado 0 ergueu sozinha uma antena aos 147 s ("Antena de rádio pronta junto a E · Vila das Oliveiras: a rede cobre 4,4 km em volta"). Na cena, o mastro treliçado com o rádio no pé; na Visão de General, a antena no mapa. Nenhum erro no console.
+- Achado: na Visão de General, perto de um ponto com muitas esquadras e obras (Vila das Oliveiras), os rótulos das unidades se amontoam num nó ilegível.
+- `tests/radio.js`: 55 ok e 3 falhas (2 de custo com a máquina cheia; a da mensagem da Visão de General acima do limite, consertada: veja `cf-radio-general.md`). `tests/comms.js`: as seções medidas passaram.
+- **Continua sem teste:** o convidado de infantaria construindo a antena com N, o servidor antigo recusando, o anel de brecha e o botão Rádio vistos de perto.
+
 Pedido do capitão: "muitas vezes o general fica com muitas areas do mapa sem rede, deve ser possivel construir radios e andar com carros ou tropas de radio tambem deve resolver esse problema e expandir a zona do radio".
 
 ## O que mudou

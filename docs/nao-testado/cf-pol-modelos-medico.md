@@ -1,5 +1,9 @@
 # cf-pol-modelos: as marcas do médico no soldado do pack (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje, a 4,5 m de um Combat Medic do pack andando: a braçadeira branca no braço. Nenhum erro no console.
+- **Continua sem teste:** o médico deitado e morto, e as outras qualidades (Baixa, Alta).
+
 ## O que mudou
 
 O médico perto do olho é o soldado animado do pack. Ele não tinha marca nenhuma: as do boneco de caixas, depois do conserto em `tests/medic-marks.js`, só vão no médico que o boneco desenha.

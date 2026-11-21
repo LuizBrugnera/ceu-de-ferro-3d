@@ -46019,7 +46019,8 @@ PACK.fix = {
   car_jeep: { wheels: [[[0x001020], 'steel']], hull: [[[0x001020], 'steel'], [[0xc0f0ff], 0x46565e]] },
   car_scout: { hull: [[[0x501000], .8], [[0xc0f0ff], 0x46565e]] },
   pickup: { hull: [[[0x5090b0], .86]] },
-  soldier: { body: [[[0x303020], .5]] }   // the SWAT's black vest, helmet, pads and boots: the side's colour, darker, so a soldier reads as one of an army
+  soldier: { body: [[[0x303020], .5]] },   // the SWAT's black vest, helmet, pads and boots: the side's colour, darker, so a soldier reads as one of an army
+  w_launcher: { hull: [[[0x70e0a0], 0x5f6a4a], [[0x309060], 0x434d36], [[0xffff00], 0xb0a040]] }   // the shoulder launcher's mint and green: olive drab, its warning band muted
 };
 function packFix(id, P) {
   const F = PACK.fix[id]; if (!F || !P) return P;
@@ -46365,6 +46366,7 @@ manModel = (f => d => {
     packPlay(s, s.act.aim ? 'aim' : 'idle', 0); s.mixer.update(0);
     const k = MAN.sc * 1.85 / s.h; s.root.position.set(m.x, m.y, m.z); s.root.rotation.set(0, m.h, 0); s.root.scale.setScalar(k);
     const w = packWeapon(s, m); if (w) { w.position.set(.32, 1.28, .12); w.rotation.set(0, 0, 0); }
+    s.root.updateMatrixWorld(true); if (typeof packHands === 'function') packHands(s, m, true);   // both hands on the weapon (cf-pol-modelos)
     const g = new THREE.Group(); g.add(s.root); return g;
   } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
 })(manModel);
@@ -46382,8 +46384,45 @@ function packMedMarks(root) {
   return L;
 }
 const packMedic = d => !!(d && d.med && !d.irr);
+/* both hands on the weapon (PIK, cf-pol-modelos): the pack's soldier aims as with a pistol, the right arm out and the left hanging at his
+   side, so a rifle hung from one hand. After the clip, each arm is bent by a two-bone reach (the upper arm turned so the elbow lands
+   where the two lengths meet, toward the pole: down and out; then the forearm onto the target): the right hand to the weapon's grip
+   (its pivot), the left to its fore end (fore of its length ahead of the grip). Not lying down, dead or unarmed */
+const PIK = { fore: .34, pole: [0, -1, .7], far: 70, V: null };
+/* only the chain of the arm is brought up to date (the bones above it, the arm's three), never the whole skeleton */
+function packReach(root, side, T) {
+  const U = root.getObjectByName('UpperArm_' + side), L = root.getObjectByName('LowerArm_' + side), W = root.getObjectByName('Wrist_' + side); if (!U || !L || !W) return;
+  const V = PIK.V || (PIK.V = { s: new THREE.Vector3(), e: new THREE.Vector3(), w: new THREE.Vector3(), u: new THREE.Vector3(), p: new THREE.Vector3(), n: new THREE.Vector3(), f: new THREE.Vector3(), g: new THREE.Vector3(), q: new THREE.Quaternion(), a: new THREE.Quaternion(), b: new THREE.Quaternion(), rq: new THREE.Quaternion(), x: new THREE.Vector3(), y: new THREE.Vector3() });
+  const up = o => { o.updateMatrix(); o.matrixWorld.multiplyMatrices(o.parent.matrixWorld, o.matrix); };
+  U.updateWorldMatrix(true, false); up(L); up(W);
+  V.s.setFromMatrixPosition(U.matrixWorld); V.e.setFromMatrixPosition(L.matrixWorld); V.w.setFromMatrixPosition(W.matrixWorld);
+  const a = V.s.distanceTo(V.e), b = V.e.distanceTo(V.w); if (!(a > 1e-6 && b > 1e-6)) return;
+  V.u.copy(T).sub(V.s); const d = clamp(V.u.length(), Math.abs(a - b) + 1e-4, a + b - 1e-4); V.u.normalize();
+  root.matrixWorld.decompose(V.x, V.rq, V.y); V.p.set(PIK.pole[0], PIK.pole[1], (side === 'L' ? -1 : 1) * PIK.pole[2]).applyQuaternion(V.rq); V.p.addScaledVector(V.u, -V.p.dot(V.u)).normalize();
+  const ca = (a * a + d * d - b * b) / (2 * a * d), sa = Math.sqrt(Math.max(0, 1 - ca * ca));
+  V.n.copy(V.s).addScaledVector(V.u, a * ca).addScaledVector(V.p, a * sa);   // the elbow's new place
+  const turn = (bone, from, to) => {   // the bone turned so that the world direction from becomes to
+    V.q.setFromUnitVectors(from.normalize(), to.normalize());
+    bone.parent.matrixWorld.decompose(V.x, V.a, V.y); bone.matrixWorld.decompose(V.x, V.b, V.y);
+    bone.quaternion.copy(V.a.invert().multiply(V.q.multiply(V.b))); up(bone);
+  };
+  turn(U, V.f.copy(V.e).sub(V.s), V.g.copy(V.n).sub(V.s));
+  up(L); up(W); V.e.setFromMatrixPosition(L.matrixWorld); V.w.setFromMatrixPosition(W.matrixWorld);
+  turn(L, V.f.copy(V.w).sub(V.e), V.g.copy(T).sub(V.e));
+}
+const PIKT = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
+function packHands(s, m, near) {   // near: draw it whatever the eye's distance (the hangar's card)
+  const w = s.wpn, st = m.dead ? 3 : m.st; if (!w || !w.visible || st >= 2 || m.civ || !s.wid) return;
+  if (!near && typeof camera !== 'undefined' && camera && Math.hypot(m.x - camera.position.x, m.z - camera.position.z) > PIK.far) return;   // too far for hands to be seen
+  const P = PACK.M[s.wid] && PACK.M[s.wid].d; if (!P) return;
+  const g = packPivot(P, 'hull') || [0, 0, 0];
+  w.updateWorldMatrix(true, false);
+  packReach(s.root, 'R', w.localToWorld(PIKT.set(g[0], g[1], g[2])));
+  packReach(s.root, 'L', w.localToWorld(PIKT.set(g[0] + P.dims[0] * PIK.fore, g[1], g[2])));
+}
 packPose = (f => (s, m, dt, fresh) => {
   f(s, m, dt, fresh);
+  packHands(s, m);
   const on = packMedic(m.def) && !m.civ && !m.dead;
   if (on && !s.med) s.med = packMedMarks(s.root);
   if (s.med) for (const o of s.med) o.visible = on;

@@ -4,7 +4,7 @@ Testado (cf-pol-testes-a, `tests/sides3.js`, partida de 3 lados): `civD().n` tem
 
 ## O que falta
 
-- A regressão com 2 lados (rodada 2): `civ.js` passa; `civ-war.js` falha em 7 pontos, igual no `main` e na página do começo desta tarefa: na cena de evacuação um atirador a 60 m do meio de uma vila de 310 m de raio só alcança 1 dos 14 civis no raio de 220 m do tiro (`CIV.hear.shot`), então a vila nunca chega a 25% assustados e não evacua. É o cenário do teste (vila maior que o ouvido), não a regra de 3 lados; falta refazê-lo. `civ-online.js` não rodou.
+- A regressão com 2 lados (rodadas 2 e 3): `civ.js` passa e `civ-war.js` passa depois de consertar o teste: na cena de evacuação o atirador ficava a 60 m do meio do terreno de uma vila de 310 m de raio e só alcançava 1 dos 14 civis no ouvido do tiro (`CIV.hear.shot`, 220 m); a 60 m do meio das pessoas, a vila evacua, vai a um refúgio a 510 m do lado oposto aos tiros e volta com a calma (de 7 falhas para nenhuma). A partida IA × IA de 1944 do fim do teste não coube em 560 s. `civ-online.js` não rodou.
 - O fogo indireto da IA insurgente perto de civis vistos: o diário dela deve dizer "Fogo suspenso" (`roeNote`).
 - Online com 3 lados: a vila que se volta contra os Insurgentes aparece no feed do convidado (`civ` k 2 com o bit 4).
 - `civState(t).towns` com `against` e `bySide`.

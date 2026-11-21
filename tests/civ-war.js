@@ -80,7 +80,8 @@ load({ seed: 32 }); fresh('modern'); C.run(2);
 console.log('-- evacuation: combat near a town empties it, calm brings its people home --');
 load({ seed: 33 }); fresh('modern'); C.run(2);
 {
-  const { g, b } = bigTown(), L = ofTown(g), sh = man(1, b.x + 60, b.z, false);
+  const { g, b } = bigTown(), L = ofTown(g), cx = L.reduce((a, c) => a + c.x, 0) / L.length, cz = L.reduce((a, c) => a + c.z, 0) / L.length;
+  const sh = man(1, cx + 60, cz, false);   // 60 m east of its people (the towns grew past the shot's earshot, CIV.hear.shot, from the middle of the ground)
   console.log('   ' + C.civName(b) + ': ' + L.length + ' people, ' + b.ru + ' m across');
   const fire = () => { S.bullets.push({ x: sh.x, y: sh.y + 1.6, z: sh.z, vx: 0, vy: 300, vz: 0, life: .5, team: 1, dmg: 1, ap: 0, sa: 1, by: sh, tr: 0 }); };
   let f = 0; C.run(CIV.evac.after - 8, () => { if ((f = (f + 1) % 20) === 0) fire(); });

@@ -1,5 +1,12 @@
 # Pack de modelos aparecendo (cf-pack-aparece) — não testado
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1): os 29 modelos do pack carregados (`st` 1, nenhum falhou). Na demonstração do hangar, 6 de 6 tanques com o pack (`u.m.userData.pack`), o caminhão e um dos carros também. Os LAV não têm modelo no pack.
+- Hangar pelos botões de verdade: aba Tanque em Hoje mostra o M1A2 Abrams do pack; em 1944 (botão da era), o Tiger I do pack, com o Sherman ao lado no carrossel. Os modelos não ficam velhos ao trocar de aba ou de era.
+- Partida de infantaria (Hoje): o soldado do jogador e os vizinhos são os do pack, animados. Com `?pack=0` voltam a figura de caixas e os veículos de antes.
+- **Continua sem teste:** o encaixe de torre e canhão de cada tanque de perto (só o Abrams foi olhado), dano e destroço com o pack, primeira pessoa no tanque, o soldado do hangar de 1944, Rússia e Insurgentes, e o convidado online.
+- Nota: mudar `era`/`cls` pelo console sem os botões deixa o carrossel vazio. Não é caminho de jogador: use os botões.
+
 Depois do #101 o capitão via ainda os modelos velhos: tanques modernos (Abrams, T-72/T-90, Leopard), soldados e o hangar.
 
 ## Causas e o que mudou (só `Céu de Ferro 3D.html`, bloco do pack)

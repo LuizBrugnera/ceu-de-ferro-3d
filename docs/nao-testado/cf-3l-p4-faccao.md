@@ -9,7 +9,7 @@ Testado (cf-pol-testes-a):
 
 ## O que falta
 
-- Jogar como insurgente: técnicas, moto e BTR-70 dirigidos pelo jogador, troca de veículo (H), requisição (U), rádio sem veículo de rádio, o drone "Drone improvisado".
+- Jogar como insurgente: visto entrar numa sala de 3 lados de T-55A (capturado) com o HUD das armas (D-10T, DShK) e o mapa em 3 cores (rodada 3). Faltam técnicas, moto e BTR-70 dirigidos pelo jogador, troca de veículo (H), requisição (U), rádio sem veículo de rádio, o drone "Drone improvisado".
 - Capturar uma técnica insurgente com um russo online (`cs`).
 - O general insurgente sem aviação na economia (ponte aérea e evacuação negadas por `ecoUse`).
 - O balanço do M1A1 e do M109A7 em jogo; a tela de toque e o celular.

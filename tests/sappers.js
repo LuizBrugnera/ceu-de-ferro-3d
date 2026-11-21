@@ -24,10 +24,10 @@ console.log('-- the kit --');
 for (const era of ['ww2', 'modern']) {
   fresh(era);
   const ids = [0, 1].map(s => INF[era][s].find(id => KITS[id].sap)), K = ids.map(id => KITS[id]), m = man(ids[0], 0, 3000, 0);
-  const net = C.$('trnKits')(), old = net.filter(id => !KITS[id].sap);
+  const net = C.$('trnKits')(), at = ids.map(id => net.indexOf(id)), later = id => KITS[id].side === 2 || KITS[id].med;   // what came after the sappers: the Insurgents' kits (3 sides) and the medics
   console.log('   ' + era + ': ' + K.map(k => k.name + ' (' + k.arms[0].name + ')').join(' and ') + '; mines ' + [0, 1].map(s => SAP.names[era][s].join(' / ')).join(', '));
   ok(K.every((k, s) => k.side === s && k.role === 'Sapador' && k.chg === SAP.chg) && m.chg === SAP.chg && m.mn.join() === SAP.mines.join(), era + ': a sapper kit on each side, with ' + SAP.chg + ' charges and ' + SAP.mines.join(' + ') + ' mines');
-  ok(net.slice(-2).join() === ids.join() && old.length === net.length - 2, era + ': in the AI rows the sapper kits come after every kit an older page knew, which keep their numbers');
+  ok(at[1] === at[0] + 1 && net.slice(0, at[0]).every(id => !KITS[id].sap && !later(id)) && net.slice(at[1] + 1).every(later), era + ': in the AI rows the sapper kits come after every kit an older page knew, which keep their numbers, and only later kits come after them (' + at + ' of ' + net.length + ')');
 }
 
 console.log('-- where a mine may lie --');

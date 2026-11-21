@@ -11,9 +11,11 @@ O que é (no main): quatro aviões em `PLANES` (B-2 Spirit e Tu-160 hoje, He 177
 - `stkFx` chamado a 140 m de um soldado na partida do navegador: a nuvem aparece (`crater.png`, vista pela janela de uma casa) e entra em `S.craters` e `S.smokes`.
 - Página: abre sem erro novo; o `dsOf is not defined` citado na doc não aparece mais.
 
+**Conserto (cf-pol-testes-a, rodada 2):** o tapete fora do alvo era o procedimento de aeronave do radar antiaéreo (`radar-aa`: "descer, usar o relevo e sair do envelope") disparando no B-2 em plena corrida, contra o radar da defesa perto do alvo: ele rolava o avião (comandos em `roll 1`), a linha passava 170 m ao lado ou a corrida era abandonada ("arremete e volta (fora da linha)"). Agora nenhum procedimento manobra o bombardeiro estratégico enquanto ele alinha e corre (`daHeld` em `daFly`; os flares continuam). Teste: `tests/bomber-run.js` (antes: arremete e nenhuma cratera; depois: 8 crateras, a mais perto a 24 m do alvo).
+
 ## Não testado
 
-- Por que o tapete do B-2 caiu fora do alvo (acima), e a nuvem e a bola de fogo na tela; He 177, Tu-160 e B-17 voando a missão; a salva de drones (`shahed`).
+- A nuvem e a bola de fogo na tela; He 177, Tu-160 e B-17 voando a missão; a salva de drones (`shahed`).
 - Os Insurgentes de verdade: pelo harness, `watch('modern', { n: 3 })` no mapa v5 ainda dá 2 lados (`S.fac` [0, 1]), então as armas deles só foram pedidas pelo `STK.any`.
 - Voar com um bombardeiro como jogador (B solta uma bomba a cada 0,3 s), a ficha do hangar, a física a 4 km.
 - Online (convidado vendo o bombardeiro, as bombas e as crateras; troca de anfitrião), MCP contra um anfitrião, o botão "Bombardeio" da Visão de General.

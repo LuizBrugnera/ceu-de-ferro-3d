@@ -155,3 +155,18 @@ mais um motivo para o `genMsg`). `gen-online`: 1 falha ("its map has squads with
 (c397126): não é do `genMsg`; a maior mensagem foi 4.781 bytes e nada foi cortado. Fica para quem cuida do online.
 Não rodaram por falta de tempo: `sede`, `rec`, `veh-drills`, `ram`, `transport`. `logistics`: parado por mim depois de 1 h, na partida
 inteira do fim; antes dela 45 ok e 1 falha já conhecida no main (as caixas do caminhão parado tomadas por um soldado inimigo).
+
+## Lote 6 (os 18 `cf-pol-*` que chegaram às 06:15), parado pelo prazo
+
+Comecei às 06:30 e parei às 09:00Z, no prazo da tarefa. Feito nos 9 primeiros (`cf-pol-armas-*`, `cf-pol-cenario-chao`, `cf-pol-fluxos`):
+
+| Suíte | Resultado |
+| --- | --- |
+| `arma-1p`, `hurt`, `tracers`, `hitmarker`, `som`, `ground-mesh`, `fluxos` | passam (22, 14, 8, 19, 52, 29, 30 ok) |
+| `state-gc` | 1 falha: a preparação não encheu o cache `HONU`, então a checagem do vazamento não mede nada (anotado em `cf-pol-fluxos.md`) |
+
+No navegador: a arma em 1ª pessoa em movimento (clarão por quadro, cápsulas no ar, a do ferrolho atrasada) e de noite; 58 traçantes no ar
+numa partida noturna. O que é "de ouvido" (motores, volumes, tique do acerto) não dá para julgar sem som e fica como estava.
+
+**Não testados** (nem começados): `cf-pol-graficos-2` e `cf-pol-modelos-` aerodromos, apoio, asas, bandeiras, obras, pedras, radares e
+rodas-redondas.

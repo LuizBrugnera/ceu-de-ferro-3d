@@ -46348,6 +46348,27 @@ manModel = (f => d => {
     const g = new THREE.Group(); g.add(s.root); return g;
   } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
 })(manModel);
+/* the medic's marks on the pack's animated soldier (cf-pol-modelos): a white armband round the left upper arm and a white disc with a red
+   cross on the helmet's top, children of those bones (UpperArm_L, Head), so that they move with him; in the bones' own units (the armature
+   is scaled a hundred times: .001 is some 10 cm), y along the bone. The box rig's medic keeps the marks of before; a slot used by another
+   soldier hides them */
+const PMED = { band: [.00055, .0008, .0011], disc: [.00118, .00012, .00222], cross: [.0014, .00038, .0002] };
+function packMedMarks(root) {
+  const arm = root.getObjectByName('UpperArm_L'), head = root.getObjectByName('Head'); if (!arm || !head) return [];
+  const wm = mat(0xeeeeee), rm = mat(0xc8102e), P = PMED, L = [];
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(P.band[0], P.band[0], P.band[1], 10), wm); band.position.y = P.band[2]; arm.add(band); L.push(band);
+  const disc = new THREE.Mesh(new THREE.CylinderGeometry(P.disc[0], P.disc[0], P.disc[1], 12), wm); disc.position.y = P.disc[2]; head.add(disc); L.push(disc);
+  for (const r of [0, Math.PI / 2]) { const c = new THREE.Mesh(new THREE.BoxGeometry(P.cross[0], P.cross[2], P.cross[1]), rm); c.position.y = P.disc[2] + P.disc[1] / 2 + P.cross[2] / 2; c.rotation.y = r; head.add(c); L.push(c); }
+  return L;
+}
+const packMedic = d => !!(d && d.med && !d.irr);
+packPose = (f => (s, m, dt, fresh) => {
+  f(s, m, dt, fresh);
+  const on = packMedic(m.def) && !m.civ && !m.dead;
+  if (on && !s.med) s.med = packMedMarks(s.root);
+  if (s.med) for (const o of s.med) o.visible = on;
+})(packPose);
+manModel = (f => d => { const g = f(d); if (packMedic(d) && g && g.getObjectByName && g.getObjectByName('Head')) packMedMarks(g); return g; })(manModel);
 /* each frame: what came in is built again, the people chosen before and tidied after */
 syncScene = (g => dt => {
   if (PACK.dirty) {

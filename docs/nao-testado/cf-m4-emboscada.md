@@ -1,5 +1,9 @@
 # M4: emboscadas e ruas alternativas (não testado por completo)
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): ok (parte)
+- Navegador, Assistir em 1944 (9 min), com o comando do lado 0 assumido: a guarda pedida pela Visão de General (`gorSend` `man k=guard` em B · Encruzilhada) abre a op `grd` com 1 esquadra. O diário diz "Guarda da rua alternativa: esquadra a caminho de B · Encruzilhada (sem ela o inimigo roda 9,6 km em vez de 5,8 km até C · Poço Fundo); chegada por 0 km com 0% à vista", e o mapa mostra o rótulo GRD. A IA do lado 1 abriu sozinha uma guarda (`grd`, em `hold`) e uma emboscada armada (`amb`, em `set`). Nenhum erro no console.
+- **Continua sem teste:** uma emboscada planejada (EMB) ou uma interdição (ITD) disparada numa partida longa, o contra-flanco, o MCP mandando `man k=ambush|interdict|guard`, o online e o A/B.
+
 Tarefa `cf-m4-emboscada`, pacote M4 da proposta de manobra do general (procedimentos P7, P8, P9 e P11), em cima do mapa tático (M1).
 
 ## O que mudou

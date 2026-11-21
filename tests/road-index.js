@@ -64,7 +64,7 @@ for (const [era, mv, N] of [['modern', 11, 3], ['ww2', 11, 2], ['modern', 1, 2]]
   for (const [x, z] of onMap) railOf(x, z);
   G.__rs = scan; C.$('rixScan = globalThis.__rs'); G.__ra = rall; C.$('railAll = globalThis.__ra');
   const per = (seen + full * all) / onMap.length;
-  ok(per < all / 3, 'and reads ' + per.toFixed(0) + ' segments a point on the map instead of all ' + all + ' (' + (100 * full / onMap.length).toFixed(0) + '% of the points, more than ' + C.$('RIX').k * c + ' m from every road, by the old loop)');
+  ok(per < all / 2 && full === 0, 'and reads ' + per.toFixed(0) + ' segments a point on the map instead of all ' + all + ' (none by the old loop)');
   bad = null; n = 0;
   for (let i = 0; i < 600 && !bad; i++) { const [x, z] = pts[i], ri = i % R.length, a = sOn(ri, x, z), b = OLD.sOn(C, R, ri, x, z); n++; if (!Object.is(a, b)) bad = [x, z, ri, a, b]; }
   ok(!bad, 'sOn: the same s on each road at ' + n + ' points' + (bad ? ': ' + bad.join(' ') : ''));

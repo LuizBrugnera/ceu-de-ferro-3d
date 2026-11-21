@@ -6992,9 +6992,10 @@ function railAll(R, x, z) {
    every match on its map and its roads do not move), again when it changes. Segment g is (line li, point i), numbered in that order, with
    the numbers the old loops computed (a the first point, e the step, L its length: Math.sqrt for railOf, Math.hypot for netNear, as a.s),
    so the answers are the same numbers, and on a tie the first segment, as the loops gave. The grid covers the terrain's ground (and the roads'
-   box); a point off it or farther than RIX.k squares from every road is answered by the old loop over every segment. sm: the 50 m samples of a road for sOn (as
+   box); a point off it is answered by the old loop over every segment. dk: how many squares from each square to the nearest one with a
+   segment (the rings inside are empty, so the search starts there: a point 3 km from every road reads a few rings, not fifteen). sm: the 50 m samples of a road for sOn (as
    routeAt gives them) */
-const RIX = { c: 200, k: 8, w: new WeakMap(), sm: new WeakMap(), q: { d: 1e9, g: -1 } };
+const RIX = { c: 200, w: new WeakMap(), sm: new WeakMap(), q: { d: 1e9, g: -1 } };
 /* the grid of polylines Ls (arrays of points with s) over terrain T's ground and the polylines' box; hyp: lengths by Math.hypot */
 function rixBuild(Ls, hyp, T) {
   const c = RIX.c; let n = 0, x0 = T.x0, z0 = T.z0, x1 = T.x0 + T.N * T.cx, z1 = T.z0 + T.N * T.cz;
@@ -7013,6 +7014,10 @@ function rixBuild(Ls, hyp, T) {
   }
   X.at = new Int32Array(cells.length + 1); for (let k = 0; k < cells.length; k++) X.at[k + 1] = X.at[k] + cells[k].length;
   X.sg = new Int32Array(X.at[cells.length]); for (let k = 0; k < cells.length; k++) X.sg.set(cells[k], X.at[k]);
+  const nx = X.nx, nz = X.nz, dk = (X.dk = new Int32Array(nx * nz)), BIG = nx + nz + 2;   // the chessboard distance to a square with a segment, two passes
+  for (let k = 0; k < dk.length; k++) dk[k] = cells[k].length ? 0 : BIG;
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; let v = dk[k]; if (i) v = Math.min(v, dk[k - 1] + 1); if (j) { v = Math.min(v, dk[k - nx] + 1); if (i) v = Math.min(v, dk[k - nx - 1] + 1); if (i < nx - 1) v = Math.min(v, dk[k - nx + 1] + 1); } dk[k] = v; }
+  for (let j = nz; j--;) for (let i = nx; i--;) { const k = j * nx + i; let v = dk[k]; if (i < nx - 1) v = Math.min(v, dk[k + 1] + 1); if (j < nz - 1) { v = Math.min(v, dk[k + nx] + 1); if (i < nx - 1) v = Math.min(v, dk[k + nx + 1] + 1); if (i) v = Math.min(v, dk[k + nx - 1] + 1); } dk[k] = v; }
   return X;
 }
 /* the main roads' grid, again if a road is added or one is not the same */
@@ -7033,21 +7038,21 @@ function rixNet(N, T) {
   RIX.w.set(N, X);
   return X;
 }
-/* the nearest segment of grid X to x z, in RIX.q (d, g; g -1 none), ring by ring of squares round the point's: every segment whose nearest
-   point lies beyond ring k is k * c m away or more. False when x z is off the grid (or not a number), or the nearest is not settled within
-   RIX.k rings (a point far from every road): the caller reads every segment, as before */
+/* the nearest segment of grid X to x z, in RIX.q (d, g; g -1 none), ring by ring of squares round the point's from the first that can
+   hold a segment (dk): every segment whose nearest point lies beyond ring k is k * c m away or more. False when x z is off the grid (or not
+   a number): the caller reads every segment, as before */
 function rixNear(X, x, z, net) {
   const c = RIX.c, cx = Math.floor((x - X.x0) / c), cz = Math.floor((z - X.z0) / c), nx = X.nx, nz = X.nz;
   if (!(cx >= 0 && cx < nx && cz >= 0 && cz < nz)) return false;
-  const Q = RIX.q, K = Math.min(RIX.k, Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz)), all = K === Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz), scan = net ? rixScanN : rixScan; Q.d = 1e9; Q.g = -1;
-  for (let k = 0; k <= K; k++) {
+  const Q = RIX.q, K = Math.max(cx, nx - 1 - cx, cz, nz - 1 - cz), scan = net ? rixScanN : rixScan; Q.d = 1e9; Q.g = -1;
+  for (let k = X.dk[cz * nx + cx]; k <= K; k++) {
     for (let j = Math.max(0, cz - k), jb = Math.min(nz - 1, cz + k); j <= jb; j++) {
       if (j === cz - k || j === cz + k) { for (let i = Math.max(0, cx - k), ib = Math.min(nx - 1, cx + k); i <= ib; i++) scan(X, j * nx + i, x, z); }
       else { if (cx - k >= 0) scan(X, j * nx + cx - k, x, z); if (k && cx + k < nx) scan(X, j * nx + cx + k, x, z); }
     }
-    if (Q.g >= 0 && Q.d < k * c - 1e-3) return true;
+    if (Q.g >= 0 && Q.d < k * c - 1e-3) break;
   }
-  return all;   // every square read: settled; else the caller reads every segment
+  return true;
 }
 /* the segments of square k against the nearest so far (RIX.q: d, g): the arithmetic of railOf's loop, the lower g on a tie */
 function rixScan(X, k, x, z) {

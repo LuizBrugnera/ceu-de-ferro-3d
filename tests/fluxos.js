@@ -23,7 +23,10 @@
      refused). Here: a connection that does not open in Net.wait s is dropped and the hangar is told, so it offers the retry.
    - Every load and every match printed "BufferGeometry.toNonIndexed(): BufferGeometry is already non-indexed" twice (the broadleaf crowns and
      the clouds are polyhedra, which have no index). Here: one helper copies a geometry without its index, and nothing calls toNonIndexed on
-     its own. */
+     its own.
+   - "Onde entrar" (the picker at the start of a match on the ground): a point or a radio picked read "Entrar pela base de suprimento undefined",
+     and the picker closed on its own (10 s) while the player was still choosing, leaving him at the main base. Here: the label names a base,
+     a point or a radio, and the first choice stops the clock. */
 const H = require('./harness'), fs = require('fs'), path = require('path'), vm = require('vm'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8');
 
@@ -114,6 +117,16 @@ console.log('-- no toNonIndexed on a geometry that has no index (a warning in th
   if (i > 0) vm.runInContext(html.slice(i, html.indexOf('\n', i)) + ';globalThis.unIndexed = unIndexed;', U);
   const mk = idx => ({ index: idx, toNonIndexed() { return 'flat'; }, clone() { return 'copy'; } });
   ok(calls === 1 && i > 0 && U.unIndexed(mk({})) === 'flat' && U.unIndexed(mk(null)) === 'copy', 'toNonIndexed only through unIndexed, and only for a geometry with an index (else a copy)');
+}
+
+console.log('-- "Onde entrar": the button names the place, and choosing stops the clock --');
+{
+  const i = html.indexOf('const entryLabel = o =>'), j = html.indexOf('\n', i), k = html.indexOf('swapTouch = (f => () => { if (sw.on && sw.entry)'), l = html.indexOf('\n', k), E = vm.createContext({ sw: { on: true, entry: 12345 }, touched: 0 });
+  if (i > 0 && k > 0) vm.runInContext(html.slice(i, j) + ';globalThis.entryLabel = entryLabel; let swapTouch = () => { touched++; };' + html.slice(k, l) + ';globalThis.st = swapTouch;', E);
+  const L = E.entryLabel || (() => '');
+  ok(L({ id: 0 }) === 'Ficar na base principal' && L({ id: 7, n: 1 }) === 'Entrar pela base de suprimento 1' && L({ id: 3, tag: 'C' }) === 'Entrar pelo ponto C' && L({ id: 'r1', tag: 'R' }) === 'Entrar pelo rádio' && !/undefined/.test(L({ id: 3, tag: 'C' })), 'the label: the main base, a supply base, a point, a radio (never "undefined")');
+  if (E.st) E.st();
+  ok(E.sw.entry === Infinity && E.touched === 1, 'the first choice in the open picker stops its clock (it waits for Enter or Esc)');
 }
 
 console.log('-- a connection that never opens is dropped, and the hangar can try again --');

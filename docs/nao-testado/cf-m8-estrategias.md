@@ -1,9 +1,15 @@
 # M8 Estratégias do general: o que mudou e o que não foi testado
 
 Tarefa `cf-m8-estrategias`. É a camada de estratégia do general, acima dos procedimentos do M3. As 22 estratégias vêm do pedido do capitão (`cf-estrategias.md`).
-Pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado em partida**. Só rodaram duas checagens:
-- o script principal compila (`node --check`);
-- o servidor sobe em 127.0.0.1 e a página abre no Chrome sem erro de JavaScript (`STG` carregado com as 22).
+
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1), duas partidas: sala Hoje de 3 lados (anfitrião, 116 s) e Assistir em 1944 (9 min):
+  - No diário, por rota: "Estratégia na rota 4 (defesa): Contra-ataque no flanco — 3 inimigo(s) conhecido(s) avançados além da nossa linha (nota 1,7; também avaliadas: defesa móvel 1, …)". Os três lados escolheram.
+  - Efeitos no diário: "Ataque em profundidade: caminhão junto a M · Esconderijo — missão de fogo e foco aéreo" e, sem arma no alcance, "… foco aéreo (fogo: Nenhum morteiro ou bateria alcança esse ponto)".
+  - `S.cmd[0].stg`: uma estratégia por frente (`fr`: prof, prof, prof, cflk, cflk) e a geral `ecof` em `act`. `genState(0).stg` traz as frentes com nome, nota e razão.
+  - `anaReport(ANA.ev, 0).stg`, os dados da seção "Estratégias do general" do AAR, vem preenchido.
+  - Nenhum erro no console.
+- **Continua sem teste:** se as escolhas fazem sentido ao longo de uma partida inteira (trocas, estratégias que nunca aparecem); a cópia da doutrina na troca de cadeira; o custo do `stgSit`; o AAR desenhado (`aarShow`) e o `get_state` pelo MCP; o A/B com `STG.on = 0`; o `tests/m8.js` sugerido abaixo. As suítes estão na lista do RESULTADO-B.
 
 ## O que mudou (`Céu de Ferro 3D.html`, bloco `M8`/`STG`, logo antes da cena 3D)
 
@@ -43,15 +49,6 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 - **Pesos das manobras**: valem para o lado inteiro, não só para a rota onde a estratégia foi escolhida.
 - **Exploração do sucesso**: não manda a reserva direto pela brecha. Ela pesa a reserva móvel, o flanqueio, a infiltração e o p5, e encurta a pausa entre assaltos.
 - **Convidado na rede**: o painel do convidado não mostra as estratégias. O `stg` não está no `GENK`. Elas aparecem no diário do anfitrião, que já é repassado.
-
-## O que NÃO foi testado (tudo)
-
-- Nenhuma partida: não se sabe se as escolhas fazem sentido, se trocam demais ou de menos, nem se alguma estratégia nunca aparece.
-- Os embrulhos (`cmdSense`, `cmdFires`, `campAI`, `cmdPosts`, `perMix`, `cmdDefend`, `genState`, `anaReport`, `aarShow`) e a mexida no `prTaste` e no degrau do `AFP`.
-- A cópia da doutrina (`stgDoc`) com a troca de cadeira (`genCtl` volta o `C.doc` para o da personalidade e o M8 reaplica no plano seguinte).
-- O custo por quadro do `stgSit` (filtra `C.known`, `S.squads`, `S.units` a cada 30 s por lado).
-- O AAR com a seção nova, o `get_state` com `stg` pelo MCP.
-- Nenhuma suíte (`tests/*`), nenhum A/B, nenhuma partida IA × IA.
 
 ## Riscos
 

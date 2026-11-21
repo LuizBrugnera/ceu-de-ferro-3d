@@ -5939,14 +5939,15 @@ const BRDH = 2.2;   // a bridge's deck above the ground (bridges keep their old 
 /* the scene's ribbon of a road edge E, half width hw (buildWorld: one mesh a class holds all its edges): NC vertices across every ~12 m (so no
    straight segment spans a bump), the two edges 1.15 x as wide and sunk into the ground (a blended shoulder, no gap seen from the side), the
    three inner ones ROADH above it. Appended to pos (x y z) and idx (triangles), whose indices count from the vertices pos already holds (the
-   edges before it in the mesh; counted from 0 every edge but the first drew nothing of its own) */
-function roadRibbon(E, hw, pos, idx) {
+   edges before it in the mesh; counted from 0 every edge but the first drew nothing of its own); rd, if given, takes each vertex's m across
+   the road and along it, for the scene's look of the road (envRoadHook) */
+function roadRibbon(E, hw, pos, idx, rd) {
   const NC = 5, r = E.p, n = Math.max(1, Math.round(r.len / 12)), st = r.len / n, b = pos.length / 3;
   for (let i = 0; i <= n; i++) {
     const p = routeAt(r, i * st);
     for (let j = 0; j < NC; j++) {
       const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
-      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z);
+      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z); if (rd) rd.push(o, i * st);
     }
     if (i < n) { const k = b + i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
   }
@@ -37930,10 +37931,12 @@ function buildWorld() {
   let rtri = 0;
   for (let c = 0; c < RN.w.length; c++) {
     const es = roadsOf(T).filter(e => e.c === c); if (!es.length) continue;
-    const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], hw = RN.w[c];
-    for (const E of es) roadRibbon(E, hw, pos, idx);
+    const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], rd = [], hw = RN.w[c];
+    for (const E of es) roadRibbon(E, hw, pos, idx, rd);
     rtri += idx.length / 3;
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); scene.add(new THREE.Mesh(g, rm));
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx);
+    g.setAttribute('rd', new THREE.BufferAttribute(new Float32Array(rd), 2));   // m across the road and along its edge, for its look (envApply)
+    const me = new THREE.Mesh(g, rm); me.userData.road = c; scene.add(me);
   }
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
   /* airfields, turned toward the middle of the map */
@@ -39468,15 +39471,17 @@ function cityScene() {
     });
     ch.c = ch[0].mesh.geometry.boundingSphere;
   });
-  {   // the streets between the blocks: paved strips on the ground, one mesh
-    const pos = [], idx = [], w = CITY.plan.street * .36;
-    for (const l of T.lanes) for (let k = 0; k < l.length; k++) {
+  {   // the streets between the blocks: paved strips on the ground, one mesh; marked a street (road -1, half width hw) for its look (envApply)
+    const pos = [], idx = [], rd = [], w = CITY.plan.street * .36;
+    for (const l of T.lanes) for (let k = 0, s = 0; k < l.length; k++) {
       const a = l[Math.max(0, k - 1)], e = l[Math.min(l.length - 1, k + 1)], d = Math.hypot(e.x - a.x, e.z - a.z) || 1, nx = -(e.z - a.z) / d * w, nz = (e.x - a.x) / d * w, n = pos.length / 3;
-      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz);
+      if (k) s += Math.hypot(l[k].x - l[k - 1].x, l[k].z - l[k - 1].z);
+      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz); rd.push(w, s, -w, s);
       if (k) idx.push(n - 2, n - 1, n, n - 1, n + 1, n);
     }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx);
-    scene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PAL[S.era].road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); g.setAttribute('rd', new THREE.BufferAttribute(new Float32Array(rd), 2));
+    const me = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PAL[S.era].road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    me.userData.road = -1; me.userData.hw = w; scene.add(me);
   }
   for (let g = 0; g < T.bn; g++) if (S.cbs[g]) cityRedo(g);
   cityFlush();
@@ -44773,14 +44778,13 @@ function sky3Init() {
   const lit = [];
   scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.geometry.type === 'PlaneGeometry') lit.push(o.material); });
   if (wo) for (const k of ['trees', 'houses', 'roofs']) if (wo[k]) lit.push(wo[k].material);
-  for (const m of lit) {
-    m.onBeforeCompile = sh => {
-      Object.assign(sh.uniforms, K.u);
-      sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
-      sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
-    };
-    m.needsUpdate = true;
-  }
+  for (const m of lit) { m.onBeforeCompile = sky3Ill; m.needsUpdate = true; }
+}
+/* a flare's light on a lit material (its emissive part), from the 4 lights sky3Init keeps in SKY3.u; the roads take it too (envApply) */
+function sky3Ill(sh) {
+  Object.assign(sh.uniforms, SKY3.u);
+  sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+  sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
 }
 const skyMix = (out, a, b, k) => out.copy(a).lerp(b, clamp(k, 0, 1));
 function skyScene() {
@@ -44932,6 +44936,25 @@ function envTex() {
   ENV.nrm = tex(s, N);
   return (ENV.tex = tex(d, N));
 }
+/* the ground under the water: the terrain mesh's heights as drawn (a fallen bridge's sunk crossing too), one texel a grid point, read
+   point by point (nearest) so the water shader lays its own triangles over them; made again when the mesh's heights change (envBedSync) */
+function envBedTex() {
+  const p = ENV.terrain.geometry.attributes.position, n = Math.round(Math.sqrt(p.count)), d = new Float32Array(n * n * 4);
+  for (let k = 0; k < n * n; k++) d[k * 4] = p.getY(k);
+  if (ENV.bed) ENV.bed.dispose();
+  const t = new THREE.DataTexture(d, n, n, THREE.RGBAFormat, THREE.FloatType);
+  t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+  ENV.bedV = p.version;
+  return (ENV.bed = t);
+}
+function envBedSync() {
+  if (!ENV.water || !ENV.wu || !ENV.terrain) return;
+  const p = ENV.terrain.geometry.attributes.position;
+  if (p.version === ENV.bedV) return;
+  const d = ENV.bed.image.data;
+  for (let k = 0; k < p.count; k++) d[k * 4] = p.getY(k);
+  ENV.bed.needsUpdate = true; ENV.bedV = p.version;
+}
 /* a cloud's puff: soft round edges broken by noise */
 function envPuff() {
   if (ENV.puff) return ENV.puff;
@@ -44952,7 +44975,7 @@ function envTerrainHook(sh) {
   Object.assign(sh.uniforms, ENV.tu);
   sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
-  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
   sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
 	vec2 eG = vec2( 0.0 );
@@ -44975,6 +44998,8 @@ function envTerrainHook(sh) {
 	eB = mix( eB, uSand * ( 0.86 + 0.24 * mix( 0.5, d1.b, eFine ) ), eSand );
 	float eSnow = smoothstep( 0.42, 0.58, vEnvS.y + ( d2.r - 0.5 ) * 0.6 - eRock * 0.35 );
 	eB = mix( eB, uSnow * ( 0.93 + 0.08 * d1.r ), eSnow );
+	float eWet = 1.0 - smoothstep( 0.0, 1.2 + 1.4 * d2.r, vEnvW.y - uWL );
+	eB *= mix( vec3( 1.0 ), vec3( 0.66, 0.66, 0.64 ), eWet ) * mix( vec3( 1.0 ), vec3( 0.5, 0.64, 0.66 ), smoothstep( 0.0, 3.5, uWL - vEnvW.y ) );
 	float eDet = mix( 0.5, mix( d1.r, d1.g, eRock ), eFine );
 	vec4 n1 = texture2D( tEnvN, eUv * ( 1.0 / 23.0 ) ) * 2.0 - 1.0;
 	eG = mix( n1.rg, n1.ba, eRock ) * eFine;
@@ -44988,6 +45013,30 @@ function envTerrainHook(sh) {
 	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
 #endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif');
 }
+/* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
+   the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
+   uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
+   off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
+function envRoadHook(sh, u) {
+  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u });
+  if (SKY3.u) sky3Ill(sh);
+  sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+	{
+		vec2 rp = vRdW.xz;
+		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
+		float u = abs( vRd.x ) / uRd.x, far = smoothstep( 70.0, 180.0, vRdD );
+		vec3 rc = diffuseColor.rgb * ( 0.86 + 0.26 * mix( n1.r, 0.5, far ) ) * ( 0.94 + 0.12 * smoothstep( 0.3, 0.8, n2.a ) );
+		rc = mix( vec3( dot( rc, vec3( 0.3, 0.59, 0.11 ) ) ), rc, uSat ) * uTone;
+		float rut = uRd.y * smoothstep( 0.42, 0.12, abs( abs( vRd.x ) - 0.95 + ( n2.r - 0.5 ) * 0.3 ) ) * ( 0.6 + 0.4 * n1.g );
+		rc *= 1.0 - 0.25 * rut;
+		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
+		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
+		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
+		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 );
+	}`);
+}
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
 const ENV_SKY_V = 'varying vec3 vDir;\nvoid main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }';
 const ENV_SKY_F = `uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uDisk; varying vec3 vDir;
@@ -44998,19 +45047,43 @@ void main() {
 	c += uSunC * uDisk * ( smoothstep( 0.99955, 0.99978, mu ) * 2.5 + pow( mu, 700.0 ) * 0.5 );
 	gl_FragColor = vec4( c, 1.0 );
 }`;
-/* the water: two layers of ripples that drift, the sky in it at a grazing look (Fresnel), the sun's glint */
+/* the water: two layers of ripples that drift (the second turned, and both stronger and calmer in wide patches, so their tiling does not
+   show), the sky in it at a grazing look (Fresnel), the sun's glint; rain roughens it. How deep it is (the ground under it, read from tH,
+   the terrain mesh's heights, in the mesh's own two triangles a cell, so it meets the bank where the drawn ground does): in the shallows
+   it is clearer and lighter (the bed shows through) and along the bank a broken line of foam laps, faded out where it would be thinner
+   than a pixel or two (cf-pol-graficos 2) */
 const ENV_WATER_V = 'varying vec3 vW;\n#include <fog_pars_vertex>\nvoid main() { vW = ( modelMatrix * vec4( position, 1.0 ) ).xyz; vec4 mvPosition = viewMatrix * vec4( vW, 1.0 ); gl_Position = projectionMatrix * mvPosition;\n#include <fog_vertex>\n}';
-const ENV_WATER_F = `uniform sampler2D tEnv; uniform vec3 uDeep; uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uT; uniform float uLit; varying vec3 vW;
+const ENV_WATER_F = `uniform sampler2D tEnv; uniform sampler2D tH; uniform vec4 uHG; uniform float uHN; uniform vec3 uDeep; uniform vec3 uShal; uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uT; uniform float uLit; uniform float uRain; varying vec3 vW;
 #include <fog_pars_fragment>
+float envSl;
+float envH( float i, float j, float e ) { return texture2D( tH, vec2( ( i + 0.5 ) * e, ( j + 0.5 ) * e ) ).r; }
+float envBed( vec2 p ) {
+	float gx = clamp( ( p.x - uHG.x ) * uHG.z, 0.0, uHN - 0.001 ), gz = clamp( ( p.y - uHG.y ) * uHG.w, 0.0, uHN - 0.001 ), i = floor( gx ), j = floor( gz ), u = gx - i, v = gz - j, e = 1.0 / ( uHN + 1.0 );
+	float h00 = envH( i, j, e ), h10 = envH( i + 1.0, j, e ), h01 = envH( i, j + 1.0, e ), h11 = envH( i + 1.0, j + 1.0, e );
+	float lo = u + v <= 1.0 ? 1.0 : 0.0, sx = ( lo > 0.5 ? h10 - h00 : h11 - h01 ) * uHG.z, sz = ( lo > 0.5 ? h01 - h00 : h11 - h10 ) * uHG.w;
+	envSl = sqrt( sx * sx + sz * sz );
+	return lo > 0.5 ? h00 + ( h10 - h00 ) * u + ( h01 - h00 ) * v : h11 + ( h01 - h11 ) * ( 1.0 - u ) + ( h10 - h11 ) * ( 1.0 - v );
+}
 void main() {
-	vec2 p = vW.xz;
-	vec4 a = texture2D( tEnv, p / 97.0 + vec2( uT * 0.011, uT * 0.007 ) ), b = texture2D( tEnv, p / 41.0 - vec2( uT * 0.006, uT * 0.013 ) );
-	vec3 n = normalize( vec3( ( a.r - 0.5 ) + ( b.b - 0.5 ), 2.6, ( a.b - 0.5 ) + ( b.r - 0.5 ) ) );
+	vec2 p = vW.xz, q = mat2( 0.8, -0.6, 0.6, 0.8 ) * p;
+	vec4 g = texture2D( tEnv, p / 431.0 + vec2( 0.13, 0.29 ) );
+	vec4 a = texture2D( tEnv, p / 97.0 + vec2( uT * 0.011, uT * 0.007 ) ), b = texture2D( tEnv, q / 41.0 - vec2( uT * 0.006, uT * 0.013 ) );
+	float k = ( 0.55 + 0.9 * g.a ) * ( 1.0 + uRain * 0.8 );
+	vec2 w = vec2( ( a.r - 0.5 ) + ( b.b - 0.5 ), ( a.b - 0.5 ) + ( b.r - 0.5 ) ) * k;
+	if ( uRain > 0.01 ) { vec4 d = texture2D( tEnv, q / 5.3 + vec2( uT * 0.29, - uT * 0.23 ) ); w += ( d.rb - 0.5 ) * uRain * 1.2; }
+	vec3 n = normalize( vec3( w.x, 2.6, w.y ) );
 	vec3 v = normalize( cameraPosition - vW ), r = reflect( - v, n );
 	float fr = 0.03 + 0.97 * pow( 1.0 - max( dot( n, v ), 0.0 ), 5.0 );
 	vec3 sky = mix( uHor, uZen, clamp( r.y * 1.8, 0.0, 1.0 ) );
-	vec3 c = mix( uDeep * uLit, sky, fr ) + uSunC * pow( max( dot( r, uSun.xyz ), 0.0 ), 260.0 ) * 2.2 * uSun.w;
-	gl_FragColor = vec4( c, 0.93 );
+	float dep = vW.y - envBed( p ), sh = smoothstep( 0.0, 5.0, dep ), bw = min( 0.8, 5.0 * max( envSl, 0.004 ) ), px = fwidth( dep ) / bw;
+	vec3 c = mix( mix( uShal, uDeep, sh ) * uLit, sky, fr ) + uSunC * pow( max( dot( r, uSun.xyz ), 0.0 ), 260.0 ) * 2.2 * uSun.w;
+	float al = mix( mix( 0.5, 0.93, sh ), 1.0, fr * 0.6 );
+	vec4 f = texture2D( tEnv, q / 9.0 + vec2( uT * 0.021, uT * 0.017 ) ), f2 = texture2D( tEnv, p / 3.1 - vec2( uT * 0.033, uT * 0.011 ) );
+	float lap = 0.5 + 0.5 * sin( uT * 1.1 + dot( p, vec2( 0.045, 0.07 ) ) + f.a * 5.0 ), fz = dep / bw + ( f.r - 0.5 ) * 0.5;
+	float foam = max( 1.0 - smoothstep( 0.05, 0.35 + 0.65 * lap, fz ), smoothstep( 0.3, 0.0, abs( fz - 1.0 - 0.6 * lap ) ) * 0.55 );
+	foam *= smoothstep( 0.42, 0.62, f.g * 0.55 + f2.r * 0.45 ) * ( 1.0 - smoothstep( 0.2, 0.6, px ) );
+	c = mix( c, mix( uHor, vec3( 0.93, 0.95, 0.96 ), 0.65 ) * uLit, foam * 0.85 );
+	gl_FragColor = vec4( c, max( al, foam * 0.85 ) );
 	#include <fog_fragment>
 }`;
 /* the clouds: puffs that always face the camera, in one draw; lit on top, shaded below, faded out when the camera flies into them */
@@ -45029,7 +45102,7 @@ function envApply() {
   ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
   ENVU.fp.x = 1 / L.H; ENVU.fp.y = T.WL; ENVU.fp.z = L.k; ENVU.fp.w = 1;
   const tex = envTex(); tex.anisotropy = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate = true;
-  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone } };
+  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL } };
   const clouds = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
@@ -45050,6 +45123,16 @@ function envApply() {
     m.onBeforeCompile = envTerrainHook; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv;
     ENV.terrain.material.dispose(); ENV.terrain.material = m;
   }
+  /* the roads and the towns' streets: lit, worn, rutted (envRoadHook) instead of flat and darkened by hand at night; one program for all, each class its uniforms */
+  ENV.roads = [];
+  scene.traverse(o => { if (o.isMesh && o.userData.road !== undefined && o.material.isMeshBasicMaterial) ENV.roads.push(o); });
+  for (const o of ENV.roads) {
+    const c = o.userData.road, b = o.material, st = c < 0, paved = st || (S.modern && c < 2);   // c -1: a town's street (cityScene)
+    const u = { value: new THREE.Vector4(st ? o.userData.hw : RN.w[c], st ? 0 : c >= 2 ? 1 : S.modern ? 0 : .5, S.modern && !c ? 1 : 0, paved ? .2 : .55) };
+    const m = new THREE.MeshLambertMaterial({ color: b.color.clone().multiplyScalar(paved ? .8 : 1), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: b.polygonOffsetFactor, polygonOffsetUnits: b.polygonOffsetUnits });
+    m.onBeforeCompile = sh => envRoadHook(sh, u); m.customProgramCacheKey = () => 'env-road';
+    o.geometry.computeVertexNormals(); b.dispose(); o.material = m; o.receiveShadow = !!Q.shadow;
+  }
   /* the sky dome: the same mesh, its own shader; skyScene() still sets material.color (night, weather), which tints the zenith */
   const tint = new THREE.Color(1, 1, 1);
   ENV.su = { uZen: { value: new THREE.Color(E.sky[0]) }, uHor: { value: new THREE.Color(E.sky[1]) }, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uDisk: { value: 1 } };
@@ -45057,10 +45140,12 @@ function envApply() {
     const m = new THREE.ShaderMaterial({ uniforms: ENV.su, vertexShader: ENV_SKY_V, fragmentShader: ENV_SKY_F, side: THREE.BackSide, depthWrite: false, fog: false });
     m.color = tint; skyDome.material.dispose(); skyDome.material = m; skyDome.renderOrder = -1; skyDome.frustumCulled = false; ENV.sky = skyDome;
   }
-  if (ENV.water && Q.water) {
+  if (ENV.water && Q.water && ENV.terrain) {
     const u = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), { fogSun: { value: ENVU.sun }, fogSunC: { value: ENVU.sunC }, fogP: { value: ENVU.fp },
-      tEnv: { value: tex }, uDeep: { value: envCol(P.water).multiplyScalar(.62) }, uZen: ENV.su.uZen, uHor: ENV.su.uHor, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uT: { value: 0 }, uLit: { value: 1 } });
-    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: ENV_WATER_V, fragmentShader: ENV_WATER_F, transparent: true, fog: true });
+      tEnv: { value: tex }, tH: { value: envBedTex() }, uHG: { value: new THREE.Vector4(T.x0, T.z0, 1 / T.cx, 1 / T.cz) }, uHN: { value: T.N },
+      uDeep: { value: envCol(P.water).multiplyScalar(.62) }, uShal: { value: envCol(P.water).lerp(envCol(L.sand), .3).multiplyScalar(.8) },
+      uZen: ENV.su.uZen, uHor: ENV.su.uHor, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uT: { value: 0 }, uLit: { value: 1 }, uRain: { value: 0 } });
+    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: ENV_WATER_V, fragmentShader: ENV_WATER_F, transparent: true, fog: true, extensions: { derivatives: true } });
     ENV.water.material.dispose(); ENV.water.material = m; ENV.wu = u;
   } else ENV.water = null;
   /* the clouds: the 46 blobs in one mesh, or puffs in clusters where the blobs were (and as many again for an overcast sky) */
@@ -45134,7 +45219,7 @@ skyScene = (g => () => {
       u.uOp.value = .78 + .2 * wet; u.uFar.value = scene.fog ? Math.max(6000, scene.fog.far * 1.4) : 20000;
     } else { m.color.setScalar(.25 + .75 * Lr); m.opacity = .7 + .25 * W.r; }
   }
-  if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; }
+  if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; ENV.wu.uRain.value = clamp(W.r, 0, 1); envBedSync(); }
   if (ENV.sh) {   // the shadow's box follows the camera, snapped to its texels so the edges do not crawl
     const cp = camera.position, r = GFXQ[GFX.lv].shadow, st = r * 2 / 2048, x = Math.round(cp.x / st) * st, z = Math.round(cp.z / st) * st, y = hgt(cp.x, cp.z);
     ENV.sh.target.position.set(x, y, z); ENV.sh.target.updateMatrixWorld(); ENV.sh.position.set(x + v.x * 3000, y + v.y * 3000, z + v.z * 3000);
@@ -45253,7 +45338,7 @@ function br3Init() {
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
     if (!K.ter && o.geometry.attributes.position.count === n && o.material && o.material.vertexColors) K.ter = o;
-    else if (o.material && o.material.isMeshBasicMaterial && o.material.polygonOffset && o.material.side === THREE.DoubleSide && o.geometry.index) K.roads.push(o);
+    else if (o.userData.road !== undefined) K.roads.push(o);   // buildWorld marks its road meshes (their material is lit since cf-pol-graficos 2)
   });
   if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
   K.g = new THREE.Group(); scene.add(K.g);
@@ -45271,7 +45356,7 @@ function br3Sink() {
   for (const r of K.roads) {
     const p = r.geometry.attributes.position, y0 = r.y0 || (r.y0 = new Map()); let n = 0;
     for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); if (inL.some(f => f(x, z))) { if (!y0.has(i)) y0.set(i, p.getY(i)); const h = hgt(x, z), y = h <= T.WL + .3 ? T.WL - 3 : inD.some(f => f(x, z)) ? h + BRDH : y0.get(i); if (Math.abs(p.getY(i) - y) > .01) { p.setY(i, y); n++; } } }
-    if (n) p.needsUpdate = true;
+    if (n) { p.needsUpdate = true; r.geometry.computeVertexNormals(); }   // the roads are lit: their slopes changed
   }
 }
 function br3Build() {

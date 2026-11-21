@@ -5,5 +5,5 @@ Testado (cf-pol-testes-a, `tests/sides3.js`, partida de 3 lados com economia e l
 ## O que falta
 
 - Com 2 lados, as suítes `eco`, `eco-prod`, `eco-war`, `logistics`, `rec`, `radio`, `comms`, `aid`, `seat`, `sappers`, `general`, `gen-cmd` e as de rede `eco-online`, `eco-war-online`, `logistics-online`, `rec-online`, `gen-online` (não rodaram: a máquina estava dividida, um processo pesado por vez; `logistics-relay`, `rec-relay`, `comms-relay` e `resume-relay` passaram).
-- Numa sandbox de 3 lados: um caminhão do lado 0 tomado por um soldado do lado 2 entrega as caixas ao lado 2 (`lgGrab`); um comboio do lado 0 destruído pelo lado 1 só no diário do lado 1 (`lgLost`); um transmissor do lado 1 ouvido só pela rede do lado 2 sobe `S.cn.st[2].df`.
+- Testado na rodada 5 (`tests/sides3.js`): um comboio dos EUA destruído pela Rússia sai como perdido no diário dos EUA, destruído no da Rússia e nada no dos Insurgentes (`lgLost`); a carga de um caminhão dos EUA tomada por um insurgente é dos Insurgentes ('Tomamos 40 caixas…'), nada no diário da Rússia (`lgGrab`). Falta: um transmissor do lado 1 ouvido só pela rede do lado 2 sobe `S.cn.st[2].df`.
 - Partida de 20 a 30 min com economia: cada general manda comboios só pelas próprias estradas e o diário de logística de cada lado só fala do que ele viu ou fez.

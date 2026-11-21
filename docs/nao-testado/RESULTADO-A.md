@@ -6,7 +6,16 @@ Como foi testado: exercícios sem tela no harness (`tests/harness.js`), as suít
 
 Legenda: **passou** (o que o documento listava rodou e deu certo; o documento saiu), **em parte** (parte rodou; o documento ficou só com o resto), **falhou** (algo rodou e deu errado; consertado ou documentado).
 
-## Lote 2: cf-consertos-61 a cf-economia-ligada (PR #175)
+## Resumo
+
+- **49 documentos**: 3 passaram inteiros e saíram (`cf-3l-p0-fundacao`, `cf-era-padrao`, `cf-folego`); os outros 46 rodaram em parte e ficaram só com o que falta, cada um dizendo por quê e como testar.
+- **Defeitos achados e consertados**, cada um com um teste que falha antes e passa depois: estradas que não eram desenhadas em 3D (`road-mesh`); a análise de partidas online que perdia lotes, o fim e o resumo (`ana-online`); veículos da IA do mesmo lado se destruindo ao sair da base (`vcol`); .50 de veículo que não atravessava parede (`walls-pen`); tiro que nunca acertava míssil (`mint`); carro-bomba da IA parado (`bomba-ia`); sacos de areia do procedimento de fogo a distância (`fogo-distante`); o B-2 tirado da linha pelo procedimento do radar (`bomber-run`); com 3 lados, o caminhão estacionado, a antiaérea e o rádio requisitados, as equipes dispersas, a base de suprimento e os helicópteros fora das estradas do lado, a Visão de General do lado 2 e o general MCP dos Insurgentes sem mapa (`sides3`, `sides3-online`, `mcp-sides3`); `tools/balance.js --lados 3`.
+- **Testes que voltaram a valer**: `dfp`, `gen-relay`, `sappers-relay`, `forts-relay`, `civ-war`, `seat`, `sappers` (cenários e limites desatualizados pelas mudanças de depois).
+- **Achados documentados, não consertados** (seções do cérebro e do general, que outra frente reescreve, ou escolhas de balanço): os homens longe da obra ordenada numa vila (`cf-construir-general`); a engenharia parada esperando energia e metal; a granada da IA que cai longe; o texto comum `far` sobrescrito pela defesa por posições; o `k` dos eventos do cérebro na origem; o carro-bomba que o general insurgente nunca manda (a produção não o faz); dois tanques que morrem num choque de frente; a janela da câmera da bomba sobre o HUD do avião.
+- **PRs**: #175 (os cinco lotes), #187 (rodadas 2 e 3), #198 (rodada 4), #205 (rodada 5).
+- **Suítes que já falhavam no `main`** e continuam iguais: `drills` (12), `forts` (posições da IA nas trincheiras e o modo de obras diante do corredor e dos muros), `bases` (3), `inf-drills` (4), `brain-lider` (1), `sim-split` (nomes da cena em seções do cérebro), `mcp-live` (6–7) e `mcp-general` (o texto `far`).
+
+## Lote 2: cf-consertos-61 a cf-economia-ligada (PR #175, com os lotes 1, 3, 4 e 5)
 
 | Documento | Resultado | Evidência | Conserto e teste |
 |---|---|---|---|
@@ -98,3 +107,5 @@ Suítes que já falham no `main` (iguais com e sem estes lotes): `sim-split` (`r
 | cf-3l-p8-civis | regressão consertada (teste) | `civ-war` falhava em 7 pontos (igual no `main`): a vila da cena de evacuação ficou maior (310 m de raio) que o ouvido do tiro (220 m) e o atirador, posto a 60 m do meio do terreno, só assustava 1 de 14 civis | o atirador a 60 m do meio das pessoas: a vila evacua, vai ao refúgio e volta (`tests/civ-war.js`: 7 falhas → nenhuma) |
 | cf-3l-p3-percepcao | regressões consertadas (testes) | `seat` comparava o mapa 4 em JSON exato e um arredondamento de 10⁻¹² m nas casas o quebrava; `sappers` esperava os kits de sapador por último, e depois deles vieram os dos Insurgentes e os médicos (os números antigos não mudaram) | `seat` compara ao milímetro; `sappers` confere os números antigos e que só kits novos vêm depois (2 + 2 falhas → nenhuma) |
 | cf-3l-p5-servidor | **falhou**, consertado (rodada 4) | a ponte MCP dos Insurgentes numa sala de 3 lados nunca recebia o mapa: o `state` deles tinha 23 KB (blocos `icv` e `grl`) e o servidor só repassa `gres` até 16 KB | `genAnswer` tira os blocos que a ponte não lê até caber; `tests/mcp-sides3.js`: antes sem mapa nem tíquetes (2 falhas), depois passa; `tests/sides3.js` confere o tamanho do `state` dos 3 lados (13–14 KB) |
+| cf-3l-p7-guerrilha | em parte (rodada 5) | 246 s de 3 lados: o IED sai aos 229 s, quando o hábito do inimigo se forma (antes não há estrada vista); homens-bomba no começo | achado: o carro-bomba nunca sai (`vbied` recusado com `res` a cada 30 s, a produção não o faz), anotado para a frente do general |
+| cf-3l-p6c-logistica | em parte (rodada 5) | comboio destruído e carga tomada creditam só o lado que fez (`lgLost`, `lgGrab`), com 3 lados | checagens novas em `tests/sides3.js` |

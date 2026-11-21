@@ -70,3 +70,20 @@ Achado e não consertado (seção CEREBRO, outra frente): a defesa por posiçõe
 | cf-casas-paredes | **falhou**, consertado | a .50 dos veículos (M2 do tanque, Kord, NSVT, DShK, a quádrupla do M16) não atravessava reboco nem tijolo | `bPow` com o mínimo pelo calibre (`CITY.pen.cal`); `tests/walls-pen.js`: 5 falhas antes, passa depois |
 | cf-cerebro-soldado | em parte | a dobra do terreno corta o dano a 0,35; granada na trincheira cai no fundo; morteiro a 5 m empurra 1,79 m e atordoa 2,86 s; granada da IA de 8–10 m cai a 5,6–6,9 m do alvo e uma atravessou a casa pela janela (não consertado: CEREBRO) | — |
 | cf-colisao-veiculos | **falhou**, consertado | 6 veículos da IA destruídos pelo próprio lado no primeiro minuto (colunas saindo da base batendo de frente a 15–51 m/s) | `vcolPair`: dois veículos da IA do mesmo lado só se empurram; `tests/vcol.js`: 5 falhas antes, passa depois; dois tanques de frente a toda velocidade ainda morrem os dois (documentado) |
+
+## Lote 5: cf-granada-casas a cf-lideres-p3
+
+| Documento | Resultado | Evidência | Conserto e teste |
+|---|---|---|---|
+| cf-granada-casas | em parte | granadas abrem reboco em 3, tijolo em 4, pedra em 6, celeiro em 1; 3 kg derrubam a laje; morteiro, RPG, minas, IED e carga de parede como descrito. Balanço: num cômodo fechado a 2ª e a 3ª granada quase não fazem nada (quebrado o vidro, o cômodo deixa de contar como fechado) | — |
+| cf-guerrilha-mais | em parte | 60 s de 3 lados: 5 táticas ativas com motivo, 3 ações no diário, sem erro; um texto diz "em a usina" (seção do general, não mexido) | — |
+| cf-inf-fogo-longe | **falhou**, consertado | o muro de sacos de areia do procedimento nunca saía: `DRILL.inf.far.bags` não existia, o lugar dava NaN e a obra era recusada | `bags: 3`; `tests/fogo-distante.js`: falhava, passa |
+| cf-infantaria-veiculos | em parte | a medição de carona funciona; nenhuma carona terminou em 60 s; `icv.js` e `embarque.js` não couberam | — |
+| cf-insurg-antiaerea | em parte | os veículos novos montam, o rodízio passa pelos 8 tipos, uma picape ZU-23 deu 78 tiros num Mi-28 | — |
+| cf-insurgente-civis | em parte | a simpatia por vila é calculada e a memória sobe com mortes pelos regulares; recrutar sem soldado nosso é recusado (`rcr0`) | — |
+| cf-insurgentes-conteudo | **falhou**, consertado | o carro-bomba da IA parado na estrada com alvo a menos de 900 m nunca saía: no trilho o volante não responde | a IA da bomba tira o carro do trilho; `tests/bomba-ia.js`: falhava, passa (anda 600 m e destrói um T-72) |
+| cf-intercepta-missil | **falhou**, consertado | nenhum tiro acertava um míssil: o teste comparava o tiro depois do passo com o míssil antes (~2 m de diferença para 1 m de raio) | `stepShots` usa o míssil no fim do passo; `tests/mint.js`: 5 falhas antes, passa (a .50 derruba com 8 tiros, 30 mm com 2) |
+| cf-lideres-p0 | em parte | nada novo rodou (a checagem online está escrita, não rodada); a nota do `pel-forma` que sobrescrevia o tipo do evento da análise | consertado na entrada da análise (lote 1) |
+| cf-lideres-p3 | em parte | morto o líder, um cabo assume em 2 s e a esquadra segue a missão (215–220 m em 60 s contra 223 m sem a perda) | — |
+
+Suítes que já falham no `main` (iguais com e sem estes lotes): `sim-split` (`rtsS`/`rtsBrain` nomeados em seções CEREBRO), `inf-drills` (4 checagens), `brain-lider` ("the unit card"), `mcp-general` (o texto `far`, ver o lote 1).

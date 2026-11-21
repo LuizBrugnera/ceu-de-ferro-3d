@@ -39439,6 +39439,15 @@ function sideLadder(me) {
   for (const a of S.units) eat(a); for (const a of S.men) eat(a); for (const a of S.planes) eat(a);
   ladMemo = { t: S.t, me, m }; return m;
 }
+/* enemy contacts drawn closer than r px to each other share one label, in their side's colour col (cf-pol-testes-b: at ×1 zoom a column of
+   tanks on the fire-control map was a smear of overlapping "CC" and class names). k the short label, rg the rung, cl the class, age s since seen */
+function tagAdd(L, r, x, y, k, rg, cl, age, col) {
+  let b = L.find(o => o.col === col && Math.abs(o.x - x) < r && Math.abs(o.y - y) < r);
+  if (!b) L.push(b = { x, y, col, n: 0, k: {}, rg: 0, cl: '', age: Infinity });
+  b.n++; b.k[k] = (b.k[k] || 0) + 1; if (rg > b.rg) { b.rg = rg; b.cl = cl; } if (age < b.age) b.age = age;
+}
+/* a cluster's label: the classes as the side knows them, the most numerous first (CC ×3 · ?) */
+const tagText = b => Object.keys(b.k).sort((p, q) => b.k[q] - b.k[p]).map(k => (b.k[k] > 1 ? k + ' ×' + b.k[k] : k)).join(' · ');
 /* fire-control map: the ground in range from above, north up, centred on the gun and, zoomed in, on the aim point. Friends, what they
    have spotted (fading as contact is lost), the aim point with the spread of the fall, the rounds on the way with their time to go, and
    the firing data. mapMpp: metres per pixel, which the sim takes as S.mpp so that the mouse moves the aim point with the pointer */
@@ -39467,25 +39476,33 @@ function fpMap(P, u, ink, acc, disp, blink) {
   for (const b of S.sup) { const x = X(b.x), y = Y(b.z), col = b.team !== me ? foeCol(b.team) : FRIEND; if (!b.dead && (b.team === me || spotted(b, me)) && on(x, y)) { mark(x, y, 5, col, false); tagTxt(b.prog < 1 ? 'OBRA' : 'SUPRIMENTO', x + 8, y - 6, 10 * u, col, 'left', 2); } }
   for (const b of S.eco ? S.eco.l : []) { const x = X(b.x), y = Y(b.z), col = b.team !== me ? foeCol(b.team) : FRIEND; if (!b.dead && (b.team === me || spotted(b, me)) && on(x, y)) { mark(x, y, 5, col, false); tagTxt((b.prog < 1 ? 'OBRA' : { pow: 'USINA', mine: 'MINA', fab: 'FÁBRICA' }[b.k]) + (b.team !== me && (S.eco.d[me] || {}).tg === b.id ? ' · ALVO' : ''), x + 8, y - 6, 10 * u, col, 'left', 2); } }
   cueMarks(X, Y, me, u, true);
-  if (ma) for (const g of S.men) { const x = X(g.x), y = Y(g.z); if (!g.dead && g !== P && on(x, y) && (g.team === me || spotted(g, me))) mark(x, y, 2.5, g.team !== me ? FOE : FRIEND, g.team !== me); }
-  const lad = sideLadder(me);
+  if (ma) for (const g of S.men) { const x = X(g.x), y = Y(g.z); if (!g.dead && g !== P && on(x, y) && (g.team === me || spotted(g, me))) mark(x, y, 2.5, g.team !== me ? foeCol(g.team) : FRIEND, g.team !== me); }
+  const lad = sideLadder(me), tags = [];
   for (const g of S.units) {
     const foe = g.team !== me;
     if (g === P || (foe && !spotted(g, me))) continue;
     const gx = foe ? sX(g, me) : g.x, gz = foe ? sZ(g, me) : g.z, x = X(gx === undefined ? g.x : gx), y = Y(gz === undefined ? g.z : gz);
     if (!on(x, y)) continue;
     const age = foe ? S.t - sT(g, me) : 0;
-    hx.globalAlpha = foe ? clamp(1.15 - age / SPOT.keep, .2, 1) : 1; mark(x, y, g.kind === 'truck' ? 3.5 : isAA(P, g) ? 6.5 : 5, isAA(P, g) ? AAC : foe ? FOE : FRIEND, foe);
+    hx.globalAlpha = foe ? clamp(1.15 - age / SPOT.keep, .2, 1) : 1; mark(x, y, g.kind === 'truck' ? 3.5 : isAA(P, g) ? 6.5 : 5, isAA(P, g) ? AAC : foe ? foeCol(g.team) : FRIEND, foe);
     if (foe) {   // the enemy at the rung the side's own perception has reached for it (the aircraft's ladder): ? detected, the class recognized, the class named when identified; and how long ago it was made out
       const rg = lad.get(g) || (!P.dead && sees(P, g) ? 3 : 1), cl = belCls(g);
-      txt(rg < 2 ? '?' : CLSG[cl] || '?', x, y + 15 * u, 9 * u, FOE, 'center');
-      if (rg > 2) txt(W13.cls[cl] || '', x + 9, y - 6, 10 * u, FOE);
-      if (age > 4) txt(Math.round(age) + ' s', x, y - 10 * u, 9 * u, FOE, 'center');
+      tagAdd(tags, 22 * u, x, y, rg < 2 ? '?' : CLSG[cl] || '?', rg, cl, age, foeCol(g.team));
     }
-    if (g.pid) txt(g.name, x, y - 18, 11 * u, foe ? FOE : FRIEND, 'center');
+    if (g.pid) txt(g.name, x, y - 18, 11 * u, foe ? foeCol(g.team) : FRIEND, 'center');
     hx.globalAlpha = 1;
   }
-  for (const q of S.planes) { const x = X(q.x), y = Y(q.z); if (!q.dead && on(x, y)) { tri(x, y, Math.atan2(q.f.z, q.f.x), 6, 'rgba(8,12,13,.85)'); tri(x, y, Math.atan2(q.f.z, q.f.x), 4.5, q.team !== me ? FOE : FRIEND); } }
+  for (const b of tags) {   // one label a cluster; the class named when the whole cluster is one identified class
+    hx.globalAlpha = clamp(1.15 - b.age / SPOT.keep, .2, 1);
+    txt(tagText(b), b.x, b.y + 15 * u, 9 * u, b.col, 'center');
+    if (b.rg > 2 && Object.keys(b.k).length === 1) txt(W13.cls[b.cl] || '', b.x + 9, b.y - 6, 10 * u, b.col);
+    if (b.age > 4) txt(Math.round(b.age) + ' s', b.x, b.y - 10 * u, 9 * u, b.col, 'center');
+  }
+  hx.globalAlpha = 1;
+  for (const q of S.planes) {   // an enemy aircraft only as the side has seen it, fading like the ground contacts (as on the battle map)
+    const foe = q.team !== me, x = X(q.x), y = Y(q.z); if (q.dead || !on(x, y) || (foe && !spotted(q, me))) continue;
+    hx.globalAlpha = foe ? clamp(1.15 - (S.t - sT(q, me)) / SPOT.keep, .2, 1) : 1; tri(x, y, Math.atan2(q.f.z, q.f.x), 6, 'rgba(8,12,13,.85)'); tri(x, y, Math.atan2(q.f.z, q.f.x), 4.5, foe ? foeCol(q.team) : FRIEND); hx.globalAlpha = 1;
+  }
   for (const m of S.missiles) if (m.target === P && blink) mark(X(m.x), Y(m.z), 5, '#ffd24a', true);
   for (const f of S.falls) { const x = X(f.x), y = Y(f.z), r = Math.max(6, w.r / mpp); hx.globalAlpha = clamp(f.life / HOW.mark * 1.5, 0, 1); hx.strokeStyle = '#fff3c8'; hx.lineWidth = 2; hx.beginPath(); hx.arc(x, y, r, 0, TAU); for (const [i, j] of CORN) { hx.moveTo(x + i * r * .3, y + j * r * .3); hx.lineTo(x + i * r * 1.5, y + j * r * 1.5); } hx.stroke(); hx.globalAlpha = 1; }
   const el = Math.max(22, ok ? sol.b / mpp + 8 : 0), lx = ax - Math.cos(br) * el, ly = ay - Math.sin(br) * el;
@@ -46872,17 +46889,19 @@ function bmDraw() {
     hx.globalAlpha = foe ? clamp(1.15 - (S.t - sT(g, me)) / keep, .2, 1) : 1; mark(x, y, g.pid ? 3.2 : 2.2, foe ? foeCol(g.team) : FRIEND, foe); hx.globalAlpha = 1;
     if (g.pid) txt(g.name, x, y - 14, 10 * u, foe ? foeCol(g.team) : FRIEND, 'center');
   }
-  const lad = sideLadder(me);
+  const lad = sideLadder(me), tags = [];
   for (const g of S.units) {
     if (g.dead || g === P) continue;
     const foe = g.team !== me; if (foe && !spotted(g, me)) continue;
     const [x, y] = at(g, foe); if (!on(x, y)) continue;
     const age = foe ? S.t - sT(g, me) : 0, col = isAA(P, g) ? AAC : foe ? foeCol(g.team) : FRIEND;
     hx.globalAlpha = foe ? clamp(1.15 - age / keep, .2, 1) : 1; mark(x, y, g.kind === 'truck' ? 3.5 : isAA(P, g) ? 6.5 : 5, col, foe);
-    if (foe) { const rg = lad.get(g) || (!P.dead && sees(P, g) ? 3 : 1), cl = belCls(g); txt(rg < 2 ? '?' : CLSG[cl] || '?', x, y + 8, 9 * u, col, 'center'); if (age > 4) txt(Math.round(age) + ' s', x, y - 10 - 9 * u, 9 * u, col, 'center'); }
+    if (foe) { const rg = lad.get(g) || (!P.dead && sees(P, g) ? 3 : 1), cl = belCls(g); tagAdd(tags, 20 * u, x, y, rg < 2 ? '?' : CLSG[cl] || '?', rg, cl, age, col); }
     if (g.pid) txt(g.name, x, y - 18, 11 * u, foe ? foeCol(g.team) : FRIEND, 'center');
     hx.globalAlpha = 1;
   }
+  for (const b of tags) { hx.globalAlpha = clamp(1.15 - b.age / keep, .2, 1); txt(tagText(b), b.x, b.y + 8, 9 * u, b.col, 'center'); if (b.age > 4) txt(Math.round(b.age) + ' s', b.x, b.y - 10 - 9 * u, 9 * u, b.col, 'center'); }
+  hx.globalAlpha = 1;
   for (const q of S.planes) {
     if (q.dead || q === P) continue;
     const foe = q.team !== me; if (foe && !spotted(q, me)) continue;

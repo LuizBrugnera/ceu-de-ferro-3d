@@ -1,5 +1,8 @@
 # cf-pol-armas: o som dos veículos de terra (testado por suíte e no navegador, não de ouvido)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/som.js`: passa (52 ok). O que falta é de ouvido (o timbre e o volume dos motores) e não dá para julgar num navegador sem tela nem som; não coube antes do prazo da tarefa.
+
 ## O que mudou
 
 Antes, o tanque, o carro e o caminhão soavam como um único dente-de-serra de 36 a 100 Hz, que subia reto com a velocidade. Agora (`sndVeh`, tabela `SND.veh`):

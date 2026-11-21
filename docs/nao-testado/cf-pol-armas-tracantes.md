@@ -1,5 +1,10 @@
 # cf-pol-armas: traçantes da metralhadora de esquadra (testado por suíte e no navegador)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/tracers.js`: passa (8 ok).
+- Navegador, Assistir de noite (Hoje): aos 33 s havia 58 traçantes no ar ao mesmo tempo, sem erro. Não deu tempo de tirar a captura de longe antes do prazo da tarefa.
+- **Continua sem teste:** a traçante vista de 500 m na tela, o online.
+
 ## O que mudou
 
 Toda bala já desenhava um risco curto. Só as dos veículos e dos aviões (`b.tr` 1 ou 2) tinham a cabeça luminosa da traçante, que se vê de longe; as da infantaria tinham `tr` 0. Agora a metralhadora de esquadra (MG 42, BAR, M249, PKP e qualquer arma com `lmg`) põe uma traçante a cada 4 balas (`TRC.lmg`), como uma fita de 4 para 1. Vale para o jogador e para a IA. O fuzil e a pistola continuam sem.

@@ -37547,6 +37547,19 @@ syncScene = (g0 => dt => {
     U.wx = u.x; U.wz = u.z; if (Math.abs(d) < WSPIN.jump) U.spin.value += d / GS * (U.spinK || 1);
   }
 })(syncScene);
+/* the search radars that turn (cf-pol-modelos): the Pantsir's and the NASAMS's, on their posts (g.userData.radar, AAB), round and round
+   at RADAR.spin rad/s from a start of their own, while the vehicle lives and its search radar (radarS) is not destroyed; a wreck's stands */
+const RADAR = { spin: 2.6 };
+syncScene = (g0 => dt => {
+  g0(dt);
+  for (const u of S.units) {
+    const r = u.m && u.m.userData.radar; if (!r) continue;
+    if (!Number.isFinite(r.userData.a)) r.userData.a = (u.x * .37 + u.z * .61) % TAU;   // a start of its own, from where it was first seen (u.id is the model's name)
+    const i = u.def && u.def.parts && u.def.parts.ix ? u.def.parts.ix.radarS : undefined, ok = !u.dead && u.hp > 0 && (i === undefined || !u.parts || !u.parts[i] || pst(u, i) < 3);
+    if (ok) r.userData.a += (dt || 0) * RADAR.spin;
+    r.rotation.y = r.userData.a;
+  }
+})(syncScene);
 /* ---------- the vehicles' contact shadows (cf-pol-modelos): a soft dark patch under each vehicle and wreck on the ground, as long and as wide
    as it (d.env) a little past, turned to its heading and laid on the slope under it, so that what drives is seen on the ground and not
    over it; and a small one under each soldier and civilian within CSHAD.men m (long when he lies or is down). One instanced mesh for
@@ -37605,6 +37618,8 @@ function vkit() {
     /* a disc facing +z, or -z with s < 0 (a hub's face) */
     dz: (to, pid, col, r, seg, x, y, z, s) => { const g = new THREE.CircleGeometry(r, seg); if (s < 0) g.rotateY(Math.PI); return K.put(to, pid, col, g, x, y, z); },
     /* a disc facing +x (the mouth of a tube) */
+    /* a node on `to`, x along, that a search radar's pieces go on, to turn it (RADAR); kept as K.rd */
+    radar: (to, x) => { const r = new THREE.Group(); r.position.x = x; to.add(r); return (K.rd = r); },
     dx: (to, pid, col, r, seg, x, y, z) => { const g = new THREE.CircleGeometry(r, seg); g.rotateY(Math.PI / 2); return K.put(to, pid, col, g, x, y, z); },
     /* a prism: its side drawn in x, y (pts), d wide across z, centred */
     pr: (to, pid, col, pts, d, x, y, z) => { const s = new THREE.Shape(); pts.forEach((p, i) => (i ? s.lineTo(p[0], p[1]) : s.moveTo(p[0], p[1]))); s.closePath(); const g = new THREE.ExtrudeGeometry(s, { depth: d, bevelEnabled: false }); g.translate(0, 0, -d / 2); return K.put(to, pid, col, g, x, y, z); },
@@ -37834,7 +37849,8 @@ const AAB = {
   pantsir(K, g, tur, gun, c) {
     AAB.truck(K, g, c);
     K.box(tur, 'hull', c.P, 2.8, .75, 2.2, 0, .2, 0).cy(tur, 'hull', c.dk, 1.1, 1.1, .2, 12, 0, -.25, 0);
-    K.box(tur, 'sensor', c.P2, .25, 2.1, .25, -.6, 1.6, 0).box(tur, 'sensor', c.P2, .35, .95, 1.9, -.6, 2.6, 0);
+    const rad = K.radar(tur, -.6);   // the search radar turns on its post (RADAR)
+    K.box(rad, 'sensor', c.P2, .25, 2.1, .25, 0, 1.6, 0).box(rad, 'sensor', c.P2, .35, .95, 1.9, 0, 2.6, 0);
     K.box(tur, 'sensor', c.P2, .55, .8, .9, 1.25, 1.0, 0).dx(tur, 'sensor', c.dk, .38, 10, 1.53, 1.0, 0);
     for (const s of LRS) {
       K.box(gun, 'weapon', c.P2, 2.4, .7, .55, .5, .25, s * .9);
@@ -37846,7 +37862,8 @@ const AAB = {
   nasams(K, g, tur, gun, c) {
     AAB.truck(K, g, c);
     K.box(tur, 'hull', c.P, 2.4, .55, 2, 0, .1, 0).cy(tur, 'hull', c.dk, 1, 1, .2, 12, 0, -.25, 0);
-    K.box(tur, 'sensor', c.dk, .2, 2.3, .2, -.5, 1.45, 0).box(tur, 'sensor', c.P2, .3, 1.1, 1.8, -.5, 2.65, 0).box(tur, 'sensor', c.dk, .02, .9, 1.6, -.34, 2.65, 0);
+    const rad = K.radar(tur, -.5);
+    K.box(rad, 'sensor', c.dk, .2, 2.3, .2, 0, 1.45, 0).box(rad, 'sensor', c.P2, .3, 1.1, 1.8, 0, 2.65, 0).box(rad, 'sensor', c.dk, .02, .9, 1.6, .16, 2.65, 0);
     K.box(tur, 'sensor', c.dk, .3, .3, .3, -.6, 1.6, .5);
     for (const s of LRS) {
       K.box(gun, 'weapon', c.P2, 3.4, .95, .9, .5, .15, s * .78);
@@ -37862,7 +37879,7 @@ buildUnit = (f => (u, wreck) => {
   const c = { P: col[0], P2: col[1], dk: VKC.dk, glass: VKC.glass };
   tur.add(gun); g.add(tur);
   if (d.era === 'modern') { tur.position.set(-1.3, 1.6, 0); gun.position.y = 1; } else { tur.position.y = 2.3; gun.position.y = .6; }
-  AAB[id](K, g, tur, gun, c); K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 }));
+  AAB[id](K, g, tur, gun, c); K.done(pm, wreck, wreck ? null : (g.userData.spin = { value: 0 })); if (K.rd) g.userData.radar = K.rd;
   g.userData.tur = tur; g.userData.gun = gun;
   g.scale.setScalar(GS); g.position.set(u.x, u.y + 1.5, u.z); g.rotation.y = u.h; tur.rotation.y = u.ty; gun.rotation.z = u.tp;
   return g;
@@ -38896,7 +38913,7 @@ function debrisMesh(o) {
   if (o.k === 'tur') { const m = buildUnit(o.u, true), t = m.userData.tur; t.position.set(0, 0, 0); t.rotation.set(0, 0, 0); w.add(t); w.scale.setScalar(GS); kill(m); return w; }
   const m = buildPlane(o.id), D = PLANES[o.id].parts, d = D[D.ix[o.pt]], b = d.box;
   m.traverse(c => { if (c.isMesh) c.visible = false; });
-  for (const me of m.userData.pm[d.vis ? d.vis[0] : o.pt] || []) { me.visible = true; me.material.color.multiplyScalar(TINT[2]); }
+  for (const me of m.userData.pm[d.vis ? d.vis[0] : o.pt] || []) me.traverse(c => { if (c.isMesh) { c.visible = true; c.material.color.multiplyScalar(TINT[2]); } });   // with what it carries: a wing its marking (cf-pol-modelos)
   m.position.set(-b[0], -b[1], -b[2]); if (d.clip) w.scale.setScalar(1 - d.clip + .1); w.add(m); return w;
 }
 /* --- soldiers: one instanced box per limb, posed on a rig that is reused for each of them. MCOL: uniform and helmet by era and side --- */

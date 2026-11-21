@@ -34,3 +34,68 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
   têm explicação ainda, e em 9f2a313 passavam.
 - `tests/man-c.js` cai com TypeError (`c.spec` de um candidato `cut` que não existe).
 - O diário do plano de fortificação diz "Perímetro em a base avançada junto a C" (deveria ser "na base avançada").
+
+### Lote 1, depois do PR #176
+- O ajuste da hora H foi confirmado. Com `PEL.on = 0` no cenário, `procedures` passa inteiro e a hora H do `approaches` passa. Os dois testes
+  foram ajustados (o portão do pelotão fica com `brain-pelotao`). O `approaches` fica com as 4 falhas da reunião, da frente do general.
+- `campaign`: 24 ok e nenhuma falha em 3 das 5 seções. Parei a rodada depois de 82 min para dar lugar ao navegador.
+  `personality`: tudo ok até a partida IA × IA final de 180 s, que não terminou em 90 min nesta máquina.
+
+## Lote 2 (cf-mapa-cidades … cf-obras-sair)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-mapa-cidades | **defeito achado** (consertado em paralelo pelo cf-pol-hud): no mapa do General, o nome da vila do ponto de conquista saía duas vezes. `tests/town-names.js` cobre o conserto. Nomes vistos no General (1920) e no mapa de tiro de 1944. |
+| cf-medico | parte: cartão do Sanitäter no hangar; 56 médicos em 455 soldados da IA; eventos do médico na analytics. O soldado do cartão segura fuzil (o pack não tem pistola). |
+| cf-miras-impl | **2 defeitos achados** (consertados em paralelo pelo cf-pol-hud): a 1ª linha de armas da cabine do jato escondida sob o painel de danos, e distâncias de aviões empilhadas no HUD. `tests/hud-labels.js` cobre os dois. 12 óticas em 1280 e 1920 px sem erro. |
+| cf-modo-rts | ok (parte): câmera, W/D, névoa (276 de 323 escondidos), quadro da esquadra de perto, esconder painéis, 1280 e 1920 px. |
+| cf-moitas-floresta | parte: 88.165 células de mato e 380 faixas no mapa 11; as moitas aparecem na orla. |
+| cf-moitas-mato | achado: as sebes do mapa 7 são 0 no mapa de 3 lados (ids a 65.448 de 65.536); o mato do mapa 10 cobre. |
+| cf-mouse-padrao | ok: o helicóptero e o jato seguem a mira do mouse; `ctrl` padrão `mouse`. Documento encurtado. |
+| cf-movimento-lider | ok (parte): as três técnicas em uso (desloc, vig, lances), 268 abrigos em contato. |
+| cf-movimento-organico | ok (parte): cunha e fila, lagartas a 9 m da estrada, soldados a 22 m do eixo (mediana). |
+| cf-obras-sair | ok (parte): `posts` passa inteiro; sacos de areia, ninho e ouriços com cor certa na partida. Achado: grama dentro do buraco da trincheira. |
+
+### Lote 2, depois do PR #179
+- `brain-medico` (nunca tinha rodado), 6 sementes: **1 falha**. O médico da esquadra trata em 9–10 s e a cruz vermelha segura o fogo,
+  mas o médico de outra esquadra não vem quando ouve "Médico!" (0/6). É do cérebro (`CEREBRO: medico`), por isso só anotei.
+
+## Lote 3 (cf-p2-posicao … cf-pol-modelos-antiaerea)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-p2-posicao | ok, menos o custo: `tps` 25 ok, falha só a meta de 0,15 ms. **No navegador, `tpsStat()` dá 2,46 ms por consulta (máx 99 ms)** em 3 min de partida: 16× a meta, mesmo descontando a máquina cheia. |
+| cf-p4-prisioneiros | ok (parte): `brain-prisioneiros` passa inteiro. |
+| cf-p5-falas | ok (parte): `brain-falas` (SECS=60) passa inteiro. |
+| cf-p6-medicao | parte: os eventos do cérebro chegam à analytics numa partida e `R.brain` vem preenchido; `brain-drills` em andamento (granadas: 100% escapam, meta ≥ 70%). |
+| cf-p7-honestidade | **falha** (1 checagem estática): a seção `CEREBRO: defesa` (DFP) lê `S.units` fora da percepção (`dfpTkGo`). As checagens dinâmicas passam. |
+| cf-p8-pelotao | ok (parte): `brain-pelotao` passa inteiro; o risco 2 (suítes antigas da hora H) se confirmou e foi resolvido no lote 2. |
+| cf-pack-aparece | ok (parte): 29 modelos carregados, 6/6 tanques com o pack, Abrams e Tiger do pack no hangar pelos botões, `?pack=0` volta ao de antes. |
+| cf-pack-modelos | ok (parte): `PACK.M` inteiro; custo com e sem o pack igual dentro do ruído desta máquina. |
+| cf-pol-hud | ok (parte): Visão de General dos Insurgentes (tecla 3) sem erro e com a tabela de forças por inimigo; HUD do F-22 sem rótulos encavalados. |
+| cf-pol-modelos-antiaerea | ok (parte): Wirbelwind e M16 no hangar; torres do NASAMS e do Pantsir girando numa partida; o Pantsir de perto. |
+
+### Achados para a frente do cérebro e do general (não consertados aqui)
+- O socorro de outra esquadra ao ouvir "Médico!" não acontece (`brain-medico` (b), 0/6).
+- `CEREBRO: defesa` (`dfpTkGo`) quebra a checagem de honestidade do P7.
+- O serviço de posição (P2) custa 2,46 ms por consulta no navegador (meta 0,15 ms).
+
+### Lote 3, depois do PR #182
+- `brain-drills`: **2 falhas**, as duas "um ferido, socorrido": o caído é contado, mas socorrido 0. Combina com o `brain-medico` (b).
+  As granadas (100%), a sucessão do líder (2,3 s) e o contato passam. `brain`: 7 ok, 1 falha de custo (o relógio do cérebro custa 0,51 ms por
+  passo com 36 esquadras, limite 0,1 ms; a máquina estava cheia).
+
+## Lote 4 (cf-pol-modelos-arma-1p … cf-popk-medidor)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-pol-modelos-arma-1p | **conserto**: o pente de 5 balas solto do modelo do Kar98 flutuava ao lado do fuzil (Schütze, Sniper), e a luneta do Sniper de 1944 ficava 7 cm acima e 3,4 cm ao lado. `tests/pack-cut.js`. |
+| cf-pol-modelos-artilharia | ok (parte): os modelos no hangar e na partida; torre girada sem cruzar a cabine; a salva do Grad com 34 foguetes no ar. |
+| cf-pol-modelos-avioes | parte: hélice em disco e insígnias no hangar de 1944. |
+| cf-pol-modelos-cores-pack | ok (parte): `pack-colors` passa; o Sherman com lagartas em aço escuro. |
+| cf-pol-modelos-esteiras | parte: as rodas de rodagem giram numa partida. |
+| cf-pol-modelos-moitas | parte: o mato rasteiro novo visto de perto numa partida. |
+| cf-pol-modelos-rodas | ok (parte): 12 de 12 veículos andando giram as rodas pela distância. |
+| cf-pontes-construir | parte: um pontão num trecho do rio, pronto, tracejado no mapa e na cena. |
+| cf-pontes-qualquer-lugar | ok (parte): a ponte nova pronta, contínua no mapa, com lajes, pilares e parapeitos na cena. |
+| cf-popk-medidor | ok (parte): em sobrecarga, o teto desce 10% a cada 10 s com os números no diário. |

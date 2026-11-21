@@ -1,5 +1,9 @@
 # Cérebro P5: falas e balões (não testado)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `SECS=60 tests/brain-falas.js`: passou inteiro (os 3 critérios do P5).
+- **Continua sem teste:** os balões vistos numa partida de verdade, o online (o convidado vendo a chamada antiga), o custo (`flOuvir`, `flSq`) e o som.
+
 Tarefa `cf-p5-falas`, pacote P5 da pesquisa `cf-cerebro-pesquisa` (arquitetura do "cérebro" dos soldados). Pedido do capitão: soldados que dão a sensação de pensar, com líderes que comandam. Este pacote é a voz: o que cada soldado fala sai da mesma decisão que ele tomou, e a fala é também um canal de informação para quem a ouve.
 
 ## O que mudou (tudo em `Céu de Ferro 3D.html`, no fim da parte de simulação, antes de `3D scene`)

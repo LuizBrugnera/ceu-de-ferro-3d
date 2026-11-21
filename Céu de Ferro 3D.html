@@ -41971,7 +41971,9 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    gap s apart and at most q waiting to be heard. far: m past which a shot is not heard; launch, boom: the same for a rocket's or missile's
    whoosh (which was as loud across the map as beside the ear) and a burst. crack: the round of a foe passing within r m of the soldier's
    head snaps, at most one every gap s. hand: the soldier's own hands, [after s, dur s, vol, f Hz, Q] noises through a band: a magazine
-   out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. deaf: a burst close by (sndDeaf). The master runs through a compressor, so that a battle's
+   out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded, a grenade or a smoke grenade thrown. deaf: a burst
+   close by (sndDeaf). foot: the soldier's own footfalls (sndSteps): one every pi / k m of his walk, louder running (vol), softer by
+   stance (st), not under min m/s nor aboard The master runs through a compressor, so that a battle's
    bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
    falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
    the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
@@ -41985,13 +41987,14 @@ const SND = {
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  foot: { k: 2.3, min: .3, vol: [.035, .055], st: [1, .6, .4], f: 300, grit: 1800 },
   deaf: { r0: 5, near: 1.6, big: 30, min: .35, in: .4, s0: .12, f: [650, 20000], t: 2.2, tone: 3700, vol: .03 },
   near: { veh: { n: 3, r: 450, ref: 30, trk: 120, vol: .7 }, air: { n: 2, r: 3000, ref: 300, vol: .9 }, dop: .6, fac: [.6, 1.6] },
   veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
     sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
   hand: { out: [[0, .035, .07, 2800, 2], [.07, .05, .05, 900, 1.2]], in: [[0, .03, .09, 2400, 2], [.15, .04, .08, 3600, 3]], bolt: [[.38, .04, .07, 2200, 2], [.55, .035, .08, 3000, 2]],
-    dry: [[0, .02, .06, 3800, 4]], swap: [[0, .12, .035, 700, .7], [.1, .025, .05, 2600, 2]], tube: [[0, .08, .06, 600, 1.5], [.25, .05, .07, 1800, 2]] }
+    dry: [[0, .02, .06, 3800, 4]], toss: [[0, .14, .045, 900, .8]], swap: [[0, .12, .035, 700, .7], [.1, .025, .05, 2600, 2]], tube: [[0, .08, .06, 600, 1.5], [.25, .05, .07, 1800, 2]] }
 };
 const A = { ctx: null, on: true, lm: -9, oq: [], ck: -9, beep: 0, h: null };
 function audioInit() {
@@ -42103,7 +42106,18 @@ function sndHands(P) {
   if (same && a.t !== H.t && a.mag > 0 && !w.k && !w.auto && w.rate >= 1.2) clack('bolt');
   if (P.ctl.fire && !H.fire && a.mag <= 0 && !rl && !(a.res > 0)) clack('dry');
   if (P.swT !== H.sw && P.swT > S.t) clack('swap');
-  H.a = a; H.rl = rl; H.fire = !!P.ctl.fire; H.sw = P.swT; H.t = a.t;
+  const nd = (P.nades | 0) + (P.smk | 0); if (H.nd !== undefined && nd < H.nd) clack('toss');   // a grenade or a smoke grenade out of the hand
+  H.a = a; H.rl = rl; H.fire = !!P.ctl.fire; H.sw = P.swT; H.t = a.t; H.nd = nd;
+}
+/* the soldier's own footfalls (SND.foot): one at each step of the view's bob (|sin| of it back at its foot every pi / k m of P.step), a
+   soft thud with a little grit, louder running, softer crouched, a crawl's shuffle prone; none standing still or aboard */
+function sndSteps(P) {
+  const F = SND.foot, n = Math.floor((P.step || 0) * F.k / Math.PI), sp = P.v ? Math.hypot(P.v.x, P.v.z) : 0;
+  if (A.fp !== P) { A.fs = n; A.fp = P; return; }
+  if (n === A.fs) return; A.fs = n;
+  if (sp < F.min || P.in) return;
+  const v = (P.run ? F.vol[1] : F.vol[0]) * F.st[P.st | 0], now = A.ctx.currentTime;
+  burst(.05, v, F.f * (.85 + Math.random() * .3), 'lowpass', now); burst(.03, v * .4, F.grit, 'bandpass', now, 1.5);
 }
 /* a foe's round passing within SND.crack.r m of the soldier's head this frame: its snap, louder the nearer, once a round */
 function sndCrack(P, dt) {
@@ -42201,7 +42215,7 @@ function audioTick(dt) {
   sndNear(live && A.on ? P : null, dt, set, now);
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
-  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
+  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); sndSteps(P); } }
   else if (P.kind) { set(A.prop.g, 0); sndVeh(P, dt, set, now); }
   else if (P.def.prop) { A.prop.o.frequency.setTargetAtTime(52 + th * 38 + k * 26, now, .1); set(A.prop.g, .03 + th * .03); set(A.jet.g, .01 + k * .03); A.jet.bp.frequency.setTargetAtTime(300 + k * 500, now, .1); }
   else { A.jet.bp.frequency.setTargetAtTime(450 + th * 700 + k * 500, now, .1); set(A.jet.g, .05 + th * .08 + (P.ab ? .07 : 0)); set(A.prop.g, 0); }

@@ -1,5 +1,5 @@
 'use strict';
-/* the sound (SND, cf-pol-armas): a burst close by deafens for a moment, the AA gun and the flares heard; the others heard (the nearest vehicles and aircraft, by distance, with the Doppler of a fly-by), a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
+/* the sound (SND, cf-pol-armas): the soldier's footfalls and his grenade thrown; a burst close by deafens for a moment, the AA gun and the flares heard; the others heard (the nearest vehicles and aircraft, by distance, with the Doppler of a fly-by), a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
    AI's (one AI shot 55 ms before took the player's), the launches by distance (one across the map was as loud as one beside the ear), the
    bursts late and dull far away, the compressor on the master, the soldier's hands (reload, bolt, empty click, swap) and the crack of a
    foe's round passing the head. The block lives in the 3D part of the page, which the harness does not load: it runs here on its own over a
@@ -220,5 +220,23 @@ console.log('-- a burst close by deafens; the AA gun and the flares are heard --
   W.ear.x = W.base[0].x; W.ear.y = 2; W.ear.z = W.base[0].z; calls.length = 0; sim.$('blastFx')(W.ear.x + 10, 2, W.ear.z, 20);
   ok(calls.some(c => c[0] === 'boom' && c[1] === 20 && c[3] === 1), 'a burst tells fx.boom it is one (blastFx), a muzzle does not');
   Object.assign(FX, keep);
+}
+console.log('-- the soldier\'s footfalls, and his grenade thrown --');
+{
+  const { $, S, C } = load(), steps = $('sndSteps'), hands = $('sndHands'), F = $('SND').foot;
+  const n = () => C.nodes.filter(x => x.kind === 'src' && !x.loop && x.t0 !== undefined).length;
+  const vol = m => { const g = C.nodes.slice(m).filter(x => x.kind === 'gain' && x.gain.ev[0]).map(x => x.gain.ev[0][1]); return Math.max(...g); };
+  const walk = (P, metres, sp) => { P.v = { x: sp, y: 0, z: 0 }; const k = n(), m = C.nodes.length; for (let d = 0; d < metres; d += .1) { P.step += .1; C.currentTime += .1 / Math.max(sp, .01); steps(P); } return { falls: (n() - k) / 2, top: n() > k ? vol(m) : 0 }; };
+  const P = { man: 1, kind: 'inf', st: 0, run: false, step: 0, v: { x: 0, y: 0, z: 0 } }; steps(P);
+  const w = walk(P, 10, 2.7), want = Math.floor(10 * F.k / Math.PI);
+  ok(Math.abs(w.falls - want) <= 1, '10 m walking: ' + w.falls + ' footfalls (one every ' + (Math.PI / F.k).toFixed(2) + ' m of the bob)');
+  P.run = true; const r = walk(P, 10, 5.6); P.run = false;
+  ok(r.falls >= want - 1 && r.top > w.top, '  running: as many, louder (' + r.top.toFixed(3) + ' against ' + w.top.toFixed(3) + ')');
+  P.st = 2; const pr = walk(P, 6, .6); P.st = 0; ok(pr.falls > 0 && pr.top < w.top, '  prone, crawling: softer');
+  const still = walk(P, 3, 0); ok(still.falls === 0, 'standing still (the step pushed by the world, no speed): none');
+  P.in = {}; const ab = walk(P, 5, 3); P.in = null; ok(ab.falls === 0, 'aboard: none');
+  const Q = { man: 1, kind: 'inf', st: 0, step: 123.4, v: { x: 3, y: 0, z: 0 } }; let k = n(); steps(Q); ok(n() === k, 'a new soldier (another body) starts on his own step: no footfall at once');
+  const H = { man: 1, kind: 'inf', def: {}, x: 0, y: 0, z: 0, st: 0, team: 0, arms: [{ d: SARMS.m4, mag: 30, res: 3, rl: 0, t: -9 }], w: 0, swT: 0, ctl: { fire: false }, nades: 2, smk: 1 };
+  hands(H); k = n(); H.nades = 1; hands(H); ok(n() === k + 1, 'a grenade thrown: the swing of the arm heard'); k = n(); H.smk = 0; hands(H); ok(n() === k + 1, '  a smoke grenade too'); k = n(); hands(H); ok(n() === k, '  and nothing more');
 }
 done();

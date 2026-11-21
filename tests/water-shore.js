@@ -102,7 +102,7 @@ console.log('-- every uniform the shaders read is given --');
   const miss = need.filter(n => !new RegExp('\\b' + n + ':').test(wsrc));
   ok(need.length >= 12 && !miss.length, 'the water: ' + need.length + ' uniforms, all given' + (miss.length ? ' (missing ' + miss.join(', ') + ')' : ''));
   ok(/extensions: \{ derivatives: true \}/.test(wsrc), 'the water asks for derivatives (fwidth, on WebGL 1)');
-  const hk = html.slice(html.indexOf('function envTerrainHook(sh) {'), html.indexOf('/* the sky: the horizon', html.indexOf('function envTerrainHook(sh) {')));
+  const hs = html.indexOf('function envTerrainHook(sh) {'), hk = html.slice(hs, html.indexOf('\n}\n', hs));
   const tu = (apply.match(/ENV\.tu = \{[^\n]*\};/) || [''])[0];
   const tneed = [...hk.matchAll(/uniform \w+ (\w+);/g)].map(m => m[1]);
   const tmiss = tneed.filter(n => !new RegExp('\\b' + n + ':').test(tu));

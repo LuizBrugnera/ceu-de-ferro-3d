@@ -533,7 +533,7 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
   <canvas id="genMap" aria-label="Mapa tático do comandante"></canvas>
   <header class="gen-top">
     <h2>Visão de General</h2>
-    <div class="seg gen-side" id="genSide" role="tablist" aria-label="Lado"><button class="tab" role="tab" type="button" data-gs="0"><b id="genN0"></b></button><button class="tab" role="tab" type="button" data-gs="1"><b id="genN1"></b></button></div>
+    <div class="seg gen-side" id="genSide" role="tablist" aria-label="Lado"><button class="tab" role="tab" type="button" data-gs="0"><b id="genN0"></b></button><button class="tab" role="tab" type="button" data-gs="1"><b id="genN1"></b></button><button class="tab" role="tab" type="button" data-gs="2" hidden><b id="genN2"></b></button></div>
     <span class="gen-clock" id="genClock"></span>
     <span class="gen-warn" id="genWarn" hidden>O jogo continua enquanto o mapa está aberto</span>
     <button class="chip" id="genAll" type="button" aria-pressed="false">Ver tudo (V)</button>
@@ -12042,7 +12042,7 @@ function trnColumn(team, nt, put, men) {
 /* the side planner's hand on all this: the parked vehicles where its soldiers enter, a sniper for each garrison and picket, the patrol
    car of its roads and a ride for a squad that is far from its place */
 function trnPlan(t, sq) {
-  const F = S.fld[t], ds = t ? 1 : -1, fr = frontR(), ri = fr, E = INF[S.era][S.fac[t]], kit = E.findIndex(id => KITS[id].snp);
+  const F = S.fld[t], ri = frontR(t), ds = dsOf(t, ri), E = INF[S.era][S.fac[t]], kit = E.findIndex(id => KITS[id].snp);   // the side's own front road and its way along it (3 sides: the Insurgents' parked trucks were set at the USA's base, on road 0)
   if (!trnOk()) return;
   const men = S.men.length + S.units.reduce((a, u) => a + (u.cargo ? u.cargo.length : 0), 0);
   for (const q of sq) if ((q.job === 'garr' || q.job === 'wood') && !q.snp && kit >= 0) {   // one of its riflemen is a sniper: the squad is no larger for it
@@ -21713,6 +21713,14 @@ function genPostMan(C, P) {
   const m = GEN.man[o.k] || o.k, w = o.k === 'gue' ? 'fustiga o inimigo com equipes pequenas' : o.k === 'dep' ? 'linha de recuo em ' + at : o.k === 'mres' ? 'reserva posta em ' + at : 'em curso' + (at ? ' contra ' + at : '');
   return { k: P.k, s: (P.s + ' Manobra: ' + m + ', ' + w + (l.length > 1 ? ' (+' + (l.length - 1) + ')' : '') + '.').slice(0, 240) };
 }
+/* what the panels of the general's view make of a view model V, with N sides (no DOM, tests/sides3.js): the forces rows [label, ours, the
+   enemy's] for F [[label, key, key2?]], the enemy every other side's tally together (with three sides the view of side 2 read V.f[-1] and
+   stopped); the ticket trend's columns of S.gtk [[column, side]], ours first, then every other side's */
+function genForceRows(V, F) {
+  const n = (s, a, b) => (V.f[s] ? (V.f[s][a] || 0) + (b ? V.f[s][b] || 0 : 0) : 0), fo = V.f.map((f, s) => s).filter(s => s !== V.t);
+  return F.map(([l, a, b]) => [l, n(V.t, a, b), fo.reduce((m, s) => m + n(s, a, b), 0)]).filter(r => r[1] || r[2]);
+}
+const genTrendCols = V => { const N = V.tk ? V.tk.length : 2; return [[1 + V.t, V.t]].concat([...Array(N).keys()].filter(s => s !== V.t).map(s => [1 + s, s])); };
 /* the view model of side t: what its map and panels show, copied out of the match (read only: nothing here writes S, calls the commander's
    own routines or draws a number from the random stream). all: every unit of both sides, else the enemy as t's commander knows it */
 function genVM(t, all) {
@@ -21791,7 +21799,7 @@ function genVM(t, all) {
   const MV = C ? genManV(C) : null;
   return genNet({ t, all, T: S.t, over: !!S.over, res: Q ? Q.res : null, net: !!S.net, host: !S.net || !!S.host, cmd: !!C,
     nm: SIDES().map(i => S.E.sides[S.fac[i]].name), doc: C ? GEN.doc[docK(C)] || '' : '',
-    tk: Q ? Q.tk.slice() : null, tk0: Q ? Q.tk0 : 0, clock: Q ? Q.T : null, held: Q ? [cqHeld(0), cqHeld(1)] : null, lost: Q ? Q.lost : null, trend: S.gtk || [],
+    tk: Q ? Q.tk.slice() : null, tk0: Q ? Q.tk0 : 0, clock: Q ? Q.T : null, held: Q ? SIDES().map(cqHeld) : null, lost: Q ? Q.lost : null, trend: S.gtk || [],
     pts: Q ? Q.p.map(p => ({ x: p.x, z: p.z, r: p.r, L: p.L, name: p.name, hold: p.hold, c: p.c, cap: p.cap, base: p.base, tw: p.tw, w: p.w.slice(), links: p.links }))
       : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: bySide(() => 0), links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
@@ -25728,7 +25736,9 @@ cnVM = (g => t => {
    message ana online (the host), a POST to the server that served the page otherwise. ANALYTICS=0 on the server stops both. */
 const ANA = { on: 1, v: 2, snap: 10, batch: 15, chunk: 7000, max: 30000, win: 120, ptw: 10, top: 5, scan: 1,
   ev: [], q: [], S: null, acc: 0, sT: 0, bT: 0, ms: [0, 0, 0], inf: [0, 0], sink: null, done: null,
-  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'], out: [] };
+  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'], out: [],
+  /* the kinds the server keeps (server.js ANA.kinds, the same list: tests/ana-online.js compares them): it refuses a whole batch with one other kind */
+  kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb']), bad: 0 };
 /* the sides of the match simulated (S.N, 2 when the page has no N yet), and of a match's events (the header's n, 2 for a v 1 match) */
 const anaN = () => (S && S.N > 2 ? S.N : 2), anaSides = n => Array.from({ length: n }, (_, i) => i), anaZ = () => anaSides(anaN()).map(() => 0);
 const anaNev = H => (H && H.n > 2 ? H.n : H && Array.isArray(H.fac) && H.fac.length > 2 ? H.fac.length : 2);
@@ -25745,6 +25755,9 @@ const anaLive = () => ANA.on && S && S.cq && cqSim();
 const anaKind = o => (!o || o.team === undefined ? '' : o.mil ? 'mil' : o.man ? 'inf' : o.kind ? tk(o) : o.heli ? 'heli' : o.role === 'cas' ? 'cas' : o.role === 'strat' ? 'strat' : o.def ? 'fighter' : '');
 const anaR = v => Math.round(v * 10) / 10;
 function anaPush(e) {
+  /* a brain event (cb, with its subkind st) whose data brought a k of its own (pel-forma's platoon kind 'def', a cover's 'veiculo') lost its kind:
+     the server refused every batch with one, an online match's end and summary with them. It goes as the cb it is (the other k kept as kd) */
+  if (!ANA.kinds.has(e.k)) { if (e.st === undefined) { ANA.bad++; return; } e = Object.assign({}, e, { k: 'cb', kd: e.k }); }
   if (ANA.ev.length >= ANA.max && e.k !== 'sn' && e.k !== 'end') return;
   ANA.ev.push(e); ANA.q.push(e);
 }
@@ -25785,7 +25798,10 @@ function anaStep(dt) {
 function anaFlush(last) {
   if (!ANA.sink) { ANA.q = []; return; }
   let part = [], n = 0;
-  for (const e of ANA.q) { const b = JSON.stringify(e).length + 1; if (part.length && n + b > ANA.chunk) { ANA.sink(part, false); part = []; n = 0; } part.push(e); n += b; }
+  for (const e of ANA.q) {
+    if (!ANA.kinds.has(e.k)) { ANA.bad++; continue; }   // one the server does not keep (pushed past anaPush) would cost the whole batch
+    const b = JSON.stringify(e).length + 1; if (part.length && n + b > ANA.chunk) { ANA.sink(part, false); part = []; n = 0; } part.push(e); n += b;
+  }
   ANA.q = [];
   if (part.length || last) ANA.sink(part, !!last);
 }
@@ -40223,7 +40239,7 @@ function cmdUi() {
 }
 function trnUi() {
   LEGEND.trn = (d, o) => trnRows('trn', d, o.pvp, o.swap); { const li = LEGEND.inf; LEGEND.inf = (d, o) => (d.snp ? trnRows('inf', d, o.pvp, o.swap) : li(d, o)); }
-  BRIEF.trn = (d, o) => 'Você entra pela ' + o.side + ' ao lado da base principal, de uma base de suprimento pronta ou num ponto seu sem disputa. Leve o pelotão até a frente: E embarca e desembarca, e ao volante F chama a tropa aliada ou manda descer.';
+  BRIEF.trn = (d, o) => 'Você entra ' + pelaDe(o.side) + ' ao lado da base principal, de uma base de suprimento pronta ou num ponto seu sem disputa. Leve o pelotão até a frente: E embarca e desembarca, e ao volante F chama a tropa aliada ou manda descer.';
   ICON.trn = '<path d="M2 9h11v7H2zM13 11h5l4 3v2h-9zM6 19a2 2 0 1 0 0-.01M17 19a2 2 0 1 0 0-.01"/>';
   CLS.trn = ['Transporte', 'Carro, caminhão e blindado sobre rodas: leva o pelotão até a frente'];
   sel.ww2.trn = 'kubel'; sel.modern.trn = 'hmmwv';
@@ -40791,14 +40807,16 @@ const LEGEND = {
   }
 };
 LEGEND.tank = LEGEND.aa = LEGEND.art = LEGEND.ground;
+/* "pela Rússia", "pelos EUA": the briefing names the side with its article (the plural ones: EUA, Aliados, Insurgentes) */
+const pelaDe = nm => (['EUA', 'Aliados', 'Insurgentes'].includes(nm) ? 'pelos ' : 'pela ') + nm;
 const BRIEF = {
-  plane: (d, o) => (o.pvp ? 'Você decola pela ' + o.side + ' contra outros jogadores e contra a IA do outro lado, que mantém caças, aviões de ataque, tanques e antiaéreas na batalha. Quem escolhe um avião ou veículo do outro lado é inimigo, e cada época é uma sala. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro.'
-    : 'Você decola pela ' + o.side + ' contra a IA do outro lado. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro. Curvas fechadas custam velocidade, e abaixo da velocidade de estol o avião cai.') + ' Cada tiro acerta uma peça do avião (asas, cauda, motor, combustível, piloto), e o conserto é só sobre a sua pista: sobrevoe, baixo e perto, para rearmar e reparar.'
+  plane: (d, o) => (o.pvp ? 'Você decola ' + pelaDe(o.side) + ' contra outros jogadores e contra a IA do outro lado, que mantém caças, aviões de ataque, tanques e antiaéreas na batalha. Quem escolhe um avião ou veículo do outro lado é inimigo, e cada época é uma sala. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro.'
+    : 'Você decola ' + pelaDe(o.side) + ' contra a IA do outro lado. Abatido, você volta quando a contagem do modelo perdido termina, ou antes em outro. Curvas fechadas custam velocidade, e abaixo da velocidade de estol o avião cai.') + ' Cada tiro acerta uma peça do avião (asas, cauda, motor, combustível, piloto), e o conserto é só sobre a sua pista: sobrevoe, baixo e perto, para rearmar e reparar.'
     + (RACKS[o.id] ? ' A carga escolhida na ficha pesa: um avião carregado acelera, sobe e curva pior, e melhora conforme solta o armamento. Trocar de carga no meio do voo só vale ao rearmar sobre a pista.' : ''),
-  inf: (d, o) => 'Você entra a pé pela ' + o.side + ', ao lado da estrada que sai da base principal, junto de uma base de suprimento pronta, num ponto seu sem disputa ou ao lado de um rádio do seu lado. A escolha aparece na tela de troca (H) e na volta depois de morrer, com a distância de cada uma até a linha de frente. A base principal fica a quilômetros do combate, então os pelotões da IA erguem uma base avançada no primeiro minuto, e você pode construir outras com N. Fuzil e metralhadora não fazem nada na blindagem de um tanque: servem contra soldados, caminhões, antiaéreas e a tripulação de canhões abertos. Contra tanque, o lançador pelo flanco ou pela traseira. Casas e mata escondem e protegem, do lado em que estão; deitado, uma explosão fere muito menos. Não fique na frente de um veículo inimigo em movimento. Ao lado de um caminhão aliado, numa base de suprimento ou perto da pista você recebe munição, granadas e curativo; o kit de construção e a carga de demolição, só nas bases. A IA não enxerga através de fumaça.',
-  art: (d, o) => 'Você entra pela ' + o.side + ' na estrada que sai da base principal, a pouco mais de um quilômetro dela, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído). O obuseiro atira por cima dos morros até ' + km(d.arms[0].range) + ' km: abra o mapa de tiro com M, ponha o ponto de pontaria sobre um inimigo avistado e atire com o veículo parado. A granada leva de dez segundos a quase um minuto para chegar, então mire à frente de quem está andando, e ela se espalha mais quanto mais longe cai. O estilhaço destrói caminhões e antiaéreas e fere os tanques; um acerto direto por cima, no teto, é o que os mata. A blindagem é fina' + (d.open ? ' e a tripulação fica a céu aberto' : '') + ': mude de posição depois de algumas salvas, use a fumaça (G) e fique longe dos tanques. Perto da pista ou de uma base de suprimento o veículo é remuniciado e reparado.',
-  ground: (d, o) => (o.pvp ? 'Você entra pela ' + o.side + ' na estrada que sai da base principal, a quilômetros do centro do mapa, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído), com alguns segundos de proteção. A IA ergue uma base avançada logo no começo, e perto dela ou da pista o veículo é remuniciado e reparado. Quem escolhe um veículo ou avião do outro lado é inimigo, e a IA mantém caças, aviões de ataque, tanques e antiaéreas dos dois lados na mesma estrada. Cada tiro acerta uma peça, e com T a tripulação conserta no campo o que dá para consertar. Destruído, você volta quando a contagem do modelo perdido termina, ou antes em outro. O veículo não entra na água nem sobe encosta íngreme.'
-    : 'Você entra pela ' + o.side + ' na estrada que sai da base principal, a pouco mais de um quilômetro dela, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído). A IA do seu lado avança pelas duas estradas e ergue uma base avançada logo no começo. Apoie a tomada dos pontos, destrua os blindados inimigos e cuide dos aviões de ataque. Cada tiro acerta uma peça: lagartas, motor, canhão, torre, munição e tripulação aparecem no painel de danos. Com T a tripulação conserta no campo o que dá para consertar; perto da pista ou de uma base de suprimento o veículo é remuniciado e reparado por inteiro. Destruído, você volta quando a contagem do modelo perdido termina, ou antes em outro. O veículo não entra na água nem sobe encosta íngreme.')
+  inf: (d, o) => 'Você entra a pé ' + pelaDe(o.side) + ', ao lado da estrada que sai da base principal, junto de uma base de suprimento pronta, num ponto seu sem disputa ou ao lado de um rádio do seu lado. A escolha aparece na tela de troca (H) e na volta depois de morrer, com a distância de cada uma até a linha de frente. A base principal fica a quilômetros do combate, então os pelotões da IA erguem uma base avançada no primeiro minuto, e você pode construir outras com N. Fuzil e metralhadora não fazem nada na blindagem de um tanque: servem contra soldados, caminhões, antiaéreas e a tripulação de canhões abertos. Contra tanque, o lançador pelo flanco ou pela traseira. Casas e mata escondem e protegem, do lado em que estão; deitado, uma explosão fere muito menos. Não fique na frente de um veículo inimigo em movimento. Ao lado de um caminhão aliado, numa base de suprimento ou perto da pista você recebe munição, granadas e curativo; o kit de construção e a carga de demolição, só nas bases. A IA não enxerga através de fumaça.',
+  art: (d, o) => 'Você entra ' + pelaDe(o.side) + ' na estrada que sai da base principal, a pouco mais de um quilômetro dela, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído). O obuseiro atira por cima dos morros até ' + km(d.arms[0].range) + ' km: abra o mapa de tiro com M, ponha o ponto de pontaria sobre um inimigo avistado e atire com o veículo parado. A granada leva de dez segundos a quase um minuto para chegar, então mire à frente de quem está andando, e ela se espalha mais quanto mais longe cai. O estilhaço destrói caminhões e antiaéreas e fere os tanques; um acerto direto por cima, no teto, é o que os mata. A blindagem é fina' + (d.open ? ' e a tripulação fica a céu aberto' : '') + ': mude de posição depois de algumas salvas, use a fumaça (G) e fique longe dos tanques. Perto da pista ou de uma base de suprimento o veículo é remuniciado e reparado.',
+  ground: (d, o) => (o.pvp ? 'Você entra ' + pelaDe(o.side) + ' na estrada que sai da base principal, a quilômetros do centro do mapa, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído), com alguns segundos de proteção. A IA ergue uma base avançada logo no começo, e perto dela ou da pista o veículo é remuniciado e reparado. Quem escolhe um veículo ou avião do outro lado é inimigo, e a IA mantém caças, aviões de ataque, tanques e antiaéreas dos dois lados na mesma estrada. Cada tiro acerta uma peça, e com T a tripulação conserta no campo o que dá para consertar. Destruído, você volta quando a contagem do modelo perdido termina, ou antes em outro. O veículo não entra na água nem sobe encosta íngreme.'
+    : 'Você entra ' + pelaDe(o.side) + ' na estrada que sai da base principal, a pouco mais de um quilômetro dela, junto de uma base de suprimento pronta ou num ponto seu sem disputa (escolha com H ou na volta depois de destruído). A IA do seu lado avança pelas duas estradas e ergue uma base avançada logo no começo. Apoie a tomada dos pontos, destrua os blindados inimigos e cuide dos aviões de ataque. Cada tiro acerta uma peça: lagartas, motor, canhão, torre, munição e tripulação aparecem no painel de danos. Com T a tripulação conserta no campo o que dá para consertar; perto da pista ou de uma base de suprimento o veículo é remuniciado e reparado por inteiro. Destruído, você volta quando a contagem do modelo perdido termina, ou antes em outro. O veículo não entra na água nem sobe encosta íngreme.')
 };
 BRIEF.tank = BRIEF.aa = BRIEF.ground;
 const CTRLTXT = [['Manche no teclado: role e puxe', 'Aponte a mira e o instrutor virtual leva o avião até ela'], ['Cíclico no teclado: incline para andar, Shift e Z no coletivo', 'Aponte a mira: o nariz e o canhão vão até ela']];
@@ -40902,7 +40920,7 @@ gLabels = (g0 => (g, V, P) => {
 })(gLabels);
 genPanels = (g0 => V => {
   g0(V);
-  const tb = $('#genForces'), f = V.f || [], a = f[V.t] && f[V.t].vet, b = V.all && f[1 - V.t] ? f[1 - V.t].vet : undefined;
+  const tb = $('#genForces'), f = V.f || [], a = f[V.t] && f[V.t].vet, b = V.all ? f.reduce((m, o, s) => (s !== V.t && o && o.vet !== undefined ? (m || 0) + o.vet : m), undefined) : undefined;
   let tr = tb.querySelector('tr.vet');
   if (!(a || b)) { if (tr) tr.remove(); return; }
   const r = ['Veteranos e elite', String(a || 0), b === undefined ? '—' : String(b)];
@@ -41568,7 +41586,8 @@ function genOpen(v, user) {
 function genBar() {
   if (!S) return;
   const nm = SIDES().map(i => S.E.sides[S.fac[i]].name), net = !!S.net && !S.spec, watch = playMode === 'watch' && !S.net;
-  $('#genN0').textContent = nm[0]; $('#genN1').textContent = nm[1];
+  for (const b of $('#genSide').children) { const i = +b.dataset.gs; b.hidden = i >= nm.length; if (i < nm.length) b.firstChild.textContent = nm[i]; }   // a tab a side (the third with three)
+  const gk = document.querySelector('.gen-keys'); if (gk) gk.textContent = gk.textContent.replace(/1 2( 3)?: lado/, nm.length > 2 ? '1 2 3: lado' : '1 2: lado');
   $('#genSide').hidden = net || !!gorSeat();
   for (const b of $('#genSide').children) b.setAttribute('aria-selected', String(+b.dataset.gs === GV.t));
   $('#genAll').hidden = net; $('#genAll').setAttribute('aria-pressed', String(GV.all));
@@ -41633,6 +41652,7 @@ function genKey(e) {
   else if (c === 'KeyF') genAct('fit');
   else if (c === 'Digit1') genSide(0);
   else if (c === 'Digit2') genSide(1);
+  else if (c === 'Digit3' && SIDES().length > 2) genSide(2);
   else if (c === 'KeyV') genAct('all');
   else if (c === 'KeyI') genAct('inf');
   else if (c === 'KeyL') genAct('lab');
@@ -42058,11 +42078,11 @@ function genPanels(V) {
   const txt = (id, s) => { const e = $(id); if (e.textContent !== s) e.textContent = s; };
   const list = (id, key, rows, build) => { const sg = key + '|' + JSON.stringify(rows); if (GV.sig[id] === sg) return; GV.sig[id] = sg; const ul = $(id); ul.replaceChildren(); rows.forEach((r, i) => ul.appendChild(build(r, i))); };
   const li = s => gE('li', '', s), mmssT = s => mmss(s);
-  txt('#genClock', V.clock !== null ? 'Relógio ' + mmss(V.clock) + ' · Tíquetes ' + Math.round(V.tk[0]) + ' × ' + Math.round(V.tk[1]) + ' · Pontos ' + V.held[0] + ' × ' + V.held[1] : 'Tempo ' + mmss(V.T));
+  txt('#genClock', V.clock !== null ? 'Relógio ' + mmss(V.clock) + ' · Tíquetes ' + V.tk.map(Math.round).join(' × ') + ' · Pontos ' + V.held.join(' × ') : 'Tempo ' + mmss(V.T));   // every side's
   txt('#genPost', V.post.k); txt('#genWhy', V.post.s); txt('#genDoc', V.doc ? 'Doutrina: ' + V.doc : ''); $('#genDoc').hidden = !V.doc;
   list('#genRoads', '', V.road ? V.road.map((r, i) => 'Rota ' + (i + 1) + ' · ' + (GEN.post[r.post] || '') + ' · ' + gN(r.own) + ' contra ' + gN(r.foe)) : [], li);
   const F = [['Infantaria (homens)', 'men'], ['Esquadras', 'sq'], ['Carros de combate', 'arm'], ['Blindados leves', 'mech'], ['Antiaérea', 'aa'], ['Artilharia', 'art'], ['Transporte', 'trk', 'car'], ['Rádio', 'rad'], ['Aviões', 'jet', 'cas'], ['Helicópteros', 'heli']];
-  const fr = F.map(([l, a, b]) => [l, V.f[V.t][a] + (b ? V.f[V.t][b] : 0), V.f[1 - V.t][a] + (b ? V.f[1 - V.t][b] : 0)]).filter(r => r[1] || r[2]);
+  const fr = genForceRows(V, F);   // the enemy: every other side's together
   const fs = JSON.stringify(fr) + V.all;
   if (GV.sig.forces !== fs) {
     GV.sig.forces = fs; const tb = $('#genForces'); tb.replaceChildren();
@@ -42117,7 +42137,7 @@ function genTrend(V) {
   g.clearRect(0, 0, w, h); g.strokeStyle = 'rgba(236,230,214,.18)'; g.lineWidth = 1; g.strokeRect(.5, .5, w - 1, h - 1);
   if (T.length < 2 || !V.tk0) return;
   const t0 = T[0][0], span = Math.max(60, T[T.length - 1][0] - t0);
-  for (const [i, col] of [[1 + V.t, FRIEND], [2 - V.t, FOE]]) { g.beginPath(); T.forEach((p, n) => { const x = (p[0] - t0) / span * (w - 4) + 2, y = h - 2 - clamp(p[i] / V.tk0, 0, 1) * (h - 4); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); }
+  for (const [i, col] of genTrendCols(V).map(([i, s]) => [i, s === V.t ? FRIEND : foeCol(s)])) { g.beginPath(); T.forEach((p, n) => { const x = (p[0] - t0) / span * (w - 4) + 2, y = h - 2 - clamp(p[i] / V.tk0, 0, 1) * (h - 4); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); }
 }
 function genLog(V) {
   const ol = $('#genLog'), L = V.log, last = L.length ? L[L.length - 1] : null, sg = V.t + ':' + L.length + ':' + (last ? last.t + last.s : '');
@@ -43404,7 +43424,7 @@ function HLEGEND(d, o) {
   if (aim) rows.push(o.esc);
   return rows;
 }
-const HBRIEF = (d, o) => 'Você decola pela ' + o.side + ' de um ponto de pouso ao lado da pista' + (o.pvp ? ', contra outros jogadores e a IA do outro lado' : '') + '. O helicóptero paira, sobe e desce na vertical e voa de lado e de ré; sem tecla ele se estabiliza e mantém a altura. Voe baixo: a antiaérea e os mísseis alcançam longe quem aparece por cima do morro. ' + (d.atk ? 'Fique atrás de uma elevação, suba só o bastante para ver o alvo, dispare o míssil guiado ou os foguetes e desça de novo. O canhão do queixo segue a mira sem precisar virar o nariz.' : 'Pouse ao lado de um pelotão aliado da IA e aperte G para embarcá-lo; pouse onde quiser e aperte G para desembarcá-lo, e ele guarda o lugar. As metralhadoras das portas atiram pelos lados.') + ' O rotor não pode encostar em nada: morro, casa, árvore ou outra aeronave. Pouse devagar (o indicador aparece abaixo de 30 m) e em terreno pouco inclinado. Sem motor, baixe o coletivo para o rotor continuar girando e puxe-o de volta perto do chão. Sem rotor de cauda ele gira, a não ser em velocidade. Pousado e parado ao lado da sua pista ele é rearmado e reparado.';
+const HBRIEF = (d, o) => 'Você decola ' + pelaDe(o.side) + ' de um ponto de pouso ao lado da pista' + (o.pvp ? ', contra outros jogadores e a IA do outro lado' : '') + '. O helicóptero paira, sobe e desce na vertical e voa de lado e de ré; sem tecla ele se estabiliza e mantém a altura. Voe baixo: a antiaérea e os mísseis alcançam longe quem aparece por cima do morro. ' + (d.atk ? 'Fique atrás de uma elevação, suba só o bastante para ver o alvo, dispare o míssil guiado ou os foguetes e desça de novo. O canhão do queixo segue a mira sem precisar virar o nariz.' : 'Pouse ao lado de um pelotão aliado da IA e aperte G para embarcá-lo; pouse onde quiser e aperte G para desembarcá-lo, e ele guarda o lugar. As metralhadoras das portas atiram pelos lados.') + ' O rotor não pode encostar em nada: morro, casa, árvore ou outra aeronave. Pouse devagar (o indicador aparece abaixo de 30 m) e em terreno pouco inclinado. Sem motor, baixe o coletivo para o rotor continuar girando e puxe-o de volta perto do chão. Sem rotor de cauda ele gira, a não ser em velocidade. Pousado e parado ao lado da sua pista ele é rearmado e reparado.';
 LEGEND.heli = HLEGEND; BRIEF.heli = HBRIEF;
 /* ---------- drones: the scene, the views, the sound and the hangar data ----------
    DVIEW: sc, how much larger than life a quad is drawn (it is hit inside its def's r, about that size); delta: the drawn length and span,

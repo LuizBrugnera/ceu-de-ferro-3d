@@ -781,13 +781,14 @@ const partidas = () => {
    batches, and the server keeps one file a match, data/matches/<era>/<date>-<id>.ndjson.gz (ANA_DIR another folder): one JSON event a line,
    each batch a gzip member appended. id is a random name the server gives the match (online: the room's match, which a new host carries on;
    by POST: the page's own random key), never a player's id or name. ana { n the room's match, e the events, end 1 the last batch }: from the
-   host only, at most ANA.rate[0] a window of ANA.rate[1] ms, events of the known kinds, ANA.max bytes a match. At the end (an end event) a
+   host only, at most ANA.rate[0] a window of ANA.rate[1] ms, events of the known kinds (every kind the page sends: a batch with one unknown
+   event is refused whole, so a kind the page adds goes here too; cb are the brain's meters), ANA.max bytes a match. At the end (an end event) a
    summary goes beside it, <date>-<id>.json (the header, the end and the review the page sent as rep). ANALYTICS=0: welcome says ana: 0 and
    nothing is written or served. Files older than ANA_DAYS days (default 90) are deleted at start and every six hours.
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
 /* a batch is a list of events, each an object of a known kind with its match time */

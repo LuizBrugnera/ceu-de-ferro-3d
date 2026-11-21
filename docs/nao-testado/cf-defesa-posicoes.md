@@ -18,3 +18,7 @@ Testado (cf-pol-testes-a): `node tests/dfp.js` rodou pela primeira vez. O teste 
 4. Aba Defesa: Refazer, Desligar, Carros +, Soltar carros, Marcar posto. MCP: `get_defence_plan`, `set_defence_positions {point, mode: "tank", count: 2}` e `{point, squad, x, z}`.
 5. Online: o convidado vê a camada e a seção, e as ordens `dpos` dele valem no anfitrião.
 6. Custo: `AIB` com e sem `DFP.on` numa partida grande.
+
+## Achado (cf-pol-testes-a, não consertado: seção CEREBRO)
+
+O bloco DFP faz `Object.assign(GEN.no, { far: 'Longe demais do ponto' })` e troca o texto comum da recusa `far`. Toda outra ordem recusada por distância (instalações da economia, obras: "fora do território ou à frente da linha") passa a dizer "Longe demais do ponto", e `tests/mcp-general.js` falha por isso (a ponte MCP tem o texto comum). Conserto sugerido: um código próprio para a `dpos` (por exemplo `dfar`).

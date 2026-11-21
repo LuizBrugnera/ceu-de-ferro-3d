@@ -222,6 +222,14 @@ const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 
   dep: 'mina só sobre jazida livre', rcap: 'Limite de 3 antenas de rádio do lado', nrad: 'Nenhum veículo-rádio ou operador de rádio livre para isso', crl: 'O servidor desta sala é antigo: sem antenas de rádio', fabroad: 'fábrica precisa de estrada a menos de 500 m', q: 'fila cheia', unknown: 'instalação inimiga não localizada', none: 'nada na reserva', en: 'Falta energia' };
 Object.assign(PT, { fac: 'Este lado não tem essa arma', scap: 'Limite de armas estratégicas desse tipo', slive: 'Já há um ataque estratégico desse tipo em curso',
   ff: 'Tropas amigas na área do bombardeio', sdr: 'Drones indisponíveis nesta sala' });   // the strategic strike (2.2)
+/* the page's reasons for the codes the later packages added (tests/mcp-general.js checks every code the page names reads the same here) */
+Object.assign(PT, { vbcap: 'Limite de carros-bomba deste lado (2 por vez)',   // the bomb vehicles (cf-vbied)
+  ins: 'Só os Insurgentes recrutam e saqueiam assim', rcr0: 'Nenhum soldado nosso (fora a milícia) na vila', rcrN: 'Já há recrutamento nessa vila',   // the Insurgents and the towns
+  rcrMax: 'Recrutamentos demais ao mesmo tempo', saq0: 'Poucos soldados nossos na vila para saquear', saqOwn: 'A vila é nossa ou nos apoia: saquear não', reg: 'Soldado inimigo na vila',
+  tcap: 'Limite de túneis do lado', short: 'Túnel curto demais (mínimo 40 m)', long: 'Túnel longo demais para o lado', tun: 'Nenhum túnel nosso pronto ali',   // the tunnels (2.4)
+  tunf: 'Nenhuma boca de túnel inimiga conhecida ali', tunb: 'Nenhum lugar para a outra boca do túnel', obj: 'Em cima de um obstáculo',
+  tank: 'Nenhum carro de combate livre perto do ponto',   // the defence by positions (dpos)
+  hsc: 'O servidor desta sala é antigo: sem HESCO nem perímetros da engenharia', done: 'O perímetro desse lugar já está de pé', enp: 'Engenharia desligada' });   // the engineers' walls
 const explain = r => (r.ok ? 'accepted' : 'refused: ' + (r.why || 'unspecified') + (PT[r.why] ? ' (' + PT[r.why] + ')' : '') + (WHY[r.why] ? ' - ' + WHY[r.why] : '') + (r.note ? ' - ' + r.note : ''));
 
 /* the host's answer to a command: text for the model */

@@ -1,5 +1,11 @@
 # cf-pol-hud: polimento da interface (testado no navegador, não por suíte)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados), Tab e tecla 3: a Visão de General dos Insurgentes abre sem erro no console, e a tabela de forças tem uma coluna por inimigo ("Nossas · EUA · Rússia").
+- Distâncias dos aviões e a lista de armas da cabine (F-22, mesma cena antes × depois): sem nada encavalado, a lista abaixo do painel de danos. O `drawHud` saiu de 6,4 para 4,2–4,3 ms (mediana; máquina cheia). `tests/hud-labels.js` (lote 2 desta tarefa) cobre o `tagTxt`, e `tests/town-names.js` o `drawTownNames(…, pt)`.
+- Hangar: o resumo da missão leva a frase inteira no title.
+- **Continua sem teste:** a tela de fim com o HUD oculto, a luneta do atirador (`scopeClip`), o drone com os óculos, o "pelos EUA" no hangar de Hoje e a escala do HUD em 1366 px.
+
 A parte da simulação ganhou teste em `tests/hud-start.js`: os avisos "… pronta" do começo e os tíquetes e pontos dos três lados em `genVM`. O resto é desenho na tela (o canvas do HUD, o hangar, a tela de fim, a Visão de General), e as suítes rodam no Node, sem DOM. Por isso foi visto num Chromium headless (Playwright, servidor em 127.0.0.1, 1280×720 e 1920×1080), não por um teste.
 
 ## O que foi visto na tela e não tem teste

@@ -1,5 +1,9 @@
 # Prisioneiros e informação (P4) (não testado)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/brain-prisioneiros.js`: passou inteiro (rendição, escolta, interrogatório só com o que o preso sabia; nunca uma posição que ele não conhecia; o quadro do general captor tem os 4).
+- **Continua sem teste:** com mais sementes, o navegador (a camada de prisioneiros, o jogador escoltando), o MCP, o online e o A×B.
+
 Tarefa `cf-p4-prisioneiros`, o pacote **P4** da arquitetura do cérebro (`/home/luiz/firstmate/data/cf-cerebro-pesquisa/report.md`, seções 2.3, 3.2 e 4). Pedido do capitão: "prisioneiros dar informações", como no Defilade.
 
 O P1 (#145/#146) já tinha um "P4 mínimo": a rendição pela moral, os estados RENDIDO e PRISIONEIRO, a captura (um inimigo a ≤ 5 m por 2 s) e o preso contando o que sabia 8 s depois, na hora, como avistamentos. Este pacote completa o resto sem duplicar: o P1 continua decidindo quem se rende e quando é capturado; o P4 assume a partir daí (`PRIS.on = 0` volta ao P1 mínimo).

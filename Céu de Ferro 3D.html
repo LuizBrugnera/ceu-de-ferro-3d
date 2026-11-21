@@ -37185,7 +37185,7 @@ function buildPlane(id) {
     g.scale.setScalar(MS); return g;
   }
   for (let i = 0; i < m.fus.length - 1; i++) {
-    const a = m.fus[i], b = m.fus[i + 1], s = tag('hull', new THREE.Mesh(cylX(a[1], b[1], b[0] - a[0], 10), pmat('hull', d.c)));
+    const a = m.fus[i], b = m.fus[i + 1], s = tag('hull', new THREE.Mesh(cylX(a[1], b[1], b[0] - a[0], 14), pmat('hull', d.c, { flatShading: false, shininess: 14 })));   // cf-pol-modelos: rounder and smooth, as the textured ones
     s.position.x = (a[0] + b[0]) / 2; body.add(s);
   }
   body.scale.set(1, m.sy, m.sz); g.add(body);
@@ -37686,6 +37686,16 @@ buildUnit = (f => (u, wreck) => {
    The textured models (mdl.glb) keep their own look; the stealth bomber wears none ---------- */
 const PROP = { blades: { stuka: 3, bf109: 3, spit: 4, p47: 4, he177: 4, b17: 3 }, chord: .24, col: 0x1f2122, spin: 40, blur: [.3, .8] };
 const CANOPY = { glass: 0x4f6872, hoops: [-.2, .14], tube: .035 };   // the canopy's glass; where the frame's hoops cross it (of its length, from its middle), how thick
+/* the propeller planes' outer wing and tailplane tips, rounded within the same span over this share of the tip's chord (at most .3 of the
+   span; the Spitfire's all but elliptical); an inner panel, whose tip is the next one's root (the Stuka's gull wing), keeps its square end */
+const WTIP = { spit: .95, bf109: .5, p47: .6, stuka: .45, he177: .45, b17: .5 };
+const wingOuter = (m, w) => !m.wings.some(v => v !== w && Math.abs(v.z0 - w.z0 - w.span) < .3 && Math.abs(v.a[0] - w.a[2]) < .2 && Math.abs(v.a[1] - w.a[3]) < .2);   // inner: another panel starts where it ends, with its chord
+function wingRound(w, s, k) {
+  const c = Math.abs(w.a[2] - w.a[3]), r = Math.min(c * k, w.span * .3), sp = w.span, f = (sp - r) / sp, mx = (w.a[2] + w.a[3]) / 2, xl = w.a[0] + (w.a[2] - w.a[0]) * f, xt = w.a[1] + (w.a[3] - w.a[1]) * f, sh = new THREE.Shape();
+  sh.moveTo(w.a[0], 0); sh.lineTo(xl, sp - r); sh.bezierCurveTo(xl, sp - r * .2, mx + c * .3, sp, mx, sp); sh.bezierCurveTo(mx - c * .3, sp, xt, sp - r * .2, xt, sp - r); sh.lineTo(w.a[1], 0); sh.closePath();
+  const t = w.t || .18, ge = new THREE.ExtrudeGeometry(sh, { depth: t, bevelEnabled: false, curveSegments: 5 }); ge.translate(0, 0, -t / 2); ge.rotateX(Math.PI / 2); if (s < 0) ge.scale(1, 1, -1);
+  return ge;
+}
 const INSIG = { kind: { stuka: 'balk', bf109: 'balk', he177: 'balk', spit: 'raf', p47: 'us', b17: 'us', su57: 'ru', su25: 'ru', tu160: 'ru', ah64: 'us', uh60: 'us', mi28: 'ru', mi8: 'ru' }, at: .62, size: [.72, 2.4], fus: .52, boom: .22, tex: {} };
 function insigTex(k) {
   if (INSIG.tex[k]) return INSIG.tex[k];
@@ -37741,6 +37751,11 @@ buildPlane = (f => id => {
   if (m.prop) blades(m.prop[0] + .18, 0, 0, m.prop[1]);
   if (m.nac) for (const n of m.nac) if (n[5]) for (const s of [1, -1]) blades(n[0] + n[4] / 2 + .2, n[1], s * n[2], n[5]);
   U.discs = []; g.traverse(c => { if (c.isMesh && c.material && c.material.isMeshBasicMaterial && c.material.transparent && c.geometry && c.geometry.type === 'CircleGeometry') { U.discs.push(c); c.userData.o = c.material.opacity; } });
+  if (WTIP[id]) m.wings.forEach((w, i) => {   // the tips rounded: each outer wing's mesh by side (the last, the tailplane, under stab)
+    if (!wingOuter(m, w)) return;
+    const last = i === m.wings.length - 1, L = last ? [[(U.pm.stab || [])[0], 1], [(U.pm.stab || [])[1], -1]] : [[(U.pm.wingR || [])[i], 1], [(U.pm.wingL || [])[i], -1]];
+    for (const [me, s] of L) if (me) { me.geometry.dispose(); me.geometry = wingRound(w, s, WTIP[id]); }
+  });
   /* the canopy: a darker glass where it was a pale blue blob, and on the propeller planes its frame in the plane's colour (two hoops across
      and a spine), filed under the pilot with the glass */
   const cn = U.pm && U.pm.pilot && U.pm.pilot[0], cv = m.can;
@@ -43930,7 +43945,7 @@ function buildHeli(id) {
   const box = (pid, c, w, h, dp, x, y, z, to) => { const b = tag(pid, new THREE.Mesh(new THREE.BoxGeometry(w, h, dp), pmat(pid, c)), to); b.position.set(x, y, z); return b; };
   const rmax = Math.max(...m.fus.map(s => s[1])), DK = 0x1d1f1f, GL = 0x22333c;
   U.flames = [];
-  for (let i = 0; i < m.fus.length - 1; i++) { const a = m.fus[i], b = m.fus[i + 1], ge = new THREE.CylinderGeometry(b[1], a[1], b[0] - a[0], 10, 1, true); ge.rotateZ(-Math.PI / 2); const s = tag('hull', new THREE.Mesh(ge, pmat('hull', d.c)), body); s.position.x = (a[0] + b[0]) / 2; }   // open rings: no disc across the cabin in front of the pilot's eye
+  for (let i = 0; i < m.fus.length - 1; i++) { const a = m.fus[i], b = m.fus[i + 1], ge = new THREE.CylinderGeometry(b[1], a[1], b[0] - a[0], 14, 1, true); ge.rotateZ(-Math.PI / 2); const s = tag('hull', new THREE.Mesh(ge, pmat('hull', d.c, { flatShading: false, shininess: 14 })), body); s.position.x = (a[0] + b[0]) / 2; }   // cf-pol-modelos: rounder and smooth   // open rings: no disc across the cabin in front of the pilot's eye
   const tip = m.fus[m.fus.length - 1], cap = tag('hull', new THREE.Mesh(new THREE.SphereGeometry(tip[1], 8, 6), pmat('hull', d.c)), body); cap.position.x = tip[0];
   body.scale.set(1, m.sy, m.sz); g.add(body);
   const B = m.boom, bm = tag('hull', new THREE.Mesh(cylX(B[3], B[2], B[0] - B[1], 8), pmat('hull', d.c))); bm.position.set((B[0] + B[1]) / 2, B[4], 0);

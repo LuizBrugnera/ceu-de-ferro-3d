@@ -188,6 +188,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .sheet.over{background:linear-gradient(180deg,rgba(18,24,26,.78) 0%,rgba(18,24,26,.93) 34%,var(--bg) 100%)}   /* the result over the battle: the world behind it faint, not its fires and labels */
 .stage:has(>.over:not([hidden]))>#hud{visibility:hidden}   /* nor the HUD (every layer drawn on it, the clock and the weather too) */
 .over h2{margin:0;font-family:var(--f-display);font-weight:400;font-size:clamp(30px,6vw,52px);text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+@media (min-width:761px) and (max-height:780px){.over .sheet-in{padding-block:4vh 20px;gap:12px;max-width:720px}.over h2{font-size:clamp(28px,5.5vh,44px)}.tally{font-size:16px}}   /* a short window (1280 × 720): the result, the table and the buttons on one screen; the buttons ended under the bottom edge, the title on two lines (cf-pol-fluxos) */
 .tally{display:grid;grid-template-columns:auto auto;gap:4px 24px;margin:0;font-family:var(--f-data);font-size:18px;font-variant-numeric:tabular-nums}
 .tally dt{color:var(--mute)} .tally dd{margin:0;text-align:right}
 .over p{margin:0;max-width:60ch} #overNext:empty{display:none}
@@ -211,6 +212,9 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .hg-setp .gen-seg .tab{flex:1 1 30%}
 .hg-setp #difs .tab{flex:1 1 22%}
 @media (max-width:760px){.hg-set{position:static}.hg-setp{left:var(--gut-l);right:var(--gut-r);width:auto}}   /* narrow: the panel spans the top bar, under it */
+/* a short window (1280 × 800): each choice on one line, its name and its note side by side, so the whole panel fits; it ran past the bottom and the general's difficulty was out of sight (cf-pol-fluxos) */
+@media (min-width:761px) and (max-height:900px){.hg-setp .tab{flex-direction:row;flex-wrap:wrap;align-items:baseline;column-gap:6px;padding:4px 9px}.hg-setp .hg-setl{margin:4px 0 2px}}
+@media (min-width:761px) and (max-height:760px){.hg-setp .tab{padding:3px 8px}.hg-setp .hg-setl{margin:3px 0 1px}.hg-setp h3{margin:3px 0 2px}}   /* 1280 × 720: tighter still */
 .hg-setp .tab b{font-size:14px}
 .hg-setp .tab span{font-size:12px}
 .row{display:flex;flex-wrap:wrap;gap:10px}
@@ -10589,7 +10593,7 @@ function hideAt(x, z, r) {
 }
 /* the post of the k-th team of a dispersed job */
 function postDisp(t, job, k) {
-  const R = S.T.routes, ds = t ? 1 : -1, G = INC.disp, ri = (frontR() + k) % R.length, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);
+  const R = S.T.routes, my = myRoutes(t), f = frontR(t), ri = my.length ? my[(Math.max(0, my.indexOf(f)) + k) % my.length] : (f + k) % R.length, ds = dsOf(t, ri), G = INC.disp, r = R[ri], sd = k % 2 ? 1 : -1, ls = lineS(t, ri);   // 3 sides: only the side's own roads, each its own way (with two, (front + k) % 3 as before)
   let x, z;
   if (job === 'rec') { const s = clamp(ls + ds * rand(G.rec.ahead[0], G.rec.ahead[1]), 0, r.len), p = routeAt(r, s), off = sd * rand(G.rec.side[0], G.rec.side[1]); x = p.x - p.dz * off; z = p.z + p.dx * off; }
   else {
@@ -10864,14 +10868,14 @@ function spawnBase() {
 /* where the AI would build next: behind its line on a road that has no base of its side yet, the front road first, then behind a town it
    holds; beside the road, on the first place that siteWhy lets through */
 function aiSite(t) {
-  const A = BLD.ai, R = S.T.routes, ds = t ? 1 : -1, fr = frontR(), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];
+  const A = BLD.ai, R = S.T.routes, ds = ri => dsOf(t, ri), fr = frontR(t), mine = S.sup.filter(b => b.team === t && !b.dead), tries = [];   // 3 sides: its own front and roads, each its own way
   if ((S.net && !Net.sb) || mine.length >= supBots(t)) return null;
   const bk = S.fld[t].bk || 0;   // after a loss the next one lies farther back
   for (const l of S.T.lots || []) if (l.team === t && l.k === 'dep' && !siteWhy(t, l.x, l.z, l.a)) { const p = railOf(l.x, l.z); return { k: 'build', ri: p.ri, s: p.s, x: l.x, z: l.z, a: l.a, R: 9 }; }   // the seat town's depot lot first
-  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
+  for (const w of towns()) if (w.hold === t && w.own !== t && !mine.some(b => hdist(b, w) < 900)) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);   // the chain goes on behind a town that was taken
   tries.push(...bmrSupTries(t, mine));   // then behind the points it holds, the most forward first (BMR)
-  for (const ri of axesFrom(fr)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds * (A.back + bk + k * 70), sd * A.off]);
-  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds * (FIELD.town + 80), sd * A.off]);
+  for (const ri of axesFrom(fr, t)) if (!mine.some(b => b.ri === ri)) for (let k = 0; k < 6; k++) for (const sd of [1, -1]) tries.push([ri, lineS(t, ri) - ds(ri) * (A.back + bk + k * 70), sd * A.off]);
+  for (const w of towns()) if (w.hold === t) for (const sd of [1, -1]) tries.push([w.ri, w.s - ds(w.ri) * (FIELD.town + 80), sd * A.off]);
   for (const [ri, s, off] of tries) {
     const p = routeAt(R[ri], clamp(s, 0, R[ri].len)), x = p.x - p.dz * off, z = p.z + p.dx * off, a = Math.atan2(-p.dz, p.dx);
     if (!siteWhy(t, x, z, a)) return { k: 'build', ri, s, x, z, a, R: 9 };
@@ -14151,7 +14155,7 @@ function heliBP(p, t) {
   }
   return Object.assign(best || open || { x: p.x, z: p.z, pop: HAI.pop[1], open: 1 }, { of: t, tx: t.x, tz: t.z });
 }
-const heliHold = p => { const fr = frontR(), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - (p.team ? 1 : -1) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
+const heliHold = p => { const fr = frontR(p.team), r = S.T.routes[fr], q = routeAt(r, clamp(lineS(p.team, fr) - dsOf(p.team, fr) * HAI.hold, 0, r.len)), o = 120 * Math.sin(p.seed); return { x: q.x - q.dz * o, z: q.z + q.dx * o }; };
 function heliExpo(A) { if (A.t0) { (S.hx || (S.hx = [])).push(+(S.t - A.t0).toFixed(2)); if (S.hx.length > 400) S.hx.shift(); A.t0 = 0; } }
 function aiAttack(p, A, dt, msl) {
   const d = p.def, c = p.ctl, agl = p.y - hgt(p.x, p.z) - d.gh, pad = A.pad || (A.pad = heliPad(p.team, 3));
@@ -14201,7 +14205,7 @@ function aiAttack(p, A, dt, msl) {
 }
 /* a flat clear place near the side's line with no enemy close */
 function heliLZ(team) {
-  const Z = HAI.lift.lz, fr = frontR(), r = S.T.routes[fr], ds = team ? 1 : -1, s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
+  const Z = HAI.lift.lz, fr = frontR(team), r = S.T.routes[fr], ds = dsOf(team, fr), s = clamp(lineS(team, fr) - ds * Z[0], 0, r.len), q = routeAt(r, s);
   for (let i = 0; i < 16; i++) {
     const o = (i % 2 ? 1 : -1) * rand(Z[1], Z[2]), a = rand(-150, 150), x = q.x - q.dz * o + q.dx * a, z = q.z + q.dx * o + q.dz * a, g = hgt(x, z);
     if (g <= S.T.WL + 1 || kindAt(x, z) === 1 || Math.max(Math.abs(hgt(x + 8, z) - hgt(x - 8, z)), Math.abs(hgt(x, z + 8) - hgt(x, z - 8))) / 16 > Z[3] || near(x, z, 30).some(solid)) continue;
@@ -15415,8 +15419,12 @@ function daLock(p) {
 }
 /* an aircraft's drill steers only while its controller is not breaking from a foe on its tail or turning a missile it knows of onto the beam */
 const daFree = p => S.t >= p.brk && !S.missiles.some(m => m.target === p && !m.gone && dist(m, p) < PAI.msl);
-/* an aircraft's drill flies dir as aiPlane would: off the map's edge, the ground and the hills ahead first */
+/* an aircraft's drill flies dir as aiPlane would: off the map's edge, the ground and the hills ahead first. Not a strategic bomber lining up
+   or on its bomb run (STK, stkFly: straight and high, no break, no beam): the radar drill dived and turned the B-2 off its line near the
+   target, so it went round again or laid its stick 170 m beside it. Its flares still go (act) */
+const daHeld = p => p.role === 'strat' && !!p.bs && (p.bs.st === 'in' || p.bs.st === 'run');
 function daFly(p, dir) {
+  if (daHeld(p)) return;
   const M = PAI.edge[0] + p.V * ASPD * PAI.edge[1]; if (p.x < M || p.x > S.W - M || Math.abs(p.z) > S.HW - M) dir = toward(p, S.W / 2, 0, hgt(p.x, p.z) + 700);
   const hf = Math.hypot(p.f.x, p.f.z) || 1, fx0 = p.f.x / hf, fz0 = p.f.z / hf, wv = vel(p), agl = p.y - hgt(p.x, p.z), ahead = p.y - hgt(p.x + wv.x * 3, p.z + wv.z * 3);
   const far = Math.max(hgt(p.x + wv.x * 8, p.z + wv.z * 8), hgt(p.x + wv.x * 14, p.z + wv.z * 14)) + 180 - p.y;
@@ -20322,7 +20330,7 @@ function cmdReq(C) {
   C.wantT = W ? C.wantT || S.t : 0;
   if (!Q || Q.ph || !cqSim() || S.t < (C.rqT || 0)) return;
   C.rqT = S.t + G.every;
-  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR();
+  const mine = S.units.filter(u => u.team === t && !u.dead && !!u.ai && !u.fixed), fr = frontR(t);   // its own front road (3 sides: the Insurgents' AA came on road 0, the USA's)
   const put = (kind, id, ri) => genCmd(t, { c: 'req', k: kind, ri }, 'ai', { id }).ok;
   if (mine.some(u => u.ai.air > S.t)) C.airT = S.t;
   if (genBy(t, 'sup') !== 'ai') return;
@@ -20333,7 +20341,7 @@ const rqPick = pick;   // the model of a tank a person requisitions (the general
 /* a requisition filled (the AI's, and the general's own order): false when rqAI finds nothing */
 function reqOpen(C, kind, id, ri) {
   const t = C.t, Q = S.cq;
-  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, (t ? 1 : -1) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
+  const e = rqAI(t, kind, ri); if (!e) return false; addUnit(kind, t, 0, 0, id, false, ri, e.s, dsOf(t, ri) * 5, 2 + Q.rqa[t].length % 6).rqa = 1; gLog(t, 'rq', 'Requisição: ' + (GEN.kind[kind] || kind) + ' para a rota ' + (ri + 1) + (ecoGate() ? ' (da reserva)' : ' (−' + (RQ.cost[kind] || 1) + ' tíquetes)'), routeAt(S.T.routes[ri], e.s)); return true;
 }
 Net.ui.req = () => {};
 Net.rx.req = m => {
@@ -20397,7 +20405,7 @@ function radScan() {
     const id = S.E.sides[S.fac[t]].rad, have = S.units.reduce((n, u) => n + (u.def.rad && u.team === t && !u.dead && !!u.ai && !u.ai.park ? 1 : 0), 0);
     if (have >= RAD.ai.n) { T[t] = Math.max(T[t], S.t + RAD.ai.again); continue; }
     if (!id || S.t < T[t]) continue;
-    const ri = frontR(), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's
+    const ri = frontR(t), e = rqAI(t, 'rad', ri); if (!e) { T[t] = S.t + CMD.rq.every; continue; }   // drawn at a depot, as a player's, on its own front road
     addUnit('car', t, 0, 0, id, false, ri, e.s, 5, 9).rqa = 1; T[t] = S.t + RAD.ai.again;
   }
 }
@@ -37430,7 +37438,7 @@ function vkit() {
     done(pm, wreck, spin) {   // spin: the uniform the model's wheels turn by (none on a wreck)
       const W = new THREE.Color(VKC.wreck), C = new THREE.Color();
       for (const e of B.values()) {
-        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex), ge = vkGeo(e.l); m.userData.c = hex;
+        const hex = wreck ? C.setHex(e.col).lerp(W, .8).getHex() : e.col, m = mat(hex, { flatShading: false }), ge = vkGeo(e.l); m.userData.c = hex;   // smooth: only the round pieces show it (a box's, a prism's and a disc's normals are their faces')
         if (spin && ge.attributes.aWheel) spinMat(m, spin);
         const me = new THREE.Mesh(ge, m); e.to.add(me); if (e.pid) (pm[e.pid] || (pm[e.pid] = [])).push(me);
       }
@@ -37442,15 +37450,15 @@ function vkit() {
 /* running gear. Wheels on axles x (r, w wide; w2 the rear ones, twin tyres), at ±z, each side filed under pL and pR; a track run from x0 to
    x1 at ±z, tw wide and h high, with n road wheels, a sprocket at the front and an idler at the back, the side's wheels and belt under pL, pR */
 function vkWheels(K, g, P2, ax, z, r, w, w2, pL, pR) {
-  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 10, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 6, x, r, s * z); K.W = null; } });
+  ax.forEach((x, i) => { for (const s of LRS) { const p = s < 0 ? pL : pR, ww = i && w2 ? w2 : w; K.W = [x, r, s * z, r]; K.cz(g, p, VKC.rub, r, ww, 14, x, r, s * z); K.cz(g, p, P2, r * .5, ww + .03, 10, x, r, s * z); K.W = null; } });
 }
 function vkTracks(K, g, P2, x0, x1, z, tw, h, n, pL, pR) {
   const L = x1 - x0, rr = h / 2, cx = (x0 + x1) / 2;
   for (const s of LRS) {
     const p = s < 0 ? pL : pR, Z = s * z;
     K.box(g, p, VKC.dk, L - h, .1, tw, cx, h - .05, Z).box(g, p, VKC.dk, L - h, .1, tw, cx, .05, Z);   // the upper and the lower run
-    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 8, x, rr, Z).dz(g, p, P2, rr * f, 6, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
-    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 8, x, h * .4, Z).dz(g, p, P2, h * .3, 6, x, h * .4, Z + s * (tw * .35 + .01), s); }
+    for (const [x, f] of [[x1 - rr, .75], [x0 + rr, .68]]) { K.W = [x, rr, Z, rr]; K.cz(g, p, VKC.dk, rr, tw, 10, x, rr, Z).dz(g, p, P2, rr * f, 8, x, rr, Z + s * (tw / 2 + .01), s); }   // round the sprocket and the idler
+    for (let i = 0; i < n; i++) { const x = x0 + h * 1.05 + (L - h * 2.1) * (n > 1 ? i / (n - 1) : .5); K.W = [x, h * .4, Z, h * .4]; K.cz(g, p, VKC.rub, h * .4, tw * .7, 10, x, h * .4, Z).dz(g, p, P2, h * .3, 8, x, h * .4, Z + s * (tw * .35 + .01), s); }
     K.W = null;
   }
 }
@@ -38686,27 +38694,48 @@ function lookSup(b, m) {
 /* a site of the economy, in buildSup's style: boxes in the side's colours, rising with its progress. usina: a slab, a boiler house, two
    chimneys and a transformer yard; mina: a headframe, a wheel, a spoil heap and a shed; fabrica: a hall with a sawtooth roof, a chimney and a yard.
    U.rise: [mesh, bottom, height] scaled from the ground up with the build; U.late: from half built; U.roof: from .85; U.mast: when finished.
-   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site */
+   On a lot of the seat town (map version 5) U.F is the plain building the other side sees until it identifies the site (ecoHid), U.R the site.
+   ECOL (cf-pol-modelos): the chimneys round and tapered, with a dark rim at the top; the mine's headframe braced (its four posts and the
+   crosses of each face one mesh) under a spoked wheel on two legs (one mesh), which comes and goes with the deck it stands on (U.roof), and
+   its spoil a heap where it was a slab */
+const ECOL = { brick: 0x5b4334, rim: 0x2c2623, steel: 0x34372f, spoil: 0x625646, seg: 12 };
 function buildEco(e) {
   const g = new THREE.Group(), [w, d, h] = ECO.site[e.k].box, sd = S.E.sides[S.fac[e.team]], U = g.userData, R = (U.R = new THREE.Group());
   let to = R; g.add(R);
   const box = (sx, sy, sz, x, y, z, c) => { const m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat(c)); m.position.set(x, y, z); to.add(m); return m; };
   const rise = (sx, sy, sz, x, y, z, c) => { const m = box(sx, sy, sz, x, y + sy / 2, z, c); (U.rise || (U.rise = [])).push([m, y, sy]); return m; };
+  const one = (l, c, x, y, z, o) => { const m = new THREE.Mesh(vkGeo(l), mat(c, o)); m.position.set(x, y, z); to.add(m); return m; };   // pieces placed about x y z, one mesh
+  const piece = (ge, x, y, z, rx, ry, rz) => { if (rx) ge.rotateX(rx); if (ry) ge.rotateY(ry); if (rz) ge.rotateZ(rz); ge.translate(x, y, z); return ge; };
+  /* a chimney: r0 at the foot, r1 at the top, a dark rim round its mouth */
+  const chimney = (r0, r1, ch, x, y, z) => one([piece(new THREE.CylinderGeometry(r1, r0, ch - .5, ECOL.seg), 0, (ch - .5) / 2, 0), piece(new THREE.CylinderGeometry(r1 * 1.12, r1 * 1.12, .5, ECOL.seg), 0, ch - .25, 0)], ECOL.brick, x, y, z, { flatShading: false });
   U.late = []; U.roof = []; U.posts = [];
   box(w + 2, .5, d + 2, 0, .05, 0, 0x6b5f47);
   if (e.k === 'pow') {
     rise(w * .55, h * .7, d * .6, -w * .12, .3, 0, sd.col);
     U.roof.push(box(w * .6, .4, d * .65, -w * .12, h * .7 + .5, 0, sd.col2));
-    U.late.push(box(1.4, h * 1.5, 1.4, w * .25, .3 + h * .75, d * .2, 0x4a4034), box(1.2, h * 1.8, 1.2, w * .25, .3 + h * .9, -d * .2, 0x4a4034));
+    U.late.push(chimney(.85, .55, h * 1.5, w * .25, .3, d * .2), chimney(.75, .48, h * 1.8, w * .25, .3, -d * .2));
     for (let i = 0; i < 3; i++) U.late.push(box(1.6, 1.4, 1.2, -w / 2 + 1.4 + i * 2, .9, d / 2 - 1.2, 0x55633a));
   } else if (e.k === 'mine') {
-    for (const [i, j] of CORN) U.posts.push(box(.4, h, .4, i * 2, h / 2 + .3, j * 2, 0x4a4034));
+    /* the headframe: four posts, and on each face two crosses one over the other */
+    const fr = CORN.map(([i, j]) => piece(new THREE.BoxGeometry(.4, h, .4), i * 2, h / 2 + .3, j * 2)), L = Math.hypot(4, h / 2), an = Math.atan2(h / 2, 4);
+    for (let f = 0; f < 4; f++) for (let k = 0; k < 2; k++) for (const s of [1, -1]) {
+      const t = f * Math.PI / 2, ge = piece(new THREE.BoxGeometry(L, .16, .16), 0, 0, 0, 0, 0, s * an); ge.rotateY(t);   // in its face, out on that face's side
+      fr.push(ge.translate(2 * Math.sin(t), .3 + h / 4 + k * h / 2, 2 * Math.cos(t)));
+    }
+    U.posts.push(one(fr, 0x4a4034, 0, 0, 0));
     U.roof.push(box(5, .5, 5, 0, h + .55, 0, sd.col2));
-    U.late.push(box(.5, 2.4, 2.4, 0, h + 1.5, 0, 0x34372f), box(w * .9, 1.6, w * .6, -w * .9, .9, w * .2, 0x6b5f47), box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
+    /* the wheel over the shaft, its axle along x, on two legs from the deck */
+    const wr = 1.1, wy = h + .8 + wr + .35, wl = [piece(new THREE.TorusGeometry(wr, .13, 6, 18), 0, 0, 0, 0, Math.PI / 2), piece(new THREE.CylinderGeometry(.2, .2, .7, 8), 0, 0, 0, 0, 0, Math.PI / 2)];
+    for (let k = 0; k < 3; k++) wl.push(piece(new THREE.BoxGeometry(.1, wr * 2, .1), 0, 0, 0, k * Math.PI / 3));
+    for (const s of [1, -1]) wl.push(piece(new THREE.BoxGeometry(.16, wr + .35, .16), s * .4, -(wr + .35) / 2, 0));
+    U.roof.push(one(wl, ECOL.steel, 0, wy, 0));   // with the deck it stands on: not before it, and not over a wrecked mine's bare ground (it hung in the air)
+    /* the spoil heap, low and long */
+    const hp = new THREE.ConeGeometry(1, 1, 8); hp.scale(w * .5, 2.4, w * .34); const heap = new THREE.Mesh(hp, mat(ECOL.spoil)); heap.position.set(-w * .9, .3 + 1.2, w * .2); to.add(heap);
+    U.late.push(heap, box(2.6, 2.2, 2.2, w * .7, 1.4, -w * .6, sd.col));
   } else {
     rise(w * .8, h * .8, d * .7, 0, .3, 0, sd.col);
     for (let i = 0; i < 3; i++) { const m = box(w * .24, .4, d * .72, (i - 1) * w * .26, h * .8 + .9, 0, sd.col2); m.rotation.z = .35; U.roof.push(m); }
-    U.late.push(box(1.6, h * 1.8, 1.6, w * .38, .3 + h * .9, -d * .25, 0x4a4034), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
+    U.late.push(chimney(.95, .6, h * 1.8, w * .38, .3, -d * .25), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
   }
   U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 4.2, d / 2 + .7, e.team === S.me ? 0x6fc3b2 : 0xe2604f)];
   if (e.lot >= 0) {   // a shed or a block of the town: plaster walls, a tiled gable roof
@@ -41764,7 +41793,7 @@ const WHY = { server: 'O servidor desta sala ainda não troca veículos no meio 
    front road, or why it is not offered. S.spawnAt is the choice, 0 the main base */
 const SPWHY = { site: 'em obra', unsafe: 'inimigo a menos de ' + BLD.safe + ' m', gone: 'destruída', fight: 'em disputa', foe: 'do inimigo' };
 function spawnOpts() {
-  const me = S.me, fr = frontR(), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
+  const me = S.me, fr = frontR(me), ri = fr, p = routeAt(S.T.routes[fr], lineS(me, fr)), km = o => (hdist(o, p) / 1000).toFixed(1).replace('.', ',') + ' km da linha de frente';
   return [{ id: 0, x: S.base[me].x, z: S.base[me].z, text: 'Base principal · ' + km(routeAt(S.T.routes[ri], endS(me, ri, SPAWN.tank))), why: '' }]
     .concat(S.sup.filter(b => b.team === me && !b.dead).map((b, i) => { const w = spawnWhy(b, me); return { id: b.id, n: i + 1, x: b.x, z: b.z, text: 'Base de suprimento ' + (i + 1) + ' · ' + (w ? SPWHY[w] : km(b)), why: w }; }))
     .concat(S.cq ? S.cq.p.filter(o => o.base < 0 && o.hold === me).map(o => { const w = cqSpawnWhy(o, me); return { id: o.i + 1, tag: o.L, x: o.x, z: o.z, text: 'Ponto ' + o.L + ' · ' + o.name + ' · ' + (w ? SPWHY[w] : km(o)), why: w }; }) : [])
@@ -48073,7 +48102,8 @@ buildTrn = (f => (u, wreck) => {
   const L = [];
   for (const c of g.children) {
     const ge = c.geometry, q = ge && ge.parameters; if (!c.isMesh || ge.type !== 'CylinderGeometry' || Math.abs(c.rotation.x - Math.PI / 2) > 1e-6 || c.rotation.z || q.radiusTop !== q.radiusBottom || q.radialSegments !== 12) continue;
-    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 6); if (s < 0) h.rotateY(Math.PI);
+    const s = c.position.z < 0 ? -1 : 1, r = q.radiusTop, h = new THREE.CircleGeometry(r * .5, 10); if (s < 0) h.rotateY(Math.PI);
+    if (c.material.flatShading) { c.material.flatShading = false; c.material.needsUpdate = true; }   // the tyre round, as the kit's
     h.translate(c.position.x, c.position.y, c.position.z + s * (q.height / 2 + .012)); h.userData.wheel = [c.position.x, c.position.y, c.position.z, r]; L.push(h);
   }
   if (!L.length) return g;

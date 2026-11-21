@@ -6710,6 +6710,9 @@ function meshT(T, x, z, H) {
   if (v >= u && v >= 1 - u) return b + (c - b) * u + (m - (b + c) / 2) * 2 * (1 - v);
   return a + (b - a) * v + (m - (a + b) / 2) * 2 * u;
 }
+/* where a camera may go down to: over the match's ground and over the drawn one (meshT, with the nodes a fallen bridge sank), whichever is
+   higher, so that no view sinks under a hill the scene draws above hgt (cf-pol-cenario; tests/ground-mesh.js) */
+function camG(x, z) { const M = S.brn, T = S.T; return Math.max(hgt(x, z), meshT(T, x, z, M && M.size ? n => (M.has(n) ? M.get(n) : T.h[n]) : null)); }
 /* the deck of a road ribbon (roadRibbon): the drawn ground, but over a river's channel at a crossing the match's own ground (hgtT: the
    causeway the bridge stands on, which the drawn ground dips under), blended into the drawn one over a cell of the grid on each bank */
 function roadG(T, x, z) {
@@ -11727,7 +11730,7 @@ function eye(u, d) {
     return { x: u.x + Math.cos(u.h) * o + c * a + s * b, y: u.y + D.mh + g.t[1] + k * t[2] * .5, z: u.z - Math.sin(u.h) * o - s * a + c * b };
   }
   const x = u.x - d.x * 26, z = u.z - d.z * 26;
-  return { x, y: Math.max(u.y + u.def.mh + 6 - d.y * 26, hgt(x, z) + 2.5), z };
+  return { x, y: Math.max(u.y + u.def.mh + 6 - d.y * 26, camG(x, z) + 2.5), z };
 }
 function rayGround(o, d, max) {
   for (let r = 30, st; r < max; r += st) {
@@ -39702,7 +39705,7 @@ function specCam(dt) {
     const k = SPC.k, v = SPC.sp * (k.ShiftLeft || k.ShiftRight ? 4 : 1) * dt, cpt = Math.cos(SPC.p), fx = cpt * Math.cos(SPC.h), fy = Math.sin(SPC.p), fz = -cpt * Math.sin(SPC.h);
     const f = (k.KeyW ? 1 : 0) - (k.KeyS ? 1 : 0), r = (k.KeyD ? 1 : 0) - (k.KeyA ? 1 : 0), u = (k.KeyE ? 1 : 0) - (k.KeyQ ? 1 : 0);
     SPC.x = clamp(SPC.x + (fx * f + Math.sin(SPC.h) * r) * v, -S.W * .1, S.W * 1.1); SPC.z = clamp(SPC.z + (fz * f + Math.cos(SPC.h) * r) * v, -S.HW * 1.1, S.HW * 1.1); SPC.y = SPC.y + (fy * f + u) * v;
-    SPC.y = clamp(Math.max(SPC.y, hgt(SPC.x, SPC.z) + 3), 0, S.ceil || 6000);
+    SPC.y = clamp(Math.max(SPC.y, camG(SPC.x, SPC.z) + 3), 0, S.ceil || 6000);
     cp.set(SPC.x, SPC.y, SPC.z); camera.up.set(0, 1, 0); camera.lookAt(SPC.x + fx * 100, SPC.y + fy * 100, SPC.z + fz * 100);
   } else {
     const l = specList();
@@ -39716,7 +39719,7 @@ function specCam(dt) {
     if (sp > 2) { dx = t.v.x / sp; dz = t.v.z / sp; } else if (t.f && t.f.x !== undefined) { const l2 = Math.hypot(t.f.x, t.f.z) || 1; dx = t.f.x / l2; dz = t.f.z / l2; } else { dx = Math.cos(t.h || 0); dz = -Math.sin(t.h || 0); }
     const back = air ? 60 : man ? 9 : 24, up = air ? 14 : man ? 4 : 9, wx = t.x - dx * back, wy = ty + up, wz = t.z - dz * back, k = SPC.init ? 1 - Math.exp(-dt * 4) : 1;
     if (!SPC.init) { cp.set(wx, wy, wz); SPC.init = true; } else cp.set(cp.x + (wx - cp.x) * k, cp.y + (wy - cp.y) * k, cp.z + (wz - cp.z) * k);
-    cp.y = Math.max(cp.y, hgt(cp.x, cp.z) + 3); camera.up.set(0, 1, 0); camera.lookAt(t.x, ty, t.z);
+    cp.y = Math.max(cp.y, camG(cp.x, cp.z) + 3); camera.up.set(0, 1, 0); camera.lookAt(t.x, ty, t.z);
   }
   camera.fov = 60; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp); S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
@@ -39740,7 +39743,7 @@ function updateCamera(dt) {
     if (p.dead) camera.lookAt(p.x, p.y + .4, p.z);
     else {
       if (seat) cp.set(e.x + a.x * .2, e.y + bob, e.z + a.z * .2);
-      else { const B = 5.2 - 2.6 * camSt.ak, R = 1.7 - .5 * camSt.ak, x = e.x - a.x * B + Math.sin(h) * R, z = e.z - a.z * B + Math.cos(h) * R; cp.set(x, Math.max(e.y - a.y * B + .9, hgt(x, z) + .4), z); }
+      else { const B = 5.2 - 2.6 * camSt.ak, R = 1.7 - .5 * camSt.ak, x = e.x - a.x * B + Math.sin(h) * R, z = e.z - a.z * B + Math.cos(h) * R; cp.set(x, Math.max(e.y - a.y * B + .9, camG(x, z) + .4), z); }
       camera.lookAt(cp.x + a.x * 100, cp.y + a.y * 100, cp.z + a.z * 100); camera.fov = 62 + (MAN.ads.fov - 62) * camSt.ak; camera.rotateX(kick + hit * .02 * calm);
       camSt.eye.x = cp.x; camSt.eye.y = cp.y; camSt.eye.z = cp.z;
     }
@@ -39792,7 +39795,7 @@ function updateCamera(dt) {
       cp.set(o.x - a.x * back, o.y - a.y * back + 8, o.z - a.z * back);
     }
     else { cp.x += mx; cp.y += my; cp.z += mz; cp.x += (p.x - f.x * back + u.x * 4 - cp.x) * k; cp.y += (p.y - f.y * back + u.y * 4 + 5 - cp.y) * k; cp.z += (p.z - f.z * back + u.z * 4 - cp.z) * k; }
-    cp.y = Math.max(cp.y, hgt(cp.x, cp.z) + 4); camSt.init = true;
+    cp.y = Math.max(cp.y, camG(cp.x, cp.z) + 4); camSt.init = true;
     if (a) { camera.up.set(u.x * .15, 1 + u.y * .15, u.z * .15).normalize(); camera.lookAt(cp.x + a.x * 100, cp.y + a.y * 100, cp.z + a.z * 100); }
     else {
       camera.up.set(u.x * .5, 1 + u.y * .5, u.z * .5).normalize();
@@ -40023,7 +40026,7 @@ function hudFort(P, u, ink, acc, disp) {
    a vehicle in a dense wood the near plane goes out instead, so that the crowns between the eye and the hull are not drawn */
 function fortCam(p) {
   const cp = camera.position, low = !!p && !!p.man && !p.dead && p.dg > .1;
-  if (low) { const g = hgt(cp.x, cp.z), cut = FHOLE.on ? trenchAt(cp.x, cp.z, -.25) : null; cp.y = Math.max(cp.y, cut ? g - cut.F.depth * cut.prog + FLOOK.eye : g + FLOOK.eye); }   // in the cut (FHOLE) the eye stays over its floor
+  if (low) { const g = hgt(cp.x, cp.z), cut = FHOLE.on ? trenchAt(cp.x, cp.z, -.25) : null; cp.y = Math.max(cp.y, cut ? g - cut.F.depth * cut.prog + FLOOK.eye : camG(cp.x, cp.z) + FLOOK.eye); }   // in the cut (FHOLE) the eye stays over its floor
   camera.near = low ? FLOOK.near : p && p.kind && !p.man && !p.dead && !S.demo && !curSeat() && (kindAt(p.x, p.z) === 1 || kindAt(cp.x, cp.z) === 1) ? FLOOK.wood : 2;
 }
 /* ---------- buildings: what is seen of them ----------
@@ -42707,7 +42710,7 @@ updateCamera = (g => dt => {
   const r = C.r[0] + (C.r[1] - C.r[0]) * (.5 + .5 * Math.sin(S.t * .11)), h = C.h[0] + (C.h[1] - C.h[0]) * (.5 + .5 * Math.sin(S.t * .07 + 1));
   const o = C.o || (C.o = { x: 0, y: 0, z: 0 }), tx = Math.cos(C.a) * r, tz = Math.sin(C.a) * r, k = C.cut ? 1 : 1 - Math.exp(-dt * 1.5); C.cut = false;
   o.x += (tx - o.x) * k; o.y += (h - o.y) * k; o.z += (tz - o.z) * k;
-  const cp = camera.position; cp.set(p.x + o.x, p.y + o.y, p.z + o.z); cp.y = Math.max(cp.y, hgt(cp.x, cp.z) + 6);
+  const cp = camera.position; cp.set(p.x + o.x, p.y + o.y, p.z + o.z); cp.y = Math.max(cp.y, camG(cp.x, cp.z) + 6);
   camera.up.set(0, 1, 0); camera.lookAt(p.x + p.f.x * 25, p.y + p.f.y * 25, p.z + p.f.z * 25); camera.fov = C.fov;
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp); S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
@@ -45050,7 +45053,7 @@ function heliCam(p, dt) {
   const lp = camSt.lp || (camSt.lp = { x: 0, y: 0, z: 0, of: null }), same = lp.of === p && camSt.init, mx = same ? p.x - lp.x : 0, my = same ? p.y - lp.y : 0, mz = same ? p.z - lp.z : 0;
   lp.x = p.x; lp.y = p.y; lp.z = p.z; lp.of = p;
   cp.x += mx + (p.x - c * B - cp.x - mx) * k; cp.y += my + (p.y + (S.demo ? 14 : 8) - cp.y - my) * k; cp.z += mz + (p.z + s * B - cp.z - mz) * k;
-  cp.y = Math.max(cp.y, hgt(cp.x, cp.z) + 3); camSt.init = true;
+  cp.y = Math.max(cp.y, camG(cp.x, cp.z) + 3); camSt.init = true;
   camera.up.set(0, 1, 0); camera.lookAt(p.x + c * 30, p.y + 1, p.z - s * 30); camera.fov = 60;
 }
 /* --- the helicopter's own symbols: the aim, the nose (rockets), where the gun lies, the missile's lock, the hover indicator with the drift
@@ -48538,7 +48541,7 @@ function rtsCam(dt) {
   const WL = S.T && Number.isFinite(S.T.WL) ? S.T.WL : -1e9, gy = Math.max(hgt(RTS.x, RTS.z), WL); RTS.fy += (gy - RTS.fy) * (1 - Math.exp(-dt * 6));
   const cp = camera.position, h = RTS.d * Math.sin(RTS.pit), bk = RTS.d * Math.cos(RTS.pit), ly = RTS.fy + (RTS.d < 60 ? 1.2 : 0);
   cp.set(RTS.x - cy * bk, ly + h, RTS.z - sy * bk);
-  cp.y = clamp(Math.max(cp.y, Math.max(hgt(cp.x, cp.z), WL) + 3), -1e4, S.ceil || 6000);
+  cp.y = clamp(Math.max(cp.y, Math.max(camG(cp.x, cp.z), WL) + 3), -1e4, S.ceil || 6000);
   camera.up.set(0, 1, 0); camera.lookAt(RTS.x, ly, RTS.z); camera.fov = 55; camSt.init = false;
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp); S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;

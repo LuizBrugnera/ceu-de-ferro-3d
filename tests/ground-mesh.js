@@ -11,7 +11,8 @@
      and meshH is meshT (a scan of the page's scene code: it does not run in Node);
    - the road ribbon's deck is ROADH over the drawn ground away from the river, and over the match's ground in a crossing's channel (the
      causeway the bridge stands on, which the drawn ground dips under), with no step between the two;
-   - no building's floor is under the drawn ground, and its footing (4 m) reaches it all round */
+   - no building's floor is under the drawn ground, and its footing (4 m) reaches it all round;
+   - the cameras keep over the drawn ground as well as over the match's (camG) */
 const H = require('./harness');
 const { ok, done } = H;
 const C = H.load({ seed: 3, mapv: 11 }), $ = C.$, src = H.source();
@@ -102,4 +103,13 @@ has(/pos\.push\(l\[k\]\.x \+ nx, gndY\(/, 'the streets of the towns on the drawn
 has(/userData\.ground = 1/, 'the terrain mesh is marked as the ground (the graphics, the flares and the bridges find it by that, not by its type)');
 ok(!/geometry\.type === 'PlaneGeometry'\) (ENV\.terrain|lit\.push)/.test(scene) && !/position\.count === n && o\.material && o\.material\.vertexColors\) K\.ter/.test(scene), 'nothing looks for the ground as a PlaneGeometry or by its vertex count any more');
 ok(/roadG\(S\.T, x, z\)/.test(src), 'roadRibbon lays its deck on roadG');
+/* the cameras: none goes down under the drawn ground where it rises over the match's (a chase view could sink into a hill) */
+{
+  const S = C.sandbox('modern'), T = S.T, camG = $('camG'), meshT = $('meshT'), hgt = $('hgt'); let low = 0, r = 11;
+  for (let q = 0; q < 5000; q++) { r = (Math.imul(r, 1664525) + 1013904223) >>> 0; const x = (r / 4294967296) * T.W; r = (Math.imul(r, 1664525) + 1013904223) >>> 0; const z = (r / 4294967296 * 2 - 1) * T.HW; const g = camG(x, z); if (g < hgt(x, z) - 1e-9 || g < meshT(T, x, z) - 1e-9) low++; }
+  ok(!low, 'camG is never under the match\'s ground nor under the drawn one (' + low + ' of 5000 points)');
+  ok(/y: Math\.max\(u\.y \+ u\.def\.mh \+ 6 - d\.y \* 26, camG\(x, z\) \+ 2\.5\)/.test(src), 'the ground vehicle\'s chase eye stays over camG');
+  const left = (scene.match(/(cp\.y|SPC\.y) = (clamp\()?Math\.max\((cp\.y|SPC\.y), (Math\.max\()?hgt\(/g) || []).length, used = (scene.match(/camG\(/g) || []).length;
+  ok(!left && used >= 8, 'no camera keeps itself over hgt alone (' + left + ' left); ' + used + ' clamps over camG');
+}
 done();

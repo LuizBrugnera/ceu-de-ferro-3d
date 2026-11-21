@@ -24,7 +24,7 @@ console.log('-- each road vertex knows its place across the road and along it (r
   /* the page's roadRibbon over two straight roads: rd's across is each vertex's offset from the road's line, its along the distance from its start */
   const fa = html.indexOf('function roadRibbon('), fb = html.indexOf('\n}\n', fa) + 2;
   const line = (x0, z0, a, len) => ({ x0, z0, dx: Math.cos(a), dz: Math.sin(a), len });
-  const ctx = vm.createContext({ Math, ROADH: .35, hgt: () => 0, routeAt: (r, s) => ({ x: r.x0 + r.dx * s, z: r.z0 + r.dz * s, dx: r.dx, dz: r.dz }) });
+  const ctx = vm.createContext({ Math, ROADH: .35, hgt: () => 0, roadG: () => 0, S: { T: {} }, routeAt: (r, s) => ({ x: r.x0 + r.dx * s, z: r.z0 + r.dz * s, dx: r.dx, dz: r.dz }) });
   vm.runInContext(html.slice(fa, fb) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'roadRibbon.js' });
   const pos = [], idx = [], rd = [], es = [line(0, 0, 0, 300), line(1000, 500, 1.2, 180)], at = [];
   for (const e of es) { const n0 = pos.length / 3; ctx.$('roadRibbon')({ p: e }, 6, pos, idx, rd); at.push([n0, pos.length / 3, e]); }
@@ -42,7 +42,8 @@ console.log('-- each road vertex knows its place across the road and along it (r
 console.log('-- a fallen bridge still finds the roads it sinks --');
 {
   const mesh = (o) => Object.assign({ isMesh: true, userData: {}, geometry: { attributes: { position: { count: o.n || 4 } }, index: [] } }, o);
-  const ter = mesh({ n: 9, material: { vertexColors: true } }), road = mesh({ material: { isMeshLambertMaterial: true, polygonOffset: true, side: 2 }, userData: { road: 2 } });
+  const ter = mesh({ n: 9, material: { vertexColors: true }, userData: { ground: 1 } }),   // the ground is marked (cf-pol-cenario, #216)
+    road = mesh({ material: { isMeshLambertMaterial: true, polygonOffset: true, side: 2 }, userData: { road: 2 } });
   const flag = mesh({ material: { isMeshBasicMaterial: true, polygonOffset: true, side: 2 } });
   const added = [];
   const ctx = vm.createContext({ S: { T: { N: 2 } }, THREE: { BoxGeometry: class {}, Group: class {}, DoubleSide: 2 }, BR3: { roads: [], mats: {} },

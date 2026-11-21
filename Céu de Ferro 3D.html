@@ -37998,8 +37998,13 @@ function buildWorld() {
   gSup = new THREE.Group(); gEco = new THREE.Group(); gGhost = new THREE.Mesh(new THREE.BoxGeometry(BLD.size[0], BLD.size[2], BLD.size[1]), new THREE.MeshBasicMaterial({ color: 0x6fd67a, transparent: true, opacity: .34, depthWrite: false }));
   gGhost.add(new THREE.LineSegments(new THREE.EdgesGeometry(gGhost.geometry), new THREE.LineBasicMaterial({ color: 0xffffff }))); gGhost.visible = false;
   scene.add(gPlanes, gUnits, gWrecks, gDebris, gBombs, gMissiles, gFlares, gSup, gEco, gGhost); buildMen();
-  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3));
-  tracers = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: 0xffeeb0, fog: false })); tracers.frustumCulled = false; scene.add(tracers);
+  /* the rounds in flight: a streak from the round back along its path, its colour and opacity per end (tc: bright at the round, fading to
+     its tail), so that a burst reads as streaks and not as scratches of one colour (TRC) */
+  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3)); bg.setAttribute('tc', new THREE.BufferAttribute(new Float32Array(MAXB * 8), 4));
+  tracers = new THREE.LineSegments(bg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
+    vertexShader: 'attribute vec4 tc; varying vec4 vc; void main(){ vc = tc; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec4 vc; void main(){ gl_FragColor = vc; }' }));
+  tracers.frustumCulled = false; scene.add(tracers);
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
   pg.setAttribute('pc', new THREE.BufferAttribute(new Float32Array(MAXP * 4), 4));
@@ -38799,6 +38804,21 @@ function pjJoin(o, q, put) {
   for (let i = 1; i <= n; i++) { const f = i / (n + 1); put(o.x + (q.x - o.x) * f, o.y + (q.y - o.y) * f, o.z + (q.z - o.z) * f, (ao + (a - ao) * f) * .5 * kk, so + (sz - so) * f); }
   return kk;
 }
+/* the rounds' streaks (cf-pol-graficos 3): a plain round (0) faint and short, fading to nothing; one rifle round in every (a tracer, 1)
+   red-orange, longer, with a small glowing head (g of the cannon's); a cannon's or an AA gun's round (2, b.tr) as it was, its tail kept a little.
+   Picked once a round (k, a WeakMap: the sim's rounds carry nothing). len s of flight the streak is long; a and tail: the opacity at the round
+   and at its tail; c: the colours [plain, tracer, cannon, b.tr 2] */
+const TRC = { every: .25, len: [.028, .045, .05], a: [.5, 1, 1], tail: [0, .05, .25], g: .7, c: [[1, .94, .8], [1, .5, .22], [1, .93, .69], [1, .62, .3]], k: new WeakMap() };
+function trcOf(b) { let t = TRC.k.get(b); if (t === undefined) TRC.k.set(b, (t = b.tr ? 2 : Math.random() < TRC.every ? 1 : 0)); return t; }
+/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle (the eye, then l m along the aim, as manFire lets the round go),
+   within far m of the eye; its size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest */
+const MZ = { t: .06, l: 1, far: 1800, s: .45, px: 3.5 };
+function mzAt(m, now, cam) {
+  const a = now - m.shotT; if (m.dead || m.in || !(a >= 0 && a < MZ.t)) return null;
+  if (Math.abs(m.x - cam.x) > MZ.far || Math.abs(m.z - cam.z) > MZ.far) return null;
+  const f = m.f || { x: Math.cos(m.h), y: 0, z: -Math.sin(m.h) }, e = STANCE[m.st].eye * MAN.sc;
+  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, 1 - .45 * a / MZ.t];
+}
 function pjTrail(o, p, on) {
   let t = PJ.tr.get(o);
   if (!t) { t = { a: new Float32Array(PJ.n * 4), i: 0, n: 0, at: -1 }; PJ.tr.set(o, t); }
@@ -38843,20 +38863,28 @@ function syncScene(dt) {
   sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : b.o && b.o.vis ? cylX(b.o.vis[0], b.o.vis[0], b.o.vis[1], 5) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
-  let n = 0; const bp = tracers.geometry.attributes.position.array; PJ.pt.clear();
+  let n = 0; const bp = tracers.geometry.attributes.position.array, tc = tracers.geometry.attributes.tc.array; PJ.pt.clear();
   let k = 0; const pp = sparks.geometry.attributes.position.array, pc = sparks.geometry.attributes.pc.array, ps = sparks.geometry.attributes.size.array;
   const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value, TB = MAXP - MAXPR;
   for (const b of S.bullets) {
     if (n >= MAXB) break;
-    const tl = b.tr ? .05 : .028; bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); n++;
-    if (!b.tr || k >= MAXP - 1) continue;   // jet cannon and AA rounds carry a glowing head that never shrinks below a few pixels, so the stream reads from far away
-    const sz = Math.max(.4, px * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z));   // a coloured halo under a white-hot core
-    pp.set([b.x, b.y, b.z, b.x, b.y, b.z], k * 3); pc.set(b.tr === 2 ? [1, .38, .12, .75, 1, .9, .7, 1] : [1, .7, .2, .75, 1, 1, .85, 1], k * 4);
+    const t = trcOf(b), tl = TRC.len[t], C = TRC.c[t === 2 && b.tr === 2 ? 3 : t];
+    bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); tc.set([C[0], C[1], C[2], TRC.a[t], C[0], C[1], C[2], TRC.tail[t]], n * 8); n++;
+    if (!t || k >= MAXP - 1) continue;   // jet cannon and AA rounds, and a rifle's tracer, carry a glowing head that never shrinks below a few pixels, so the stream reads from far away
+    const sz = Math.max(.4, px * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z)) * (t === 1 ? TRC.g : 1);   // a coloured halo under a white-hot core
+    pp.set([b.x, b.y, b.z, b.x, b.y, b.z], k * 3); pc.set(t === 1 ? [1, .45, .18, .6, 1, .82, .62, 1] : b.tr === 2 ? [1, .38, .12, .75, 1, .9, .7, 1] : [1, .7, .2, .75, 1, 1, .85, 1], k * 4);
     ps[k++] = sz * 3.2; ps[k++] = sz;
+  }
+  for (const m of S.men) {   // a soldier's muzzle flash (mzAt): a white-hot core in an orange star, never under a few pixels, so a firefight reads from far
+    if (k >= MAXP - 1) break;
+    if (m === S.my && fp) continue;   // in first person the weapon in hand shows its own
+    const p = mzAt(m, S.t, cam); if (!p) continue;
+    const s = Math.max(MZ.s, px * MZ.px * Math.hypot(p[0] - cam.x, p[1] - cam.y, p[2] - cam.z)) * p[3];
+    pp.set([p[0], p[1], p[2], p[0], p[1], p[2]], k * 3); pc.set([1, .6, .22, .8, 1, .95, .82, 1], k * 4); ps[k++] = s * 2.8; ps[k++] = s;
   }
   for (const q of S.parts) {
     const a = q.life / q.max;
-    if (q.k === 'tr') { if (n < MAXB) { bp.set([q.x, q.y, q.z, q.x2, q.y2, q.z2], n * 6); n++; } continue; }
+    if (q.k === 'tr') { if (n < MAXB) { bp.set([q.x, q.y, q.z, q.x2, q.y2, q.z2], n * 6); tc.set([1, .93, .69, .9, 1, .93, .69, .35], n * 8); n++; } continue; }
     if (k >= MAXP) break;
     pp.set([q.x, q.y, q.z], k * 3);
     if (q.k === 'smoke') {   // a puff left by something on the move (q.e) is joined to the one before it from the same source (pjJoin)
@@ -38909,7 +38937,7 @@ function syncScene(dt) {
       pc.set([.74 + h3 * .1, .75 + h3 * .1, .73 + h3 * .1, a * .96], k * 4); ps[k++] = (27 + 13 * h1) * grow * SR / SMOKE.r;
     }
   }
-  tracers.geometry.setDrawRange(0, n * 2); tracers.geometry.attributes.position.needsUpdate = true;
+  tracers.geometry.setDrawRange(0, n * 2); tracers.geometry.attributes.position.needsUpdate = tracers.geometry.attributes.tc.needsUpdate = true;
   const ga = sparks.geometry; ga.setDrawRange(0, k); ga.attributes.position.needsUpdate = ga.attributes.pc.needsUpdate = ga.attributes.size.needsUpdate = true;
   pshFrame();
 }

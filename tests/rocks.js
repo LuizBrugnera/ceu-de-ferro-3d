@@ -2,7 +2,7 @@
 /* the rocks (ROCKS, rockGeo; cf-pol-modelos): each boulder is the old dodecahedron with its corners pushed in or out, and stays whole and in
    the old one's box: every copy of a corner (the geometry repeats it on each face it closes) goes to the same place, so no face parts from
    its neighbour and no crack shows the sky through a rock; as wide as before, its top as high, its foot as far under the ground; no corner
-   and no face more; and the boulders differ. The 3D part is not loaded by the harness: the block runs here with a dodecahedron of its own,
+   and no face more; and, if there are several, the boulders differ. The 3D part is not loaded by the harness: the block runs here with a dodecahedron of its own,
    built as three.js builds it (its corners, its faces, each corner copied on each face) */
 const fs = require('fs'), vm = require('vm'), H = require('./harness'), { ok, done } = H;
 const html = fs.readFileSync(H.PAGE, 'utf8'), a = html.indexOf('const ROCKS = '), b = html.indexOf('function buildWorld()', a);
@@ -33,5 +33,5 @@ for (let k = 0; k < ROCKS.n; k++) {
   ok(Math.abs(w - 1) < 1e-4 && Math.abs(d - 1) < 1e-4 && Math.abs(B.max.y - ROCKS.top) < 1e-4 && Math.abs(B.min.y + ROCKS.bot) < 1e-4 && Math.abs(B.min.x + B.max.x) < 1e-4 && Math.abs(B.min.z + B.max.z) < 1e-4, '  in the old box: as wide (' + w.toFixed(3) + ', ' + d.toFixed(3) + '), its top at ' + B.max.y.toFixed(2) + ', its foot ' + (-B.min.y).toFixed(2) + ' under the ground, on its middle');
   shapes.push(Array.from(Object.values(at)).map(p => p.map(v => v.toFixed(3)).join()).join('|'));
 }
-ok(new Set(shapes).size === ROCKS.n, 'the ' + ROCKS.n + ' boulders all differ');
+ok(ROCKS.n >= 1 && new Set(shapes).size === ROCKS.n, ROCKS.n > 1 ? 'the ' + ROCKS.n + ' boulders all differ' : 'one boulder for every rock (each with its own turn, width and height)');
 done();

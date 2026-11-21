@@ -1,5 +1,8 @@
 # cf-pol-modelos: cabines dos aviões e sombra no carrossel do hangar (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): não testado aqui
+- Não coube nesta rodada: nenhuma cabine de avião foi vista por dentro. O carrossel do hangar (com a sombra) foi visto nos lotes 2 a 5 em 1280 e 1920 px.
+
 ## O que mudou
 
 - **Cabine dos aviões feitos pelos números** (`CANOPY`, no embrulho do `buildPlane`):

@@ -7744,6 +7744,7 @@ function damagePlane(p, dmg, by, rx, h) {
   hitMine(p, dmg, by);
   note(p, dmg, by, h);
   if (relayed(p, dmg, by, rx, h)) return;
+  hurtMine(p, dmg, h);
   p.hitT = S.t; if (by) p.lastBy = by; puff(p.x, p.y, p.z, 'spark', .5);
   lose(p, wound(p, dmg, by, h), by);
 }
@@ -7803,12 +7804,16 @@ function killUnit(u, det) {
   if (det && u.def.t) S.debris.push({ k: 'tur', u, x: u.x, y: u.y + u.def.mh, z: u.z, vx: rand(-5, 5), vy: rand(10, 15), vz: rand(-5, 5), q: yawQ(u.h + u.ty), w: { x: rand(-3, 3), y: rand(-1, 1), z: rand(-3, 3) }, drag: 0, h: 2.2, life: 30 });
   const w = { u, life: 45, det: !!det }; S.wrecks.push(w); wreckObj(w); if (S.wrecks.length > 24) dropObj(S.wrecks.shift().o);
 }
+/* a hit on the player's own vehicle, aircraft or soldier, once the damage is his (after relayed): heard on the hull or the body (fx.hurt; cf-pol-armas) */
+const hurtMine = (o, dmg, h) => { if (o.me && (dmg > 0 || h)) fx.hurt(o, dmg, h); };
+if (!fx.hurt) fx.hurt = () => {};
 function damageUnit(u, dmg, by, rx, h) {
   if (u.dead || u.inv > 0) return;
   hitMine(u, dmg, by);
   if (u.occ) paxHit(u, dmg, by, rx, h);
   note(u, dmg, by, h);
   if (relayed(u, dmg, by, rx, h)) return;
+  hurtMine(u, dmg, h);
   u.hitT = S.t; if (by) u.lastBy = by; if (u.ai && by && by.team !== u.team) { u.ai.hurt = by; u.ai.hurtT = S.t; }
   if (dmg > 0) { u.fix = null; u.fixLock = S.t + DMG.repair.lock; }
   ruin(u, wound(u, dmg, by, h), by);
@@ -7922,6 +7927,7 @@ function strike(o, k, dmg, by, x, y, z, dx, dy, dz, ap) {
   if (k === HK.shell && FC < A.rico) {
     for (let i = 0; i < 4; i++) puff(x, y, z, 'spark', 1.5, rand(-9, 9), rand(2, 12), rand(-9, 9));
     if (by && by.me && !(o.inv > 0)) S.floats.push({ x: o.x, y: o.y + 9, z: o.z, text: 'ricochete', life: 1.4 });
+    if (o.me && !(o.inv > 0)) fx.hurt(o, 0, { k, ric: 1 });   // the plate rings on the player's own hull
     return null;
   }
   const m = A.face[f3] * (A.ang + (1 - A.ang) * FC) * (k !== HK.bullet ? 1 : ap < 0 ? A.sa : o.kind === 'tank' ? ap : 1), P = DMG.pen;
@@ -9902,6 +9908,7 @@ function damageMan(m, dmg, by, rx, h) {
   hitMine(m, dmg, by);
   if (by && by.me && h && dmg > 0 && !(S.t - m.nT < DMG.note)) { m.nT = S.t; S.floats.push({ x: m.x, y: m.y + 4, z: m.z, text: ZONE[h.pt] || ZONE[0], life: 1 }); }
   if (relayed(m, dmg, by, rx, h)) return;
+  hurtMine(m, dmg, h);
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
   if (h && h.pt === 2) m.wl += dmg; else if (h && h.pt === 3) m.wa += dmg;
   if (h && dmg > 0) m.bl = Math.min(DMG.man.cap, (m.bl || 0) + dmg * DMG.man.bleed[h.pt & 3]);
@@ -9940,6 +9947,9 @@ function manLock(m, a) {
   if (t !== a.lock) { a.lock = t; a.lockT = S.t + w.lockT; }
   return t && S.t >= a.lockT && !(dist(t, m) < w.min) ? t : null;
 }
+/* tracers (cf-pol-armas): a squad machine gun's belt carries one every lmg rounds, drawn with the glowing head of a vehicle's (b.tr); a
+   rifle's carry none. A count on the arm (a.tn), no dice: the battle is the same */
+const TRC = { lmg: 4 };
 function manFire(m, a) {
   const w = a.d, c = m.ctl, e = manEye(m), f = m.f, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
   if (w.k) {
@@ -9953,8 +9963,8 @@ function manFire(m, a) {
   }
   if (w.snp) return snipe(m, a);
   const s = (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) + c.sp) * (m.sup > S.t ? SUP.sp : 1);
-  a.mag--; a.cool = w.rate; a.t = m.shotT = S.t;
-  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
+  a.mag--; a.cool = w.rate; a.t = m.shotT = S.t; a.tn = (a.tn || 0) + 1;
+  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: w.lmg && a.tn % TRC.lmg === 0 ? 1 : 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
   fx.shot(m === S.my, m, w);
 }
 /* a hand grenade (k 1) or a smoke grenade (2), thrown along the aim and a little up */
@@ -39312,7 +39322,7 @@ function updateCamera(dt) {
   camSt.sens = seat && p.kind ? seat.fov[zoomOf(seat)] / 58 : 1;
   if (p.man) {   // on foot: over the right shoulder, or from the eye; sighting narrows the view. A step bobs it and a shot kicks it
     const a = S.aim && p === S.my ? S.aim.d : p.f, e = manEye(p), h = Math.atan2(-a.z, a.x), sp = Math.min(1, Math.hypot(p.v.x, p.v.z) / 2.5), ts = S.t - p.shotT;
-    const bob = seat ? Math.sin(p.step * 2.3) * .045 * sp * calm : 0, kick = ts < .15 ? (1 - ts / .15) * (p.arms[p.w].d.k ? .03 : .007) * calm : 0;
+    const bob = seat ? Math.sin(p.step * 2.3) * .045 * sp * calm : 0, kick = ts < .15 ? (1 - ts / .15) * (p.arms[p.w].d.k ? .03 : .007 * vmKick(p.arms[p.w].d, 'rifle')) * calm : 0;
     camSt.ak = (camSt.ak || 0) + ((p.ctl.ads && !p.dead ? 1 : 0) - (camSt.ak || 0)) * Math.min(1, dt * 12);
     camera.up.set(0, 1, 0);
     if (p.dead) camera.lookAt(p.x, p.y + .4, p.z);
@@ -41555,12 +41565,17 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
    falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
    the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
-   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed) */
+   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed). near: the
+   others heard (sndNear): the n nearest ground vehicles on the move within r m, each an engine through the same gears at vol, half at
+   ref m and duller away, a tracked hull's knocks within trk m; the n nearest aircraft within r m (a helicopter has its own, fx.rotor), a
+   jet's roar or a propeller's drone by its throttle, half at ref m, pitched by dop of its Doppler shift (within fac): a fly-by drops as it
+   passes. Each voice keeps whom it hears while that one stays among the nearest */
 const SND = {
   c: 343, ref: 80, air: 700, far: 2500,
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  near: { veh: { n: 3, r: 450, ref: 30, trk: 120, vol: .7 }, air: { n: 2, r: 3000, ref: 300, vol: .9 }, dop: .6, fac: [.6, 1.6] },
   veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
     sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
@@ -41683,6 +41698,55 @@ function sndCrack(P, dt) {
 }
 /* a ground vehicle's own sound (SND.veh), each frame; P null: the engine and the servo fall quiet. A.eng: a sawtooth and a square an octave
    under it through a low-pass, made on first use; A.vty: the turret's angle the frame before */
+/* the revs of a ground vehicle at its speed, through SND.veh's gears: 0 to 1, climbing in each gear and falling at the shift */
+function sndRpm(u) {
+  const V = SND.veh, k = clamp(Math.abs(u.sp || 0) / ((u.def && u.def.spd) || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
+  return Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w);
+}
+/* the others heard (SND.near), each frame; P null: all quiet. A.nv: the ground voices, A.na: the aircraft's, each { o, o2 | n, lp, g, u, trk } */
+function sndNear(P, dt, set, now) {
+  const N = SND.near, c = A.ctx, E = S.ear;
+  if (!A.nv) {
+    if (!P) return;
+    const voice = air => {
+      const g = c.createGain(), lp = c.createBiquadFilter(), o = c.createOscillator(), v = { g, lp, o, u: null, trk: 0 };
+      lp.type = 'lowpass'; g.gain.value = 0; o.connect(lp); lp.connect(g); g.connect(A.master); o.start();
+      if (air) { o.type = 'sawtooth'; const n = c.createBufferSource(), bp = c.createBiquadFilter(), ng = c.createGain(); n.buffer = A.noise; n.loop = true; bp.type = 'bandpass'; bp.Q.value = .7; ng.gain.value = 0; n.connect(bp); bp.connect(ng); ng.connect(g); n.start(); Object.assign(v, { bp, ng }); }
+      else { o.type = 'sawtooth'; const o2 = c.createOscillator(); o2.type = 'square'; o2.connect(lp); o2.start(); v.o2 = o2; }
+      return v;
+    };
+    A.nv = []; for (let i = 0; i < N.veh.n; i++) A.nv.push(voice(false));
+    A.na = []; for (let i = 0; i < N.air.n; i++) A.na.push(voice(true));
+  }
+  /* the nearest list of L within r of the ear that ok lets in, handed to the voices: one already on a wanted one keeps it */
+  const hand = (vs, L, r, ok) => {
+    const W = [];
+    if (P) for (const u of L) { if (u === P || u.dead || u.gone || !ok(u)) continue; const d = Math.hypot(u.x - E.x, u.y - E.y, u.z - E.z); if (d < r) W.push([d, u]); }
+    W.sort((a, b) => a[0] - b[0]); W.length = Math.min(W.length, vs.length);
+    const want = new Map(W.map(([d, u]) => [u, d]));
+    for (const v of vs) if (!want.has(v.u)) v.u = null;
+    for (const [, u] of W) if (!vs.some(v => v.u === u)) { const v = vs.find(q => !q.u); v.u = u; v.trk = 0; }
+    return want;
+  };
+  const V = SND.veh, wv = hand(A.nv, S.units || [], N.veh.r, u => u.def && Math.abs(u.sp || 0) > .3);
+  for (const v of A.nv) {
+    const u = v.u; if (!u) { set(v.g, 0); continue; }
+    const d = wv.get(u), at = sndAt(d, N.veh.ref) * (1 - d / N.veh.r), rpm = sndRpm(u), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+    v.o.frequency.setTargetAtTime(f, now, .06); v.o2.frequency.setTargetAtTime(f / 2, now, .06); v.lp.frequency.setTargetAtTime(sndCut(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, d, SND.air, 90), now, .08);
+    set(v.g, N.veh.vol * (V.g[0] + V.g[1] * rpm) * at);
+    const sp = Math.abs(u.sp || 0), T = V.trk;
+    if (d < N.veh.trk && hullTracked(u)) { v.trk += dt * Math.min(T.max, sp * T.hz); if (v.trk >= 1) { v.trk %= 1; burst(.025, T.vol * Math.min(1, sp / 4) * at, sndCut(T.f, d, SND.air, 200) * (.85 + Math.random() * .3), 'bandpass', 0, 2); } }
+  }
+  const wa = hand(A.na, S.planes || [], N.air.r, u => !u.heli && u.def && !(u.y - hgt(u.x, u.z) < 2 && (u.V || 0) < 5));   // a helicopter is heard by fx.rotor; a plane parked on the field is quiet
+  for (const v of A.na) {
+    const u = v.u; if (!u) { set(v.g, 0); continue; }
+    const d = Math.max(1, wa.get(u)), at = sndAt(d, N.air.ref) * (1 - d / N.air.r), th = u.ctl ? clamp(u.ctl.thr || 0, 0, 1) : .7, kv = clamp((u.V || 0) / (u.def.vmax || 200), 0, 1.3);
+    const vr = u.v ? -((u.x - E.x) * u.v.x + (u.y - E.y) * u.v.y + (u.z - E.z) * u.v.z) / d * ASPD : 0, fac = clamp(SND.c / Math.max(1, SND.c - vr * N.dop), N.fac[0], N.fac[1]);
+    if (u.def.prop) { v.o.frequency.setTargetAtTime((52 + th * 38 + kv * 26) * fac, now, .1); v.ng.gain.setTargetAtTime(.25, now, .1); v.bp.frequency.setTargetAtTime((300 + kv * 500) * fac, now, .1); set(v.g, N.air.vol * (.03 + th * .03) * at); }
+    else { v.o.frequency.setTargetAtTime(40 * fac, now, .1); v.ng.gain.setTargetAtTime(1, now, .1); v.bp.frequency.setTargetAtTime((450 + th * 700 + kv * 500) * fac, now, .1); set(v.g, N.air.vol * (.05 + th * .08) * at); }
+    v.lp.frequency.setTargetAtTime(sndCut(u.def.prop ? 1400 : 3000, d, SND.air, 150), now, .1);
+  }
+}
 function sndVeh(P, dt, set, now) {
   const V = SND.veh, c = A.ctx;
   if (!A.eng) {
@@ -41693,8 +41757,7 @@ function sndVeh(P, dt, set, now) {
     A.eng = { o, o2, lp, g }; A.tur = { o: t, g: tg }; A.trk = 0; A.vty = null;
   }
   if (!P) { set(A.eng.g, 0); set(A.tur.g, 0); A.vty = null; return; }
-  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
-  const rpm = Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), rpm = sndRpm(P), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
   A.eng.o.frequency.setTargetAtTime(f, now, .06); A.eng.o2.frequency.setTargetAtTime(f / 2, now, .06); A.eng.lp.frequency.setTargetAtTime(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, now, .08);
   set(A.eng.g, V.g[0] + V.g[1] * rpm + V.g[2] * th);
   set(A.jet.g, V.road.g[0] + V.road.g[1] * k); A.jet.bp.frequency.setTargetAtTime(V.road.f[0] + (V.road.f[1] - V.road.f[0]) * k, now, .1);
@@ -41708,6 +41771,7 @@ function audioTick(dt) {
   const P = S.my, live = playMode === 'play' && !paused && P && !P.dead && !S.over, now = A.ctx.currentTime;
   const set = (g, v) => g.gain.setTargetAtTime(v, now, .08);
   if (!live || !P.kind || P.man) sndVeh(null, dt, set, now);   // the engine and the servo quiet off a vehicle (a soldier's kind is inf)
+  sndNear(live && A.on ? P : null, dt, set, now);
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
   if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
@@ -41722,6 +41786,30 @@ function audioTick(dt) {
     o.type = 'square'; o.frequency.value = ml ? ((A.tr ^= 1) ? 1800 : 1250) : tone ? 820 : 1350; g.gain.value = .05; o.connect(g); g.connect(A.master); o.start(now); o.stop(now + .07);
   }
 }
+
+/* ---------- hits on the player, heard (HURT, cf-pol-armas) ----------
+   A round or a burst that lands on the player's own vehicle, aircraft or soldier (fx.hurt: from damageUnit, damagePlane and damageMan once
+   the damage is his, and from strike when a shell glances off his hull) is heard there, where until now only the view shook: armour that
+   stops it rings (a struck plate: a tone falling from ping[0] to ping[1] Hz, with a clank), one that goes in crunches (a low thud under a
+   harsh burst), a reactive plate bangs, a burst outside thuds, a round on a soft skin (an aircraft's, a truck's) or off a tank's plate
+   ticks, and a soldier hit hears a dull thud in his body. Louder with the damage (k, over a share of the hull), at most one every gap s */
+const HURT = { gap: .05, ping: [2600, 1500], vol: { ring: .14, pen: .26, era: .3, blast: .16, skin: .07, body: .14 }, k: [.5, 1.4], share: .15 };
+const hurtKind = (o, h) => (o.man ? 'body' : !h ? 'skin' : h.ric || h.res === 1 ? 'ring' : h.res === 0 || h.res === 2 ? 'pen' : h.res === 3 ? 'era' : h.k === HK.blast ? 'blast' : 'skin');
+fx.hurt = (o, dmg, h) => {
+  if (!A.ctx || !A.on || playMode !== 'play') return;
+  const c = A.ctx, now = c.currentTime; if (now - (A.hT === undefined ? -9 : A.hT) < HURT.gap) return; A.hT = now;
+  const K = hurtKind(o, h), V = HURT.vol[K], k = clamp(.5 + (dmg || 0) / ((o.max || (o.def && o.def.hp) || 100) * HURT.share), HURT.k[0], HURT.k[1]);
+  if (K === 'body') { thump(85, .14, V * k, now); burst(.06, V * .6 * k, 500, 'lowpass', now); }
+  else if (K === 'ring') {
+    const o2 = c.createOscillator(), g = c.createGain(); o2.type = 'sine'; o2.frequency.setValueAtTime(HURT.ping[0], now); o2.frequency.exponentialRampToValueAtTime(HURT.ping[1], now + .3);
+    g.gain.setValueAtTime(V, now); g.gain.exponentialRampToValueAtTime(.001, now + .35); o2.connect(g); g.connect(A.master); o2.start(now); o2.stop(now + .4);
+    burst(.05, V * .8, 1800, 'bandpass', now, 5);
+  }
+  else if (K === 'pen') { thump(60, .4, V * k, now); burst(.3, V * .8 * k, 1100, 'lowpass', now); }
+  else if (K === 'era') { burst(.35, V, 700, 'lowpass', now); thump(50, .3, V * .6, now); }
+  else if (K === 'blast') { thump(55, .3, V * k, now); burst(.2, V * .5 * k, 400, 'lowpass', now); }
+  else burst(.025, V * k, 3200, 'bandpass', now, 3);
+};
 
 /* ---------- interface ---------- */
 let matchLen = CQ.def, playMode = 'demo', paused = false, era = 'modern', overShown = false, invertY = false, ready = false, ctrl = 'mouse', cls = 'plane';
@@ -47164,8 +47252,9 @@ function vmBuild(pk) {
   hb(0, -.035, 0); vmLimb(R, [-.03, -.05, .02], [-.3, -.21, .13], .075, sleeve); vmLimb(R, [-.3, -.21, .13], [-.6, -.36, .32], .085, sleeve);
   hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
   if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
-    const f = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    const f = new THREE.Sprite(vmFlashMat());
     f.position.set(V.mz[0], V.mz[1], V.mz[2] || 0); f.visible = false; turn.add(f); V.flash = f;
+    const ej = new THREE.Object3D(); ej.position.set(clamp(.12 * L, .04, .16), B.min.y + .8 * (B.max.y - B.min.y), B.max.z); turn.add(ej); V.ej = ej;   // the ejection port: a little ahead of the grip, high on the right
   }
   /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
   const ads = VMP[pk.cls][1].slice();
@@ -47182,12 +47271,62 @@ function vmGet(pk) {
   if (V) VM.M.set(pk.key, V);
   return V;
 }
+/* ---------- the weapon's shot, seen (cf-pol-armas): the flash, the brass and the kick ----------
+   The muzzle flash is a star of spikes round a white-hot core fading to nothing, drawn once on a canvas (vmFlashMat): without a map the
+   sprite drew its whole square, a pale card in front of the muzzle on every shot. A spent case flies out of the ejection port to the
+   right on each shot (vmEjectAt: at once; a bolt rifle's when its bolt is worked, VMC.bolt s after; never a launcher's or the mortar's),
+   up and back, spinning, falls out of the view and is gone in VMC.life s, at most VMC.n in the air. The kick of a rifle grows with its
+   round (vmKick: the damage over VMC.kd, within VMC.kick), and each shot throws it a little to one side and rolls it (VM.kx, VM.kz: drawn
+   anew each shot), so automatic fire does not move like one picture */
+const VMC = { n: 6, life: .6, g: 9.8, v: [1.5, 1.3, .35], jit: .35, bolt: .45, len: { rifle: .024, pistol: .014 }, kd: 8, kick: [.8, 1.8] };
+function vmFlashMat() {
+  if (!VM.ftex) {
+    const c = document.createElement('canvas'), N = 64, h = N / 2, g = c.getContext('2d'); c.width = c.height = N;
+    const grad = r => { const q = g.createRadialGradient(h, h, 0, h, h, r); q.addColorStop(0, 'rgba(255,255,236,1)'); q.addColorStop(.3, 'rgba(255,214,128,.9)'); q.addColorStop(.65, 'rgba(255,150,40,.35)'); q.addColorStop(1, 'rgba(255,120,20,0)'); return q; };
+    g.fillStyle = grad(h * .55); g.fillRect(0, 0, N, N);   // the glow
+    g.fillStyle = grad(h); g.beginPath();
+    for (let i = 0; i < 14; i++) { const a = i * Math.PI / 7 + .2, r = (i % 2 ? .2 : i % 4 ? .78 : 1) * h; g.lineTo(h + Math.cos(a) * r, h + Math.sin(a) * r); }   // seven spikes, long and short
+    g.closePath(); g.fill();
+    VM.ftex = new THREE.CanvasTexture(c);
+  }
+  return new THREE.SpriteMaterial({ map: VM.ftex, color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+}
+/* s after a shot that its case comes out, or -1: none */
+const vmEjectAt = (d, cls) => (!d || d.k || (cls !== 'rifle' && cls !== 'pistol') ? -1 : !d.auto && d.rate >= 1.2 ? VMC.bolt : 0);
+const vmKick = (d, cls) => (cls === 'rifle' && d && d.dmg ? clamp(d.dmg / VMC.kd, VMC.kick[0], VMC.kick[1]) : 1);
+/* a case in the air: p, v in the eye's frame (m, m/s), t s since it left; false once it is gone */
+function vmCasStep(c, dt) { c.t += dt; c.v[1] -= VMC.g * dt; c.p[0] += c.v[0] * dt; c.p[1] += c.v[1] * dt; c.p[2] += c.v[2] * dt; return c.t < VMC.life; }
+/* a new shot of the weapon in hand (a, the one seen the frame before): the kick's throw for it, and when its case comes out (VM.ej, S.t) */
+function vmShot(a, d, cls) {
+  const shot = VM.la === a && a.t !== VM.lt && a.t > 0; VM.la = a; VM.lt = a.t;
+  if (!shot) return;
+  VM.kx = Math.random() * 2 - 1; VM.kz = Math.random() * 2 - 1;
+  const e = vmEjectAt(d, cls); if (e >= 0) VM.ej = a.t + e;
+}
+/* the cases: one out of the port when its time comes, the others on their way; off: all gone (the weapon not drawn) */
+function vmCas(V, dt, off) {
+  const L = VM.cas || (VM.cas = []);
+  if (off || reduced) { for (const c of L) { c.t = VMC.life; c.m.visible = false; } VM.ej = 0; return; }
+  if (VM.ej && S.t >= VM.ej && V.ej) {
+    VM.ej = 0;
+    let c = L.find(q => q.t >= VMC.life);
+    if (!c && L.length < VMC.n) { if (!VM.casG) { VM.casG = new THREE.CylinderGeometry(.0045, .0045, 1, 6); VM.casG.userData.keep = true; VM.casM = mat(0xb5913f, { flatShading: false }); } c = { m: new THREE.Mesh(VM.casG, VM.casM), p: [0, 0, 0], v: [0, 0, 0], t: 0, w: [0, 0] }; VM.sc.add(c.m); L.push(c); }
+    if (!c) c = L.reduce((x, y) => (y.t > x.t ? y : x));
+    V.root.updateMatrixWorld(true); const w = V.ej.getWorldPosition(new THREE.Vector3()), J = VMC.jit;
+    c.p = [w.x, w.y, w.z]; c.v = [VMC.v[0] * (1 + (Math.random() - .5) * J), VMC.v[1] * (1 + (Math.random() - .5) * J), VMC.v[2]]; c.t = 0; c.w = [rand(14, 24), rand(-8, 8)];
+    c.m.scale.set(1, V.pk.cls === 'pistol' ? VMC.len.pistol : VMC.len.rifle, 1); c.m.rotation.set(0, 0, Math.PI / 2);
+  }
+  for (const c of L) {
+    if (!(c.t < VMC.life)) { c.m.visible = false; continue; }
+    c.m.visible = vmCasStep(c, dt); c.m.position.fromArray(c.p); c.m.rotation.x += c.w[0] * dt; c.m.rotation.y += c.w[1] * dt;
+  }
+}
 /* each frame, after the world (render3d): the weapon in hand, if any */
 function vmRender() {
   const now = performance.now(), dt = Math.min(.1, (now - (VM.t || now)) / 1000), P = S.my; VM.t = now; VM.on = false; VM.f = frameId;
   for (const V of VM.M.values()) V.root.visible = false;
-  if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; return; }
-  if (scoped(P) && camSt.ak > .5) return;   // the scope is the view
+  if (!vmOk() || !P || !P.man || P.dead || P.in || S.watch || curSeat() !== SEAT.inf) { VM.ph = null; VM.la = null; if (VM.cas) vmCas(null, 0, true); return; }
+  if (scoped(P) && camSt.ak > .5) { VM.la = null; if (VM.cas) vmCas(null, 0, true); return; }   // the scope is the view
   const a = P.arms[P.w], d = a && a.d, gp = slotVm(P), pk = (gp && vmGet(gp) && gp) || vmPick(d, P.def); if (!pk) return;   // a compartment's item with a model (cf-slots-arma), else the weapon of before
   for (const o of P.arms) { const q = o !== a && vmPick(o.d, P.def); if (q && q.id) packGet(q.id); }   // the other weapon too, so a swap finds it here
   const V = vmGet(pk); if (!V) return;
@@ -47208,15 +47347,16 @@ function vmRender() {
   if (VM.ph === null) { VM.ph = h; VM.pp = pt; }
   let dh = h - VM.ph; dh -= Math.round(dh / TAU) * TAU; VM.ph = h; const dp = pt - VM.pp; VM.pp = pt;
   const e = Math.exp(-dt * 9); VM.sx = clamp(VM.sx * e + dh * .5, -.09, .09); VM.sy = clamp(VM.sy * e + dp * .5, -.07, .07);
+  vmShot(a, d, cls); const kp = vmKick(d, cls);
   const T = big ? .3 : .12, rc = ts >= 0 && ts < T ? (1 - ts / T) ** 2 * calm : 0;
   const rl = a.rl > 0 && d.rl ? Math.sin(Math.PI * clamp(1 - a.rl / d.rl, 0, 1)) ** .6 : 0, sw = S.t < P.swT ? clamp((P.swT - S.t) / MAN.swap, 0, 1) : 0;
   const hip = V.hip, ads = V.ads, lerp = (i) => hip[i] + (ads[i] - hip[i]) * k, loose = (1 - .75 * k) * calm, run = VM.rn * (1 - k);
   const bx = Math.sin(ph * 1.15) * .009 * sp * loose, by = -Math.abs(Math.sin(ph * 2.3)) * .01 * sp * loose + Math.sin(S.t * 1.6) * .0018 * (1 - k) * calm;
   const R = V.root;
-  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045) * rc);
-  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose, .35 * run + .55 * rl, 'YXZ');
-  if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .07 : .12) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
-  R.visible = true;
+  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045 * kp) * rc);
+  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055 * kp) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose + (big ? 0 : .02 * (VM.kx || 0) * rc), .35 * run + .55 * rl + (big ? 0 : .045 * (VM.kz || 0) * rc), 'YXZ');
+  if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .1 : .17) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
+  R.visible = true; vmCas(V, dt);
   /* drawn over the world: its own camera and field of view, the depth cleared */
   const C = VM.cam, asp = cw / Math.max(1, ch); if (C.aspect !== asp) { C.aspect = asp; C.updateProjectionMatrix(); }
   const ac = renderer.autoClear; renderer.autoClear = false; renderer.clearDepth(); renderer.render(VM.sc, C); renderer.autoClear = ac;

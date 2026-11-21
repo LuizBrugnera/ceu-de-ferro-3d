@@ -1,5 +1,5 @@
 'use strict';
-/* the sound (SND, cf-pol-armas): a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
+/* the sound (SND, cf-pol-armas): the others heard (the nearest vehicles and aircraft, by distance, with the Doppler of a fly-by), a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
    AI's (one AI shot 55 ms before took the player's), the launches by distance (one across the map was as loud as one beside the ear), the
    bursts late and dull far away, the compressor on the master, the soldier's hands (reload, bolt, empty click, swap) and the crack of a
    foe's round passing the head. The block lives in the 3D part of the page, which the harness does not load: it runs here on its own over a
@@ -30,7 +30,7 @@ function load() {
     console, Math, S, fx, playMode: 'play', paused: false, reduced: false, HOW: { hear: 2500 }, TAU: Math.PI * 2,
     window: { AudioContext: function () { return AC(); } },
     clamp: (v, lo, hi) => Math.min(hi, Math.max(lo, v)), dist: (p, q) => Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z),
-    calOf: sim.$('calOf'), manEye: sim.$('manEye'), hullTracked: sim.$('hullTracked'), wrap: sim.$('wrap')
+    calOf: sim.$('calOf'), manEye: sim.$('manEye'), hullTracked: sim.$('hullTracked'), wrap: sim.$('wrap'), hgt: () => 0, ASPD: 1.5
   });
   vm.runInContext(html.slice(a, b) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'sound.js' });
   ctx.$('audioInit')();
@@ -163,5 +163,34 @@ console.log('-- a ground vehicle: the engine through its gears, the tracks, the 
   tick(1 / 60); ok(last(A.tur.g.gain) === 0, '  the turret still: quiet');
   S.my = { man: 1, kind: 'inf', def: {}, x: 0, y: 0, z: 0, st: 0, team: 0, arms: [{ d: SARMS.m4, mag: 30, res: 3, rl: 0, t: -9 }], w: 0, swT: 0, ctl: { fire: false } }; tick(1 / 60);
   ok(last(A.eng.g.gain) === 0 && last(A.tur.g.gain) === 0, 'out of the tank, on foot: the engine and the servo fall quiet');
+}
+console.log('-- the others heard: the nearest vehicles and aircraft --');
+{
+  const { $, S, C, A } = load(), tick = $('audioTick'), N = $('SND').near, last = p => { const e = p.ev.filter(x => x[0] === 'tgt'); return e.length ? e[e.length - 1][1] : p.value; };
+  sim.watch('modern', { len: 0 });
+  const tank = (x, sp) => { const u = sim.addVehicle('tank', 'abrams', 1, x, 0, 0); u.x = x; u.y = 2; u.z = 0; u.sp = sp; return u; };
+  const me = tank(5, 0), t20 = tank(20, 6), t50 = tank(50, 6), t100 = tank(100, 6), t300 = tank(300, 6), t600 = tank(600, 6), parked = tank(10, 0);
+  S.my = me; me.dead = false; me.ctl.drive = 0; S.units = [me, t20, t50, t100, t300, t600, parked]; S.planes = [];
+  tick(1 / 60);
+  const on = () => A.nv.filter(v => v.u).map(v => v.u), g = u => last(A.nv.find(v => v.u === u).g.gain);
+  ok(A.nv.length === N.veh.n && on().length === 3 && [t20, t50, t100].every(u => on().includes(u)), 'six tanks round the ear: the three nearest on the move are heard (20, 50, 100 m), not the parked one at 10 m, not the player\'s own, not the one at 600 m');
+  ok(g(t20) > g(t50) && g(t50) > g(t100) && g(t100) > 0, '  quieter with distance: ' + [t20, t50, t100].map(u => g(u).toFixed(4)).join(', '));
+  const v20 = A.nv.find(v => v.u === t20), v50 = A.nv.find(v => v.u === t50), v100 = A.nv.find(v => v.u === t100);
+  t300.x = 15; tick(1 / 60);
+  ok(v20.u === t20 && v50.u === t50 && v100.u === t300, 'the one at 300 m drives up to 15 m: it takes the voice of the farthest (100 m); the others keep theirs');
+  const n = () => C.nodes.filter(x => x.kind === 'src' && !x.loop && x.t0 !== undefined).length;
+  let k = n(); for (let i = 0; i < 60; i++) tick(1 / 60); const near = n() - k;
+  t20.x = 200; t50.x = 250; t300.x = 300; t100.x = 350; k = n(); for (let i = 0; i < 60; i++) tick(1 / 60); const far = n() - k;
+  ok(near >= 15 && far === 0, 'the tracks of the near ones knock (' + near + ' in a second at 15 to 50 m), none past ' + N.veh.trk + ' m');
+  console.log('   aircraft');
+  const jet = (x, vx, o) => Object.assign({ x, y: 300, z: 0, v: { x: vx, y: 0, z: 0 }, V: Math.abs(vx), def: { vmax: 300 }, ctl: { thr: 1 } }, o);
+  const app = jet(800, -200), rec = jet(-800, -200), heli = jet(100, 0, { heli: 1 }), far2 = jet(4000, -200), park = jet(60, 0, { y: 0, V: 0 });
+  S.units = [me]; S.planes = [heli, park, app, rec, far2]; tick(1 / 60);
+  const ap = A.na.find(v => v.u === app), rc = A.na.find(v => v.u === rec);
+  ok(ap && rc && !A.na.some(v => v.u === heli || v.u === park || v.u === far2), 'two jets at 800 m are heard; not the helicopter (its own rotor), not a plane parked on the field, not one at 4 km');
+  ok(last(ap.bp.frequency) > last(rc.bp.frequency) * 1.8, '  the one closing in pitched up, the one going away down (' + Math.round(last(ap.bp.frequency)) + ' against ' + Math.round(last(rc.bp.frequency)) + ' Hz): the drop of a fly-by');
+  ok(last(ap.g.gain) > 0 && Math.abs(last(ap.g.gain) - last(rc.g.gain)) < 1e-9, '  the same distance, the same loudness');
+  S.my = null; tick(1 / 60);
+  ok(A.nv.concat(A.na).every(v => !v.u && last(v.g.gain) === 0), 'no one to hear (the hangar, dead, the end): every voice quiet');
 }
 done();

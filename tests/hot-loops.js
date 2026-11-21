@@ -31,7 +31,7 @@ console.log('-- the index form visits what for...of visits --');
 
 console.log('-- the hot functions keep it --');
 {
-  const src = fs.readFileSync(H.PAGE, 'utf8'), hot = ['spotSd', 'spotRun', 'stepShots', 'fortStep', 'fortMen', 'supStep', 'ranOver', 'popUse', 'droneTouch', 'lodTier', 'foeIn', 'step', 'civLook', 'navAt'];
+  const src = fs.readFileSync(H.PAGE, 'utf8'), hot = ['spotSd', 'spotRun', 'stepShots', 'fortStep', 'fortMen', 'supStep', 'ranOver', 'popUse', 'droneTouch', 'lodTier', 'foeIn', 'step', 'civLook', 'navAt', 'near', 'navPath', 'stepMan', 'wayTo'];
   const body = n => { const m = new RegExp('\\nfunction\\*? *' + n + '\\(').exec(src); if (!m) return null; const a = m.index + 1, e = src.slice(a).search(/\n(function|const|let|\/\*|[A-Za-z]\w* = )/); return src.slice(a, a + 1 + e); };
   const lists = 'units|men|planes|bullets|bombs|missiles|shells|flares|forts|sup|squads|wrecks|parts|floats|feed|falls|debris|civs|chg|base|T\\.objs';
   for (const n of hot) {

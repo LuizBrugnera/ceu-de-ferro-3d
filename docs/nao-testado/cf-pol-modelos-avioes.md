@@ -1,5 +1,9 @@
 # cf-pol-modelos: hélices que giram e insígnias nos aviões e helicópteros (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): parte
+- Hangar pelos botões, 1944, aba Avião: o Stuka com o disco da hélice e as insígnias nas asas e no casco, e os outros no carrossel. Nenhum erro.
+- **Continua sem teste:** a hélice parando no avião abatido, a asa cortada com a insígnia, a cabine com as pás.
+
 ## O que mudou
 
 Nos aviões feitos pelos números (todos menos o F-22 e o A-10, que têm modelo com textura), bloco depois do da antiaérea:

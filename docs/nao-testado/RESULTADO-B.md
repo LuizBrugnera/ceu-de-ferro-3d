@@ -79,3 +79,23 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
 - O socorro de outra esquadra ao ouvir "Médico!" não acontece (`brain-medico` (b), 0/6).
 - `CEREBRO: defesa` (`dfpTkGo`) quebra a checagem de honestidade do P7.
 - O serviço de posição (P2) custa 2,46 ms por consulta no navegador (meta 0,15 ms).
+
+### Lote 3, depois do PR #182
+- `brain-drills`: **2 falhas**, as duas "um ferido, socorrido": o caído é contado, mas socorrido 0. Combina com o `brain-medico` (b).
+  As granadas (100%), a sucessão do líder (2,3 s) e o contato passam. `brain`: 7 ok, 1 falha de custo (o relógio do cérebro custa 0,51 ms por
+  passo com 36 esquadras, limite 0,1 ms; a máquina estava cheia).
+
+## Lote 4 (cf-pol-modelos-arma-1p … cf-popk-medidor)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-pol-modelos-arma-1p | **conserto**: o pente de 5 balas solto do modelo do Kar98 flutuava ao lado do fuzil (Schütze, Sniper), e a luneta do Sniper de 1944 ficava 7 cm acima e 3,4 cm ao lado. `tests/pack-cut.js`. |
+| cf-pol-modelos-artilharia | ok (parte): os modelos no hangar e na partida; torre girada sem cruzar a cabine; a salva do Grad com 34 foguetes no ar. |
+| cf-pol-modelos-avioes | parte: hélice em disco e insígnias no hangar de 1944. |
+| cf-pol-modelos-cores-pack | ok (parte): `pack-colors` passa; o Sherman com lagartas em aço escuro. |
+| cf-pol-modelos-esteiras | parte: as rodas de rodagem giram numa partida. |
+| cf-pol-modelos-moitas | parte: o mato rasteiro novo visto de perto numa partida. |
+| cf-pol-modelos-rodas | ok (parte): 12 de 12 veículos andando giram as rodas pela distância. |
+| cf-pontes-construir | parte: um pontão num trecho do rio, pronto, tracejado no mapa e na cena. |
+| cf-pontes-qualquer-lugar | ok (parte): a ponte nova pronta, contínua no mapa, com lajes, pilares e parapeitos na cena. |
+| cf-popk-medidor | ok (parte): em sobrecarga, o teto desce 10% a cada 10 s com os números no diário. |

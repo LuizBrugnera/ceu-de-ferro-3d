@@ -1,5 +1,9 @@
 # cf-pol-modelos: esteiras nos veículos sobre lagartas feitos à mão (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): parte
+- Na mesma medição do `cf-pol-modelos-rodas.md`, as rodas de rodagem do tanque giram (39 m, giro 5,9); a esteira não corre, como o documento diz.
+- **Continua sem teste:** o destroço e o dano escurecendo a esteira.
+
 ## O que mudou
 
 Os veículos sobre lagartas que o `buildTrn` desenha à mão eram uma fila de rodas pretas com uma caixa preta chata embaixo, no lugar da esteira. São eles:

@@ -12,6 +12,19 @@ const post = (p, body, port) => new Promise(res => { const q = http.request({ ho
 const list = era => { try { return fs.readdirSync(path.join(DIR, era)); } catch (e) { return []; } };
 const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
 (async () => {
+  /* every kind of event the page sends is one the server keeps: it refuses a whole batch with one unknown event. The brain's cb meters were
+     not in the server's list, and a brain event whose data had a k of its own (pel-forma's 'def', a cover's 'veiculo') went out under that
+     kind: an online match lost every such batch, its end and summary with them */
+  {
+    const page = fs.readFileSync(H.PAGE, 'utf8'), srv = fs.readFileSync(N.SERVER, 'utf8'), m = srv.match(/kinds: new Set\(\[([^\]]*)\]\)/);
+    const known = new Set(m ? m[1].split(',').map(k => k.trim().replace(/'/g, '')) : []), sent = new Set([...page.matchAll(/anaPush\((?:Object\.assign\()?\{ k: '([a-z0-9]+)'/g)].map(a => a[1]));
+    const miss = [...sent].filter(k => !known.has(k));
+    ok(sent.size >= 10 && !miss.length, 'every kind the page sends (' + [...sent].join(' ') + ') is a kind the server keeps' + (miss.length ? ': not ' + miss.join(', ') : ''));
+    const P = H.load({ ana: true }).$, A = P('ANA'), pk = A.kinds ? [...A.kinds].sort().join() : 'none';
+    ok(pk === [...known].sort().join(), 'the page\'s list of kinds (ANA.kinds) is the server\'s: ' + pk);
+    A.ev = []; A.q = []; P('anaPush')({ k: 'def', t: 1, s: 0, st: 'pel-forma', p: 3 }); P('anaPush')({ k: 'nope', t: 1 });
+    ok(A.ev.length === 1 && A.ev[0].k === 'cb' && A.ev[0].kd === 'def' && A.ev[0].st === 'pel-forma', 'a brain event whose data brought k \'def\' goes as cb (kd def); an unknown event with no subkind is left out');
+  }
   /* an old file and a fresh one, before the server starts: the old one goes */
   fs.mkdirSync(path.join(DIR, 'ww2'), { recursive: true });
   const oldF = path.join(DIR, 'ww2', '2026-01-01-aaaaaaaaaaaa.ndjson.gz'), newF = path.join(DIR, 'ww2', '2026-11-01-bbbbbbbbbbbb.ndjson.gz');

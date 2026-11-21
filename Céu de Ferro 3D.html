@@ -5936,6 +5936,21 @@ const MAN = { hp: 22, sc: 1.7, r: .42, walk: 2.7, run: 5.6, stam: 9, rest: 14, w
   nade: { n: 2, dmg: 60, r: 11, spd: 17, cool: 1.6 }, smk: { n: 1, r: 15, h: 8, spd: 15 } };
 const ROADH = .35;   // the scene's road deck above the ground it follows (was 2.2, which showed as a floating ribbon from the side; the depth bias polygonOffset does the rest)
 const BRDH = 2.2;   // a bridge's deck above the ground (bridges keep their old height)
+/* the scene's ribbon of a road edge E, half width hw (buildWorld: one mesh a class holds all its edges): NC vertices across every ~12 m (so no
+   straight segment spans a bump), the two edges 1.15 x as wide and sunk into the ground (a blended shoulder, no gap seen from the side), the
+   three inner ones ROADH above it. Appended to pos (x y z) and idx (triangles), whose indices count from the vertices pos already holds (the
+   edges before it in the mesh; counted from 0 every edge but the first drew nothing of its own) */
+function roadRibbon(E, hw, pos, idx) {
+  const NC = 5, r = E.p, n = Math.max(1, Math.round(r.len / 12)), st = r.len / n, b = pos.length / 3;
+  for (let i = 0; i <= n; i++) {
+    const p = routeAt(r, i * st);
+    for (let j = 0; j < NC; j++) {
+      const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
+      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z);
+    }
+    if (i < n) { const k = b + i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
+  }
+}
 const ZONE = ['tronco', 'cabeça', 'pernas', 'braços'];
 /* stances: h body height and eye, m; spd of the walk; sp of the spread; vis of the distance it is seen at; blast: what a burst leaves */
 const STANCE = [{ name: 'Em pé', h: 1.75, eye: 1.62, spd: 1, sp: 1, vis: 1, blast: 1 }, { name: 'Agachado', h: 1.15, eye: 1.05, spd: .5, sp: .6, vis: .6, blast: .8 }, { name: 'Deitado', h: .45, eye: .32, spd: .22, sp: .35, vis: .3, blast: .3 }];
@@ -8251,7 +8266,7 @@ function lockMsl(p, u, w, own) {
   }
   return best;
 }
-/* shooting a missile down by gunfire (cf-intercepta-missil; NOT TESTED, see docs/nao-testado/cf-intercepta-missil.md). Only a round of cal mm
+/* shooting a missile down by gunfire (cf-intercepta-missil; tests/mint.js, what is not tested yet in docs/nao-testado/cf-intercepta-missil.md). Only a round of cal mm
    or more counts (the .50 up: Kord, DShK, KPV, 20-30 mm cannon, ZU-23, CIWS); a rifle's does nothing. A round that passes within r m of a
    missile of the other side in flight (am m for a gun made for it, the CIWS) strikes it for dmg of its hp ([from cal mm, so much], am rounds
    amk times that) and is spent. hp by what the missile is: at an anti-tank one (Javelin, TOW, Kornet, Hellfire, Ataka, any from the ground or
@@ -8950,7 +8965,7 @@ function bump(u, x, z, cx, cz) {
    that overlap are pushed apart by weight (ramW; m0 for a hull with none): the lighter is shoved further, a fixed one (an emplaced gun) does
    not move, nor does one another client drives (u.net: it gives its own share on its own client, so the room settles as one). A hull on its
    rail is pushed along its rail (s) and to its side (u.cox, which place and tripMove add to its lane and which eases back at `back` m/s); one
-   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow: each hull takes hit of its hp times its blow squared, its blow
+   off its rail is pushed where it is. Closing at v[0] m/s or more is a blow (not between two hulls the AI drives for one side: those only push): each hull takes hit of its hp times its blow squared, its blow
    2 * (the other's weight share) * closing speed / v[1], so a car that rams a tank pays for it and a tank barely feels a car; a heavy tracked
    hull (tank) closing at crush.v on a hull of crush.w weight or less drives over it (crush.dmg of its hp more, and the tank slows). Every
    client deals only its own hulls' blows and pushes (rx), as RAM does; no message. cd: s between two blows of one hull. A rail hull with a
@@ -9046,6 +9061,7 @@ function vcolPair(A, B, dt) {
   const j = (1 + VCOL.e) * vc / ((ia + ib) || 1);
   for (const [u, im, s] of [[a, ia, 1], [b, ib, -1]]) if (!u.net && !u.rail && im > 0) { const f = Math.cos(u.h) * nx - Math.sin(u.h) * nz; u.sp = clamp(u.sp + s * j * im * f / GSPD, -u.def.spd, u.def.spd); }
   if (vc < VCOL.v[0] || ia + ib <= 0) return;
+  if (a.team === b.team && a.ai && b.ai) return;   // two hulls of the AI's own side: pushed apart and held, no blow (their drivers see only their own lane, scan; the columns leaving a base rammed each other)
   const K = VCOL.crush, wa = ramW(a), wb = ramW(b);
   const crA = b.kind === 'tank' && wa <= K.w && vc >= K.v && vbn > K.v / 2 && !a.def.rad, crB = a.kind === 'tank' && wb <= K.w && vc >= K.v && -van > K.v / 2 && !b.def.rad;   // a light car under a tank's tracks
   vcolHit(a, b, vc, 2 * sa, cx, cz, crA); vcolHit(b, a, vc, 2 * sb, cx, cz, crB);
@@ -11360,9 +11376,9 @@ function stepShots(dt) {
     const x0 = b.x, y0 = b.y, z0 = b.z;
     b.life -= dt; b.vy -= GR * dt; b.x += b.vx * dt; b.y += b.vy * dt; b.z += b.vz * dt;
     if (b.life <= 0) { b.gone = true; continue; }
-    if (b.cal >= MINT.cal) for (const m of S.missiles) {   // a heavy round and a missile in flight: the nearest the round came to it in this step (MINT)
+    if (b.cal >= MINT.cal) for (const m of S.missiles) {   // a heavy round and a missile in flight: the nearest the round came to it in this step (MINT); the round has flown it and the missile not yet (MSL.step comes after), so the missile is taken where the step leaves it
       if (m.gone || m.team === b.team) continue;
-      const rx = m.x - b.x, ry = m.y - b.y, rz = m.z - b.z, vx = b.vx - m.d.x * m.v, vy = b.vy - m.d.y * m.v, vz = b.vz - m.d.z * m.v, R = Math.max(MINT.r, b.am || 0), far = (Math.abs(vx) + Math.abs(vy) + Math.abs(vz)) * dt + R;
+      const mv = m.v * dt, rx = m.x + m.d.x * mv - b.x, ry = m.y + m.d.y * mv - b.y, rz = m.z + m.d.z * mv - b.z, vx = b.vx - m.d.x * m.v, vy = b.vy - m.d.y * m.v, vz = b.vz - m.d.z * m.v, R = Math.max(MINT.r, b.am || 0), far = (Math.abs(vx) + Math.abs(vy) + Math.abs(vz)) * dt + R;
       if (Math.abs(rx) > far || Math.abs(ry) > far || Math.abs(rz) > far) continue;
       const t = clamp((rx * vx + ry * vy + rz * vz) / (vx * vx + vy * vy + vz * vz || 1), -dt, dt);
       if (Math.hypot(rx - vx * t, ry - vy * t, rz - vz * t) > R) continue;
@@ -12054,7 +12070,7 @@ function trnColumn(team, nt, put, men) {
 /* the side planner's hand on all this: the parked vehicles where its soldiers enter, a sniper for each garrison and picket, the patrol
    car of its roads and a ride for a squad that is far from its place */
 function trnPlan(t, sq) {
-  const F = S.fld[t], ds = t ? 1 : -1, fr = frontR(), ri = fr, E = INF[S.era][S.fac[t]], kit = E.findIndex(id => KITS[id].snp);
+  const F = S.fld[t], ri = frontR(t), ds = dsOf(t, ri), E = INF[S.era][S.fac[t]], kit = E.findIndex(id => KITS[id].snp);   // the side's own front road and its way along it (3 sides: the Insurgents' parked trucks were set at the USA's base, on road 0)
   if (!trnOk()) return;
   const men = S.men.length + S.units.reduce((a, u) => a + (u.cargo ? u.cargo.length : 0), 0);
   for (const q of sq) if ((q.job === 'garr' || q.job === 'wood') && !q.snp && kit >= 0) {   // one of its riflemen is a sniper: the squad is no larger for it
@@ -14899,7 +14915,7 @@ mindGate = (g => o => { g(o); if (!(o.ffQ > S.t)) return; const c = o.ctl; if (o
      of it is already contact for con): th of it in win s (rush on an assault, an escort or a rush: a stray round does not stop one) and no
      ground enemy believed within near m: down for down s, a smoke toward where the fire is from (drIncAt: where the shots were heard, else
      est m back along the rounds' way; smk m out), a report and, with the shots heard, fire called on that place; each man out of the line
-     of fire within hide m (a building first), and with half the squad or more without it, sandbags and a trench dug where it is
+     of fire within hide m (a building first), and with half the squad or more without it, sandbags bags m toward the fire and a trench dug where it is
      (drFarPlace, fortStart: the caps and the ground's rules hold); a new smoke every again s while the fire goes on. Over after quiet s
      with no round in (dug s once it digs), or when an enemy is believed near (the other drills are for that).
    Already done elsewhere, and so not here: a drone over the squad (dHide), a grenade (sqMan), clearing a building (bAtk, sqBound), a mate down
@@ -14913,7 +14929,7 @@ DRILL.inf = { tank: { r: 600, hide: 45, again: 14, gone: 25, smk: 21 }, at: { r:
   snp: { r: 900, hide: 30 }, air: { r: 1500, near: 800, hide: 50, gap: 12, gone: 10 }, mine: { r: 40, ahead: 12, still: 2, back: 25 },
   open: { r: [250, 700], len: 40, c: .3, smk: 450 }, ammo: { low: .25 }, wd: { str: .5, back: 150, len: 35 }, sup: { k: 1.4, r: 400, atk: .3 },
   smk: { r: [60, 450], age: 8 }, esc: { r: 60, back: [8, 16], side: 4, v: 6 }, per: { r: 7, at: 2, set: 5, bld: 35 }, ff: { t: 3, hold: 5 }, fix: { r: [60, 300], flank: 70 },
-  far: { win: 8, con: 2, th: 4, rush: 10, hit: 3, near: 250, est: 350, down: 2, hide: 60, smk: 21, quiet: 14, dug: 30, again: 18 } };
+  far: { win: 8, con: 2, th: 4, rush: 10, hit: 3, near: 250, est: 350, down: 2, hide: 60, smk: 21, bags: 3, quiet: 14, dug: 30, again: 18 } };
 const drFresh = (b, s) => S.t - b.t < s;
 const drArm = b => b.c === 'tank' || b.c === 'lav';
 const drMen = q => q.men.filter(m => !m.dead && !m.down && m.ai);
@@ -16828,8 +16844,10 @@ const CITY = { bay: 5, sh: 4.4, body: 2,
   /* going through: a round's power (bPow) is sa for a soldier's rifle or a light gun with no armour piercing, else gun[0] + gun[1] x its ap +
      gun[2] x its damage over 5 (a .50 about 2 to 2.5, a 20 mm 4 or more, a 30 mm far more); a wall takes pen of it whole, crack of that cracked, a
      slab slab times and a partition part times, and what is left goes on (its damage and speed by the share left), max walls at most.
+     cal: [calibre mm, power] the least power of a gun's round of that calibre or more (b.cal), whatever its damage and ap say: a vehicle's
+     .50 with no ap (a tank's M2, Kord, NSVT, DShK) and the M16's four (their damage cut for the rate) are .50s too.
      shell: walls a tank's solid shot goes through; th: m of a slab; puff: the dust where it comes out */
-  pen: { sa: 1, gun: [1, 15, .25], crack: .6, slab: 1.4, part: .4, max: 3, shell: 2, th: .3 },
+  pen: { sa: 1, gun: [1, 15, .25], cal: [[12.7, 2.3], [14.5, 2.8], [20, 4], [30, 6]], crack: .6, slab: 1.4, part: .4, max: 3, shell: 2, th: .3 },
   dmg: { gun: 2, k: .34, r: .42, crack: .6, gone: .6, crash: [9, 160] },
   sup: { posts: 4, T: 1.5, step: .4, fall: .34 }, rub: [0, .9, 1.7, 2.6], fall: { on: 9, under: 34, near: 12, r: 3.5 },
   types: {
@@ -17141,7 +17159,8 @@ function bShot(o, b, dmg, x, y, z, vx, vy, vz) {
   return OUT;
 }
 /* what a round has to go through a wall with (CITY.pen), kept on it as it loses some at each wall */
-const bPow = b => b.pw !== undefined ? b.pw : (b.pw = b.sa ? CITY.pen.sa : CITY.pen.gun[0] + CITY.pen.gun[1] * (b.ap || 0) + CITY.pen.gun[2] * Math.max(0, (b.dmg || 0) - 5));
+const bPow = b => b.pw !== undefined ? b.pw : (b.pw = b.sa ? CITY.pen.sa : Math.max(CITY.pen.gun[0] + CITY.pen.gun[1] * (b.ap || 0) + CITY.pen.gun[2] * Math.max(0, (b.dmg || 0) - 5),
+  CITY.pen.cal.reduce((p, c) => (b.cal >= c[0] ? c[1] : p), 0)));
 /* what element e of a building takes of a round's power to be gone through: its material, what it is and its state */
 function bRes(o, e) { const B = o.B, P = CITY.pen, s = S.cbs[B.off + e]; return B.mat.pen * (e >= B.oS ? P.slab : B.kd[e] > 4 ? P.part : 1) * (s === 1 ? P.crack : s === 2 ? P.crack * .5 : 1); }
 /* a round that struck element e (on axis an, RAY.ax) comes out on its far side: past the wall's body, however slant it went in */
@@ -21736,6 +21755,9 @@ function genPostMan(C, P) {
   const m = GEN.man[o.k] || o.k, w = o.k === 'gue' ? 'fustiga o inimigo com equipes pequenas' : o.k === 'dep' ? 'linha de recuo em ' + at : o.k === 'mres' ? 'reserva posta em ' + at : 'em curso' + (at ? ' contra ' + at : '');
   return { k: P.k, s: (P.s + ' Manobra: ' + m + ', ' + w + (l.length > 1 ? ' (+' + (l.length - 1) + ')' : '') + '.').slice(0, 240) };
 }
+/* the ticket trend of the general's view (genTrend) for a view model V with N sides: the columns of S.gtk [[column, side]], its own first, then every
+   other side's (with three sides the view of side 2 drew the clock column as a side's tickets, and side 0's left the third side out) */
+const genTrendCols = V => { const N = V.tk ? V.tk.length : 2; return [[1 + V.t, V.t]].concat([...Array(N).keys()].filter(s => s !== V.t).map(s => [1 + s, s])); };
 /* the view model of side t: what its map and panels show, copied out of the match (read only: nothing here writes S, calls the commander's
    own routines or draws a number from the random stream). all: every unit of both sides, else the enemy as t's commander knows it */
 function genVM(t, all) {
@@ -24423,7 +24445,7 @@ const sus = t => { const a = S.msus || (S.msus = bySide(() => [])); return a[t] 
 addMan = (g => (id, team, x, z, h) => { const m = g(id, team, x, z, h); if (m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } return m; })(addMan);
 refill = (g => (m, dep) => { g(m, dep); if (dep && m.def.sap) { m.mn = SAP.mines.slice(); m.chg = SAP.chg; } })(refill);
 const sapShort = m => !!m.def.sap && !!m.mn && m.mn.some((n, i) => n < (i < 2 ? SAP.mines[i] : SAP.ied || 0));   // [2]: the command IEDs of a kit with ied (cf-slots-arma)
-/* ---------- the Insurgents (cf-insurgentes-conteudo; NOT TESTED, see docs/nao-testado/cf-insurgentes-conteudo.md) ----------
+/* ---------- the Insurgents (cf-insurgentes-conteudo; the bombs' AI in tests/bomba-ia.js, what is not tested yet in docs/nao-testado/cf-insurgentes-conteudo.md) ----------
    A third faction of the modern front, as data in the tables the two modern sides use, kept out of every list a match picks from today:
    its kits are in KITS but in no INF list, its vehicles are in TRNS but not enumerable (as REC's), its tanks and rocket technical carry
    side 2, a slot no match has yet. FACTIONS.modern.insurgentes gathers all of it in the shape of an ERAS side (side), plus what an ERAS side
@@ -24598,7 +24620,7 @@ AI.car = (g => (u, dt) => {
   g(u, dt); const B = bombOf(u); if (!B || u.dead || u.bArm === undefined || S.t < u.bArm) return;
   if (S.t >= (u.bLook || 0)) { u.bLook = S.t + BOMB.every * 2; u.bTgt = bombFoe(u, B.seek); }
   const t = u.bTgt; if (!t || t.dead || t.in) return;
-  driveTo(u, t.x, t.z); u.ctl.brake = false; u.bye = false;
+  u.rail = false; driveTo(u, t.x, t.z); u.ctl.brake = false; u.bye = false;   // off the road: a car on its rail does not answer the wheel
 })(AI.car);
 /* why a mine of kind k may not lie at x z for side t: '' or map, water, base, near, foe, cap */
 function mineWhy(k, t, x, z) {
@@ -25751,7 +25773,9 @@ cnVM = (g => t => {
    message ana online (the host), a POST to the server that served the page otherwise. ANALYTICS=0 on the server stops both. */
 const ANA = { on: 1, v: 2, snap: 10, batch: 15, chunk: 7000, max: 30000, win: 120, ptw: 10, top: 5, scan: 1,
   ev: [], q: [], S: null, acc: 0, sT: 0, bT: 0, ms: [0, 0, 0], inf: [0, 0], sink: null, done: null,
-  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'], out: [] };
+  dec: ['atk', 'def', 'amb', 'fire', 'rq', 'eng', 'rf'], out: [],
+  /* the kinds the server keeps (server.js ANA.kinds, the same list: tests/ana-online.js compares them): it refuses a whole batch with one other kind */
+  kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb']), bad: 0 };
 /* the sides of the match simulated (S.N, 2 when the page has no N yet), and of a match's events (the header's n, 2 for a v 1 match) */
 const anaN = () => (S && S.N > 2 ? S.N : 2), anaSides = n => Array.from({ length: n }, (_, i) => i), anaZ = () => anaSides(anaN()).map(() => 0);
 const anaNev = H => (H && H.n > 2 ? H.n : H && Array.isArray(H.fac) && H.fac.length > 2 ? H.fac.length : 2);
@@ -25768,6 +25792,9 @@ const anaLive = () => ANA.on && S && S.cq && cqSim();
 const anaKind = o => (!o || o.team === undefined ? '' : o.mil ? 'mil' : o.man ? 'inf' : o.kind ? tk(o) : o.heli ? 'heli' : o.role === 'cas' ? 'cas' : o.role === 'strat' ? 'strat' : o.def ? 'fighter' : '');
 const anaR = v => Math.round(v * 10) / 10;
 function anaPush(e) {
+  /* a brain event (cb, with its subkind st) whose data brought a k of its own (pel-forma's platoon kind 'def', a cover's 'veiculo') lost its kind:
+     the server refused every batch with one, an online match's end and summary with them. It goes as the cb it is (the other k kept as kd) */
+  if (!ANA.kinds.has(e.k)) { if (e.st === undefined) { ANA.bad++; return; } e = Object.assign({}, e, { k: 'cb', kd: e.k }); }
   if (ANA.ev.length >= ANA.max && e.k !== 'sn' && e.k !== 'end') return;
   ANA.ev.push(e); ANA.q.push(e);
 }
@@ -25808,7 +25835,10 @@ function anaStep(dt) {
 function anaFlush(last) {
   if (!ANA.sink) { ANA.q = []; return; }
   let part = [], n = 0;
-  for (const e of ANA.q) { const b = JSON.stringify(e).length + 1; if (part.length && n + b > ANA.chunk) { ANA.sink(part, false); part = []; n = 0; } part.push(e); n += b; }
+  for (const e of ANA.q) {
+    if (!ANA.kinds.has(e.k)) { ANA.bad++; continue; }   // one the server does not keep (pushed past anaPush) would cost the whole batch
+    const b = JSON.stringify(e).length + 1; if (part.length && n + b > ANA.chunk) { ANA.sink(part, false); part = []; n = 0; } part.push(e); n += b;
+  }
   ANA.q = [];
   if (part.length || last) ANA.sink(part, !!last);
 }
@@ -37897,18 +37927,7 @@ function buildWorld() {
   for (let c = 0; c < RN.w.length; c++) {
     const es = roadsOf(T).filter(e => e.c === c); if (!es.length) continue;
     const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], hw = RN.w[c];
-    const NC = 5;   // vertices across: the two edges sink into the ground (a blended shoulder, no gap seen from the side), the three inner ones lie ROADH above it
-    for (const E of es) {
-      const r = E.p, n = Math.max(1, Math.round(r.len / 12)), st = r.len / n;   // a vertex every ~12 m (was 45), so no straight segment spans a bump
-      for (let i = 0; i <= n; i++) {
-        const p = routeAt(r, i * st);
-        for (let j = 0; j < NC; j++) {
-          const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
-          pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z);
-        }
-        if (i < n) { const k = i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
-      }
-    }
+    for (const E of es) roadRibbon(E, hw, pos, idx);
     rtri += idx.length / 3;
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); scene.add(new THREE.Mesh(g, rm));
   }
@@ -42849,7 +42868,7 @@ function genTrend(V) {
   g.clearRect(0, 0, w, h); g.strokeStyle = 'rgba(236,230,214,.18)'; g.lineWidth = 1; g.strokeRect(.5, .5, w - 1, h - 1);
   if (T.length < 2 || !V.tk0) return;
   const t0 = T[0][0], span = Math.max(60, T[T.length - 1][0] - t0);
-  for (const [i, col] of [[1 + V.t, FRIEND], [2 - V.t, FOE]]) { g.beginPath(); T.forEach((p, n) => { const x = (p[0] - t0) / span * (w - 4) + 2, y = h - 2 - clamp(p[i] / V.tk0, 0, 1) * (h - 4); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); }
+  for (const [i, col] of genTrendCols(V).map(([i, s]) => [i, s === V.t ? FRIEND : foeCol(s)])) { g.beginPath(); T.forEach((p, n) => { const x = (p[0] - t0) / span * (w - 4) + 2, y = h - 2 - clamp(p[i] / V.tk0, 0, 1) * (h - 4); if (n) g.lineTo(x, y); else g.moveTo(x, y); }); g.strokeStyle = col; g.lineWidth = 1.8; g.stroke(); }
 }
 function genLog(V) {
   const ol = $('#genLog'), L = V.log, last = L.length ? L[L.length - 1] : null, sg = V.t + ':' + L.length + ':' + (last ? last.t + last.s : '');

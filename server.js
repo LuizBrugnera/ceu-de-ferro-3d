@@ -782,7 +782,8 @@ const partidas = () => {
    each batch a gzip member appended. id is a random name the server gives the match (online: the room's match, which a new host carries on;
    by POST: the page's own random key), never a player's id or name. ana { n the room's match, e the events, end 1 the last batch }: from the
    host only, at most ANA.rate[0] a window of ANA.rate[1] ms (ANA_RATE, 30: a busy match's brain events fill about ten pieces of the page's
-   ANA.chunk every flush, and with 10 the flush after the end was refused), events of the known kinds, ANA.max bytes a match. At the end (an end event) a
+   ANA.chunk every flush, and with 10 the flush after the end was refused), events of the known kinds (every kind the page sends: a batch with
+   one unknown event is refused whole, so a kind the page adds goes here too and in the page's ANA.kinds; cb are the brain's meters), ANA.max bytes a match. At the end (an end event) a
    summary goes beside it, <date>-<id>.json (the header, the end and the review the page sent as rep). ANALYTICS=0: welcome says ana: 0 and
    nothing is written or served. Files older than ANA_DAYS days (default 90) are deleted at start and every six hours.
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>

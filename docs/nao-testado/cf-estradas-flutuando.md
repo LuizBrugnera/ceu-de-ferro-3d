@@ -1,25 +1,19 @@
-# cf-estradas-flutuando — estradas flutuando vistas de lado (NÃO TESTADO)
+# cf-estradas-flutuando — estradas flutuando vistas de lado (parte testada; um defeito achado e corrigido)
 
-## O que mudou (`Céu de Ferro 3D.html`)
-- `ROADH` 2,2 → 0,35 m (altura da faixa da estrada sobre o terreno). O `polygonOffset` já existente (por classe, `RN.off`) cuida do z-fighting. `manY` (pés do soldado na estrada) usa o mesmo `ROADH`, então segue coerente.
-- Nova constante `BRDH = 2.2`: as pontes (`inD` do terreno e `yAt` dos blocos de ponte) mantêm a altura antiga.
-- Malha da estrada: um vértice a cada ~12 m (era 45 m) e 5 vértices na largura (era 2). Os 2 vértices de borda ficam 1,15× mais largos e afundados (-0,05 m) no terreno, para a borda se fundir ao chão sem fresta; os 3 internos ficam a `ROADH`.
-- Ruas da cidade: 0,45 → 0,3 m.
-- Grafo de estradas e jogabilidade inalterados.
+O que é: `ROADH` 2,2 → 0,35 m (leito da estrada sobre o terreno), `BRDH` 2,2 para as pontes, fita com um vértice a cada ~12 m e 5 na largura (bordas 1,15× e enterradas 0,05 m), ruas da cidade 0,3 m.
 
-## NÃO testado
-Nada foi rodado além de: o servidor sobe e o script principal do HTML faz parse. Não houve conferência visual, nem testes, nem partida.
+## Testado em cf-pol-testes-a
+- **Defeito achado e corrigido**: nas capturas de "Assistir" em Hoje as estradas fora da cidade não apareciam (câmera de lado numa encosta, perto de muros a 90 m da estrada, sobre a estrada de chão mais longa). Causa: a malha de cada classe guarda todas as arestas, e o índice dos triângulos passou (no #100) a ser contado do zero em cada aresta (`k = i * NC`); só a primeira estrada de cada classe era desenhada, as outras apontavam para os vértices da primeira (até 87% dos vértices fora de qualquer triângulo, triângulos de até 10 km). Agora a fita é `roadRibbon(E, hw, pos, idx)` (seção da simulação, ao lado de `ROADH`), que conta a partir dos vértices que já estão na malha; `buildWorld` chama ela por aresta.
+- `tests/road-mesh.js` (novo): nas duas épocas e nas quatro classes, nenhum vértice fora de triângulo, nenhum índice fora da malha, nenhum lado maior que uma célula, leito a `ROADH` e bordas abaixo do chão. Com o índice antigo: 8 FAILED; com o conserto: all passed.
+- `manY` usa o mesmo `ROADH` (conferido no código).
+- Depois do conserto, no navegador headless (Hoje, `ag3/proof` da tarefa): a estrada numa encosta vista de lado a 22 m e de cima (`rd-road-slope-side.png`, `rd-road-slope-above.png`) cola no chão, sem faixa flutuante nem fresta; a estrada de chão aparece como fita marrom seguindo o terreno (`rd-dirt-road.png`); soldados na rua da vila com os pés no leito (`manY` 89,52 = chão 89,17 + 0,35; `rd-man-on-road.png`).
 
-## Riscos
-- Pontes: a faixa agora passa a 0,35 m enquanto o tabuleiro está a 2,2 m; pode aparecer degrau ou rampa nas cabeceiras, ou faixa sob a água sob a ponte.
-- Soldados na estrada (`manY`) ficam 1,85 m mais baixos: veículos/objetos que assumiam 2,2 m podem destoar.
-- Muito mais vértices (~4× ao longo, 2,5× na largura): custo de geração/memória em mapas grandes (v8/v9).
-- Borda mais larga (1,15×) pode tocar vegetação/casas; graus de qualidade gráfica e texturas procedurais (#63, #39) não foram conferidos.
-- Z-fighting com o terreno em ângulo rasante à distância, com 0,35 m + polygonOffset.
+## Ainda não testado
+- **Cabeceira de ponte**: na captura (`rd-bridge-head.png`) o tabuleiro (2,2 m) começa num degrau acima da faixa (0,35 m), como o risco previa. Não corrigido (seria uma rampa nova nas pontes). Como: câmera baixa de lado em cada cabeceira; se incomodar, rampa de ~15 m da faixa até `BRDH`.
+- Pedras e moitas aparecem em cima da faixa da estrada principal (`rd-road-slope-side.png`); invisível antes do conserto porque a estrada não era desenhada. Ver se são só enfeite ou objetos que param veículos (geração das pedras/moitas perto de `onRoad`).
+- Z-fighting em ângulo rasante de longe, os níveis de qualidade gráfica (Baixa/Média/Alta) e a vegetação na borda mais larga; 1944 (só Hoje foi visto depois do conserto).
+- Custo de memória/geração da malha mais densa em mapas grandes.
+- `node tests/bridges.js`, `node tests/roads-ops.js`, `node tests/world.js`: não rodados de novo (trava de memória da tarefa); a mudança não toca a simulação.
 
 ## Como testar depois
-1. `node server.js`, abrir a página, ir ao mapa v9 e ao v8 (estradas de terra).
-2. Câmera baixa e lateral em: encosta, topo de morro, vale, cabeceiras de ponte; conferir que a estrada cola no chão, sem faixa flutuante nem fresta.
-3. Alternar os níveis de qualidade gráfica; conferir z-fighting e a vegetação.
-4. Soldados marchando na estrada: pés no chão, sem afundar ou flutuar.
-5. `node tests/bridges.js`, `node tests/roads-ops.js` e `node tests/world.js`.
+`node server.js`, "Assistir" em 1944 e em Hoje, câmera livre (F) baixa e de lado numa encosta, num topo de morro, num vale e numa cabeceira de ponte; alternar Baixa/Média/Alta no hangar.

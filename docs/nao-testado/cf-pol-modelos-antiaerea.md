@@ -34,7 +34,7 @@ As quatro antiaéreas eram duas pilhas de caixas (uma para 1944, outra para hoje
 
 ## O que NÃO foi testado
 
-- Nenhuma delas vista numa partida atirando, girando a torre ou sendo destruída no meio da batalha.
+- Visto depois (GPU de verdade, demonstração): o NASAMS da IA atirando com os casulos levantados e a torre girada, e o Wirbelwind atirando com os canos levantados (imagens na #178). Não vi o M16 nem o Pantsir atirando, nem uma antiaérea destruída no meio da batalha.
 - O radar de busca não gira, e antes também não girava.
 - As rodas e lagartas não giram.
 

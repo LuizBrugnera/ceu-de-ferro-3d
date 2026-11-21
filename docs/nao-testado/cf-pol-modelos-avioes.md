@@ -39,6 +39,7 @@ Nos aviões feitos pelos números (todos menos o F-22 e o A-10, que têm modelo 
 
 ## O que NÃO foi testado
 
+- Visto depois (GPU de verdade, demonstração de 1944): um Bf 109 da IA a 1 285 m com a hélice borrada no disco, a Balkenkreuz na fuselagem e a cabine escura com armação; e na de hoje um Apache voando com a estrela no cone de cauda (imagens na #178).
 - O avião abatido: as pás parando devagar e as insígnias escurecendo no destroço que cai.
 - A asa cortada pela metade com a insígnia (ela é filha da asa e encolhe junto, mas não foi vista).
 - A cabine (visão de dentro): as pás girando na frente do piloto.

@@ -37281,8 +37281,36 @@ function spinMat(m, U) {
   m.customProgramCacheKey = () => 'wheelspin';
   return m;
 }
+/* the hand-made body kept for far off, merged: its meshes of one node and one colour as one mesh, hidden (a few draw calls where it was
+   a dozen or more), the meshes themselves let go */
+function packLodMerge(off) {
+  const B = new Map(), out = [];
+  for (const m of off) {
+    const p = m.parent, mt = m.material; if (!p || !mt || Array.isArray(mt) || !m.geometry) continue;
+    m.updateMatrix(); const key = p.uuid + '|' + mt.color.getHex() + '|' + (mt.transparent ? mt.opacity : 1);
+    let e = B.get(key); if (!e) B.set(key, (e = { p, mt, l: [] }));
+    const ge = m.geometry.clone(); ge.applyMatrix4(m.matrix); e.l.push(ge);
+  }
+  for (const e of B.values()) { const me = new THREE.Mesh(vkGeo(e.l), e.mt.clone()); me.visible = false; e.p.add(me); out.push(me); }
+  for (const m of off) kill(m);
+  return out;
+}
+/* the pack's vehicles far off (PLOD, cf-pol-modelos): beyond far m of the eye (at the field of view fov; a zoomed view, a gunner's sight or
+   a scope, counts as nearer by as much) the hand-made body packSkin kept is drawn in place of the pack's (some 300 triangles where a truck
+   of the pack has 10 000), and back within near m; the turret and the gun go where each had them.
+   Damage looks go on the pack's meshes as before (the hand-made ones are not in pm) */
+const PLOD = { far: 450, near: 400, fov: 55 };
+function packLod(m, cx, cz, zk) {   // zk: how much nearer the camera's zoom brings things than PLOD.fov does (a sight at 36× keeps the pack's models 36 times as far)
+  const U = m.userData, L = U.lod; if (!L) return;
+  const d2 = ((m.position.x - cx) * (m.position.x - cx) + (m.position.z - cz) * (m.position.z - cz)) * (zk || 1) * (zk || 1), far = L.far ? d2 > PLOD.near * PLOD.near : d2 > PLOD.far * PLOD.far;
+  if (far === L.far) return; L.far = far;
+  for (const o of L.hi) o.visible = !far; for (const o of L.lo) o.visible = far;
+  if (U.tur && L.t0) U.tur.position.copy(far ? L.t0 : L.t1); if (U.gun && L.g0) U.gun.position.copy(far ? L.g0 : L.g1);
+}
 syncScene = (g0 => dt => {
   g0(dt);
+  const cp = typeof camera !== 'undefined' && camera ? camera.position : null, zk = cp ? Math.tan(camera.fov * Math.PI / 360) / Math.tan(PLOD.fov * Math.PI / 360) : 1;
+  if (cp) for (const L of [S.units, S.wrecks || []]) for (const o of L) if (o.m && o.m.userData.lod) packLod(o.m, cp.x, cp.z, zk);
   for (const u of S.units) {
     const m = u.m, U = m && m.userData; if (!U || !U.spin) continue;
     const dx = u.x - (U.wx === undefined ? u.x : U.wx), dz = u.z - (U.wz === undefined ? u.z : U.wz), d = dx * Math.cos(u.h) - dz * Math.sin(u.h);
@@ -45987,10 +46015,11 @@ function packSkin(g, P, d, col, wreck, keepTur) {
   g.traverse(c => { if (c.isMesh && !keep.has(c)) off.push(c); });
   const gone = new Set(off);
   for (const k in pm) pm[k] = pm[k].filter(m => !gone.has(m));
-  for (const m of off) kill(m);
+  /* the hand-made body stays, hidden: far off it is drawn in the pack's place (PLOD, cf-pol-modelos), with the turret and gun where it had them */
+  const lod = (U.lod = { lo: packLodMerge(off), hi: [], t0: U.tur && U.tur.position.clone(), g0: U.gun && U.gun.position.clone(), t1: null, g1: null, far: false });
   const [L, W] = P.dims, sx = d.l / L, sz = d.w / W, sy = (sx + sz) / 2, hex = wreck ? 0x2b2b28 : col, dk = wreck ? .3 : 0;
   const tag = (pid, grp) => { if (!grp) return grp; grp.traverse(c => { if (c.isMesh) (pm[pid] || (pm[pid] = [])).push(c); }); return grp; };
-  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body);
+  const body = new THREE.Group(); body.scale.set(sx, sy, sz); g.add(body); lod.hi.push(body);
   for (const nm of ['hull', 'trackL', 'trackR', 'wheels']) {
     const p = tag(nm === 'hull' ? 'hull' : nm, packPart(P, nm, hex, dk)); if (!p) continue;
     p.position.fromArray(packPivot(P, nm)); body.add(p);
@@ -45999,14 +46028,14 @@ function packSkin(g, P, d, col, wreck, keepTur) {
     const tp = packPivot(P, 'turret'), gp = packPivot(P, 'gun'), tur = U.tur, gun = U.gun;
     if (tp) {
       tur.position.set(tp[0] * sx, tp[1] * sy, tp[2] * sz);
-      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t);
+      const t = tag('turret', packPart(P, 'turret', hex, dk)); t.scale.set(sx, sy, sz); tur.add(t); lod.hi.push(t);
     }
     if (gp && gun) {
       const o = tp || [0, 0, 0]; gun.position.set((gp[0] - o[0]) * sx, (gp[1] - o[1]) * sy, (gp[2] - o[2]) * sz);
-      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm);
+      const gm = tag('gun', packPart(P, 'gun', hex, dk)); gm.scale.set(sx, sy, sz); gun.add(gm); lod.hi.push(gm);
     }
   }
-  U.pack = 1; U.sig = undefined;
+  U.pack = 1; U.sig = undefined; lod.t1 = U.tur && U.tur.position.clone(); lod.g1 = U.gun && U.gun.position.clone();
   return g;
 }
 /* the debris of a wreck: a pile of rubble under it */

@@ -45901,6 +45901,35 @@ function packFix(id, P) {
   }
   return P;
 }
+/* loose props a source model carries that the game does not want, cut when the model comes in (cf-pol-testes-b), after its colours: in a
+   part, every triangle with its three corners inside the box [x0, y0, z0]-[x1, y1, z1] (the model's own frame) goes, and the vertices only
+   it used (the first-person weapon sizes itself by its vertices). w_kar98: the stripper clip of five rounds the source had lying beside the
+   receiver, which floated beside the rifle in first person, and lifted the 1944 sniper's scope 4 cm off the rifle */
+PACK.cut = { w_kar98: [['hull', [.05, .105, .04], [.13, .175, .08]]] };
+function packCut(id, P) {
+  const L = PACK.cut[id]; if (!L || !P) return P;
+  for (const [part, a, b] of L) {
+    const i = P.parts[part]; if (i === undefined) continue;
+    for (const pr of P.meshes[P.nodes[i].mesh]) {
+      const ge = pr.g, pa = ge.attributes.position, n = pa.count, X = pa.array;
+      if (!ge.index || Object.values(ge.attributes).some(A => !A.array)) continue;   // an interleaved or unindexed primitive is left as it is
+      const inn = v => X[v * 3] >= a[0] && X[v * 3] <= b[0] && X[v * 3 + 1] >= a[1] && X[v * 3 + 1] <= b[1] && X[v * 3 + 2] >= a[2] && X[v * 3 + 2] <= b[2];
+      const I = ge.index.array, keep = [];
+      for (let t = 0; t < I.length; t += 3) if (!(inn(I[t]) && inn(I[t + 1]) && inn(I[t + 2]))) keep.push(I[t], I[t + 1], I[t + 2]);
+      if (keep.length === I.length) continue;
+      const map = new Int32Array(n).fill(-1); let m = 0; for (const v of keep) if (map[v] < 0) map[v] = m++;
+      const g2 = new THREE.BufferGeometry();
+      for (const nm in ge.attributes) {
+        const A = ge.attributes[nm], k = A.itemSize, B = new A.array.constructor(m * k);
+        for (let v = 0; v < n; v++) if (map[v] >= 0) for (let c = 0; c < k; c++) B[map[v] * k + c] = A.array[v * k + c];
+        g2.setAttribute(nm, new THREE.BufferAttribute(B, k, A.normalized));
+      }
+      const J = new (m > 65535 ? Uint32Array : Uint16Array)(keep.length); keep.forEach((v, j) => { J[j] = map[v]; });
+      g2.setIndex(new THREE.BufferAttribute(J, 1)); g2.computeBoundingSphere(); g2.computeBoundingBox(); g2.userData = ge.userData; pr.g = g2;
+    }
+  }
+  return P;
+}
 /* the pack's rolling wheels (cf-pol-modelos, WSPIN): in the parts that hold them (wheels, trackL, trackR), the round pieces (connected
    triangles, the vertices at one place taken as one, as wide as high, every vertex within PSPIN.rim radii of the middle seen from the side, and
    at least PSPIN.min of the model's height) are wheels: their
@@ -45942,7 +45971,7 @@ function packGet(id) {
   if (E) return E.st === 1 ? E.d : null;
   const e = (PACK.M[id] = { st: 0, d: null });
   try {
-    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packFix(id, packRead(b)); e.st = 1; PACK.dirty = true; packHangar(id); })
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packCut(id, packFix(id, packRead(b))); e.st = 1; PACK.dirty = true; packHangar(id); })
       .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
   } catch (er) { e.st = -1; }
   return null;
@@ -46284,10 +46313,10 @@ function vmBuild(pk) {
     const inv = new THREE.Matrix4().copy(turn.matrixWorld).invert(), B = new THREE.Box3();
     m.traverse(c => { if (c.isMesh) { c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, c.matrixWorld))); } });
     if (pk.scope) {   // a 1944 sniper's scope over the receiver
-      const sc = new THREE.Mesh(new THREE.CylinderGeometry(.017, .02, .26, 10), metal); sc.rotation.z = -Math.PI / 2; sc.position.set(.06, B.max.y + .03, 0); turn.add(sc);
-      B.max.y += .05;
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(.017, .02, .26, 10), metal); sc.rotation.z = -Math.PI / 2; sc.position.set(.06, B.max.y + .015, (B.min.z + B.max.z) / 2); turn.add(sc);   // resting on the receiver (its axis 5 cm over the bore), on the weapon's own middle (the Kar98's is 3.4 cm off the grip's line)
+      B.max.y += .035;
     }
-    V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H];
+    V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H, (B.min.z + B.max.z) / 2];
   }
   const B = V.box, L = pk.len, lx = pk.cls === 'pistol' ? .01 : pk.cls === 'mort' ? .3 : clamp(.3 * L, .16, .42), ly = pk.cls === 'pistol' ? -.05 : B.min.y * .5 - .02, lz = pk.cls === 'pistol' ? -.03 : 0;
   const R = new THREE.Group(); turn.add(R);
@@ -46296,7 +46325,7 @@ function vmBuild(pk) {
   hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
   if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
     const f = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    f.position.set(V.mz[0], V.mz[1], 0); f.visible = false; turn.add(f); V.flash = f;
+    f.position.set(V.mz[0], V.mz[1], V.mz[2] || 0); f.visible = false; turn.add(f); V.flash = f;
   }
   /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
   const ads = VMP[pk.cls][1].slice();

@@ -5,7 +5,17 @@
 - Observação para o capitão (não é defeito do código): depois de detonar, o motorista sai a pé, vivo ("Veículo destruído · Você saiu a pé").
 - **Continua sem teste:** a batida forte detonando, os modelos (picape com tambores, caminhão), o civil disfarçado, a IA mandando o carro-bomba pelo caminho menos vigiado, a reação dos regulares a um suspeito, o online e o MCP.
 
-Pedidos do capitão: "faltou o carro bomba e caminhão bomba para os insurgentes" e "deve ter uma classe de homem bomba insurgente que se disfarça de civil".
+## Caminhão-bomba mais forte, a cluster e a dica no topo (cf-svbied-buff, 2026-11-21)
+Pedidos do capitão: "pode bufar mais um pouco a explosão do caminhão bomba, colocar uma cluster tambem" e "explicar ali no topo como usa ele, enquanto esta dentro dele".
+- **Números**: `STK.K.svbied` (e `BOMB.truck`, que copia dele) de **1800 em 120 m** para **2350 em 155 m** (+30% de dano, +29% de raio). Vale para o caminhão do jogador e o estratégico do quartel-general. Carro-bomba e picape-bomba (`BOMB.car`, 1400 em 70 m) não mudaram. `trig`, `kill`, custo e limites iguais.
+- **Efeito** (`svbFx`, sobre o `stkFx` de antes): clarão maior, mais fogo jogado mais alto, coluna de fumaça, anel de poeira correndo pelo chão, tremor de câmera maior e um estrondo mais perto.
+- **Cluster** (`SVB.c`, `svbCluster`, `svbStep` no `step`): 12 submunições incendiárias saem em arco (`S.svbC`, no máximo uma dúzia por caminhão) para um anel de 0,55 a 1,7 vez o raio (85–264 m), deixando um rastro de fogo, e cada uma explode onde cai entre ~0,5 e 2,2 s depois (as mais longe, mais tarde): `explode` com 260 de dano em 18 m, pelo caminhão e o lado dele (placar, fogo amigo e diário são do caminhão). Os dois caminhos chamam `svbBurst`: `stkSvbGo` (estratégico) e um gancho no `bombGo` (só quando a carga é `BOMB.truck`).
+- **Online**: só onde a batalha é simulada (solo e anfitrião, `bombSim`), como a explosão principal. O convidado vê o fim do caminhão como o de qualquer veículo; nem o `stkFx` nem a cluster vão pela rede (não há mensagem de efeito de explosão no servidor).
+- **Dica no topo** (`vbHint`, embrulho do `hudWarn`): dentro de qualquer veículo-bomba (carro, picape, caminhão), na coluna de avisos sob o placar: "CAMINHÃO-BOMBA: ARMANDO… (3 S)" + "Depois: 5 detona (raio de 155 m)", e depois "CAMINHÃO-BOMBA ARMADO — 5 DETONA" + "Batida forte ou inimigo a 22 m também detonam · raio de 155 m". Some quando ele sai a pé ou o veículo acaba.
+- **Testado**: `tests/svbied-cluster.js` (novo, passa), `tests/bomba-ia.js` e `tests/bomber-run.js` passam; `tests/sim-split.js` tem uma falha que já existia no main (`rtsS`/`rtsBrain`, não tocados aqui). Navegador (Chrome headless com GPU, 1280×720 e 1920×1080): a dica armando e armada sob o placar, sem cobrir a mira nem o aviso "Protegido por"; um caminhão-bomba detonado a 450 m: bola de fogo, coluna e as explosões secundárias em volta; sem erro no console.
+- **Não testado**: o equilíbrio em partida (a cluster pode matar a própria tropa perto, com fogo amigo ligado: a IA só olha o raio principal antes de detonar), a dica no carro e na picape, convidado online, desempenho com várias cluster seguidas.
+
+Pedidos do capitão (cf-vbied): "faltou o carro bomba e caminhão bomba para os insurgentes" e "deve ter uma classe de homem bomba insurgente que se disfarça de civil".
 
 ## O que já existia (e o que faltava)
 
@@ -26,7 +36,7 @@ Seção própria logo depois do ataque estratégico (`/* ---------- the car bomb
 
 Na seção nova (`VBM`):
 - **Jogador**: `vbied`, `vbiedPk` e `svbied` aparecem na classe Transporte dos Insurgentes (hangar, quadro H, requisição U). Requisição: 3 tíquetes (carro) e 6 (caminhão), recusa `vbcap` com 2 carros ou 1 caminhão do lado vivos (os da IA e o estratégico contam). Tecla **5** dentro do veículo detona (depois de `BOMB.arm` s); convidado online manda `mreq k 9` e o anfitrião detona (`server.js` repassa). Ao entrar, um aviso diz o que o 5 faz.
-- **Detonação**: batida a 8 m/s ou mais (`ramHit` em muro/casa/HESCO, `vcolHit` em outro veículo) com a carga armada; inimigo a `trig` m (como antes). `BOMB.truck` = dano e raio do caminhão estratégico (1800 em 120 m). Toda explosão de veículo-bomba ganha a cratera, bola de fogo e nuvem do `stkFx`, e uma linha no diário.
+- **Detonação**: batida a 8 m/s ou mais (`ramHit` em muro/casa/HESCO, `vcolHit` em outro veículo) com a carga armada; inimigo a `trig` m (como antes). `BOMB.truck` = dano e raio do caminhão estratégico (1800 em 120 m; 2350 em 155 m desde cf-svbied-buff). Toda explosão de veículo-bomba ganha a cratera, bola de fogo e nuvem do `stkFx`, e uma linha no diário.
 - **Ordem `vbied`** no `genCmd` (domínio `atk`): `{ k: car|truck, m: sedan|pk, x z | id | pi, why }`. Carro: da economia como `car`, teto de 2, população, ROE para a IA; vai pelo **caminho menos vigiado** (`vbTrip`/`vbCost`: cada trecho de estrada custa mais perto de inimigos conhecidos, pontos e bases do inimigo) e depois reto ao alvo, sem parar para lutar. Caminhão: repassa ao `GC.bomb` `svbied`, que agora também usa o caminho menos vigiado e o modelo `svbied`.
 - **IA**: `insBomb` manda o carro (ou o caminhão quando a reserva tem um e o alvo vale ≥ 4,5) pelo `genCmd`; alvos novos: base principal, sede (HQ) e postos inimigos. Sabotagem (`sab`) e cortar o comando (`cmd`) da guerrilha tentam um veículo-bomba metade das vezes. O homem-bomba mandado é o disfarçado 60% das vezes.
 - **Homem-bomba disfarçado** (`KITS.insCivBomber`, no fim de `INF.modern[2]` e da lista do servidor): cópia do `insBomber` com `civ: 1`. Para o inimigo, no máximo "homem visto" (`grade` 1: não atira) até chegar a 25 m, atirar ou ficar suspeito. Modelo civil do pack (`packManModel`).
@@ -56,7 +66,7 @@ Só fumaça (~1 min): `node --check` da página, do servidor e do MCP; o servido
 - `bombOf` agora ignora `u.svb`: o caminhão estratégico não explode pelo `bombStep` (usa só o `stkSvb`, como antes).
 - Na requisição, o custo vem de `RQ.cost.vbied/svbied`; nas logísticas (`lgCostP`) o caminhão-bomba custa caixas como um caminhão.
 - O quadro de troca H e a escolha no hangar não têm teto (só a requisição U tem).
-- Balanço: carro 1400 em 70 m, caminhão 1800 em 120 m: o jogador pode limpar um ponto inteiro com um caminhão de 6 tíquetes.
+- Balanço: carro 1400 em 70 m, caminhão 2350 em 155 m mais a cluster (cf-svbied-buff): o jogador pode limpar um ponto inteiro com um caminhão de 6 tíquetes.
 
 ## Como testar depois
 

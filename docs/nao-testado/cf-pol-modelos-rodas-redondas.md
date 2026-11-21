@@ -29,10 +29,10 @@ Nos veículos feitos à mão, os que o pack não cobre: a artilharia, as antiaé
   - **GPU de verdade**, cena só com 52 veículos do kit (4 de cada um dos 13 de artilharia e antiaérea): as mesmas 696 chamadas; 9,3 / 11,7 ms antes e 7,0 / 12,7 ms depois (com 16 lados no pneu; ficou em 14).
   - **SwiftShader** (processador, sem GPU), 26 veículos do kit: as mesmas 390 chamadas; triângulos de 28 268 para 33 092; quadro de 49,1 / 50,4 ms para 54,5 / 56,1 ms. Sem GPU, uma cena só desses veículos fica uns 5 ms mais lenta. Numa batalha (cerca de 630 mil triângulos à vista), esses veículos são poucos.
   - Por veículo do kit: de +128 (técnica com Type 63, ZPU-4) a +256 triângulos (NASAMS, Pantsir); +160 na Shilka; de +32 a +56 num blindado sem modelo do pack.
+- Visto depois, numa partida moderna (GPU de verdade, `probe verify`): as rodas giram com o chão que o veículo anda, nos do kit e nos do pack. Um NASAMS do kit que andou 180,7 m girou 106,3 (1/1,7 por metro, a escala do modelo), e um que ficou parado não girou. As rodas de perto não foram vistas numa imagem.
 
 ## O que NÃO foi testado
 
-- As rodas girando numa partida, de perto, com o pneu liso.
 - O destroço de cada veículo do kit.
 
 ## Como testar depois

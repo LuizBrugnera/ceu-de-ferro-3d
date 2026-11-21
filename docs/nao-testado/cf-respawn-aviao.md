@@ -1,5 +1,9 @@
 # cf-respawn-aviao: abatido no ar, só voltava quando o destroço caía no chão
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/respawn-air.js`: passa inteiro sobre o main de hoje. O "nada roda" de antes (o `ReferenceError` de `dsOf`/`myRoutes` depois do merge de 2026-11-19) já não existe.
+- **Continua sem teste:** a câmera e o HUD na troca para a aeronave nova com o destroço ainda caindo, no navegador; as suítes online com dois clientes.
+
 **Causa:** em `step`, a contagem de volta do jogador só chamava `spawnPlayer()` quando `P.gone || P.man`. Um avião ou helicóptero abatido fica `dead` na hora (a morte, o tíquete, `S.cq.st.d`, `playerDown` e `Net.down` já eram ali, em `lose`/`heliLost`), mas só fica `gone` quando o destroço bate no chão (`stepPlane`, ramo `p.dead`). Enquanto caía, a contagem voltava a 0,3 s e esperava. Abatido a 600 m, o F-22 voltava em 9 s em vez de 3; o Apache a 250 m, em 5,8 s. Valia também para outra aeronave escolhida no painel (H, "onde entrar"): a escolha ficava esperando o destroço.
 
 **O que mudou** (`Céu de Ferro 3D.html`):

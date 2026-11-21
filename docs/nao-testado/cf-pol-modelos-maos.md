@@ -1,5 +1,9 @@
 # cf-pol-modelos: as duas mãos na arma do soldado do pack (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador (GPU), Assistir em Hoje, câmera de comandante a 4,5 m de um Combat Engineer do pack correndo: a mão direita no punho e a esquerda no guarda-mão do fuzil. Nenhum erro no console.
+- **Continua sem teste:** a recarga, a granada e a troca de arma.
+
 ## O que mudou
 
 O soldado animado do pack (o SWAT do Quaternius) mira como com pistola: o braço direito estendido e o esquerdo caído do lado. Por isso o fuzil, a metralhadora e o lançador pareciam pendurados numa mão só, ou boiando no peito com os braços longe dele.

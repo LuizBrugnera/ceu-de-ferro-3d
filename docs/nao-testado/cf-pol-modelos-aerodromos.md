@@ -20,7 +20,7 @@ O desenho dos aeródromos saiu de `buildWorld` para `baseScene(b, t)`, com o vis
   - galpões com telhado de duas águas (metal cinza ou enferrujado), porta e duas janelas;
   - o bunker baixo com laje e seteira;
   - a bandeira na cor do lado (`foeCol`).
-- As oito marcas da pista são uma malha só, não mais oito.
+- As oito marcas da pista são uma malha só, não mais oito. Depois (cf-pol-modelos, rodada das faixas), essa malha ganhou as faixas das bordas e as barras de cabeceira nas duas pontas: 216 triângulos a mais por pista e nenhuma chamada de desenho.
 - Os detalhes de cada prédio também são uma malha só. O primeiro objeto de cada prédio continua o que fica como escombro (`lookObj`), e os detalhes somem com o prédio destruído.
 
 ## O que foi testado

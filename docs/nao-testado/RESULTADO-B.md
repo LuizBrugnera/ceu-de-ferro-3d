@@ -55,3 +55,27 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
 | cf-movimento-lider | ok (parte): as três técnicas em uso (desloc, vig, lances), 268 abrigos em contato. |
 | cf-movimento-organico | ok (parte): cunha e fila, lagartas a 9 m da estrada, soldados a 22 m do eixo (mediana). |
 | cf-obras-sair | ok (parte): `posts` passa inteiro; sacos de areia, ninho e ouriços com cor certa na partida. Achado: grama dentro do buraco da trincheira. |
+
+### Lote 2, depois do PR #179
+- `brain-medico` (nunca tinha rodado), 6 sementes: **1 falha**. O médico da esquadra trata em 9–10 s e a cruz vermelha segura o fogo,
+  mas o médico de outra esquadra não vem quando ouve "Médico!" (0/6). É do cérebro (`CEREBRO: medico`), por isso só anotei.
+
+## Lote 3 (cf-p2-posicao … cf-pol-modelos-antiaerea)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-p2-posicao | ok, menos o custo: `tps` 25 ok, falha só a meta de 0,15 ms. **No navegador, `tpsStat()` dá 2,46 ms por consulta (máx 99 ms)** em 3 min de partida: 16× a meta, mesmo descontando a máquina cheia. |
+| cf-p4-prisioneiros | ok (parte): `brain-prisioneiros` passa inteiro. |
+| cf-p5-falas | ok (parte): `brain-falas` (SECS=60) passa inteiro. |
+| cf-p6-medicao | parte: os eventos do cérebro chegam à analytics numa partida e `R.brain` vem preenchido; `brain-drills` em andamento (granadas: 100% escapam, meta ≥ 70%). |
+| cf-p7-honestidade | **falha** (1 checagem estática): a seção `CEREBRO: defesa` (DFP) lê `S.units` fora da percepção (`dfpTkGo`). As checagens dinâmicas passam. |
+| cf-p8-pelotao | ok (parte): `brain-pelotao` passa inteiro; o risco 2 (suítes antigas da hora H) se confirmou e foi resolvido no lote 2. |
+| cf-pack-aparece | ok (parte): 29 modelos carregados, 6/6 tanques com o pack, Abrams e Tiger do pack no hangar pelos botões, `?pack=0` volta ao de antes. |
+| cf-pack-modelos | ok (parte): `PACK.M` inteiro; custo com e sem o pack igual dentro do ruído desta máquina. |
+| cf-pol-hud | ok (parte): Visão de General dos Insurgentes (tecla 3) sem erro e com a tabela de forças por inimigo; HUD do F-22 sem rótulos encavalados. |
+| cf-pol-modelos-antiaerea | ok (parte): Wirbelwind e M16 no hangar; torres do NASAMS e do Pantsir girando numa partida; o Pantsir de perto. |
+
+### Achados para a frente do cérebro e do general (não consertados aqui)
+- O socorro de outra esquadra ao ouvir "Médico!" não acontece (`brain-medico` (b), 0/6).
+- `CEREBRO: defesa` (`dfpTkGo`) quebra a checagem de honestidade do P7.
+- O serviço de posição (P2) custa 2,46 ms por consulta no navegador (meta 0,15 ms).

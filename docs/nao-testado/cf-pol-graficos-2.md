@@ -9,16 +9,15 @@ Polimento dos gráficos do que já existe, visto na GPU daqui (RTX 4060, Chrome 
 - A queda de uma ponte afunda a malha do terreno: `envBedSync` reenvia a textura quando a versão das posições muda.
 
 ## Estradas
-- **Bug (desde #100, 19/11):** cada classe de estrada desenhava só a primeira estrada. Os índices de cada fileira contavam do começo da própria estrada (`i * NC`), então todas as estradas da classe caíam sobre os vértices da primeira. No mapa 11 da época moderna eram 12 estradas principais, 15 secundárias, 4 trilhas e 13 estradas de terra, e na visão 3D só uma de cada aparecia. Os mapas 2D desenham as estradas por conta própria, por isso nada no jogo dependia disso.
 - As estradas e as ruas das vilas (`cityScene`) agora tomam a luz do sol, do céu e dos sinalizadores (`sky3Ill`), como o chão. Antes eram planas e escurecidas à mão à noite, quando ficavam mais claras que tudo em volta. Ganham manchas, desgaste nas bordas, sulcos de roda e coroa de mato nas de terra, e uma faixa tracejada gasta na estrada principal moderna. Asfalto e ruas ficam um tom mais escuros e gastam menos nas bordas.
-- As pontes acham as estradas pelo marcador `userData.road` (antes, pelo material `MeshBasicMaterial`).
+- Cada vértice da fita da estrada (`roadRibbon`, que #175 tirou de `buildWorld`) leva a posição através e ao longo dela (`rd`). As pontes acham as estradas pelo marcador `userData.road`, e não mais pelo material `MeshBasicMaterial`.
 
 ## Testado
 - `tests/water-shore.js`, `tests/road-look.js` (novos), `tests/gfx.js`, `tests/veg-fade.js`, `tests/sparks-light.js`.
 - Capturas antes × depois de dia, de noite e na chuva, na Média, e o tempo de GPU na Média e na Alta (veja o PR).
 
 ## NÃO testado
-- Uma partida jogada com as estradas inteiras: carros e soldados andam pela simulação, que não mudou. Ainda não foi visto se a estrada desenhada, agora inteira, bate com o caminho dos veículos em todo o mapa: o convés fica 0,35 m acima de `hgt` (bilinear), e a malha do terreno é triangulada, então em lombadas o terreno pode cobrir a estrada.
+- Uma partida jogada com as estradas iluminadas. Em lombadas o terreno pode cobrir a estrada: o convés fica 0,35 m acima de `hgt` (bilinear) e a malha do terreno é triangulada. Isso é anterior a este PR.
 - Uma ponte caindo de fato no jogo, com a água e as estradas novas. Só foi testado com stubs: a textura do leito é reenviada e `br3Init` acha as estradas.
 - A Baixa: nela a água segue a antiga e as estradas ficam iluminadas, mas não foi capturada.
 - WebGL 1 (sem WebGL 2): a água pede `derivatives` e uma textura float (`OES_texture_float`), e nada disso foi visto rodando.

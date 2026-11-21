@@ -1,5 +1,10 @@
 # cf-pol-modelos: modelos das antiaéreas (testado em parte)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Hangar pelos botões, 1944, aba Antiaérea: a Wirbelwind nova (casco do Panzer IV, torre aberta de nove lados, os quatro canos) e a M16 meia-lagarta ao lado no carrossel.
+- Partida (Assistir em Hoje, 3 min): as torres do NASAMS e do Pantsir giram de verdade (rumo da torre de −3,1 a 3,1 rad). De perto, o Pantsir mostra o caminhão 8×8, a torre com os blocos de mísseis e o radar de busca no mastro. Nenhum erro no console.
+- **Continua sem teste:** o tiro contra um avião visto na tela e a antiaérea destruída no meio da batalha.
+
 ## O que mudou
 
 As quatro antiaéreas eram duas pilhas de caixas (uma para 1944, outra para hoje). Agora cada uma tem o seu modelo (bloco `AAB`, depois do da artilharia, com o mesmo kit `VK`):
@@ -29,7 +34,7 @@ As quatro antiaéreas eram duas pilhas de caixas (uma para 1944, outra para hoje
 
 ## O que NÃO foi testado
 
-- Nenhuma delas vista numa partida atirando, girando a torre ou sendo destruída no meio da batalha.
+- Visto depois (GPU de verdade, demonstração): o NASAMS da IA atirando com os casulos levantados e a torre girada, e o Wirbelwind atirando com os canos levantados (imagens na #178). Não vi o M16 nem o Pantsir atirando, nem uma antiaérea destruída no meio da batalha.
 - O radar de busca não gira, e antes também não girava.
 - As rodas e lagartas não giram.
 

@@ -1,6 +1,5 @@
 'use strict';
-/* the roads' look (cf-pol-graficos 2): since #100 each class's mesh drew only its first road (the others' rows were indexed from the first
-   one's vertices); and the roads were flat MeshBasicMaterial ribbons, darkened by hand at night and never lit by the sun,
+/* the roads' look (cf-pol-graficos 2): the roads were flat MeshBasicMaterial ribbons, darkened by hand at night and never lit by the sun,
    the sky or a flare. Now envApply gives them a lit material and envRoadHook their surface (worn edges, ruts on dirt roads, a dashed
    centre line on a modern main road). The bridges found the road meshes by their old material (MeshBasicMaterial, polygon offset, double
    sided): with the new one a fallen bridge would leave its road hanging over the river. This checks that br3Init finds them by their mark,
@@ -15,43 +14,29 @@ const ba = html.indexOf('function br3Init() {'), bb = html.indexOf('\n}\n', ba) 
 const ia = html.indexOf('function sky3Ill(sh) {'), ib = html.indexOf('\n}\n', ia) + 2;
 if (ha < 0 || ia < 0) { console.log('no lit roads: a page before them'); process.exit(0); }
 
-console.log('-- buildWorld marks its roads and gives each vertex its place across and along --');
+console.log('-- each road vertex knows its place across the road and along it (roadRibbon rd, buildWorld) --');
 {
   const bw = html.slice(html.indexOf('function buildWorld() {'), html.indexOf('/* airfields, turned toward the middle of the map */'));
-  ok(/rd\.push\(o, i \* st\)/.test(bw) && /setAttribute\('rd', new THREE\.BufferAttribute\(new Float32Array\(rd\), 2\)\)/.test(bw), 'the rd attribute: m across (o) and m along (i * st), two a vertex');
+  ok(/roadRibbon\(E, hw, pos, idx, rd\)/.test(bw) && /setAttribute\('rd', new THREE\.BufferAttribute\(new Float32Array\(rd\), 2\)\)/.test(bw), 'buildWorld asks roadRibbon for rd and gives it to the mesh');
   ok(/me\.userData\.road = c/.test(bw), 'each road mesh marked with its class');
   const cs = html.slice(html.indexOf('function cityScene() {'), html.indexOf('cityFlush();', html.indexOf('function cityScene() {')));
   ok(/rd\.push\(w, s, -w, s\)/.test(cs) && /me\.userData\.road = -1; me\.userData\.hw = w;/.test(cs), 'a town\'s streets marked too (class -1, their half width), with their place across and along');
-}
-
-console.log('-- every road of a class is drawn, each over its own line --');
-{
-  /* buildWorld's road loop, over three straight roads (two of class 0, one of class 2): since #100 the rows' indices counted from each
-     road's own start (i * NC), so every road of a class was drawn over the first one's vertices and the others never showed in 3D */
-  const ra = html.indexOf('  /* roads follow the routes through the valleys'), rb = html.indexOf("  if (T.net) console.log('road meshes: '", ra);
+  /* the page's roadRibbon over two straight roads: rd's across is each vertex's offset from the road's line, its along the distance from its start */
+  const fa = html.indexOf('function roadRibbon('), fb = html.indexOf('\n}\n', fa) + 2;
   const line = (x0, z0, a, len) => ({ x0, z0, dx: Math.cos(a), dz: Math.sin(a), len });
-  const es = [{ c: 0, p: line(0, 0, 0, 300) }, { c: 0, p: line(1000, 500, 1.2, 180) }, { c: 2, p: line(-400, 900, 2.5, 95) }];
-  const meshes = [];
-  class BA { constructor(a, n) { this.array = a; this.itemSize = n; this.count = a.length / n; } }
-  const ctx = vm.createContext({ Math, Float32Array, console: { log() {} },
-    THREE: { DoubleSide: 2, MeshBasicMaterial: class { constructor(o) { Object.assign(this, o); } }, BufferAttribute: BA,
-      BufferGeometry: class { constructor() { this.attributes = {}; } setAttribute(k, a) { this.attributes[k] = a; } setIndex(i) { this.index = i; } },
-      Mesh: class { constructor(g, m) { this.geometry = g; this.material = m; this.userData = {}; } } },
-    RN: { w: [8, 6, 3.5, 3], pal: { ww2: [0, 1, 2, 3] }, off: [-2, -1.6, -1.2, -1] }, S: { era: 'ww2' }, P: { road: 9 }, T: { net: { e: es } }, ROADH: .35,
-    roadsOf: T => T.net.e, hgt: () => 0, routeAt: (r, s) => ({ x: r.x0 + r.dx * s, z: r.z0 + r.dz * s, dx: r.dx, dz: r.dz }), scene: { add: m => meshes.push(m) } });
-  vm.runInContext('(() => {\n' + html.slice(ra, rb) + '\n})()', ctx, { filename: 'roads.js' });
-  ok(meshes.length === 2, 'one mesh per class there is (' + meshes.length + ')');
-  for (const me of meshes) {
-    const g = me.geometry, n = g.attributes.position.count, P = g.attributes.position.array, I = g.index, used = new Uint8Array(n);
-    let mx = 0, off = 0; for (const k of I) { used[k] = 1; mx = Math.max(mx, k); }
-    /* each triangle's corners on one road: the distance of each corner from that road's line, under the road's half width x 1.15 */
-    const mine = es.filter(e => e.c === me.userData.road), hw = [8, 6, 3.5, 3][me.userData.road] * 1.15 + 1e-3;   // the positions are Float32
-    const onRoad = (k, e) => { const x = P[k * 3] - e.p.x0, z = P[k * 3 + 2] - e.p.z0, a = x * e.p.dx + z * e.p.dz; return a > -1e-3 && a < e.p.len + 1e-3 && Math.abs(-x * e.p.dz + z * e.p.dx) <= hw; };
-    for (let t = 0; t < I.length; t += 3) if (!mine.some(e => [I[t], I[t + 1], I[t + 2]].every(k => onRoad(k, e)))) off++;
-    const roadsHit = mine.filter(e => { for (let k = 0; k < n; k++) if (used[k] && onRoad(k, e)) return true; return false; }).length;
-    ok(mx === n - 1 && used.every(Boolean), 'class ' + me.userData.road + ': every vertex drawn (' + n + ', highest index ' + mx + ')');
-    ok(!off && roadsHit === mine.length, 'class ' + me.userData.road + ': all ' + mine.length + ' roads drawn, no triangle across two of them (' + off + ' off)');
+  const ctx = vm.createContext({ Math, ROADH: .35, hgt: () => 0, routeAt: (r, s) => ({ x: r.x0 + r.dx * s, z: r.z0 + r.dz * s, dx: r.dx, dz: r.dz }) });
+  vm.runInContext(html.slice(fa, fb) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'roadRibbon.js' });
+  const pos = [], idx = [], rd = [], es = [line(0, 0, 0, 300), line(1000, 500, 1.2, 180)], at = [];
+  for (const e of es) { const n0 = pos.length / 3; ctx.$('roadRibbon')({ p: e }, 6, pos, idx, rd); at.push([n0, pos.length / 3, e]); }
+  let bad = 0;
+  for (const [n0, n1, e] of at) for (let k = n0; k < n1; k++) {
+    const x = pos[k * 3] - e.x0, z = pos[k * 3 + 2] - e.z0, along = x * e.dx + z * e.dz, across = -x * e.dz + z * e.dx;
+    if (Math.abs(rd[k * 2] - across) > 1e-6 || Math.abs(rd[k * 2 + 1] - along) > 1e-6) bad++;
   }
+  ok(rd.length === pos.length / 3 * 2 && !bad, 'rd: two numbers a vertex, across and along, right at every vertex (' + bad + ' off of ' + pos.length / 3 + ')');
+  const p2 = [], i2 = [];
+  ctx.$('roadRibbon')({ p: es[0] }, 6, p2, i2);
+  ok(p2.length === at[0][1] * 3 && i2.length > 0, 'without rd, roadRibbon lays the same road (tests/road-mesh.js calls it so)');
 }
 
 console.log('-- a fallen bridge still finds the roads it sinks --');

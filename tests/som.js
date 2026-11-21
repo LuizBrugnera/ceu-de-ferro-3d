@@ -1,5 +1,5 @@
 'use strict';
-/* the sound (SND, cf-pol-armas): the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
+/* the sound (SND, cf-pol-armas): a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
    AI's (one AI shot 55 ms before took the player's), the launches by distance (one across the map was as loud as one beside the ear), the
    bursts late and dull far away, the compressor on the master, the soldier's hands (reload, bolt, empty click, swap) and the crack of a
    foe's round passing the head. The block lives in the 3D part of the page, which the harness does not load: it runs here on its own over a
@@ -30,7 +30,7 @@ function load() {
     console, Math, S, fx, playMode: 'play', paused: false, reduced: false, HOW: { hear: 2500 }, TAU: Math.PI * 2,
     window: { AudioContext: function () { return AC(); } },
     clamp: (v, lo, hi) => Math.min(hi, Math.max(lo, v)), dist: (p, q) => Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z),
-    calOf: sim.$('calOf'), manEye: sim.$('manEye')
+    calOf: sim.$('calOf'), manEye: sim.$('manEye'), hullTracked: sim.$('hullTracked'), wrap: sim.$('wrap')
   });
   vm.runInContext(html.slice(a, b) + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'sound.js' });
   ctx.$('audioInit')();
@@ -138,5 +138,30 @@ console.log('-- a foe\'s round passing the head --');
   ok(go(shot(1, 1, P)).length === 0, 'the soldier\'s own: nothing');
   const slow = go(shot(1, 1, null, 300)); ok(slow.length === 1, 'a slow round (a pistol\'s, 300 m/s): a whizz, not the supersonic snap');
   const far = shot(1, 1); far.x = eye.x - 40; ok(go(far).length === 0, 'a round already past, 40 m behind: nothing');
+}
+console.log('-- a ground vehicle: the engine through its gears, the tracks, the turret --');
+{
+  const { $, S, C, A } = load(), tick = $('audioTick'), SND = $('SND'), W = sim.watch('modern', { len: 0 });
+  const tank = sim.addVehicle('tank', 'abrams', 0, W.base[0].x + 200, W.base[0].z, 0), last = p => { const e = p.ev.filter(x => x[0] === 'tgt'); return e.length ? e[e.length - 1][1] : p.value; };
+  S.my = tank; tank.dead = false; tank.ctl.drive = 1; tank.sp = 0; tick(1 / 60);
+  ok(A.eng && A.tur, 'a tank: its engine and its turret\'s servo are made on the first frame aboard');
+  const spd = tank.def.spd, fs = [], gs = [];
+  for (let i = 0; i <= 40; i++) { tank.sp = spd * i / 40; tick(1 / 60); fs.push(last(A.eng.o.frequency)); gs.push(last(A.eng.g.gain)); }
+  let drops = 0; for (let i = 1; i < fs.length; i++) if (fs[i] < fs[i - 1] - 1) drops++;
+  ok(drops === SND.veh.gears - 1, 'from a stop to its top speed (' + spd + ' m/s) the revs climb in each gear and fall at each of the ' + drops + ' shifts (' + fs.filter((f, i) => !(i % 5)).map(f => Math.round(f)).join(', ') + ' Hz)');
+  ok(fs[40] > fs[0] * 2 && Math.abs(last(A.eng.o2.frequency) * 2 - fs[40]) < 1e-6, '  idle to the top is ' + Math.round(fs[0]) + ' to ' + Math.round(fs[40]) + ' Hz, with a square an octave under it');
+  tank.sp = spd * .3; tank.ctl.drive = 1; tick(1 / 60); const on = last(A.eng.g.gain); tank.ctl.drive = 0; tick(1 / 60); const off = last(A.eng.g.gain);
+  ok(on > off, '  under the throttle louder than coasting at the same speed (' + on.toFixed(3) + ' against ' + off.toFixed(3) + ')');
+  const n = () => C.nodes.filter(x => x.kind === 'src' && !x.loop && x.t0 !== undefined).length;
+  let k = n(); tank.sp = 6; for (let i = 0; i < 60; i++) tick(1 / 60); const clk = n() - k;
+  ok(clk >= 10 && clk <= 16, 'its tracks at 6 m/s: ' + clk + ' knocks a second (about 6 × ' + SND.veh.trk.hz + ')');
+  k = n(); tank.sp = 0; for (let i = 0; i < 60; i++) tick(1 / 60); ok(n() === k, '  stopped: none');
+  const truck = { kind: 'truck', def: { spd: 20, parts: [] }, sp: 12, ctl: { drive: 1 }, ty: 0 }; S.my = truck; k = n(); for (let i = 0; i < 60; i++) tick(1 / 60);
+  ok(n() === k && last(A.eng.g.gain) > 0, 'a truck at 12 m/s: its engine, no track knocks');
+  S.my = tank; tank.sp = 0; tick(1 / 60); tank.ty += tank.def.sl * (1 / 60); tick(1 / 60); const sv = last(A.tur.g.gain);
+  ok(Math.abs(sv - SND.veh.tur.vol) < 1e-6, 'the turret slewing at its top rate: the servo whines at full (' + sv + ')');
+  tick(1 / 60); ok(last(A.tur.g.gain) === 0, '  the turret still: quiet');
+  S.my = { man: 1, kind: 'inf', def: {}, x: 0, y: 0, z: 0, st: 0, team: 0, arms: [{ d: SARMS.m4, mag: 30, res: 3, rl: 0, t: -9 }], w: 0, swT: 0, ctl: { fire: false } }; tick(1 / 60);
+  ok(last(A.eng.g.gain) === 0 && last(A.tur.g.gain) === 0, 'out of the tank, on foot: the engine and the servo fall quiet');
 }
 done();

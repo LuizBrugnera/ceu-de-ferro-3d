@@ -1,5 +1,9 @@
 # cf-movimento-organico: tropas e veículos fora da linha reta (não testado)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados), 68 s: formações das esquadras andando, cunha 23 e fila 19 (`orgForm`). 5 veículos fora do eixo, os de lagarta a 9 m (o previsto em campo aberto). Os soldados andando ficam a uma mediana de 22 m do eixo (p10 3 m, p90 88 m). Nenhum erro no console.
+- **Continua sem teste:** a ultrapassagem, a fila nas pontes, o tempo de chegada e o A/B com `ORG.on = 0`.
+
 Pedido do capitão: "as tropas e tudo mais não devem andar todas na estrada em linha reta, deixe mais orgânico".
 Pela regra de entrega, nenhuma suíte, baseline ou partida A/B foi rodada. Tudo abaixo está sem teste, salvo o smoke do fim.
 
@@ -23,23 +27,11 @@ Nada usa `Math.random`: todo sorteio vem de `hash2` (semente da esquadra, ordem 
 - **Veículos em viagem** (`tripMove`/`placeOn`): mantêm 2,5 m para o seu lado do caminho, com ondulação. Começam no meio e saem devagar. Em ponte voltam ao meio.
 - **Caminhos curvos** (`orgPoly`): os cantos de mais de ~20° viram uma curva de até 14 m de cada lado. Isso vale para os caminhos do `tripOf` (veículos e esquadras), os escondidos do `hideStep` e os do comandante (`O.wp`, no `setOrd`). Se o meio da curva cair na água, o canto fica (pontes e vaus não são cortados). O caminho é alterado no próprio array, uma vez só (`p.org`).
 
-## O que rodou (smoke de ~1 min)
+## O que NÃO foi testado (o que ainda falta)
 
-- `node --check` no script da página: ok.
-- O servidor sobe em 127.0.0.1 e a página carrega no Chrome. A demonstração IA × IA roda; no console só os erros que já existiam (404 e a conexão recusada da sala).
-- No console da demonstração: 900 passos de `step(1/30)` sem erro nem NaN. Soldados em movimento ficaram a 3–9 m do eixo, nos dois lados. Uma antiaérea de rodas sob ameaça saiu 5 m. Formações: 27 em coluna e 5 em cunha.
-
-## O que NÃO foi testado
-
-- Nenhuma suíte (`tests/*.js`), nenhuma partida longa, nenhum A/B, nenhuma medição de custo por quadro.
-- Não foi visto na tela (o smoke foi pelo console).
-- Não foi verificado se:
-  - as esquadras ainda chegam no tempo de antes. O líder só avança quando está perto do seu lugar, e o lugar agora se mexe;
-  - alguém trava em casas ou sebes. O lugar passa pelo `clearOf`, mas o soldado pode ficar enroscado no mato;
-  - a coluna passa por pontes em fila de verdade;
-  - a ultrapassagem não faz veículos se atravessarem (os do trilho não colidem entre si);
-  - tanques fora da estrada atravessam árvores (veículos no trilho não usam `bump`; o teste de "limpo a 5 m" é só no ponto ao lado e 25 m à frente).
-- Online com convidados: não testado.
+- Se as esquadras chegam no tempo de antes; se alguém trava em casas ou sebes; a fila nas pontes.
+- Se a ultrapassagem faz veículos se atravessarem; tanques fora da estrada atravessando árvores.
+- O custo por quadro e o online.
 
 ## Riscos
 

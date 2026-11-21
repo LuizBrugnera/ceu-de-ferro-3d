@@ -34,3 +34,24 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
   têm explicação ainda, e em 9f2a313 passavam.
 - `tests/man-c.js` cai com TypeError (`c.spec` de um candidato `cut` que não existe).
 - O diário do plano de fortificação diz "Perímetro em a base avançada junto a C" (deveria ser "na base avançada").
+
+### Lote 1, depois do PR #176
+- O ajuste da hora H foi confirmado. Com `PEL.on = 0` no cenário, `procedures` passa inteiro e a hora H do `approaches` passa. Os dois testes
+  foram ajustados (o portão do pelotão fica com `brain-pelotao`). O `approaches` fica com as 4 falhas da reunião, da frente do general.
+- `campaign`: 24 ok e nenhuma falha em 3 das 5 seções. Parei a rodada depois de 82 min para dar lugar ao navegador.
+  `personality`: tudo ok até a partida IA × IA final de 180 s, que não terminou em 90 min nesta máquina.
+
+## Lote 2 (cf-mapa-cidades … cf-obras-sair)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-mapa-cidades | **defeito achado** (consertado em paralelo pelo cf-pol-hud): no mapa do General, o nome da vila do ponto de conquista saía duas vezes. `tests/town-names.js` cobre o conserto. Nomes vistos no General (1920) e no mapa de tiro de 1944. |
+| cf-medico | parte: cartão do Sanitäter no hangar; 56 médicos em 455 soldados da IA; eventos do médico na analytics. O soldado do cartão segura fuzil (o pack não tem pistola). |
+| cf-miras-impl | **2 defeitos achados** (consertados em paralelo pelo cf-pol-hud): a 1ª linha de armas da cabine do jato escondida sob o painel de danos, e distâncias de aviões empilhadas no HUD. `tests/hud-labels.js` cobre os dois. 12 óticas em 1280 e 1920 px sem erro. |
+| cf-modo-rts | ok (parte): câmera, W/D, névoa (276 de 323 escondidos), quadro da esquadra de perto, esconder painéis, 1280 e 1920 px. |
+| cf-moitas-floresta | parte: 88.165 células de mato e 380 faixas no mapa 11; as moitas aparecem na orla. |
+| cf-moitas-mato | achado: as sebes do mapa 7 são 0 no mapa de 3 lados (ids a 65.448 de 65.536); o mato do mapa 10 cobre. |
+| cf-mouse-padrao | ok: o helicóptero e o jato seguem a mira do mouse; `ctrl` padrão `mouse`. Documento encurtado. |
+| cf-movimento-lider | ok (parte): as três técnicas em uso (desloc, vig, lances), 268 abrigos em contato. |
+| cf-movimento-organico | ok (parte): cunha e fila, lagartas a 9 m da estrada, soldados a 22 m do eixo (mediana). |
+| cf-obras-sair | ok (parte): `posts` passa inteiro; sacos de areia, ninho e ouriços com cor certa na partida. Achado: grama dentro do buraco da trincheira. |

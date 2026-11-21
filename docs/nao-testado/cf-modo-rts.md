@@ -1,5 +1,13 @@
 # cf-modo-rts: a câmera de comandante (modo RTS, issue #123)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados), `rtsSet(true)`: a câmera de comandante aparece sobre a cena 3D, com o anel da base, o minimapa no canto, o aviso de teclas e a névoa ("Névoa: o que EUA vê"). Em 1280 e 1920 px.
+- W anda na direção do rumo da câmera (direção −0,29 = rumo −0,29), D anda de lado (990 m em 1 s a 900 m de distância).
+- Névoa: 276 dos 323 inimigos ficam escondidos (`rtsHid`), só os vistos nos últimos 2,5 s aparecem.
+- Esquadra selecionada e F (`rtsFocus`): a câmera desce a 140 m. O quadro da cabeça mostra "ESQ 28 · Assalto · 6 homens", líder (Sgt. Prado, confiança 2), ordem, técnica (desloc) e as equipes A e B; estrela dourada no líder e as letras das equipes embaixo dos homens.
+- "Esconder painéis" (`RTS.nop`) tira os painéis. Nenhum erro no console.
+- **Continua sem teste:** mouse de verdade (arrastar, roda, botão do meio, bordas, minimapa), seleção por clique, caixa e duplo clique, ordens pelo botão direito em 3D e a fila com Shift, o botão Comandante (RTS) com servidor e o espectador, telas estreitas (< 981 px); a névoa no convidado online (se ele não recebe `seenT`, todos os inimigos dele somem); o custo num host lento (a cena volta a ser desenhada com a visão aberta, #118); a neblina da cena vista do alto com tempo ruim.
+
 Pedido do capitão: "ja pode tambem fazer o modo RTS". A visão aprovada (STRATEGY.md) diz que o modo RTS é mais um jeito opcional de jogar, nunca o principal. Por isso ele é a própria Visão de General vista em 3D. Não tem lógica de comando própria.
 
 ## O que mudou
@@ -27,17 +35,6 @@ Pedido do capitão: "ja pode tambem fazer o modo RTS". A visão aprovada (STRATE
 
 ### `README.md`
 - "Quatro jeitos de entrar" e um parágrafo sobre a câmera de comandante.
-
-## O que NÃO foi testado
-Só houve o teste de fumaça: o servidor sobe, a página carrega sem erro, e com IA × IA local + `rtsSet(true)` a cena 3D, o minimapa, os anéis dos pontos e os painéis aparecem, sem erro no console (navegador sem GPU, cerca de 1 quadro por segundo). Nada mais foi testado:
-- mover, girar, aproximar e usar as bordas com mouse e teclado reais; o arrasto do minimapa;
-- selecionar (clique, caixa, duplo clique, grupos) e ordenar pelo botão direito em 3D; a fila com Shift; as ordens armadas (G H Q E R T Y K C P M B U J O) com clique no chão e no minimapa; o plano de assalto;
-- a névoa: inimigos aparecendo e sumindo, corpos, os modelos do pack, os pontinhos de longe, 3 lados, convidado online (se o convidado não recebe `seenT` dos fantasmas, todos os inimigos dele ficam escondidos e só os contatos aparecem);
-- o líder, as equipes e o quadro da cabeça com o P0/P1/P3 de verdade (cf-lideres, cf-cerebro-soldado): os nomes dos campos vêm da seção 2.5 do relatório;
-- online: o botão Comandante entrando na sala, a cadeira ocupada por outro, o espectador;
-- desempenho num host lento (#118): a cena 3D volta a ser desenhada com a visão aberta (antes não era), e a sobreposição é refeita a cada quadro;
-- telas estreitas (< 981 px), 1280 px e 1920 px; "Esconder painéis";
-- a neblina da cena vista do alto (com tempo ruim, o chão pode sumir perto de 2,6 km).
 
 ## Riscos
 - Ver a cena e o mapa ao mesmo tempo custa mais quadro que o mapa sozinho. Num host lento, a IA pode encolher o teto de população (#118) por causa do relógio.

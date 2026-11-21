@@ -17,7 +17,20 @@ Tudo numa seção própria da página, `CEREBRO: urbano`, mais a medição em `C
 
 Veja o PR: a tabela antes × depois do torneio (12 partidas Curtas, sementes 1-12, `--eco --lg --rec --mapv 11 --nobudget`, com `nice`, no saomiguel; o mapa 11 é o do jogo e o da régua do G0) e o exercício sem tela `tests/urbano.js`.
 
-**Parcial (6 partidas de 1944 por braço, 2026-11-21): não bate o critério.** Foguetes anticarro em blindado 1,0 por partida com o G7 contra 2,8 sem; tiros de atirador de elite 4,7 contra 10,3; defesa urbana em prédio 39% contra 36% (meta 40%); nenhum assalto a cidade tomou o ponto nos dois braços. O caçador e o posto do atirador, do jeito que estão, são piores que o código antigo na partida.
+**Resultado (12 + 12 partidas Curtas, mapa 11, 2026-11-21): não bate o critério.**
+
+| Medida | Meta | Sem o G7 | Com o G7 |
+| --- | --- | --- | --- |
+| Defesa urbana em prédio | ≥ 40% | 33% | 37% |
+| Assaltos a cidade que tomam o ponto | ≥ 40% | 0% | 0% (nenhum chega à hora H) |
+| Foguetes anticarro em blindado, por partida | ≥ 3 | 6,3 | 5,3 |
+| Tiros de atirador de elite, por partida | sobe | 6,0 | 6,9 |
+
+Por época:
+- **Anticarro:** em 1944 caiu de 2,8 para 1,0 foguetes por partida; na época moderna ficou igual (9,8 → 9,5).
+- **Atirador de elite:** em 1944 caiu de 10,3 para 4,7 tiros por partida; na época moderna subiu de 1,7 para 9,2.
+
+O caçador anticarro e o posto do atirador pioram 1944. O posto do atirador ganha na época moderna. A guarnição ganha 4 pontos nas duas épocas.
 
 ## O que o número NÃO cobre
 

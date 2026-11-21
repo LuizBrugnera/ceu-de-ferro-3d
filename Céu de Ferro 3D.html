@@ -41490,12 +41490,16 @@ trnUi = (f => () => { f(); crewUi(); })(trnUi);
    whoosh (which was as loud across the map as beside the ear) and a burst. crack: the round of a foe passing within r m of the soldier's
    head snaps, at most one every gap s. hand: the soldier's own hands, [after s, dur s, vol, f Hz, Q] noises through a band: a magazine
    out and in, a bolt worked, an empty click, a weapon swapped, a launcher loaded. The master runs through a compressor, so that a battle's
-   bursts do not clip */
+   bursts do not clip. veh: a ground vehicle's own sound (sndVeh): the engine through gears (one band of the speed each, the revs climbing in it and
+   falling at the shift: f Hz from idle to the top, the gain g [idle, at full revs, more under the throttle], a cutoff lp opening with the revs),
+   the tracks' clatter on a tracked hull (a link's knock hz times a second per m/s, at most max, through a band at f), the turret's servo
+   whining as it slews (f Hz from still to its top rate, vol at the top) and the road under the wheels (road: g and f by the speed) */
 const SND = {
   c: 343, ref: 80, air: 700, far: 2500,
   mine: { k: .2, gap: .03, late: .12 }, other: { k: .1, gap: .03, q: 24 },
   launch: { far: 3000, ref: 150 }, boom: { air: 1400 },
   crack: { r: 6, gap: .05, vol: .14 },
+  veh: { gears: 4, f: [28, 78], idle: .2, g: [.03, .025, .02], lp: [180, 650], trk: { hz: 2.2, max: 26, vol: .035, f: 850 }, tur: { f: [170, 420], vol: .02 }, road: { g: [.005, .02], f: [300, 700] } },
   v: { pistol: [.05, .6, 2600, 0, 0], smg: [.06, .65, 2200, 0, 0], rifle: [.075, 1, 1900, 140, .25], battle: [.11, 1.15, 1600, 110, .4], mg: [.085, 1.05, 1700, 120, .3],
     sniper: [.16, 1.4, 1300, 85, .55], hmg: [.11, 1.2, 1150, 80, .5], cannon: [.2, 1.4, 750, 55, .7] },
   hand: { out: [[0, .035, .07, 2800, 2], [.07, .05, .05, 900, 1.2]], in: [[0, .03, .09, 2400, 2], [.15, .04, .08, 3600, 3]], bolt: [[.38, .04, .07, 2200, 2], [.55, .035, .08, 3000, 2]],
@@ -41615,14 +41619,37 @@ function sndCrack(P, dt) {
     return;
   }
 }
+/* a ground vehicle's own sound (SND.veh), each frame; P null: the engine and the servo fall quiet. A.eng: a sawtooth and a square an octave
+   under it through a low-pass, made on first use; A.vty: the turret's angle the frame before */
+function sndVeh(P, dt, set, now) {
+  const V = SND.veh, c = A.ctx;
+  if (!A.eng) {
+    if (!P) return;
+    const g = c.createGain(), lp = c.createBiquadFilter(), o = c.createOscillator(), o2 = c.createOscillator(), tg = c.createGain(), t = c.createOscillator();
+    o.type = 'sawtooth'; o2.type = 'square'; lp.type = 'lowpass'; lp.frequency.value = V.lp[0]; g.gain.value = 0; tg.gain.value = 0; t.type = 'triangle';
+    o.connect(lp); o2.connect(lp); lp.connect(g); g.connect(A.master); t.connect(tg); tg.connect(A.master); o.start(); o2.start(); t.start();
+    A.eng = { o, o2, lp, g }; A.tur = { o: t, g: tg }; A.trk = 0; A.vty = null;
+  }
+  if (!P) { set(A.eng.g, 0); set(A.tur.g, 0); A.vty = null; return; }
+  const d = P.def, sp = Math.abs(P.sp || 0), k = clamp(sp / (d.spd || 20), 0, 1), G = V.gears, gp = Math.min(G - 1e-6, k * G), gi = Math.floor(gp), w = gp - gi;
+  const rpm = Math.max(V.idle, gi ? .55 + .45 * w : V.idle + (1 - V.idle) * w), th = Math.abs(P.ctl.drive || 0), f = V.f[0] + (V.f[1] - V.f[0]) * rpm;
+  A.eng.o.frequency.setTargetAtTime(f, now, .06); A.eng.o2.frequency.setTargetAtTime(f / 2, now, .06); A.eng.lp.frequency.setTargetAtTime(V.lp[0] + (V.lp[1] - V.lp[0]) * rpm, now, .08);
+  set(A.eng.g, V.g[0] + V.g[1] * rpm + V.g[2] * th);
+  set(A.jet.g, V.road.g[0] + V.road.g[1] * k); A.jet.bp.frequency.setTargetAtTime(V.road.f[0] + (V.road.f[1] - V.road.f[0]) * k, now, .1);
+  const T = V.trk;
+  if (hullTracked(P) && sp > .3) { A.trk += dt * Math.min(T.max, sp * T.hz); if (A.trk >= 1) { A.trk %= 1; burst(.025, T.vol * Math.min(1, sp / 4), T.f * (.85 + Math.random() * .3), 'bandpass', 0, 2); } } else A.trk = 0;
+  const ty = P.ty || 0, sl = (d.sl || 0) * (P.mod ? P.mod.slew : 1), turn = A.vty === null || !sl || !(dt > 0) ? 0 : clamp(Math.abs(wrap(ty - A.vty)) / dt / sl, 0, 1); A.vty = ty;
+  A.tur.o.frequency.setTargetAtTime(V.tur.f[0] + (V.tur.f[1] - V.tur.f[0]) * turn, now, .05); set(A.tur.g, V.tur.vol * turn);
+}
 function audioTick(dt) {
   if (!A.ctx) return;
   const P = S.my, live = playMode === 'play' && !paused && P && !P.dead && !S.over, now = A.ctx.currentTime;
   const set = (g, v) => g.gain.setTargetAtTime(v, now, .08);
+  if (!live || !P.kind || P.man) sndVeh(null, dt, set, now);   // the engine and the servo quiet off a vehicle (a soldier's kind is inf)
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
   if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
-  else if (P.kind) { A.prop.o.frequency.setTargetAtTime(36 + Math.abs(P.sp) * 2.6, now, .1); set(A.prop.g, .035 + Math.abs(P.ctl.drive) * .02); set(A.jet.g, .006); }
+  else if (P.kind) { set(A.prop.g, 0); sndVeh(P, dt, set, now); }
   else if (P.def.prop) { A.prop.o.frequency.setTargetAtTime(52 + th * 38 + k * 26, now, .1); set(A.prop.g, .03 + th * .03); set(A.jet.g, .01 + k * .03); A.jet.bp.frequency.setTargetAtTime(300 + k * 500, now, .1); }
   else { A.jet.bp.frequency.setTargetAtTime(450 + th * 700 + k * 500, now, .1); set(A.jet.g, .05 + th * .08 + (P.ab ? .07 : 0)); set(A.prop.g, 0); }
   A.siren.o.frequency.setTargetAtTime(380 + k * 420, now, .15); set(A.siren.g, P.siren ? .06 : 0);

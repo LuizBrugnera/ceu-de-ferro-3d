@@ -8,7 +8,7 @@ const SECS = process.env.SECS === undefined ? 180 : +process.env.SECS;
 const nm = ($, p) => $('gName')(p), ord = q => (q.cnP ? q.cnP.O : q.ord);   // the order a squad has, or the one the radio is bringing it
 /* the 1944 map, side 0 holding Travessia, both maps refreshed: what the side knows is the points the enemy holds */
 function setup(o) {
-  const C = H.load(Object.assign({ seed: 9, eco: 1, mapv: 6 }, o)), $ = C.$; try { $('G4').on = 0; } catch (e) {}   // M2's pool rules under the allocator of before (G4: tests/g4-operacao.js) C.$('globalThis').performance = performance;
+  const C = H.load(Object.assign({ seed: 9, eco: 1, mapv: 6 }, o)), $ = C.$; C.$('globalThis').performance = performance; try { $('G4').on = 0; } catch (e) {}   // M2's pool rules under the allocator of before (G4: tests/g4-operacao.js)
   const S = C.watch('ww2', { len: 0 }), find = re => S.cq.p.find(p => re.test(nm($, p)));
   const tg = find(/Moinho/), st = find(/Travessia/); st.hold = 0;
   $('run')(1);
@@ -100,7 +100,7 @@ function field(o) {
     ok(op.formT === Math.min($('AP').form, Math.max(CQ.form, far / $('AP').run + $('AP').slack)) && op.formT >= CQ.form && op.formT <= $('AP').form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, from ' + CQ.form + ' to AP.form ' + $('AP').form + ' s');
     ok((op.ap.length === 2) === (a.ape !== b.ape), '  ' + (op.ap.length === 2 ? 'two elements, two approaches (' + op.ap.map(x => x.ang + '°').join(' and ') + ')' : 'one element, one approach (' + op.ap[0].ang + '°)'));
     /* H-hour: along the approach, through the assault position, into the objective */
-    op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
+    { const PEL = $('PEL'), was = PEL.on; PEL.on = 0; try { op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op); } finally { PEL.on = was; } }   // M2's own H-hour: the platoon's gate (P8, #144: the assault waits for its base of fire) is tests/brain-pelotao.js
     const O = op.O;
     const as = op.sq.filter(q => q.ord.k === 'assault'), ow = op.sq.filter(q => q.ord.k === 'overwatch');
     const cut = (() => { try { return $('ORG').on ? $('ORG').poly.cut : 1; } catch (e) { return 1; } })();
@@ -146,6 +146,7 @@ console.log('-- economy of force: a quiet post lends its squad and gets it back 
 console.log('-- cf-manobra-fix: assault squads first, more posts lend, a pool within reach, a forming up that is not given up --');
 {
   const E = field(), { $, S, Cm, mk, sq, at, tg } = E, AP = $('AP'), CMD = $('CMD'), D = Cm.doc;
+  { const PR = $('PR'); PR.rec.n = 99; PR.rec.foe = 99; }   // no p12: an unseen enemy point is worth CMD.guess 10, over PR.rec.foe, and the recon walks first (st rec), so the refill and the time-up below would not be the forming up's (tests/procedures.js does the same)
   Cm.thr = 0; Cm.want = null; Cm.pn = null;
   const P0 = $('cmdPosts')(Cm, sq(), {}), ip = P0.findIndex(e => e[0] === 'push');
   ok(ip >= 0 && P0.slice(0, ip).every(e => e[0] === 'garr' && Cm.thr > 2) && P0[ip][1] >= D.push - 1 && P0.filter(e => e[0] === 'push').length === 1, 'cmdPosts: the assault squads (push) before every other post (' + P0.slice(0, 4).map(e => e[0] + ' ' + e[1]).join(', ') + ' …)');

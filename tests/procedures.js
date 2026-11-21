@@ -119,7 +119,7 @@ console.log('-- p1, fix and flank, through its states --');
     ok(op.st === 'mv', '  the manoeuvre not there yet: still mv');
     put(man[0], a1.pos.x, a1.pos.z); $('OPS').atk(Cm, op);
     ok(op.st === 'prep' && op.H > S.t, 'the manoeuvre at its assault position: H-hour in ' + Math.round(op.H - S.t) + ' s (st ' + op.st + ')');
-    $('OPS').atk(Cm, op); op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
+    { const PEL = $('PEL'), was = PEL.on; PEL.on = 0; try { $('OPS').atk(Cm, op); op.H = S.t; op.smk = false; $('OPS').atk(Cm, op); } finally { PEL.on = was; } }   // M3's own H-hour: the platoon's gate (P8, #144: the manoeuvre waits for its base of fire) is tests/brain-pelotao.js
     ok(op.st === 'go', 'H-hour (st ' + op.st + ')');
     ok(fix.every(q => ordOf(q).k === 'overwatch' && Math.hypot(ordOf(q).x - q.fp.x, ordOf(q).z - q.fp.z) < 1) && man.every(q => ordOf(q).k === 'assault'), '  the fixing element fires from its base, the manoeuvre assaults');
   }

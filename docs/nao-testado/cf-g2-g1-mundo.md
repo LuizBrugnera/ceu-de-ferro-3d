@@ -66,7 +66,31 @@ De informação: aos 60 s, cada lado tinha posto na sua crença 75-80% da força
 
 ### Torneio curto antes × depois
 
-PREENCHER: a tabela do PR.
+Comando, no bartolomeu (nunca no elrei), com `nice`, igual para os dois lados:
+
+```
+node tools/balance.js --torneio 12 --era all --len 0 --eco --lg --rec --nobudget --mapv 6 --seed 1 --jobs 6
+```
+
+Antes é o main `ab57ded`; depois, o ramo em `6da6b39` (o G1 sem o merge do #168). São 12 partidas Curtas, sementes 1 a 12, cada par das três doutrinas: 6 em 1944 e 6 hoje. A máquina estava com carga perto de 50 em 24 núcleos (o G0 rodava 16 partidas ao mesmo tempo), então cada partida levou de 1,5 h a 7 h de relógio.
+
+1944 (as 6 primeiras):
+
+| 1944, 6 partidas Curtas | Antes (main `ab57ded`) | Depois (G1 ligado) |
+| --- | --- | --- |
+| Partidas idênticas evento a evento (sem o cabeçalho) | — | **6 de 6** |
+| Vitórias: lado 0, lado 1 | 5, 1 | 5, 1 |
+| Como acabaram | tempo: 6 | tempo: 6 |
+| Assaltos por partida (hora H, tomaram, recuaram) | 2,7 (0,5, 0,3, 0,3) | 2,7 (0,5, 0,3, 0,3) |
+| Taxa de flanco; fora do eixo | 0%; 31% | 0%; 31% |
+| "Sem força para atacar" por partida | 64,7 | 64,7 |
+| Emboscadas por partida: armadas, disparadas | 5,5, 1,2 | 5,5, 1,2 |
+| Entropia das chegadas | 0,1 bit | 0,1 bit |
+| Tíquetes: sangria | 68% | 68% |
+
+A época moderna (sementes 7 a 12) ainda está rodando: PENDENTE.
+
+É o que se espera de um pacote que ninguém lê ainda: o G1 não muda a partida. O torneio mostra que ele não quebra nada nem desvia a simulação. Ele não mede o que o G1 vai valer quando o G3 e o G4 o usarem.
 
 ### Custo
 
@@ -74,7 +98,11 @@ PREENCHER: a tabela do PR.
 - Rotas de um par: 10-36 ms em média, no pior caso 73 ms, em pedaços de 2.500 células por quadro, só quando alguém pede.
 - Uma olhada: 0,15 ms (no pior caso 0,36 ms), a cada 4 s por lado.
 
-PREENCHER: o custo do general por quadro sem `--nobudget`, antes × depois.
+- O custo do general por quadro sem `--nobudget` vem de 4 partidas de 10 min (`--docs balanced`, sementes 1 a 4), main e ramo rodando ao mesmo tempo na mesma máquina carregada:
+  - general: 17,95 ms no main e 17,7 ms no ramo;
+  - toda a IA: 115 ms no main e 109 ms no ramo.
+
+  Com a máquina 20 a 25 vezes mais lenta que o normal, isso só mostra que o G1 não pesa de forma que se veja.
 
 ## O que NÃO foi testado
 
@@ -88,7 +116,21 @@ PREENCHER: o custo do general por quadro sem `--nobudget`, antes × depois.
 - **Veículo capturado** não entra no rol de quem o capturou: a força própria fica um pouco menor.
 - **Bases de suprimento, antenas e cúpulas inimigas** não entram no valor para tomar, porque o lado não tem uma lista honesta delas. Só entram as instalações identificadas da economia e os canhões conhecidos.
 
-## Riscos
+## As outras suítes
+
+Rodaram no main `ab57ded` e no ramo, no bartolomeu: `sim-split`, `relay`, `gen-relay`, `tmap-relay`, `tmap`, `approaches-relay`, `approaches`, `brain-honesty`, `frame-budget`, `mcp-general`, `sede` e `bridges`. Saíram iguais nos dois.
+
+As falhas que aparecem já existem no main:
+- `sim-split`: as declarações da visão RTS, e a cópia sem `.git`;
+- `tmap`: a mesma partida com e sem o mapa, com o relógio real numa máquina carregada;
+- `approaches`: 7 falhas;
+- `brain-honesty`: uma seção CEREBRO que lê as listas;
+- `mcp-general`: as recusas do funil;
+- `gen-relay`: "a side that is none";
+- `bridges`: um `TypeError` na linha 139 do teste.
+
+Depois do merge do #168, o `tests/cupula-general.js` falha numa coisa: o lado 1 não pede cúpula em 12 min. Com o relógio do medidor fixo, ele falha igual no main `ffff56d`, sem o G1.
+
 
 - O carregamento fica 40-110 ms mais longo.
 - Cada objetivo pedido guarda uma árvore de chegada de 80 KB (só os pedidos).

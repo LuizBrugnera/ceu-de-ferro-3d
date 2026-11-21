@@ -56,12 +56,15 @@ for (const [era, mv, N] of [['modern', 11, 3], ['ww2', 11, 2], ['modern', 1, 2]]
   let bad = null, n = 0;
   for (const [x, z] of pts) { const a = railOf(x, z), b = OLD.railOf(R, x, z); n++; if (!same(a, b)) { bad = [x, z, show(a), show(b)]; break; } }
   ok(!bad, 'railOf: the same d, ri, s and off as the loop over every segment at ' + n + ' points (the vertices, the squares\' edges, off the map, not a number)' + (bad ? ': ' + bad.join(' ') : ''));
-  // how many segments a point reads now
-  let seen = 0; const scan = C.$('rixScan'); C.$('globalThis').__rs = (Xr, k, x, z) => { seen += Xr.at[k + 1] - Xr.at[k]; return scan(Xr, k, x, z); }; C.$('rixScan = globalThis.__rs');
-  let q = 0; for (const [x, z] of pts.slice(0, 3000)) { railOf(x, z); q++; }
-  C.$('globalThis').__rs = scan; C.$('rixScan = globalThis.__rs');
-  const all = R.reduce((a, r) => a + r.length - 1, 0);
-  ok(seen / q < all / 4, 'and reads ' + (seen / q).toFixed(0) + ' segments a point on the map instead of all ' + all);
+  // how many segments a point reads now: the grid's squares, and every segment for the points it hands to the old loop
+  let seen = 0, full = 0; const scan = C.$('rixScan'), rall = C.$('railAll'), G = C.$('globalThis');
+  G.__rs = (Xr, k, x, z) => { seen += Xr.at[k + 1] - Xr.at[k]; return scan(Xr, k, x, z); }; C.$('rixScan = globalThis.__rs');
+  G.__ra = (R2, x, z) => { full++; return rall(R2, x, z); }; C.$('railAll = globalThis.__ra');
+  const all = R.reduce((a, r) => a + r.length - 1, 0), onMap = pts.slice(0, 3000).filter(([x, z]) => x > 0 && x < W && Math.abs(z) < HW);
+  for (const [x, z] of onMap) railOf(x, z);
+  G.__rs = scan; C.$('rixScan = globalThis.__rs'); G.__ra = rall; C.$('railAll = globalThis.__ra');
+  const per = (seen + full * all) / onMap.length;
+  ok(per < all / 3, 'and reads ' + per.toFixed(0) + ' segments a point on the map instead of all ' + all + ' (' + (100 * full / onMap.length).toFixed(0) + '% of the points, more than ' + C.$('RIX').k * c + ' m from every road, by the old loop)');
   bad = null; n = 0;
   for (let i = 0; i < 600 && !bad; i++) { const [x, z] = pts[i], ri = i % R.length, a = sOn(ri, x, z), b = OLD.sOn(C, R, ri, x, z); n++; if (!Object.is(a, b)) bad = [x, z, ri, a, b]; }
   ok(!bad, 'sOn: the same s on each road at ' + n + ' points' + (bad ? ': ' + bad.join(' ') : ''));

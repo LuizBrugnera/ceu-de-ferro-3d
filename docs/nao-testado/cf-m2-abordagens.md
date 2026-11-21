@@ -1,7 +1,15 @@
 # M2 Abordagens: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): falha (7 checagens)
+- `tests/approaches.js` (SECS=180, 41 min com a máquina cheia): 7 falhas, todas fora do planejador das abordagens, que passa inteiro (as 3 abordagens de Vila do Moinho, honestidade, água e pontes, economia de forças, `gask ap`, pool de 2.489 m):
+  - **Hora H**: "0 squads assault, each along its approach, 1 covers them". As ordens na hora H saem `hold, hold, overwatch`. A causa da hora H, lida no código: desde o pelotão (P8, #144, `CEREBRO: pelotao`) a manobra segura (`hold`, passo "espera") na hora H até ouvir a base atirar, por até `PEL.fogo.max` = 45 s. O próprio `cf-p8-pelotao.md` avisa (risco 2) e pedia para rodar `approaches` e `procedures` com o pelotão no meio. O cenário do teste chama `OPS.atk` uma vez só, sem base atirando, e encontra `hold, hold, overwatch`. O ajuste dos dois testes é `PEL.on = 0` nesses cenários, como eles já fazem com `PR.on = 0`. O portão do pelotão fica com `tests/brain-pelotao.js`.
+  - **Confirmado em 2026-11-21**: com `PEL.on = 0` no cenário, `procedures` passa inteiro e a hora H do `approaches` passa ("2 squads assault, each along its approach, 1 covers them"). Os dois testes foram ajustados assim (lote 2 desta tarefa). Ficam no `approaches` só as 4 falhas da reunião.
+  - **Reunião** (4): a esquadra perdida na reunião não é substituída por uma livre ("element undefined", sem a linha "substitui a perdida" no diário), e com o prazo vencido e 2 de 2 na reunião o assalto fica em `form` (p1) em vez de seguir. Não investigado: é código da manobra (`apRefill`, `OPS.atk`), que outra frente está reescrevendo. Em 9f2a313 isso passava. Entre lá e ffff56d entraram o #144 (pelotão), o #165 (reunião e pool) e o #166.
+  - **Partida IA × IA de 180 s**: nenhum assalto aberto ("0 of 0").
+  - **Custo**: o pior pedaço da busca levou 105 ms (meta < 1 ms por quadro na média). A máquina estava cheia, então isso não diz nada sobre o código.
+- No navegador (Assistir em 1944, comando assumido): o `gask ap` sobre Vila do Moinho volta com as 3 abordagens, desenhadas no mapa (veja `cf-m7-jogador-mcp.md`). Em 9 min de partida não apareceu "Assalto planejado contra …" nas 80 últimas linhas do diário de cada lado.
+
 Tarefa `cf-m2-abordagens`, pacote M2 da proposta de manobra do general (decisões D1-D12 = A).
-Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que não foi testado"), a validação parou no meio. Abaixo está o que chegou a rodar e o que ficou sem teste.
 
 ## O que mudou
 

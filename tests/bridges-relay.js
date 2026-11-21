@@ -17,12 +17,13 @@ const N = require('./net'), { ok, done } = require('./harness');
   ok(f1 && f2 && f1.e[0].join() === row.join() && f2.e[0][1] === 7, 'a pontoon (kind 7) in the host\'s fort lines reaches the room');
   h.send({ t: 'fort', i: 0, n: 1, e: [[30521, 9, ...row.slice(2)]] }); const f3 = await a.wait('fort'); ok(f3 && f3.e[0][1] === 9, 'a rebuild (kind 9) in the host\'s fort lines reaches the room');
   h.send({ t: 'fort', i: 0, n: 1, e: [[30522, 10, ...row.slice(2)]] }); const f4 = await a.wait('fort'); ok(f4 && f4.e[0][1] === 10, 'a new bridge (kind 10) in the host\'s fort lines reaches the room');
-  h.send({ t: 'fort', i: 0, n: 1, e: [[30520, 11, ...row.slice(2)]] }); ok(await none(a, 'fort'), 'a kind after the new bridge (10) is still none');
+  const past = +require('fs').readFileSync(N.SERVER, 'utf8').match(/const FKINDS = (\d+)/)[1] + 1;   // the first kind the server does not know (the engineers' walls took 11 to 13 after the new bridge, 10, and this test still said 11)
+  h.send({ t: 'fort', i: 0, n: 1, e: [[30520, past, ...row.slice(2)]] }); ok(await none(a, 'fort'), 'a kind past the last the server knows (' + past + ') is still none');
   a.send({ t: 'fbuild', k: 7, p: [12000.5, -2600.2], a: 0 }); const fb = await h.wait('fbuild');
   ok(fb && fb.k === 7 && fb.from === a.id && await none(b, 'fbuild'), 'a soldier\'s request for a pontoon (fbuild k 7) goes to the host alone');
   await N.sleep(720); a.send({ t: 'fbuild', k: 9, p: [12000.5, -2600.2], a: 0 }); const fb8 = await h.wait('fbuild'); ok(fb8 && fb8.k === 9 && await none(b, 'fbuild'), 'and for a rebuild (fbuild k 9)');
   await N.sleep(720); a.send({ t: 'fbuild', k: 10, p: [12000.5, -2600.2], a: 0 }); const fb10 = await h.wait('fbuild'); ok(fb10 && fb10.k === 10 && await none(b, 'fbuild'), 'and for a new bridge (fbuild k 10)');
-  await N.sleep(720); a.send({ t: 'fbuild', k: 11, p: [12000.5, -2600.2], a: 0 }); ok(await none(h, 'fbuild'), 'not for a kind past it (fbuild k 11)');
+  await N.sleep(720); a.send({ t: 'fbuild', k: past, p: [12000.5, -2600.2], a: 0 }); ok(await none(h, 'fbuild'), 'not for a kind past the last (fbuild k ' + past + ')');
   a.send({ t: 'gclaim', on: 1 }); await a.wait('gctl');
   a.send({ t: 'gask', q: { q: 'brg' }, n: 1 }); const q1 = await h.wait('gask'); ok(q1 && q1.q.q === 'brg', 'the question brg reaches the host');
   await N.sleep(1020); a.send({ t: 'gcmd', d: 'cmd', c: { c: 'man', k: 'demolish', x: 12000, z: -2600, why: 'recuo' }, n: 2 }); const g1 = await h.wait('gcmd');

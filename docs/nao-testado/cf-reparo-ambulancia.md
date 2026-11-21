@@ -5,7 +5,7 @@
 - **Ambulância** (HMMWV M997, Hoje), parada: um soldado caído a 7 m levanta na hora (com uma "vida salva" contada), e um ferido com 30% da vida sara aos poucos.
 - **Caminhão de reparo** (FMTV M1089), parado: um NASAMS com 40% do casco ao lado passa de 20 para 39 (de 50) em 10 s.
 - No diário da IA: "Caminhão de reparo a caminho na retaguarda: 1 avariado" (a IA manda o dela sozinha).
-- `tests/rec.js`: veja o RESULTADO-B.
+- `tests/rec.js`: não rodou nesta tarefa (faltou tempo com a máquina cheia).
 - Nenhum erro no console.
 - **Continua sem teste:** a ambulância do jogador embarcando e entregando feridos, a ROE (a IA não mira a ambulância inimiga), o custo em metal isolado, o online.
 

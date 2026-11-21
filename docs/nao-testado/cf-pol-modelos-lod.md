@@ -1,5 +1,9 @@
 # cf-pol-modelos: veículos do pack mais leves de longe (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje, a câmera passando por um M1A1 Abrams: longe a 471 m, ainda longe a 401 m, perto a 351 m; voltando, perto a 401 m e a 441 m (só passa a longe depois de 450 m). A histerese de `PLOD` (troca a 400 m chegando e a 450 m saindo) funciona sem piscar. Nenhum erro no console.
+- **Continua sem teste:** o destroço de longe e o convidado online.
+
 ## O que mudou
 
 Os veículos do pack são pesados: o caminhão M939, que também desenha o Opel Blitz, o GMC, o Ural e o ZIL, tem ~10 mil triângulos, o Tiger ~11 mil, e um comboio deles longe custava tanto quanto perto. Agora (`PLOD`, `packLod`, `packLodMerge`):

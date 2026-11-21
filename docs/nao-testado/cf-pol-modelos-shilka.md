@@ -1,5 +1,10 @@
 # cf-pol-modelos: a Shilka sobre lagartas e as antiaéreas rebocadas (testado em parte)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): parte
+- Navegador, pelos botões (Insurgentes, Transporte, até a ZSU-23-4 Shilka) e "Continuar": a partida começa na Shilka (assento `gunnerM`), sem erro. Na cena de fora aparece o corpo sobre lagartas com a torre e o prato do radar.
+- **Achado no hangar** (ver `cf-pol-hud`/RESULTADO-B): a 1280×713 com uma partida suspensa, o carrossel encolhia a 132 px e o modelo escolhido ficava sob o nome; consertado neste lote (`tests/hangar-short.js`). A Shilka no carrossel não foi conferida de perto depois disso.
+- **Continua sem teste:** a Shilka atirando e girando a torre numa partida, o destroço, a visão do atirador.
+
 ## O que mudou
 
 A ZSU-23-4 Shilka capturada dos Insurgentes usava o corpo do LAV-25: oito rodas e casco de barco. A de verdade é sobre lagartas. Agora tem modelo próprio, feito com o kit `VK`, como o wrapper mais interno do `buildTrn`:

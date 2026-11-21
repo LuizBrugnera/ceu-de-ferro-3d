@@ -2,7 +2,7 @@
 
 ## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
 - Navegador, Tiger I a 25 m de uma casa, acelerando: ele entra na casa a ~4 m/s, a casa passa ao estágio 1 (furada de lado a lado), o tanque perde 6 de 130 de casco e segue, e entra na casa seguinte. Como o documento diz, a casa não desaba. Sem erro no console.
-- `tests/ram.js`: veja o RESULTADO-B.
+- `tests/ram.js`: não rodou nesta tarefa (faltou tempo com a máquina cheia).
 - **Continua sem teste:** o online e os caminhões da IA batendo em paredes.
 
 ## O que mudou

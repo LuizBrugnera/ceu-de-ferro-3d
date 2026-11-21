@@ -23,7 +23,7 @@ Tudo em `Céu de Ferro 3D.html`, no bloco de logística (`LG`, perto de `Net.rx.
 
 ## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok
 - `tests/logistics-online.js` pelo servidor de verdade (HOST=127.0.0.1, sozinho): passa inteiro (15 ok), com a seção W11: o reembolso honesto chega uma vez; o mesmo `lsp` de novo é recusado; `lsp {k: 2, n: 20}` repetido sem requisição não muda a base; o caminhão deixado com metade do casco não devolve nada. A troca de anfitrião leva os estoques ao novo anfitrião.
-- `tests/logistics.js`: veja o RESULTADO-B.
+- `tests/logistics.js`: parado depois de 1 h, na partida inteira do fim; antes dela, 45 ok e 1 falha, a mesma que o cf-testar-mundo já achou no main: as caixas do caminhão parado tomadas por um soldado inimigo (fora deste documento).
 
 ## O que NÃO foi testado
 

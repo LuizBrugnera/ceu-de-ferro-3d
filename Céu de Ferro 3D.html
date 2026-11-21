@@ -6268,7 +6268,7 @@ Object.assign(TRUCK, { parts: Object.assign([], { ix: {}, pos: [] }), tx: 0, env
 for (const d of [...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS), TRUCK]) { d.hitR = 8; d.crewI = -1; }
 for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS)]) d.hot = d.parts.find(p => p.burn).box;   // where fire and engine smoke come out
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
-const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, blast() { return false; } };   // blast: the view's look of a burst (XFX), true when it drew one
+const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, hit() {}, blast() { return false; } };   // hit: the player's own hit on a foe, marked by the view (HM)   // blast: the view's look of a burst (XFX), true when it drew one
 let S = null;
 /* a side's name after "de" and "por" with the article its name asks for: 'da Rússia', 'dos EUA', 'pela Luftwaffe', 'pelos Aliados' */
 const SIDEPL = { EUA: 1, Aliados: 1, Insurgentes: 1 }, daDe = n => (SIDEPL[n] ? 'dos ' : 'da ') + n, pelaDe = n => (SIDEPL[n] ? 'pelos ' : 'pela ') + n;
@@ -7702,8 +7702,11 @@ function relayed(o, dmg, by, rx, h) {
   if (o.net && by && (by.me || (o.pid && by.aid && !by.net))) { Net.hit(o, dmg, by, h); if (by.me) puff(o.x, o.y + (o.kind ? 3 : 0), o.z, 'spark', .5); }
   return !!(o.net || (by && by.net));
 }
+/* a hit of the player's own on a foe, for the mark the view puts on it (fx.hit, HM; cf-pol-armas) */
+const hitMine = (o, dmg, by) => { if (by && by.me && dmg > 0 && by.team !== o.team) fx.hit(o); };
 function damagePlane(p, dmg, by, rx, h) {
   if (p.dead || p.inv > 0) return;
+  hitMine(p, dmg, by);
   note(p, dmg, by, h);
   if (relayed(p, dmg, by, rx, h)) return;
   p.hitT = S.t; if (by) p.lastBy = by; puff(p.x, p.y, p.z, 'spark', .5);
@@ -7767,6 +7770,7 @@ function killUnit(u, det) {
 }
 function damageUnit(u, dmg, by, rx, h) {
   if (u.dead || u.inv > 0) return;
+  hitMine(u, dmg, by);
   if (u.occ) paxHit(u, dmg, by, rx, h);
   note(u, dmg, by, h);
   if (relayed(u, dmg, by, rx, h)) return;
@@ -9860,6 +9864,7 @@ function manHit(m, k, dmg, x, y, z, dx, dz) {
 function damageMan(m, dmg, by, rx, h) {
   if (m.dead || m.inv > 0) return;
   if (m.in && !rx && !PAX.on) return;
+  hitMine(m, dmg, by);
   if (by && by.me && h && dmg > 0 && !(S.t - m.nT < DMG.note)) { m.nT = S.t; S.floats.push({ x: m.x, y: m.y + 4, z: m.z, text: ZONE[h.pt] || ZONE[0], life: 1 }); }
   if (relayed(m, dmg, by, rx, h)) return;
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
@@ -38149,7 +38154,7 @@ function baseScene(b, t) {
       const L = [box(16.6, .8, 16.6, 0, 33.6, 0), box(17.2, 1, 17.2, 0, 42.5, 0), box(.25, 6, .25, 4, 46, 4)];
       for (const [i, j2] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) L.push(box(.35, 8, .35, i * 7.55, 38, j2 * 7.55));
       one(L, c);
-    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? foeCol(t) : FRIEND }), x + 8, y + hh - 4, z)); }
+    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); const fl = flagMesh(t !== S.me ? foeCol(t) : FRIEND, 15.6, 8, false); fl.position.set(x + .4, y + hh - 4, z); g.add(fl); ms.push(fl); }
   });
   return g;
 }
@@ -38897,6 +38902,24 @@ function debrisMesh(o) {
 /* --- soldiers: one instanced box per limb, posed on a rig that is reused for each of them. MCOL: uniform and helmet by era and side --- */
 const MCOL = { ww2: [[0x5f675b, 0x3c423a], [0x77734a, 0x4d4b30]], modern: [[0xa89e7e, 0x716a51], [0x58673f, 0x374029]] }, SKIN = 0xc39b77, GUNC = 0x2e2f2a, MAXM = Math.max(IAI.cap, GP.capMax) + 24 + CIV.cap, MP = 8, MFAR = 1400;   // beyond MFAR m a soldier is only its speck
 let gMen = null, rig = null;
+/* ---------- the flags (cf-pol-modelos): cloth that waves, where they were stiff boards (an airfield's, a supply base's, a site's of the
+   economy). A flag is a plane of FLAG.seg strips from its staff (x 0) to its free end (x 1), scaled to its length, its height and, across,
+   its length again, so that the wave is as deep for every size; the vertex shader moves it across by a wave (k: how many to the length,
+   speed) that runs out along it, growing from the staff (amp at the free end), the end sagging a little, its phase by where the flag
+   stands; flat shaded, so that each strip is lit as it is turned and the folds show (lit: a flag that was lit; the airfield's was not,
+   and glows more of its own colour). One program for every flag; FLAG.t the time, from syncScene ---------- */
+const FLAG = { seg: 10, amp: .14, k: 8, speed: 3.4, sag: .04, t: { value: 0 } };
+function flagMesh(col, L, H, lit) {
+  const g = new THREE.PlaneGeometry(1, 1, FLAG.seg, 1); g.translate(.5, 0, 0);
+  const c = new THREE.Color(col), m = mat(c.getHex(), { side: THREE.DoubleSide, emissive: c.clone().multiplyScalar(lit ? .08 : .14) });   // shaded flat: the folds show, each strip lit as it is turned
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uFlag = FLAG.t;
+    sh.vertexShader = 'uniform float uFlag;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.z += sin(position.x * ' + FLAG.k.toFixed(2) + ' - uFlag * ' + FLAG.speed.toFixed(2) + ' + modelMatrix[3][0] * .07 + modelMatrix[3][2] * .05) * ' + FLAG.amp.toFixed(3) + ' * position.x;\n  transformed.y -= ' + FLAG.sag.toFixed(3) + ' * position.x * position.x;');
+  };
+  m.customProgramCacheKey = () => 'cf-flag';
+  const me = new THREE.Mesh(g, m); me.scale.set(L, H, L); return me;
+}
+syncScene = (g0 => dt => { g0(dt); FLAG.t.value += dt || 0; })(syncScene);
 /* a supply base: the pad and the corner posts of a site, walls that rise as it is built, then the roof, the stores beside it, the sandbags
    and a mast with a flag in the colour of friend or foe; burnt and flat when it is destroyed */
 function buildSup(b) {
@@ -38907,7 +38930,8 @@ function buildSup(b) {
   U.walls = box(w - .5, h * .8, d - .5, 0, h * .4, 0, sd.col); U.roof = box(w + .6, .4, d + .6, 0, h * .84, 0, sd.col2);
   U.stores = [box(1.7, 1.3, 1.7, w / 2 + 2, .65, -1.6, 0x55633a), box(1.7, 1.3, 1.7, w / 2 + 2, .65, .5, 0x55633a), box(1.5, 1.1, 1.5, w / 2 + 2, 1.85, -.5, 0x6d5a3a), box(2.6, .9, 1.1, -w / 2 - 2, .45, 0, 0x3f4a3a)];
   U.bags = [box(w + 4, 1, .9, 0, .5, d / 2 + 1.9, 0x8a7d5c), box(w + 4, 1, .9, 0, .5, -d / 2 - 1.9, 0x8a7d5c)];
-  U.mast = [box(.2, h + 6, .2, -w / 2 + .5, (h + 6) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 5.2, d / 2 + .7, b.team === S.me ? 0x6fc3b2 : 0xe2604f)];
+  const fl = flagMesh(b.team === S.me ? 0x6fc3b2 : 0xe2604f, 2.2, 1.3, true); fl.position.set(-w / 2 + .5, h + 5.2, d / 2 - .4); fl.rotation.y = -Math.PI / 2; g.add(fl);   // its free end toward +z, as the board was
+  U.mast = [box(.2, h + 6, .2, -w / 2 + .5, (h + 6) / 2, d / 2 - .5, 0x34372f), fl];
   return g;
 }
 function lookSup(b, m) {
@@ -38964,7 +38988,8 @@ function buildEco(e) {
     for (let i = 0; i < 3; i++) { const m = box(w * .24, .4, d * .72, (i - 1) * w * .26, h * .8 + .9, 0, sd.col2); m.rotation.z = .35; U.roof.push(m); }
     U.late.push(chimney(.95, .6, h * 1.8, w * .38, .3, -d * .25), box(2.4, 2, 2.4, -w * .3, 1.3, d * .48 + 1.5, 0x55633a), box(2.4, 1.6, 2.4, 0, 1.1, d * .48 + 1.5, 0x6d5a3a));
   }
-  U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), box(.1, 1.3, 2.2, -w / 2 + .5, h + 4.2, d / 2 + .7, e.team === S.me ? 0x6fc3b2 : 0xe2604f)];
+  const fl = flagMesh(e.team === S.me ? 0x6fc3b2 : 0xe2604f, 2.2, 1.3, true); fl.position.set(-w / 2 + .5, h + 4.2, d / 2 - .4); fl.rotation.y = -Math.PI / 2; to.add(fl);
+  U.mast = [box(.2, h + 5, .2, -w / 2 + .5, (h + 5) / 2, d / 2 - .5, 0x34372f), fl];
   if (e.lot >= 0) {   // a shed or a block of the town: plaster walls, a tiled gable roof
     to = U.F = new THREE.Group(); g.add(to);
     box(w * .9, h, d * .85, 0, h / 2 + .3, 0, e.k === 'fab' ? 0x8d8d84 : 0xb9ad94);
@@ -40742,6 +40767,31 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
   if (nS) txt('G FUMAÇA ×' + P.smk + (P.smk && P.smkT > S.t ? '  ' + Math.ceil(P.smkT - S.t) + ' s' : ''), L, y + 2 * u, 12.5 * u, P.smk ? ink : FOE);
   if (w.k === 'sam' && !P.dead && !S.lockAir && !S.noLos) txt('SEM ALVO NA MIRA', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
 }
+/* ---------- hit marks (HM, cf-pol-armas): the player's own hits, seen and heard ----------
+   A round, rocket, shell or bomb of the player's that hurts a foe (fx.hit, from damageMan, damageUnit and damagePlane) puts four short
+   strokes round the foe on the screen, white, for t s, fading; if the foe is dead by the time it is drawn (also online, where a ghost dies
+   when its owner says so) they turn red and larger and hold k s. One mark at a time, the last; a tick for the hit (at most one every gap s)
+   and a lower one for the kill. Off with localStorage cf-hm 0 ---------- */
+const HM = { on: true, t: .3, k: .7, gap: .06, o: null, at: -9, kill: false, snd: -9 };
+try { HM.on = localStorage.getItem('cf-hm') !== '0'; } catch (e) {}
+fx.hit = o => {
+  if (!HM.on) return;
+  if (HM.o !== o || !HM.kill) { HM.o = o; HM.at = S.t; HM.kill = false; }
+  if (A.ctx && A.on && playMode === 'play' && S.t - HM.snd >= HM.gap) { HM.snd = S.t; burst(.018, .06, 3400, 'bandpass'); }
+};
+function hmDraw() {
+  const o = HM.o; if (!o || playMode !== 'play' || !S.my) return;
+  if (o.dead && !HM.kill) { HM.kill = true; HM.at = S.t; if (A.ctx && A.on) burst(.07, .09, 1100, 'bandpass'); }
+  const age = S.t - HM.at, life = HM.kill ? HM.k : HM.t;
+  if (age > life || age < 0) { HM.o = null; return; }
+  const s = proj(o.x, bodyY(o), o.z); if (!onScr(s)) return;
+  const u = hudU(), k = HM.kill ? 1.4 : 1, r0 = 4 * u * k, r1 = 9.5 * u * k;
+  hx.save(); hx.globalAlpha = 1 - age / life; hx.lineCap = 'round'; hx.beginPath();
+  for (const [dx, dy] of CORN) { hx.moveTo(s.x + dx * r0, s.y + dy * r0); hx.lineTo(s.x + dx * r1, s.y + dy * r1); }
+  hx.lineWidth = 4.2 * u; hx.strokeStyle = 'rgba(0,0,0,.5)'; hx.stroke();
+  hx.lineWidth = 2 * u; hx.strokeStyle = HM.kill ? '#ff4a36' : '#f4f1e8'; hx.stroke(); hx.restore();
+}
+drawHud = (g => () => { g(); hmDraw(); })(drawHud);
 /* ---------- damage panel: the vehicle from above, nose up, each part in the colour of its state; beside it what is hurt, worst first,
    with the seconds left of what is running out, the crew by seat, and under it fire, leak, jammed controls, the extinguishers and the
    field repair with what waits behind it. Bottom left, lifted over the touch stick or a seat's own corner; in a cockpit it takes the top

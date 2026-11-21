@@ -19,7 +19,7 @@ const THREE = { Group: Obj, Mesh: Obj, Shape, BoxGeometry: kind('Box'), Cylinder
 
 function check(label, sim, S) {
   const hgtT = sim.$('hgtT'), wo = { base: {} };
-  const ctx = vm.createContext({ THREE, S, wo, BASE: sim.$('BASE'), headTo: sim.$('headTo'), hgt: (x, z) => hgtT(S.T, x, z), mat: c => ({ c }), vkGeo: list => new Geo('merged', list), FRIEND: '#6fc3b2', foeCol: () => '#e2604f' });
+  const ctx = vm.createContext({ THREE, S, wo, BASE: sim.$('BASE'), headTo: sim.$('headTo'), hgt: (x, z) => hgtT(S.T, x, z), mat: c => ({ c }), vkGeo: list => new Geo('merged', list), FRIEND: '#6fc3b2', foeCol: () => '#e2604f', flagMesh: () => new Obj(new Geo('flag')) });
   vm.runInContext(src + '\n;globalThis.$ = s => eval(s);', ctx, { filename: 'airfields.js' });
   const baseScene = ctx.$('baseScene');
   console.log('-- ' + label + ': ' + S.base.length + ' sides --');

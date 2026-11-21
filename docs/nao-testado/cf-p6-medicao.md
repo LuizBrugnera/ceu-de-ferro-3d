@@ -1,5 +1,11 @@
 # cf-p6-medicao: a medição do cérebro (P6 de cf-cerebro-pesquisa)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): parte
+- Navegador, Assistir em Hoje (3 lados), 3 min: os eventos `cb` do cérebro chegam à analytics (994 `acao`, 940 `ordem`, 470 `fala`, 358 `relato`, 288 `tec`, os do pelotão e do líder) e `anaReport(ANA.ev, 0).brain` vem preenchido para a seção Cérebro da revisão.
+- `tests/brain-drills.js` (41 min com a máquina cheia): **2 falhas**, as duas no exercício "um ferido, socorrido" (ww2 e hoje): o caído é contado, mas "socorrido 0, morto caído 0", ou seja, o medidor não vê o socorro. Combina com o `brain-medico` (b): o socorro não chega. Passam as granadas (100% escapam, meta ≥ 70%), a sucessão do líder (2,3 s, meta 4 s) e o contato (tiros e reações contados). A meta "a esquadra segue a missão depois de perder o líder" ficou em 0% (é uma meta, não uma checagem).
+- `tests/brain.js`: 7 ok e 1 falha de custo: o relógio do cérebro custa 0,51 ms por passo com 36 esquadras (limite 0,1 ms), e 2,85 ms em média na partida, com a máquina cheia.
+- **Continua sem teste:** a seção Cérebro desenhada no fim de uma partida, o online, o custo do medidor e o A×B sobre o main de hoje.
+
 Pedido do capitão: soldados que pensam de verdade, com líder em cada esquadra e camadas de liderança, como no Defilade, feito do jeito certo e sem gambiarra. A pesquisa dividiu o trabalho nos pacotes P0 a P8. Este é o P6, a régua: os números que dizem se o cérebro novo (P1, P2, P3, P5...) deixou os soldados mais "gente", com o mesmo instrumento ligado e desligado.
 
 ## O que mudou

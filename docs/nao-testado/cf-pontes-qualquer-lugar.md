@@ -1,5 +1,9 @@
 # Ponte nova em qualquer ponto do rio (cf-pontes-qualquer-lugar)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em 1944: uma ponte nova (obra 10) num trecho do rio, terminada com `fortAt`. O diário diz "Ponte nova pronta: ponte no rio (em campo aberto), uma travessia nova". No mapa do General, traço contínuo (o pontão, tracejado). Na cena, o tabuleiro de lajes de pedra, os pilares na água e as bordas dos parapeitos. Nenhum erro.
+- **Continua sem teste:** a IA escolhendo `nbr` sozinha numa partida longa.
+
 Pedido do capitão: "a ponte pode ser feita em qualquer lugar tambem".
 
 ## O que mudou

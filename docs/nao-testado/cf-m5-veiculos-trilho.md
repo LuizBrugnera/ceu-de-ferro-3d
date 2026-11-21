@@ -1,5 +1,9 @@
 # M5 Veículos fora do trilho: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): parte
+- Navegador, Assistir em 1944 (9 min de partida): aos 540 s nenhum tanque estava fora do trilho (`u.ai.m5`), e nenhuma das 80 últimas linhas do diário de cada lado (o diário guarda 80) era "estradas secundárias". Nenhum erro no console. Não dá para dizer se algum tanque saiu antes.
+- **Continua sem teste:** tudo da lista abaixo. Nenhum tanque do assalto foi visto chegar, segurar e voltar.
+
 Tarefa `cf-m5-veiculos-trilho`, pacote M5 da proposta de manobra do general (decisão D5 = A: blindados de manobra e emboscada por viagem tática; logística no trilho variando a rota).
 Pela regra de entrega do capitão, nenhuma suíte, linha de base ou partida A/B foi rodada. Tudo abaixo está sem teste, salvo o smoke do fim.
 

@@ -1,5 +1,11 @@
 # cf-pack-modelos: pack de modelos e gráficos (não testado)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Os 29 modelos do pack que a página pede carregam no Chrome (`PACK.M`: todos `st` 1). Veículos, soldados e obras do pack vistos numa partida (veja também `cf-pack-aparece.md`, `cf-obras-sair.md`).
+- `?pack=0`: nenhum modelo buscado (`PACK.M` vazio), soldados de caixas e veículos de antes, sem erro.
+- Custo, a mesma cena semeada (fuzileiro de Hoje, 10 s de partida, câmera atrás): com o pack, p50 de 187 e 272 ms por quadro (duas rodadas); sem o pack, 232 e 277 ms. Na máquina presa a 12 núcleos, a diferença não se mede.
+- **Continua sem teste:** os níveis `?packq=1..3`, os soldados deitados e agachados de perto, o carro-bomba sem os tambores, a troca de anfitrião e o espectador com o pack, `file://`.
+
 Pedido do capitão: um pack de upgrade de modelos e gráficos com modelos low-poly livres (tanques, infantaria, armas, animações). Os candidatos foram ao quadro Lavish (113 modelos renderizados no estilo do jogo) e o capitão aprovou os 40 marcados como "Usar"; nas classes sem modelo bom ("O que faltou") fica o modelo de hoje.
 
 ## O que mudou

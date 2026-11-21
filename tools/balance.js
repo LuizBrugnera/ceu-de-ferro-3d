@@ -22,7 +22,7 @@
        [--eco] [--lg] [--rec] [--nobudget] [--mapv V] [--seed S] [--jobs J] [--save folder] [--json file] [--ref file]
        [--pers ret,blz,gue,art,log] [--dif normal | facil,dificil] [--lados 2|3]
    --pers pairs the AI general's personalities (W17) instead of the doctrines; --dif the difficulty of every side, or of side 0, 1 (and 2).
-   --lados 3 plays the current front with three sides (USA × Russia × Insurgents; modern only: the 1944 front always has two).
+   --lados 3 plays the current front with three sides (USA × Russia × Insurgents; modern only: the 1944 front always has two), on map 9 unless --mapv says.
    --lg and --rec turn the physical logistics and the recovery on (with --eco and --mapv 6, the game as it is played); --nobudget stops the AI
    frame meter (AIB) from cutting the population cap by how busy this machine is, so the same seed plays the same match anywhere; without it each
    match keeps the general's cost per frame (tour.aib), so measure the cost in a separate short run without --nobudget.
@@ -101,9 +101,12 @@ function save(dir, era, ev, src) {
   if (end) fs.writeFileSync(path.join(dir, era, base + '.json'), JSON.stringify({ id: base, era, src, hdr: ev.find(e => e.k === 'hdr') || null, end, rep }));
   return path.join(dir, era, base + '.ndjson.gz');
 }
+/* the map of a tournament: --mapv, else 4 (the reference map of the two-sided tournaments), or MAP3 with three sides (the first map with the
+   Insurgents' base: on map 4 the page builds two sides and --lados 3 stopped at once) */
+const MAP3 = 9, mapvOf = (mv, n) => mv || (n > 2 ? MAP3 : 4);
 /* one tournament match, in this process */
 function playOne(m) {
-  const C = H.load({ seed: m.seed, eco: !!m.eco, lg: !!m.lg, rec: !!m.rec, mapv: m.mapv || 4, ana: true });
+  const C = H.load({ seed: m.seed, eco: !!m.eco, lg: !!m.lg, rec: !!m.rec, mapv: mapvOf(m.mapv, m.n), ana: true });
   if (m.nobudget) C.$('AIB').now = () => 0;
   if (m.brain === 0 || m.brain === 1) C.$('BRAIN').on = m.brain;
   if (m.set) for (const [k, v] of Object.entries(m.set)) C.$(k + ' = ' + JSON.stringify(v));   // --set: a page's switch, before the match
@@ -343,7 +346,7 @@ async function main() {
   }
   console.log(print(A, title, ref) + (A.brain ? brainPrint(C, A.brain, ref && ref.brain) : '') + (A.urb ? urbPrint(C, A.urb, ref && ref.urb) : ''));
   if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)', ref) + (AL.brain ? brainPrint(C, AL.brain, ref && ref.brain) : '') + (AL.urb ? urbPrint(C, AL.urb, ref && ref.urb) : ''));
-  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: o.mapv || 4, seed: o.seed || 1, set: o.set || null } : null;
+  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: mapvOf(o.mapv, o.sides), seed: o.seed || 1, set: o.set || null } : null;
   if (o.json) fs.writeFileSync(o.json, JSON.stringify(Object.assign({ files: real.map(r => r.file), local: AL && Object.assign({ files: loc.map(r => r.file) }, AL) }, tour && { tour }, A), null, 1));
 }
 if (require.main === module) main().catch(e => { console.error(e.stack); process.exit(1); });

@@ -80,6 +80,7 @@ function field(o) {
 {
   const E = field(), { $, S, Cm, tg, at, mk, sq } = E;
   $('PR').on = 0;   // M2's own assault: with M3's procedures a strong point draws p12, whose recon walks to the assault positions (tests/procedures.js)
+  try { $('PEL').on = 0; } catch (e) {}   // and without the platoon (P8, #144): at H-hour it holds the assault until its base fires (tests/brain-pelotao.js)
   const a = mk('road', 0, 0), b = mk('road', 1, 40), c3 = mk('road', 2, 80), ri0 = [a.ri, b.ri, c3.ri];
   $('cmdSense')(Cm, sq()); $('tmNow')(0);
   $('cmdAttack')(Cm, sq());

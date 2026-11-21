@@ -17,6 +17,8 @@ Tudo numa seção própria da página, `CEREBRO: urbano`, mais a medição em `C
 
 Veja o PR: a tabela antes × depois do torneio (12 partidas Curtas, sementes 1-12, `--eco --lg --rec --mapv 11 --nobudget`, com `nice`, no saomiguel; o mapa 11 é o do jogo e o da régua do G0) e o exercício sem tela `tests/urbano.js`.
 
+**Parcial (6 partidas de 1944 por braço, 2026-11-21): não bate o critério.** Foguetes anticarro em blindado 1,0 por partida com o G7 contra 2,8 sem; tiros de atirador de elite 4,7 contra 10,3; defesa urbana em prédio 39% contra 36% (meta 40%); nenhum assalto a cidade tomou o ponto nos dois braços. O caçador e o posto do atirador, do jeito que estão, são piores que o código antigo na partida.
+
 ## O que o número NÃO cobre
 
 - **Assaltos a cidade.** Quase nenhum assalto chega à cidade: a reunião mata o assalto antes (G4). A limpeza prédio por prédio foi provada só no exercício (`tests/urbano.js`, parte 4: um ponto-cidade sem defensores). Contra defensores de verdade, numa partida, ela pode ser mais lenta que correr para o centro, e a captura depende de quem está dentro do círculo.

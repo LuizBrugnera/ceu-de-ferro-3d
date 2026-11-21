@@ -18,6 +18,10 @@ Quem roda:
 - As esteiras não andam (não têm textura para correr).
 - Os tanques do Quaternius (T-34, T-55/T-62, Tiger, Panzer IV) e o T-72/T-90 têm as rodas na mesma peça da esteira: ficam paradas como antes.
 - Destroço e hangar: rodas paradas.
+- **Feitos à mão pelo `buildTrn`** (LAV-25, BTR-82A, BTR-70, Shilka, os veículos de rádio e os de apoio: ambulâncias, oficinas e socorro), onde o pack não pôs o modelo dele:
+  - as rodas eram círculos pretos lisos; agora cada uma ganha um cubo de seis lados na face de fora, na segunda cor do veículo;
+  - os cubos de um veículo são uma malha só e rodam pelo shader;
+  - o pneu preto não muda (liso, o giro dele não se veria).
 
 ## O que foi testado
 
@@ -31,8 +35,10 @@ Quem roda:
   - a técnica, o Abrams e o BM-21 com a distância em 0 e em 0,45, lado a lado: as rodas giram no lugar e o resto não se mexe.
 - Custo: 36 unidades (Abrams, T-72, Tiger, Sherman, BM-21, M270, Paladin, Pantsir, Ural), antes × depois, duas vezes: mesmos triângulos (138 178) e chamadas (365); 246–249 contra 233–252 ms (ruído).
 
+Custo dos cubos dos feitos à mão: 36 desses veículos (LAV-25, BTR-82A, BTR-70, M997, Sd.Kfz. 251, M577, UAZ-452, Kfz. 31, Shilka), antes × depois. Chamadas de desenho de 923 para 957 (uma por veículo), triângulos de 21 496 para 22 984, 72 contra 70 ms (ruído). Uma primeira versão com um cubo por roda custava +239 chamadas; juntei os cubos numa malha.
+
 ## O que NÃO foi testado
 
 - As rodas de um veículo do convidado numa partida online (a distância vem da posição que chega pela rede, então devem rodar igual).
 - As sombras do sol (Alta) mostram as rodas paradas: o material de profundidade não tem o trecho.
-- Os blindados de rodas feitos à mão (LAV-25, BTR) e os caminhões de apoio feitos pelo `buildTrn`: as rodas deles são malhas soltas e não rodam.
+- Os cubos dos veículos feitos à mão só foram vistos parados com a distância posta à mão (0 e 0,45), não andando numa partida.

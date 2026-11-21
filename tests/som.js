@@ -1,5 +1,5 @@
 'use strict';
-/* the sound (SND, cf-pol-armas): the others heard (the nearest vehicles and aircraft, by distance, with the Doppler of a fly-by), a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
+/* the sound (SND, cf-pol-armas): a burst close by deafens for a moment, the AA gun and the flares heard; the others heard (the nearest vehicles and aircraft, by distance, with the Doppler of a fly-by), a ground vehicle's engine through its gears, its tracks and its turret's servo; the shots by their voice, distance and the speed of sound, the player's own gun never held back by the
    AI's (one AI shot 55 ms before took the player's), the launches by distance (one across the map was as loud as one beside the ear), the
    bursts late and dull far away, the compressor on the master, the soldier's hands (reload, bolt, empty click, swap) and the crack of a
    foe's round passing the head. The block lives in the 3D part of the page, which the harness does not load: it runs here on its own over a
@@ -47,7 +47,7 @@ const near = (x, y, e) => Math.abs(x - y) <= (e || 1e-6);
 console.log('-- the master and the compressor --');
 {
   const { A, C } = load();
-  ok(A.comp && A.comp.kind === 'comp' && A.master.out[0] === A.comp && A.comp.out[0] === C.destination, 'the master runs through a compressor to the speakers (a battle\'s bursts summed clipped)');
+  ok(A.comp && A.comp.kind === 'comp' && A.master.out[0] === A.ear && A.ear.out[0] === A.comp && A.comp.out[0] === C.destination, 'the master runs through the ear (a low-pass, open) and a compressor to the speakers (a battle\'s bursts summed clipped)');
   ok(A.comp.ratio.value > 1 && A.comp.threshold.value < 0, '  it squeezes only what is loud (threshold ' + A.comp.threshold.value + ' dB, ratio ' + A.comp.ratio.value + ')');
 }
 
@@ -192,5 +192,33 @@ console.log('-- the others heard: the nearest vehicles and aircraft --');
   ok(last(ap.g.gain) > 0 && Math.abs(last(ap.g.gain) - last(rc.g.gain)) < 1e-9, '  the same distance, the same loudness');
   S.my = null; tick(1 / 60);
   ok(A.nv.concat(A.na).every(v => !v.u && last(v.g.gain) === 0), 'no one to hear (the hangar, dead, the end): every voice quiet');
+}
+console.log('-- a burst close by deafens; the AA gun and the flares are heard --');
+{
+  const { $, S, C, A, fx } = load(), D = $('SND').deaf, man = { man: 1, kind: 'inf', def: {}, x: 0, y: 0, z: 0, st: 0, team: 0 };
+  S.my = man; C.currentTime = 50;
+  const cut = () => { const e = A.ear.frequency.ev; const k = e.length - 1; return k >= 1 && e[k - 1][0] === 'set' ? e[k - 1][1] : null; };
+  const rings = m => C.nodes.slice(m).filter(n => n.kind === 'osc' && n.frequency.value === D.tone);
+  let m = C.nodes.length; fx.boom(25, 8, 1); const f1 = cut(), r1 = rings(m);
+  ok(f1 !== null && f1 < 3000 && A.ear.frequency.ev[A.ear.frequency.ev.length - 1][1] === D.f[1], 'a shell bursting 8 m from the soldier: the world falls to a low-pass at ' + Math.round(f1) + ' Hz and opens again');
+  ok(r1.length === 1 && r1[0].out[0].out[0] === A.comp, '  under a ring at ' + D.tone + ' Hz, in the head (past the ear\'s filter)');
+  C.currentTime += 10; const ev = A.ear.frequency.ev.length; m = C.nodes.length; fx.boom(25, 8);
+  ok(A.ear.frequency.ev.length === ev && !rings(m).length, 'the same boom from a muzzle (no burst): no deafness (the player\'s own gun never deafens him)');
+  fx.boom(25, 300, 1); ok(A.ear.frequency.ev.length === ev, 'a burst 300 m off: none');
+  fx.boom(3, 2, 1); ok(A.ear.frequency.ev.length === ev, 'a tiny one (under ' + D.r0 + ' m of radius): none');
+  S.my = { kind: 'tank', def: {}, ctl: {}, team: 0, x: 0, y: 0, z: 0 }; C.currentTime += 10; fx.boom(25, 8, 1); const f2 = cut();
+  ok(f2 > f1, 'the same burst with the player inside a tank: less (' + Math.round(f2) + ' Hz)');
+  console.log('   the AA gun and the flares');
+  ok($('shotVoice')({ k: 'flak', spd: 820 }, { kind: 'aa' }) === 'cannon', 'a heavy AA gun\'s shot: the cannon\'s voice');
+  const W = sim.watch('modern', { len: 0 }), FX = sim.$('fx'), calls = [], keep = { shot: FX.shot, launch: FX.launch, boom: FX.boom };
+  FX.shot = (...a) => calls.push(['shot', ...a]); FX.launch = (...a) => calls.push(['launch', ...a]); FX.boom = (...a) => calls.push(['boom', ...a]);
+  const u = { ctl: { fuse: 800 }, team: 0, x: W.base[0].x, y: 2, z: W.base[0].z }, w = { k: 'flak', spd: 820, range: 3200, r: 50, dmg: 26 };
+  sim.$('ARMK').flak.fire(u, w, { x: u.x, y: 4, z: u.z }, { x: .6, y: .8, z: 0 });
+  ok(calls.some(c => c[0] === 'shot' && c[2] === u && c[3] === w), 'the AA gun fired: its shot is heard (only its burst was)');
+  const pl = sim.addPlane('f22', 0, W.base[0].x, 800, W.base[0].z, 0, true);
+  pl.flares = 4; pl.fcool = 0; calls.length = 0; sim.$('dropFlare')(pl); ok(calls.some(c => c[0] === 'launch' && c[2] === pl), 'a plane\'s flares: their hiss is heard (they were silent)');
+  W.ear.x = W.base[0].x; W.ear.y = 2; W.ear.z = W.base[0].z; calls.length = 0; sim.$('blastFx')(W.ear.x + 10, 2, W.ear.z, 20);
+  ok(calls.some(c => c[0] === 'boom' && c[1] === 20 && c[3] === 1), 'a burst tells fx.boom it is one (blastFx), a muzzle does not');
+  Object.assign(FX, keep);
 }
 done();

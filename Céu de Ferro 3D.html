@@ -6268,7 +6268,7 @@ Object.assign(TRUCK, { parts: Object.assign([], { ix: {}, pos: [] }), tx: 0, env
 for (const d of [...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS), TRUCK]) { d.hitR = 8; d.crewI = -1; }
 for (const d of [...Object.values(PLANES), ...Object.values(TANKS), ...Object.values(AAS), ...Object.values(ARTS)]) d.hot = d.parts.find(p => p.burn).box;   // where fire and engine smoke come out
 /* ---------- simulation (no DOM, no WebGL in this part) ---------- */
-const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, blast() { return false; } };   // blast: the view's look of a burst (XFX), true when it drew one
+const fx = { shot() {}, boom() {}, launch() {}, over() {}, whistle() {}, enter() {}, hit() {}, blast() { return false; } };   // hit: the player's own hit on a foe, marked by the view (HM)   // blast: the view's look of a burst (XFX), true when it drew one
 let S = null;
 /* a side's name after "de" and "por" with the article its name asks for: 'da Rússia', 'dos EUA', 'pela Luftwaffe', 'pelos Aliados' */
 const SIDEPL = { EUA: 1, Aliados: 1, Insurgentes: 1 }, daDe = n => (SIDEPL[n] ? 'dos ' : 'da ') + n, pelaDe = n => (SIDEPL[n] ? 'pelos ' : 'pela ') + n;
@@ -7702,8 +7702,11 @@ function relayed(o, dmg, by, rx, h) {
   if (o.net && by && (by.me || (o.pid && by.aid && !by.net))) { Net.hit(o, dmg, by, h); if (by.me) puff(o.x, o.y + (o.kind ? 3 : 0), o.z, 'spark', .5); }
   return !!(o.net || (by && by.net));
 }
+/* a hit of the player's own on a foe, for the mark the view puts on it (fx.hit, HM; cf-pol-armas) */
+const hitMine = (o, dmg, by) => { if (by && by.me && dmg > 0 && by.team !== o.team) fx.hit(o); };
 function damagePlane(p, dmg, by, rx, h) {
   if (p.dead || p.inv > 0) return;
+  hitMine(p, dmg, by);
   note(p, dmg, by, h);
   if (relayed(p, dmg, by, rx, h)) return;
   p.hitT = S.t; if (by) p.lastBy = by; puff(p.x, p.y, p.z, 'spark', .5);
@@ -7767,6 +7770,7 @@ function killUnit(u, det) {
 }
 function damageUnit(u, dmg, by, rx, h) {
   if (u.dead || u.inv > 0) return;
+  hitMine(u, dmg, by);
   if (u.occ) paxHit(u, dmg, by, rx, h);
   note(u, dmg, by, h);
   if (relayed(u, dmg, by, rx, h)) return;
@@ -9860,6 +9864,7 @@ function manHit(m, k, dmg, x, y, z, dx, dz) {
 function damageMan(m, dmg, by, rx, h) {
   if (m.dead || m.inv > 0) return;
   if (m.in && !rx && !PAX.on) return;
+  hitMine(m, dmg, by);
   if (by && by.me && h && dmg > 0 && !(S.t - m.nT < DMG.note)) { m.nT = S.t; S.floats.push({ x: m.x, y: m.y + 4, z: m.z, text: ZONE[h.pt] || ZONE[0], life: 1 }); }
   if (relayed(m, dmg, by, rx, h)) return;
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
@@ -22268,6 +22273,10 @@ function genAnswer(s, q) {
   if (q.q === 'state') {   // within the relay's size for gres (16 KB): the log, then the enemy seen, then the vehicles go first
     const r = genQuery(s, q);
     for (const k of ['log', 'foe', 'veh']) if (JSON.stringify(r).length > 15000 && Array.isArray(r[k])) { r[k] = r[k].slice(-Math.floor(r[k].length / 4)); r.cut = 1; }
+    /* then the packages' add-ons the bridge does not read (the towns' sympathy icv and the guerrilla's grl of the Insurgents, civ, stg): with them
+       the Insurgents' state passed 23 KB, the relay dropped the gres and their MCP general never got the map (tests/mcp-sides3.js) */
+    for (const k of ['icv', 'grl', 'civ', 'stg']) if (JSON.stringify(r).length > 15000 && r[k] !== undefined) { delete r[k]; (r.drop || (r.drop = [])).push(k); r.cut = 1; }
+    if (JSON.stringify(r).length > 15000 && Array.isArray(r.sq)) { r.sq = r.sq.slice(0, Math.ceil(r.sq.length / 2)); r.cut = 1; }
     return { ok: true, why: '', id: 0, r };
   }
   if (q.q === 'pool' || q.q === 'amb' || q.q === 'fire') return { ok: true, why: '', id: 0, r: genQuery(s, q) };
@@ -38095,6 +38104,79 @@ function bushTex() {
 }
 const bushMat = hex => mat(hex, { vertexColors: true, flatShading: false, map: bushTex() });
 
+/* ---------- an airfield (cf-pol-modelos): its runway and markings, and its buildings (BASE), turned toward the middle of the map. The
+   buildings are the world objects the simulation placed (genTerrain: id 200 + 10 t + j, BASE[era] for sides 0 and 1, BASE.ins for side 2's
+   hideout), each drawn on its own object's ground, its meshes kept in wo.base (lookObj: the first stays as the rubble, the rest go with the
+   building). Side 2's hideout has no runway: it was drawn as an airfield, three hangars and a tower where nothing stood, its sheds unseen.
+   AFL, the look: a modern hangar's hall with doors on its front (toward the runway) and an edge round its roof; an old one's round arch
+   with its ribs and its doors; the tower's glass cab with its floor, its roof, its frames and a mast; the hideout's sheds (its hangars)
+   with a pitched roof, a door and windows, and its low bunker (its ctl) with a slab and a firing slit. The details of each building are
+   one mesh; the runway's markings too ---------- */
+const AFL = { run: 0x3a3c3b, mark: 0xd8d3bd, hall: 0x70756f, door: 0x3c403e, arch: 0x5b5f4d, rib: 0x3a3c33, cab: 0x7ea2ae, shed: [0x8b8069, 0x9a8f78], roof: [0x6b6e66, 0x7a5038], dark: 0x2b2a26, bunker: 0x7d7460, slab: 0x6a624f };
+function baseScene(b, t) {
+  const g = new THREE.Group(), gy = hgt(b.x, b.z), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
+  const box = (sx, sy, sz, x, y, z) => new THREE.BoxGeometry(sx, sy, sz).translate(x, y, z);
+  g.position.set(b.x, gy, b.z); g.rotation.y = headTo(b.x, b.z, S.W / 2, 0);   // as genTerrain turns its objects
+  if (t < 2) {
+    add(new THREE.BoxGeometry(1100, 1, 44), mat(AFL.run), 0, 2, 150);
+    const L = []; for (let i = -480; i <= 480; i += 120) L.push(box(40, 1.1, 2, i, 0, 0));
+    add(vkGeo(L), mat(AFL.mark), 0, 2.1, 150);
+  }
+  (t > 1 ? BASE.ins : BASE[S.era]).forEach(([k, x, z, w, d, hh], j) => {
+    const id = 200 + t * 10 + j, o = S.T.byId[id], y = o ? o.y - gy : 0, ms = (wo.base[id] = []), keep = (me, c) => { me.userData.c = c; ms.push(me); return me; };
+    const one = (l, c, op) => keep(add(vkGeo(l), mat(c, op), x, y, z), c);   // pieces placed about the building's foot, as one mesh
+    if (k === 'hangar' && t > 1) {   // a shed: walls, a pitched roof along its length, a door and two windows on its front
+      const c = AFL.shed[j % 2], rc = AFL.roof[j % 2], rh = Math.min(3, d * .22), sh = new THREE.Shape();
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(c), x, y + hh / 2, z), c);
+      sh.moveTo(-d / 2 - .4, 0); sh.lineTo(0, rh); sh.lineTo(d / 2 + .4, 0); sh.closePath();
+      const rg = new THREE.ExtrudeGeometry(sh, { depth: w + .8, bevelEnabled: false }); rg.translate(0, 0, -(w + .8) / 2); rg.rotateY(Math.PI / 2); rg.translate(0, hh, 0);
+      one([rg], rc);
+      one([box(Math.min(4, w * .3), hh * .7, .3, 0, hh * .35, -d / 2 - .1), box(1.4, 1, .3, -w * .32, hh * .62, -d / 2 - .1), box(1.4, 1, .3, w * .32, hh * .62, -d / 2 - .1)], AFL.dark);
+    } else if (k === 'hangar' && S.modern) {   // a hall: four door leaves on its front, an edge round its roof
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(AFL.hall), x, y + hh / 2, z), AFL.hall);
+      const L = [], dw = w * .84 / 4;
+      for (let i = 0; i < 4; i++) L.push(box(dw - .35, hh * .8, .4, (i - 1.5) * dw, hh * .4, -d / 2 - .2));
+      L.push(box(w + .6, .9, .6, 0, hh, -d / 2), box(w + .6, .9, .6, 0, hh, d / 2), box(.6, .9, d, -w / 2, hh, 0), box(.6, .9, d, w / 2, hh, 0));
+      one(L, AFL.door);
+    } else if (k === 'hangar') {   // the old arch, round, with its ribs and the doors on its front
+      const hg = new THREE.CylinderGeometry(24, 24, 55, 20, 1, false, 0, Math.PI); hg.rotateZ(Math.PI / 2); hg.rotateY(Math.PI / 2);
+      keep(add(hg, mat(AFL.arch, { side: THREE.DoubleSide, flatShading: false }), x, y, z), AFL.arch);
+      const L = []; for (let i = 0; i <= 5; i++) L.push(new THREE.TorusGeometry(24.15, .35, 4, 24, Math.PI).translate(0, 0, -27.5 + i * 11));
+      const dr = new THREE.CircleGeometry(19, 18, 0, Math.PI); dr.rotateY(Math.PI); dr.translate(0, 0, -27.65); L.push(dr);
+      one(L, AFL.rib);
+    } else if (k === 'ctl' && t > 1) {   // the hideout's low bunker: a slab over it and a firing slit
+      keep(add(new THREE.BoxGeometry(w, hh, d), mat(AFL.bunker), x, y + hh / 2, z), AFL.bunker);
+      one([box(w + 1.2, .6, d + 1.2, 0, hh + .3, 0)], AFL.slab);
+      one([box(w * .6, .45, .3, 0, hh * .7, -d / 2 - .1)], AFL.dark);
+    } else if (k === 'ctl') {   // the tower and its glass cab, with the cab's floor, roof, frames and a mast
+      const c = S.modern ? 0x7b807a : 0x6a5a44;
+      keep(add(new THREE.BoxGeometry(9, 34, 9), mat(c), x, y + 17, z), c); keep(add(new THREE.BoxGeometry(15, 8, 15), mat(AFL.cab, { shininess: 40 }), x, y + 38, z), AFL.cab);
+      const L = [box(16.6, .8, 16.6, 0, 33.6, 0), box(17.2, 1, 17.2, 0, 42.5, 0), box(.25, 6, .25, 4, 46, 4)];
+      for (const [i, j2] of [[-1, -1], [1, -1], [1, 1], [-1, 1], [0, -1], [0, 1], [-1, 0], [1, 0]]) L.push(box(.35, 8, .35, i * 7.55, 38, j2 * 7.55));
+      one(L, c);
+    } else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, y + hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? foeCol(t) : FRIEND }), x + 8, y + hh - 4, z)); }
+  });
+  return g;
+}
+/* the rocks (cf-pol-modelos): every rock was the same regular dodecahedron, a die on the grass. ROCKS: n boulders (one: each rock already has
+   its own turn, width and height, which an irregular boulder shows), each the dodecahedron
+   with its corners pushed in or out (jit: the least and the most of its radius, by the dice of the boulder and the corner), its underside
+   flattened (flat: what is left of its depth under the middle), and set back in the old one's box: as wide, its top as high (top), its foot
+   bot under the ground; the same corners and faces, so no triangle more. Each rock is one of them by the dice of its id */
+const ROCKS = { n: 1, jit: [.62, 1.25], flat: .5, top: 1.45, bot: .3 };   // n 1: one instanced mesh, as before (three cost no triangle more, but a draw each, and the rocks are the dearest instanced draw of the map here)
+function rockGeo(k) {
+  const g = new THREE.DodecahedronGeometry(1, 0), P = g.attributes.position, A = P.array;
+  g.computeBoundingBox(); const b0 = g.boundingBox.clone(), key = i => Math.round(A[i] * 97) * 7919 + Math.round(A[i + 1] * 97) * 104729 + Math.round(A[i + 2] * 97);
+  for (let i = 0; i < A.length; i += 3) {   // a corner's copies (the geometry repeats it on each face) are pushed alike: same place, same dice
+    const f = ROCKS.jit[0] + (ROCKS.jit[1] - ROCKS.jit[0]) * hash2(key(i), k + 1, 41);
+    A[i] *= f; A[i + 1] *= (A[i + 1] < 0 ? ROCKS.flat : 1) * f; A[i + 2] *= f;
+  }
+  g.computeBoundingBox(); const b = g.boundingBox;
+  g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
+  g.scale((b0.max.x - b0.min.x) / (b.max.x - b.min.x), (ROCKS.top + ROCKS.bot) / (b.max.y - b.min.y), (b0.max.z - b0.min.z) / (b.max.z - b.min.z));
+  g.translate(0, -ROCKS.bot, 0); g.computeVertexNormals(); P.needsUpdate = true;
+  return g;
+}
 function buildWorld() {
   if (scene) scene.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   const E = S.E, W = S.W, HW = S.HW, T = S.T, N = T.N, P = PAL[S.era], c = new THREE.Color();
@@ -38132,20 +38214,7 @@ function buildWorld() {
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
   /* airfields, turned toward the middle of the map */
   wo = { seen: 0, at: {}, base: {}, cv: {}, falls: [], trees: null, houses: null, roofs: null, holes: null, rocks: null, bushes: null };
-  S.base.forEach((b, t) => {
-    const g = new THREE.Group(), add = (geo, m, x, yy, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, yy, z); g.add(me); return me; };
-    add(new THREE.BoxGeometry(1100, 1, 44), mat(0x3a3c3b), 0, 2, 150);
-    for (let i = -480; i <= 480; i += 120) add(new THREE.BoxGeometry(40, 1.1, 2), mat(0xd8d3bd), i, 2.1, 150);
-    BASE[S.era].forEach(([k, x, z, w, d, hh], j) => {   // its buildings are world objects (BASE): the meshes of each are kept, to show its stage
-      const ms = (wo.base[200 + t * 10 + j] = []), keep = (me, c) => { me.userData.c = c; ms.push(me); };
-      if (k === 'hangar') {
-        if (S.modern) keep(add(new THREE.BoxGeometry(w, hh, d), mat(0x70756f), x, hh / 2, z), 0x70756f);
-        else { const hg = new THREE.CylinderGeometry(24, 24, 55, 10, 1, false, 0, Math.PI); hg.rotateZ(Math.PI / 2); hg.rotateY(Math.PI / 2); keep(add(hg, mat(0x5b5f4d, { side: THREE.DoubleSide }), x, 0, z), 0x5b5f4d); }
-      } else if (k === 'ctl') { const c = S.modern ? 0x7b807a : 0x6a5a44; keep(add(new THREE.BoxGeometry(9, 34, 9), mat(c), x, 17, z), c); keep(add(new THREE.BoxGeometry(15, 8, 15), mat(0xb9d3d8), x, 38, z), 0xb9d3d8); }
-      else { keep(add(new THREE.BoxGeometry(.8, hh, .8), mat(0xc9c4b0), x, hh / 2, z), 0xc9c4b0); ms.push(add(new THREE.BoxGeometry(16, 8, .5), new THREE.MeshBasicMaterial({ color: t !== S.me ? FOE : FRIEND }), x + 8, hh - 4, z)); }
-    });
-    g.position.set(b.x, hgt(b.x, b.z), b.z); g.rotation.y = headTo(b.x, b.z, W / 2, 0); scene.add(g);
-  });
+  S.base.forEach((b, t) => scene.add(baseScene(b, t)));
   /* forests, towns, clouds */
   const mx = new THREE.Matrix4(), q0 = new THREE.Quaternion(), v0 = new THREE.Vector3(), s0 = new THREE.Vector3(), UP = new THREE.Vector3(0, 1, 0);
   /* the trees and the houses are the terrain's world objects: one instance each, by id, which lookObj() changes with the object's stage */
@@ -38159,12 +38228,12 @@ function buildWorld() {
   wo.seen = S.olog.length; wo.houses.instanceColor.needsUpdate = wo.roofs.instanceColor.needsUpdate = true;
   scene.add(wo.trees, wo.leaf, wo.houses, wo.roofs, wo.holes);
   /* the rocks and bushes of map version 6 (COVERS): an instance each, by id, as low and as wide as the object the simulation has */
-  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1), rkg = new THREE.DodecahedronGeometry(1, 0);
-  bsg.translate(0, .55, 0); rkg.translate(0, .45, 0);
+  const cvl = T.cvn ? T.objs.filter(o => o.k === 'rock' || o.k === 'bush') : [], nr = cvl.filter(o => o.k === 'rock').length, bsg = bushGeo(1);
+  bsg.translate(0, .55, 0);
   /* map version 7 (COV7): the bushes in tiles of COV7.tile m, each an instanced mesh with its own bounds (so that the frustum leaves out what
      is not in view) and drawn only within COV7.see m of the eye (bushTiles); the rocks keep one mesh, bounded by the whole map */
-  rkg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW));
-  wo.rocks = new THREE.InstancedMesh(rkg, mat(P.rock), Math.max(1, nr));
+  wo.rk = []; for (let k = 0; k < ROCKS.n; k++) { const rg = rockGeo(k); rg.boundingSphere = new THREE.Sphere(new THREE.Vector3(W / 2, 0, 0), Math.hypot(W, 2 * HW)); wo.rk.push(new THREE.InstancedMesh(rg, mat(P.rock), Math.max(1, nr))); }
+  wo.rocks = wo.rk[0];   // ROCKS: three boulders, each rock on one of them by the dice of its id
   const bm = bushMat(P.bush), BT = COV7.tile, btl = new Map(), cc = new THREE.Color();
   for (const o of cvl) if (o.k === 'bush') { const k = Math.floor(o.x / BT) * 4096 + Math.floor((o.z + HW) / BT), l = btl.get(k); if (l) l.push(o); else btl.set(k, [o]); }
   wo.bt = [];
@@ -38175,12 +38244,11 @@ function buildWorld() {
     l.forEach((o, j) => { wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); });
   }
   wo.bushes = wo.bt[0] || null;
-  let ir = 0;
-  for (const o of cvl) if (o.k === 'rock') { wo.cv[o.id] = [wo.rocks, ir++]; wo.rocks.setColorAt(ir - 1, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
-  wo.rocks.count = ir;
-  if (wo.rocks.instanceColor) wo.rocks.instanceColor.needsUpdate = true;
+  const ir = wo.rk.map(() => 0);
+  for (const o of cvl) if (o.k === 'rock') { const k = Math.min(ROCKS.n - 1, Math.floor(hash2(o.id, 3, 11) * ROCKS.n)), me = wo.rk[k], j = ir[k]++; wo.cv[o.id] = [me, j]; me.setColorAt(j, cc.setScalar(.82 + .3 * hash2(o.id, 1, 7))); lookObj(o); }
+  wo.rk.forEach((me, k) => { me.count = ir[k]; if (me.instanceColor) me.instanceColor.needsUpdate = true; });
   for (const me of wo.bt) if (me.instanceColor) me.instanceColor.needsUpdate = true;
-  scene.add(wo.rocks, ...wo.bt);
+  scene.add(...wo.rk, ...wo.bt);
   if (T.ug) { const g = bushGeo(0); g.translate(0, .5, 0); wo.ug = { tiles: new Map(), none: new Set(), geo: g, mat: bushMat(P.bush) }; }   // map version 10: the undergrowth, made near the eye (ugTiles)
   cityScene();
   vegBuild();
@@ -40679,6 +40747,31 @@ function hudDrive(P, u, ink, acc, disp, blink, seat) {
   if (nS) txt('G FUMAÇA ×' + P.smk + (P.smk && P.smkT > S.t ? '  ' + Math.ceil(P.smkT - S.t) + ' s' : ''), L, y + 2 * u, 12.5 * u, P.smk ? ink : FOE);
   if (w.k === 'sam' && !P.dead && !S.lockAir && !S.noLos) txt('SEM ALVO NA MIRA', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
 }
+/* ---------- hit marks (HM, cf-pol-armas): the player's own hits, seen and heard ----------
+   A round, rocket, shell or bomb of the player's that hurts a foe (fx.hit, from damageMan, damageUnit and damagePlane) puts four short
+   strokes round the foe on the screen, white, for t s, fading; if the foe is dead by the time it is drawn (also online, where a ghost dies
+   when its owner says so) they turn red and larger and hold k s. One mark at a time, the last; a tick for the hit (at most one every gap s)
+   and a lower one for the kill. Off with localStorage cf-hm 0 ---------- */
+const HM = { on: true, t: .3, k: .7, gap: .06, o: null, at: -9, kill: false, snd: -9 };
+try { HM.on = localStorage.getItem('cf-hm') !== '0'; } catch (e) {}
+fx.hit = o => {
+  if (!HM.on) return;
+  if (HM.o !== o || !HM.kill) { HM.o = o; HM.at = S.t; HM.kill = false; }
+  if (A.ctx && A.on && playMode === 'play' && S.t - HM.snd >= HM.gap) { HM.snd = S.t; burst(.018, .06, 3400, 'bandpass'); }
+};
+function hmDraw() {
+  const o = HM.o; if (!o || playMode !== 'play' || !S.my) return;
+  if (o.dead && !HM.kill) { HM.kill = true; HM.at = S.t; if (A.ctx && A.on) burst(.07, .09, 1100, 'bandpass'); }
+  const age = S.t - HM.at, life = HM.kill ? HM.k : HM.t;
+  if (age > life || age < 0) { HM.o = null; return; }
+  const s = proj(o.x, bodyY(o), o.z); if (!onScr(s)) return;
+  const u = hudU(), k = HM.kill ? 1.4 : 1, r0 = 4 * u * k, r1 = 9.5 * u * k;
+  hx.save(); hx.globalAlpha = 1 - age / life; hx.lineCap = 'round'; hx.beginPath();
+  for (const [dx, dy] of CORN) { hx.moveTo(s.x + dx * r0, s.y + dy * r0); hx.lineTo(s.x + dx * r1, s.y + dy * r1); }
+  hx.lineWidth = 4.2 * u; hx.strokeStyle = 'rgba(0,0,0,.5)'; hx.stroke();
+  hx.lineWidth = 2 * u; hx.strokeStyle = HM.kill ? '#ff4a36' : '#f4f1e8'; hx.stroke(); hx.restore();
+}
+drawHud = (g => () => { g(); hmDraw(); })(drawHud);
 /* ---------- damage panel: the vehicle from above, nose up, each part in the colour of its state; beside it what is hurt, worst first,
    with the seconds left of what is running out, the crew by seat, and under it fire, leak, jammed controls, the extinguishers and the
    field repair with what waits behind it. Bottom left, lifted over the touch stick or a seat's own corner; in a cockpit it takes the top
@@ -45545,7 +45638,7 @@ skyScene = (g => () => {
     ENV.sh.castShadow = e > .03 && lit > .2 && wet < .4;
     if ((ENV.shT = (ENV.shT || 0) - 1) <= 0) {   // what casts: what moves and what stands, looked over twice a second
       ENV.shT = 30;
-      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, wo && wo.rocks, wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
+      for (const gr of [gUnits, gPlanes, gWrecks, gDr, wo && wo.trees, wo && wo.leaf, ...(wo && wo.rk || []), wo && wo.bushes, wo && wo.houses, wo && wo.roofs]) if (gr && gr.traverse) gr.traverse(o => { if (o.isMesh && !o.castShadow && !o.material.transparent) o.castShadow = true; });
       if (gCity) scene.traverse(o => { if (o.isMesh && o.material === gCity.mat) o.castShadow = o.receiveShadow = true; });
     }
   }

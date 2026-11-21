@@ -16113,8 +16113,9 @@ function woodCut(ax, ay, az, bx, by, bz) {
 }
 /* is o under the canopy: kept for a second while it stays within move m of where it was looked at */
 function canopy(o) {
-  if (o.cnS === S && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
-  o.cnS = S; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
+  const k = S.cnK || (S.cnK = canopy.n = (canopy.n || 0) + 1);   // the state's number, not the state: an entity kept after its match (the bomb the camera followed, the vehicle left in the picker) held its whole battle alive through o.cnS (cf-pol-fluxos)
+  if (o.cnS === k && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
+  o.cnS = k; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
   return (o.cn = woodAt(o.x, o.z) || near(o.x, o.z, 1).some(t => t.k === 'tree' && S.os[t.id] < 2 && Math.hypot(t.x - o.x, t.z - o.z) < t.cr));
 }
 /* the rocks and bushes of a terrain, after everything else is placed */
@@ -20163,6 +20164,12 @@ function cqStep(dt) {
    clock to the next match (Q.left, the host's; the guests read it in cq) runs on here, and at 0 the host starts the next one. Without it the end
    screen said "Nova partida nesta sala em 25 s" for ever and the room never started again (cf-pol-fluxos; tests/rematch.js) */
 function overStep(dt) { if (S.cq && S.cq.ph) cqStep(dt); }
+/* a new state (a match, the hangar's battle behind it, a watch) keeps nothing of the last one alive. honTown's cache of 50 m cells (HONU)
+   kept the state each cell was worked out in, and was dropped only past 4096 cells; the analytics kept its last match's (ANA.S, and its live
+   manoeuvres, MVA.live, whose soldiers lead back to it). Each match
+   left its whole battle reachable: in the browser about 85 MB more after every join and every leave, the states alive 1, 2, 3, 5 after three
+   matches, until the tab ran out of memory (cf-pol-fluxos; tests/state-gc.js). Here, outside the brain's section, which keeps its cache */
+newState = (g => (e, m, o) => { HONU.clear(); ANA.S = null; MVA.live = new Map(); return g(e, m, o); })(newState);
 /* the point the player's body stands in, for the capture bar */
 function cqHere() {
   const P = S.my, Q = S.cq; if (!Q || !P || P.dead) return null;
@@ -41753,6 +41760,7 @@ ANA.post = (e, last) => {
   try { fetch('/ana', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: !!last && body.length < AAR.ka }).then(r => { if (r.status === 404) AAR.off = true; }, () => {}); } catch (er) {}
 };
 const aarLocal = () => { try { return JSON.parse(localStorage.getItem(AAR.key)) || []; } catch (e) { return []; } };
+newState = (g => (e, m, o) => { AAR.kS = null; return g(e, m, o); })(newState);   // its key's match (a state) is let go with the match
 ANA.done = R => {
   const l = aarLocal(); l.unshift({ at: Date.now(), rep: R }); try { localStorage.setItem(AAR.key, JSON.stringify(l.slice(0, AAR.keep))); } catch (e) {}
   $('#btnAar').hidden = false;

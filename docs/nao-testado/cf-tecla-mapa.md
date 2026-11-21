@@ -1,5 +1,10 @@
 # cf-tecla-mapa: M abre o mapa para todos (NÃO TESTADO)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1), partida de verdade pelos botões do hangar (1944, ambulância Kfz. 31): M abre o mapa da batalha e M fecha, sem erro no console. Em 1920 px: o lado próprio, os pontos com a cor do dono, as estradas, os nomes das vilas, as instalações (USINA, MINA, OBRA), "VOCÊ" e a legenda. O inimigo não visto não aparece.
+- Detalhe visto: o rótulo "VOCÊ" cai em cima do nome da vila-sede quando o jogador nasce nela.
+- **Continua sem teste:** as outras classes (avião, helicóptero, soldado), arrastar e a roda no mapa, a trava do mouse ao fechar, 3 lados e o jogador morto.
+
 ## O que mudou
 - **M em qualquer veículo ou classe** (avião, helicóptero, tanque, antiaérea, transporte, infantaria): abre/fecha o **mapa da batalha** (`bmDraw`, bloco "the battle map" no fim do script do HTML). Mostra relevo, grade, estradas, vilas, pontos de conquista com o dono, bases, suprimento, obras da economia, rádios (os do inimigo só se vistos), marcas do comandante e do general (`cueMarks`), fumaça, aliados, e o inimigo **só como o seu lado o conhece** (`spotted`, posição `sX/sZ`, escada de percepção, apaga com o tempo). Sua posição e direção ("VOCÊ"). Roda ou + − aproxima no ponteiro, arrastar move, duplo clique centra em você, M ou Esc fecha.
 - **Artilharia, lançador e morteiro**: M continua abrindo o mapa de tiro deles (`mapKey`, assento `fcm`), sem mudança.

@@ -100,7 +100,8 @@ const score = (c, id) => c.Net.players.get(id);
   const before = host.S.men.filter(m => m.aid && !m.dead && m.team === 1).map(m => m.aid).sort(), loaded = !!truck.cargo && !truck.dead;
   g1.$('CMD').scout.min = 99;   // the new host's commander would send the truck's squad ahead on foot through a stretch it distrusts
   host.on = false; host.Net.close(); await N.sleep(150); await run(3);
-  const mine = g1.S.men.filter(m => m.aid && !m.dead && !m.net && m.ai && m.sq && m.team === 1), sq1 = g1.S.squads.filter(q => q.men[0] && q.men[0].team === 1), q1 = sq1[0];   // side 0 may have had a squad flown in by a transport helicopter meanwhile
+  // the new host's own director may already have sent a squad of side 1 out (and side 0 one flown in by a transport helicopter): only the adopted count
+  const mine = g1.S.men.filter(m => m.aid && !m.dead && !m.net && m.ai && m.sq && m.team === 1 && before.includes(m.aid)), sq1 = g1.S.squads.filter(q => q.men[0] && q.men[0].team === 1 && before.includes(q.men[0].aid)), q1 = sq1[0];
   ok(g1.S.host && !g2.S.host, 'the earliest guest is the new host');
   ok(mine.length === before.length && mine.map(m => m.aid).sort().join() === before.join() && sq1.length === 1 && q1.men.length === before.length, 'it adopted the ' + mine.length + ' soldiers on foot as one squad with a place on the road');
   const tk = g1.S.units.find(u => u.kind === 'truck'); ok(loaded && tk && !tk.net && tk.ai && tk.cargo && tk.cargo.length === 6, 'and the truck with its squad still aboard');

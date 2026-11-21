@@ -728,7 +728,7 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
         <div class="net" id="netBox" hidden>
           <p class="net-about">PvP online: gente e IA na mesma batalha, um time por lado. Conquista por pontos e tíquetes, com aliados ao lado.</p>
           <label for="pname">Nome do jogador</label>
-          <input id="pname" type="text" maxlength="16" autocomplete="off" spellcheck="false">
+          <input id="pname" type="text" maxlength="16" autocomplete="off" spellcheck="false" placeholder="Jogador">
           <p id="netStatus" role="status"></p>
           <button class="chip" id="btnRetry" type="button" hidden>Tentar de novo</button>
           <p id="susNote" hidden></p>
@@ -5939,14 +5939,15 @@ const BRDH = 2.2;   // a bridge's deck above the ground (bridges keep their old 
 /* the scene's ribbon of a road edge E, half width hw (buildWorld: one mesh a class holds all its edges): NC vertices across every ~12 m (so no
    straight segment spans a bump), the two edges 1.15 x as wide and sunk into the ground (a blended shoulder, no gap seen from the side), the
    three inner ones ROADH above it. Appended to pos (x y z) and idx (triangles), whose indices count from the vertices pos already holds (the
-   edges before it in the mesh; counted from 0 every edge but the first drew nothing of its own) */
-function roadRibbon(E, hw, pos, idx) {
+   edges before it in the mesh; counted from 0 every edge but the first drew nothing of its own); rd, if given, takes each vertex's m across
+   the road and along it, for the scene's look of the road (envRoadHook) */
+function roadRibbon(E, hw, pos, idx, rd) {
   const NC = 5, r = E.p, n = Math.max(1, Math.round(r.len / 12)), st = r.len / n, b = pos.length / 3;
   for (let i = 0; i <= n; i++) {
     const p = routeAt(r, i * st);
     for (let j = 0; j < NC; j++) {
       const o = (j / (NC - 1) * 2 - 1) * hw * (j === 0 || j === NC - 1 ? 1.15 : 1), x = p.x - p.dz * o, z = p.z + p.dx * o;
-      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z);
+      pos.push(x, hgt(x, z) + (j === 0 || j === NC - 1 ? -.05 : ROADH), z); if (rd) rd.push(o, i * st);
     }
     if (i < n) { const k = b + i * NC; for (let j = 0; j < NC - 1; j++) idx.push(k + j, k + j + 1, k + j + NC, k + j + 1, k + j + NC + 1, k + j + NC); }
   }
@@ -16129,8 +16130,9 @@ function woodCut(ax, ay, az, bx, by, bz) {
 }
 /* is o under the canopy: kept for a second while it stays within move m of where it was looked at */
 function canopy(o) {
-  if (o.cnS === S && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
-  o.cnS = S; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
+  const k = S.cnK || (S.cnK = canopy.n = (canopy.n || 0) + 1);   // the state's number, not the state: an entity kept after its match (the bomb the camera followed, the vehicle left in the picker) held its whole battle alive through o.cnS (cf-pol-fluxos)
+  if (o.cnS === k && S.t < o.cnT && Math.abs(o.x - o.cnx) < TREES.move && Math.abs(o.z - o.cnz) < TREES.move) return o.cn;
+  o.cnS = k; o.cnT = S.t + 1; o.cnx = o.x; o.cnz = o.z;
   return (o.cn = woodAt(o.x, o.z) || near(o.x, o.z, 1).some(t => t.k === 'tree' && S.os[t.id] < 2 && Math.hypot(t.x - o.x, t.z - o.z) < t.cr));
 }
 /* the rocks and bushes of a terrain, after everything else is placed */
@@ -20182,6 +20184,12 @@ function cqStep(dt) {
    clock to the next match (Q.left, the host's; the guests read it in cq) runs on here, and at 0 the host starts the next one. Without it the end
    screen said "Nova partida nesta sala em 25 s" for ever and the room never started again (cf-pol-fluxos; tests/rematch.js) */
 function overStep(dt) { if (S.cq && S.cq.ph) cqStep(dt); }
+/* a new state (a match, the hangar's battle behind it, a watch) keeps nothing of the last one alive. honTown's cache of 50 m cells (HONU)
+   kept the state each cell was worked out in, and was dropped only past 4096 cells; the analytics kept its last match's (ANA.S, and its live
+   manoeuvres, MVA.live, whose soldiers lead back to it). Each match
+   left its whole battle reachable: in the browser about 85 MB more after every join and every leave, the states alive 1, 2, 3, 5 after three
+   matches, until the tab ran out of memory (cf-pol-fluxos; tests/state-gc.js). Here, outside the brain's section, which keeps its cache */
+newState = (g => (e, m, o) => { HONU.clear(); ANA.S = null; MVA.live = new Map(); return g(e, m, o); })(newState);
 /* the point the player's body stands in, for the capture bar */
 function cqHere() {
   const P = S.my, Q = S.cq; if (!Q || !P || P.dead) return null;
@@ -37942,10 +37950,12 @@ function buildWorld() {
   let rtri = 0;
   for (let c = 0; c < RN.w.length; c++) {
     const es = roadsOf(T).filter(e => e.c === c); if (!es.length) continue;
-    const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], hw = RN.w[c];
-    for (const E of es) roadRibbon(E, hw, pos, idx);
+    const rm = new THREE.MeshBasicMaterial({ color: c ? RN.pal[S.era][c] : P.road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: RN.off[c], polygonOffsetUnits: RN.off[c] }), pos = [], idx = [], rd = [], hw = RN.w[c];
+    for (const E of es) roadRibbon(E, hw, pos, idx, rd);
     rtri += idx.length / 3;
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); scene.add(new THREE.Mesh(g, rm));
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx);
+    g.setAttribute('rd', new THREE.BufferAttribute(new Float32Array(rd), 2));   // m across the road and along its edge, for its look (envApply)
+    const me = new THREE.Mesh(g, rm); me.userData.road = c; scene.add(me);
   }
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
   /* airfields, turned toward the middle of the map */
@@ -38066,7 +38076,7 @@ const VEG = {
   },
   cell: 128, move: 10, every: .3, nearMax: 3000, midMax: 9000, wind: .5, wood: .25, crop: 1.5, chunk: 24, make: 2, grid: .55, jump: 80, treeSat: .6
 };
-const VS = { built: null, atlas: null, imp: null, base: null };
+const VS = { built: null, atlas: null, imp: null, base: null, shade: null };
 /* the picture the cards are cut from: a spruce frond, a bunch of leaves, bark and dark foliage, drawn by hand on a canvas */
 function vegAtlas() {
   if (VS.atlas) return VS.atlas;
@@ -38324,10 +38334,13 @@ function vegBuild() {
   V.mid = [0, 1].map(k => mk(V.geo[k][1], VEG.midMax, 'mid'));
   /* shadows: a soft round patch laid on the ground, a little toward the far side from the sun */
   {
-    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
-    gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.55, 'rgba(0,0,0,.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+    if (!VS.shade) {   // the patch is made once (VS.shade): one made at every build stayed in the GPU when vegDrop let the build go (cf-pol-fluxos)
+      const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d'), gr = g.createRadialGradient(32, 32, 2, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(0,0,0,.55)'); gr.addColorStop(.55, 'rgba(0,0,0,.32)'); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+      VS.shade = new THREE.CanvasTexture(c);
+    }
     const sg = new THREE.PlaneGeometry(1, 1); sg.rotateX(-Math.PI / 2);
-    const sm2 = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const sm2 = new THREE.MeshBasicMaterial({ map: VS.shade, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
     V.shadow = new THREE.InstancedMesh(sg, sm2, VEG.nearMax + VEG.midMax); V.shadow.instanceMatrix.setUsage(THREE.DynamicDrawUsage); V.shadow.count = 0; V.shadow.frustumCulled = false; V.shadow.renderOrder = -1;
     scene.add(V.shadow);
     V.SM = new Float32Array(n * 16); const nn = new THREE.Vector3(), qq = new THREE.Quaternion(), p = new THREE.Vector3();
@@ -39289,7 +39302,11 @@ const CLOOK = { tile: 128, lod: 650, chunk: 380, back: .74, rise: [.34, 6.5, 1.3
   chim: [.62, .9], corn: [.3, .28], det: 1 };
 const CMAT = ['plaster', 'brick', 'concrete', 'stone', 'metal', '', 'wood'];   // a material's row of the atlas (5: the flat tiles)
 let gCity = null;
+/* made once: the same seed draws the same sheet, and a new one at every world (each match and the hangar's battle) stayed in the GPU after the city it
+   dressed was gone (its meshes and materials disposed, never the texture: two more textures a join and a leave, cf-pol-fluxos) */
+let cityTexC = null;
 function cityTex() {
+  if (cityTexC) return cityTexC;
   const P = CLOOK.tile, cv = document.createElement('canvas'), g = cv.getContext('2d'); let sd = 7;
   const rnd = () => (sd = (Math.imul(sd, 1664525) + 1013904223) >>> 0) / 4294967296, G = CITY.gap;
   cv.width = cv.height = P * 8;
@@ -39329,7 +39346,7 @@ function cityTex() {
   const flat = (c, col, lines) => { const x = c * P, y = 5 * P; g.fillStyle = col; g.fillRect(x, y, P, P); g.strokeStyle = 'rgba(30,24,18,.3)'; g.lineWidth = 1; g.beginPath(); for (let k = 0; k < lines; k++) { g.moveTo(x, y + k * P / lines + .5); g.lineTo(x + P, y + k * P / lines + .5); } g.stroke(); for (let k = 0; k < 30; k++) { g.fillStyle = 'rgba(40,32,24,' + (.04 + rnd() * .07) + ')'; g.fillRect(x + rnd() * P, y + rnd() * P, 3 + rnd() * 12, 2 + rnd() * 5); } };
   flat(0, '#e6e2da', 8); flat(1, '#e6e2da', 8); crack(1, 5, 6); flat(2, '#e8e2dc', 10); flat(3, '#dcdcd8', 2); flat(5, '#e2e0da', 3); flat(7, '#ffffff', 0);
   { const x = 4 * P, y = 5 * P; g.fillStyle = '#d6d2ca'; g.fillRect(x, y, P, P); for (let k = 0; k < 70; k++) { const s = 6 + rnd() * 18; g.fillStyle = 'rgba(' + [60, 110, 150, 200][k % 4] + ',' + [56, 104, 144, 194][k % 4] + ',' + [50, 96, 136, 186][k % 4] + ',.8)'; g.save(); g.translate(x + rnd() * P, y + rnd() * P); g.rotate(rnd() * 3); g.fillRect(-s / 2, -s / 3, s, s * .66); g.restore(); } }
-  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return t;
+  const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; return (cityTexC = t);
 }
 /* the tile an element shows: [column, row] of the atlas; 6 5 is nothing. Codes: 0 a wall, 11 the inner face of an outer one (plastered
    inside masonry), 1 a floor, 2 a roof, 3 rubble, 4 a step, 5 a plain wall, 6 a flat roof, 7 a pillar, 12 a detail in its colour while the
@@ -39480,15 +39497,17 @@ function cityScene() {
     });
     ch.c = ch[0].mesh.geometry.boundingSphere;
   });
-  {   // the streets between the blocks: paved strips on the ground, one mesh
-    const pos = [], idx = [], w = CITY.plan.street * .36;
-    for (const l of T.lanes) for (let k = 0; k < l.length; k++) {
+  {   // the streets between the blocks: paved strips on the ground, one mesh; marked a street (road -1, half width hw) for its look (envApply)
+    const pos = [], idx = [], rd = [], w = CITY.plan.street * .36;
+    for (const l of T.lanes) for (let k = 0, s = 0; k < l.length; k++) {
       const a = l[Math.max(0, k - 1)], e = l[Math.min(l.length - 1, k + 1)], d = Math.hypot(e.x - a.x, e.z - a.z) || 1, nx = -(e.z - a.z) / d * w, nz = (e.x - a.x) / d * w, n = pos.length / 3;
-      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz);
+      if (k) s += Math.hypot(l[k].x - l[k - 1].x, l[k].z - l[k - 1].z);
+      pos.push(l[k].x + nx, hgt(l[k].x + nx, l[k].z + nz) + .3, l[k].z + nz, l[k].x - nx, hgt(l[k].x - nx, l[k].z - nz) + .3, l[k].z - nz); rd.push(w, s, -w, s);
       if (k) idx.push(n - 2, n - 1, n, n - 1, n + 1, n);
     }
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx);
-    scene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PAL[S.era].road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })));
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3)); g.setIndex(idx); g.setAttribute('rd', new THREE.BufferAttribute(new Float32Array(rd), 2));
+    const me = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: PAL[S.era].road, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    me.userData.road = -1; me.userData.hw = w; scene.add(me);
   }
   for (let g = 0; g < T.bn; g++) if (S.cbs[g]) cityRedo(g);
   cityFlush();
@@ -40715,16 +40734,17 @@ function drawHud() {
   if (S.t < S.shellT && !P.dead) { txt(blink ? 'ARTILHARIA CAINDO PERTO' : '', cw / 2, wy, 15 * u, FOE, 'center', disp); wy += 20 * u; }
   if (bs.hit > 0) { txt('BASE SOB FOGO', cw / 2, wy, 14 * u, FOE, 'center'); wy += 19 * u; }
   if (P.inv > 0 && !P.dead && P.kind) { txt('Protegido por ' + Math.ceil(P.inv) + ' s', cw / 2, wy, 13 * u, ink, 'center'); wy += 19 * u; }
-  if (P.dead && !S.over && !(cdLeft(S.cls, S.model) > 0) && radHold() > 0) txt('PRÓXIMA LEVA PELO RÁDIO EM ' + Math.ceil(radHold()) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
-  if (P.dead && S.cq && !S.over && cdLeft(S.cls, S.model) > 0) txt(DEFS[S.cls][S.model].name.toUpperCase() + ' VOLTA EM ' + Math.ceil(cdLeft(S.cls, S.model)) + ' s', cw / 2, ch * .22 + 74 * u, 14 * u, ink, 'center');
+  const by = Math.max(ch * .22, wy + S.feed.length * 19 * u + 8 * u);   // the banner's top: under the column of warnings and feed when that reaches it (cf-pol-hud: the two wrote on each other)
+  if (P.dead && !S.over && !(cdLeft(S.cls, S.model) > 0) && radHold() > 0) txt('PRÓXIMA LEVA PELO RÁDIO EM ' + Math.ceil(radHold()) + ' s', cw / 2, by + 74 * u, 14 * u, ink, 'center');
+  if (P.dead && S.cq && !S.over && cdLeft(S.cls, S.model) > 0) txt(DEFS[S.cls][S.model].name.toUpperCase() + ' VOLTA EM ' + Math.ceil(cdLeft(S.cls, S.model)) + ' s', cw / 2, by + 74 * u, 14 * u, ink, 'center');
   if (S.banner) {
     hx.globalAlpha = clamp(S.banner.life, 0, 1);
-    txt(S.banner.text.toUpperCase(), cw / 2, ch * .22, 40 * u, acc, 'center', disp);
+    txt(S.banner.text.toUpperCase(), cw / 2, by, 40 * u, acc, 'center', disp);
     hx.font = '600 ' + 15 * u + "px 'Barlow Semi Condensed', sans-serif"; hx.textAlign = 'center';   // semibold (the light face washed out on a bright sky), and in lines no wider than the middle of the screen (it ran into the scores at 1280)
     const sl = [], mw = Math.min(cw * .5, 640 * u); let ln = '';   // half the screen: clear of the scores on the right at 1280
     for (const w of String(S.banner.sub || '').split(' ')) { const t = ln ? ln + ' ' + w : w; if (ln && hx.measureText(t).width > mw) { sl.push(ln); ln = w; } else ln = t; }
     if (ln) sl.push(ln);
-    sl.forEach((l, i) => { const ly = ch * .22 + 48 * u + i * 19 * u; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(l, cw / 2 + 1, ly + 1); hx.fillStyle = ink; hx.fillText(l, cw / 2, ly); });
+    sl.forEach((l, i) => { const ly = by + 48 * u + i * 19 * u; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(l, cw / 2 + 1, ly + 1); hx.fillStyle = ink; hx.fillText(l, cw / 2, ly); });
     hx.globalAlpha = 1;
   }
   S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, wy + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
@@ -41866,7 +41886,7 @@ $('#btnSwap').addEventListener('click', () => (sw.on ? closeSwap() : openSwap())
 function joinRoom(fresh) {
   if (!ready) return;
   audioInit();
-  const name = $('#pname').value.trim().slice(0, 16) || 'Piloto', k = klass();
+  const name = $('#pname').value.trim().slice(0, 16) || 'Jogador', k = klass();   // with no name: Jogador, whatever the class ("Piloto · Fuzileiro" read oddly)
   try { localStorage.setItem('ceu-de-ferro-3d-nome', name); } catch (e) {}
   netStatus('Conectando a ' + Net.url() + '…');
   Net.wantSpec = false; Net.fresh = fresh === true; Net.susO = null; Net.connect(era, name, k, sel[era][k]);
@@ -41929,6 +41949,7 @@ ANA.post = (e, last) => {
   try { fetch('/ana', { method: 'POST', headers: { 'content-type': 'application/json' }, body, keepalive: !!last && body.length < AAR.ka }).then(r => { if (r.status === 404) AAR.off = true; }, () => {}); } catch (er) {}
 };
 const aarLocal = () => { try { return JSON.parse(localStorage.getItem(AAR.key)) || []; } catch (e) { return []; } };
+newState = (g => (e, m, o) => { AAR.kS = null; return g(e, m, o); })(newState);   // its key's match (a state) is let go with the match
 ANA.done = R => {
   const l = aarLocal(); l.unshift({ at: Date.now(), rep: R }); try { localStorage.setItem(AAR.key, JSON.stringify(l.slice(0, AAR.keep))); } catch (e) {}
   $('#btnAar').hidden = false;
@@ -42099,7 +42120,7 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
   let xt = x + 5 * u;
   for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
-  let y = y0 + h + 26 * u;
+  let y = y0 + h + 26 * u + (S.sky ? 12 * u : 0);   // under the clock's line (skyHud: the hour, day or night, the weather) when it shows: the point's name was written over it (cf-pol-fluxos)
   const p = !mapV && (P.man || P.kind) && !P.dead ? cqHere() : null;
   if (p) {
     const sd = cqSide(p), k = sd === me ? .5 + .5 * p.c : sd < 0 ? .5 : .5 - .5 * p.c, a = p.w[me] || 0, b = cqFoeW(p, me), may = p.hold === me || p.links.some(i => Q.p[i].hold === me), bw = 150 * u, f = v => v.toFixed(1).replace('.', ',').replace(',0', '');
@@ -44785,14 +44806,13 @@ function sky3Init() {
   const lit = [];
   scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.geometry.type === 'PlaneGeometry') lit.push(o.material); });
   if (wo) for (const k of ['trees', 'houses', 'roofs']) if (wo[k]) lit.push(wo[k].material);
-  for (const m of lit) {
-    m.onBeforeCompile = sh => {
-      Object.assign(sh.uniforms, K.u);
-      sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
-      sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
-    };
-    m.needsUpdate = true;
-  }
+  for (const m of lit) { m.onBeforeCompile = sky3Ill; m.needsUpdate = true; }
+}
+/* a flare's light on a lit material (its emissive part), from the 4 lights sky3Init keeps in SKY3.u; the roads take it too (envApply) */
+function sky3Ill(sh) {
+  Object.assign(sh.uniforms, SKY3.u);
+  sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
+  sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
 }
 const skyMix = (out, a, b, k) => out.copy(a).lerp(b, clamp(k, 0, 1));
 function skyScene() {
@@ -44944,6 +44964,25 @@ function envTex() {
   ENV.nrm = tex(s, N);
   return (ENV.tex = tex(d, N));
 }
+/* the ground under the water: the terrain mesh's heights as drawn (a fallen bridge's sunk crossing too), one texel a grid point, read
+   point by point (nearest) so the water shader lays its own triangles over them; made again when the mesh's heights change (envBedSync) */
+function envBedTex() {
+  const p = ENV.terrain.geometry.attributes.position, n = Math.round(Math.sqrt(p.count)), d = new Float32Array(n * n * 4);
+  for (let k = 0; k < n * n; k++) d[k * 4] = p.getY(k);
+  if (ENV.bed) ENV.bed.dispose();
+  const t = new THREE.DataTexture(d, n, n, THREE.RGBAFormat, THREE.FloatType);
+  t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true;
+  ENV.bedV = p.version;
+  return (ENV.bed = t);
+}
+function envBedSync() {
+  if (!ENV.water || !ENV.wu || !ENV.terrain) return;
+  const p = ENV.terrain.geometry.attributes.position;
+  if (p.version === ENV.bedV) return;
+  const d = ENV.bed.image.data;
+  for (let k = 0; k < p.count; k++) d[k * 4] = p.getY(k);
+  ENV.bed.needsUpdate = true; ENV.bedV = p.version;
+}
 /* a cloud's puff: soft round edges broken by noise */
 function envPuff() {
   if (ENV.puff) return ENV.puff;
@@ -44964,7 +45003,7 @@ function envTerrainHook(sh) {
   Object.assign(sh.uniforms, ENV.tu);
   sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
-  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
   sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
 	vec2 eG = vec2( 0.0 );
@@ -44987,6 +45026,8 @@ function envTerrainHook(sh) {
 	eB = mix( eB, uSand * ( 0.86 + 0.24 * mix( 0.5, d1.b, eFine ) ), eSand );
 	float eSnow = smoothstep( 0.42, 0.58, vEnvS.y + ( d2.r - 0.5 ) * 0.6 - eRock * 0.35 );
 	eB = mix( eB, uSnow * ( 0.93 + 0.08 * d1.r ), eSnow );
+	float eWet = 1.0 - smoothstep( 0.0, 1.2 + 1.4 * d2.r, vEnvW.y - uWL );
+	eB *= mix( vec3( 1.0 ), vec3( 0.66, 0.66, 0.64 ), eWet ) * mix( vec3( 1.0 ), vec3( 0.5, 0.64, 0.66 ), smoothstep( 0.0, 3.5, uWL - vEnvW.y ) );
 	float eDet = mix( 0.5, mix( d1.r, d1.g, eRock ), eFine );
 	vec4 n1 = texture2D( tEnvN, eUv * ( 1.0 / 23.0 ) ) * 2.0 - 1.0;
 	eG = mix( n1.rg, n1.ba, eRock ) * eFine;
@@ -45000,6 +45041,30 @@ function envTerrainHook(sh) {
 	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
 #endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif');
 }
+/* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
+   the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
+   uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
+   off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
+function envRoadHook(sh, u) {
+  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u });
+  if (SKY3.u) sky3Ill(sh);
+  sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+	{
+		vec2 rp = vRdW.xz;
+		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
+		float u = abs( vRd.x ) / uRd.x, far = smoothstep( 70.0, 180.0, vRdD );
+		vec3 rc = diffuseColor.rgb * ( 0.86 + 0.26 * mix( n1.r, 0.5, far ) ) * ( 0.94 + 0.12 * smoothstep( 0.3, 0.8, n2.a ) );
+		rc = mix( vec3( dot( rc, vec3( 0.3, 0.59, 0.11 ) ) ), rc, uSat ) * uTone;
+		float rut = uRd.y * smoothstep( 0.42, 0.12, abs( abs( vRd.x ) - 0.95 + ( n2.r - 0.5 ) * 0.3 ) ) * ( 0.6 + 0.4 * n1.g );
+		rc *= 1.0 - 0.25 * rut;
+		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
+		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
+		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
+		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 );
+	}`);
+}
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
 const ENV_SKY_V = 'varying vec3 vDir;\nvoid main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }';
 const ENV_SKY_F = `uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uDisk; varying vec3 vDir;
@@ -45010,19 +45075,43 @@ void main() {
 	c += uSunC * uDisk * ( smoothstep( 0.99955, 0.99978, mu ) * 2.5 + pow( mu, 700.0 ) * 0.5 );
 	gl_FragColor = vec4( c, 1.0 );
 }`;
-/* the water: two layers of ripples that drift, the sky in it at a grazing look (Fresnel), the sun's glint */
+/* the water: two layers of ripples that drift (the second turned, and both stronger and calmer in wide patches, so their tiling does not
+   show), the sky in it at a grazing look (Fresnel), the sun's glint; rain roughens it. How deep it is (the ground under it, read from tH,
+   the terrain mesh's heights, in the mesh's own two triangles a cell, so it meets the bank where the drawn ground does): in the shallows
+   it is clearer and lighter (the bed shows through) and along the bank a broken line of foam laps, faded out where it would be thinner
+   than a pixel or two (cf-pol-graficos 2) */
 const ENV_WATER_V = 'varying vec3 vW;\n#include <fog_pars_vertex>\nvoid main() { vW = ( modelMatrix * vec4( position, 1.0 ) ).xyz; vec4 mvPosition = viewMatrix * vec4( vW, 1.0 ); gl_Position = projectionMatrix * mvPosition;\n#include <fog_vertex>\n}';
-const ENV_WATER_F = `uniform sampler2D tEnv; uniform vec3 uDeep; uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uT; uniform float uLit; varying vec3 vW;
+const ENV_WATER_F = `uniform sampler2D tEnv; uniform sampler2D tH; uniform vec4 uHG; uniform float uHN; uniform vec3 uDeep; uniform vec3 uShal; uniform vec3 uZen; uniform vec3 uHor; uniform vec4 uSun; uniform vec3 uSunC; uniform float uT; uniform float uLit; uniform float uRain; varying vec3 vW;
 #include <fog_pars_fragment>
+float envSl;
+float envH( float i, float j, float e ) { return texture2D( tH, vec2( ( i + 0.5 ) * e, ( j + 0.5 ) * e ) ).r; }
+float envBed( vec2 p ) {
+	float gx = clamp( ( p.x - uHG.x ) * uHG.z, 0.0, uHN - 0.001 ), gz = clamp( ( p.y - uHG.y ) * uHG.w, 0.0, uHN - 0.001 ), i = floor( gx ), j = floor( gz ), u = gx - i, v = gz - j, e = 1.0 / ( uHN + 1.0 );
+	float h00 = envH( i, j, e ), h10 = envH( i + 1.0, j, e ), h01 = envH( i, j + 1.0, e ), h11 = envH( i + 1.0, j + 1.0, e );
+	float lo = u + v <= 1.0 ? 1.0 : 0.0, sx = ( lo > 0.5 ? h10 - h00 : h11 - h01 ) * uHG.z, sz = ( lo > 0.5 ? h01 - h00 : h11 - h10 ) * uHG.w;
+	envSl = sqrt( sx * sx + sz * sz );
+	return lo > 0.5 ? h00 + ( h10 - h00 ) * u + ( h01 - h00 ) * v : h11 + ( h01 - h11 ) * ( 1.0 - u ) + ( h10 - h11 ) * ( 1.0 - v );
+}
 void main() {
-	vec2 p = vW.xz;
-	vec4 a = texture2D( tEnv, p / 97.0 + vec2( uT * 0.011, uT * 0.007 ) ), b = texture2D( tEnv, p / 41.0 - vec2( uT * 0.006, uT * 0.013 ) );
-	vec3 n = normalize( vec3( ( a.r - 0.5 ) + ( b.b - 0.5 ), 2.6, ( a.b - 0.5 ) + ( b.r - 0.5 ) ) );
+	vec2 p = vW.xz, q = mat2( 0.8, -0.6, 0.6, 0.8 ) * p;
+	vec4 g = texture2D( tEnv, p / 431.0 + vec2( 0.13, 0.29 ) );
+	vec4 a = texture2D( tEnv, p / 97.0 + vec2( uT * 0.011, uT * 0.007 ) ), b = texture2D( tEnv, q / 41.0 - vec2( uT * 0.006, uT * 0.013 ) );
+	float k = ( 0.55 + 0.9 * g.a ) * ( 1.0 + uRain * 0.8 );
+	vec2 w = vec2( ( a.r - 0.5 ) + ( b.b - 0.5 ), ( a.b - 0.5 ) + ( b.r - 0.5 ) ) * k;
+	if ( uRain > 0.01 ) { vec4 d = texture2D( tEnv, q / 5.3 + vec2( uT * 0.29, - uT * 0.23 ) ); w += ( d.rb - 0.5 ) * uRain * 1.2; }
+	vec3 n = normalize( vec3( w.x, 2.6, w.y ) );
 	vec3 v = normalize( cameraPosition - vW ), r = reflect( - v, n );
 	float fr = 0.03 + 0.97 * pow( 1.0 - max( dot( n, v ), 0.0 ), 5.0 );
 	vec3 sky = mix( uHor, uZen, clamp( r.y * 1.8, 0.0, 1.0 ) );
-	vec3 c = mix( uDeep * uLit, sky, fr ) + uSunC * pow( max( dot( r, uSun.xyz ), 0.0 ), 260.0 ) * 2.2 * uSun.w;
-	gl_FragColor = vec4( c, 0.93 );
+	float dep = vW.y - envBed( p ), sh = smoothstep( 0.0, 5.0, dep ), bw = min( 0.8, 5.0 * max( envSl, 0.004 ) ), px = fwidth( dep ) / bw;
+	vec3 c = mix( mix( uShal, uDeep, sh ) * uLit, sky, fr ) + uSunC * pow( max( dot( r, uSun.xyz ), 0.0 ), 260.0 ) * 2.2 * uSun.w;
+	float al = mix( mix( 0.5, 0.93, sh ), 1.0, fr * 0.6 );
+	vec4 f = texture2D( tEnv, q / 9.0 + vec2( uT * 0.021, uT * 0.017 ) ), f2 = texture2D( tEnv, p / 3.1 - vec2( uT * 0.033, uT * 0.011 ) );
+	float lap = 0.5 + 0.5 * sin( uT * 1.1 + dot( p, vec2( 0.045, 0.07 ) ) + f.a * 5.0 ), fz = dep / bw + ( f.r - 0.5 ) * 0.5;
+	float foam = max( 1.0 - smoothstep( 0.05, 0.35 + 0.65 * lap, fz ), smoothstep( 0.3, 0.0, abs( fz - 1.0 - 0.6 * lap ) ) * 0.55 );
+	foam *= smoothstep( 0.42, 0.62, f.g * 0.55 + f2.r * 0.45 ) * ( 1.0 - smoothstep( 0.2, 0.6, px ) );
+	c = mix( c, mix( uHor, vec3( 0.93, 0.95, 0.96 ), 0.65 ) * uLit, foam * 0.85 );
+	gl_FragColor = vec4( c, max( al, foam * 0.85 ) );
 	#include <fog_fragment>
 }`;
 /* the clouds: puffs that always face the camera, in one draw; lit on top, shaded below, faded out when the camera flies into them */
@@ -45041,7 +45130,7 @@ function envApply() {
   ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
   ENVU.fp.x = 1 / L.H; ENVU.fp.y = T.WL; ENVU.fp.z = L.k; ENVU.fp.w = 1;
   const tex = envTex(); tex.anisotropy = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate = true;
-  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone } };
+  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL } };
   const clouds = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
@@ -45062,6 +45151,16 @@ function envApply() {
     m.onBeforeCompile = envTerrainHook; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv;
     ENV.terrain.material.dispose(); ENV.terrain.material = m;
   }
+  /* the roads and the towns' streets: lit, worn, rutted (envRoadHook) instead of flat and darkened by hand at night; one program for all, each class its uniforms */
+  ENV.roads = [];
+  scene.traverse(o => { if (o.isMesh && o.userData.road !== undefined && o.material.isMeshBasicMaterial) ENV.roads.push(o); });
+  for (const o of ENV.roads) {
+    const c = o.userData.road, b = o.material, st = c < 0, paved = st || (S.modern && c < 2);   // c -1: a town's street (cityScene)
+    const u = { value: new THREE.Vector4(st ? o.userData.hw : RN.w[c], st ? 0 : c >= 2 ? 1 : S.modern ? 0 : .5, S.modern && !c ? 1 : 0, paved ? .2 : .55) };
+    const m = new THREE.MeshLambertMaterial({ color: b.color.clone().multiplyScalar(paved ? .8 : 1), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: b.polygonOffsetFactor, polygonOffsetUnits: b.polygonOffsetUnits });
+    m.onBeforeCompile = sh => envRoadHook(sh, u); m.customProgramCacheKey = () => 'env-road';
+    o.geometry.computeVertexNormals(); b.dispose(); o.material = m; o.receiveShadow = !!Q.shadow;
+  }
   /* the sky dome: the same mesh, its own shader; skyScene() still sets material.color (night, weather), which tints the zenith */
   const tint = new THREE.Color(1, 1, 1);
   ENV.su = { uZen: { value: new THREE.Color(E.sky[0]) }, uHor: { value: new THREE.Color(E.sky[1]) }, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uDisk: { value: 1 } };
@@ -45069,10 +45168,12 @@ function envApply() {
     const m = new THREE.ShaderMaterial({ uniforms: ENV.su, vertexShader: ENV_SKY_V, fragmentShader: ENV_SKY_F, side: THREE.BackSide, depthWrite: false, fog: false });
     m.color = tint; skyDome.material.dispose(); skyDome.material = m; skyDome.renderOrder = -1; skyDome.frustumCulled = false; ENV.sky = skyDome;
   }
-  if (ENV.water && Q.water) {
+  if (ENV.water && Q.water && ENV.terrain) {
     const u = Object.assign(THREE.UniformsUtils.clone(THREE.UniformsLib.fog), { fogSun: { value: ENVU.sun }, fogSunC: { value: ENVU.sunC }, fogP: { value: ENVU.fp },
-      tEnv: { value: tex }, uDeep: { value: envCol(P.water).multiplyScalar(.62) }, uZen: ENV.su.uZen, uHor: ENV.su.uHor, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uT: { value: 0 }, uLit: { value: 1 } });
-    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: ENV_WATER_V, fragmentShader: ENV_WATER_F, transparent: true, fog: true });
+      tEnv: { value: tex }, tH: { value: envBedTex() }, uHG: { value: new THREE.Vector4(T.x0, T.z0, 1 / T.cx, 1 / T.cz) }, uHN: { value: T.N },
+      uDeep: { value: envCol(P.water).multiplyScalar(.62) }, uShal: { value: envCol(P.water).lerp(envCol(L.sand), .3).multiplyScalar(.8) },
+      uZen: ENV.su.uZen, uHor: ENV.su.uHor, uSun: { value: ENVU.sun }, uSunC: { value: ENVU.sunC }, uT: { value: 0 }, uLit: { value: 1 }, uRain: { value: 0 } });
+    const m = new THREE.ShaderMaterial({ uniforms: u, vertexShader: ENV_WATER_V, fragmentShader: ENV_WATER_F, transparent: true, fog: true, extensions: { derivatives: true } });
     ENV.water.material.dispose(); ENV.water.material = m; ENV.wu = u;
   } else ENV.water = null;
   /* the clouds: the 46 blobs in one mesh, or puffs in clusters where the blobs were (and as many again for an overcast sky) */
@@ -45146,7 +45247,7 @@ skyScene = (g => () => {
       u.uOp.value = .78 + .2 * wet; u.uFar.value = scene.fog ? Math.max(6000, scene.fog.far * 1.4) : 20000;
     } else { m.color.setScalar(.25 + .75 * Lr); m.opacity = .7 + .25 * W.r; }
   }
-  if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; }
+  if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; ENV.wu.uRain.value = clamp(W.r, 0, 1); envBedSync(); }
   if (ENV.sh) {   // the shadow's box follows the camera, snapped to its texels so the edges do not crawl
     const cp = camera.position, r = GFXQ[GFX.lv].shadow, st = r * 2 / 2048, x = Math.round(cp.x / st) * st, z = Math.round(cp.z / st) * st, y = hgt(cp.x, cp.z);
     ENV.sh.target.position.set(x, y, z); ENV.sh.target.updateMatrixWorld(); ENV.sh.position.set(x + v.x * 3000, y + v.y * 3000, z + v.z * 3000);
@@ -45265,7 +45366,7 @@ function br3Init() {
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
     if (!K.ter && o.geometry.attributes.position.count === n && o.material && o.material.vertexColors) K.ter = o;
-    else if (o.material && o.material.isMeshBasicMaterial && o.material.polygonOffset && o.material.side === THREE.DoubleSide && o.geometry.index) K.roads.push(o);
+    else if (o.userData.road !== undefined) K.roads.push(o);   // buildWorld marks its road meshes (their material is lit since cf-pol-graficos 2)
   });
   if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
   K.g = new THREE.Group(); scene.add(K.g);
@@ -45283,7 +45384,7 @@ function br3Sink() {
   for (const r of K.roads) {
     const p = r.geometry.attributes.position, y0 = r.y0 || (r.y0 = new Map()); let n = 0;
     for (let i = 0; i < p.count; i++) { const x = p.getX(i), z = p.getZ(i); if (inL.some(f => f(x, z))) { if (!y0.has(i)) y0.set(i, p.getY(i)); const h = hgt(x, z), y = h <= T.WL + .3 ? T.WL - 3 : inD.some(f => f(x, z)) ? h + BRDH : y0.get(i); if (Math.abs(p.getY(i) - y) > .01) { p.setY(i, y); n++; } } }
-    if (n) p.needsUpdate = true;
+    if (n) { p.needsUpdate = true; r.geometry.computeVertexNormals(); }   // the roads are lit: their slopes changed
   }
 }
 function br3Build() {
@@ -46078,6 +46179,35 @@ function packFix(id, P) {
   }
   return P;
 }
+/* loose props a source model carries that the game does not want, cut when the model comes in (cf-pol-testes-b), after its colours: in a
+   part, every triangle with its three corners inside the box [x0, y0, z0]-[x1, y1, z1] (the model's own frame) goes, and the vertices only
+   it used (the first-person weapon sizes itself by its vertices). w_kar98: the stripper clip of five rounds the source had lying beside the
+   receiver, which floated beside the rifle in first person, and lifted the 1944 sniper's scope 4 cm off the rifle */
+PACK.cut = { w_kar98: [['hull', [.05, .105, .04], [.13, .175, .08]]] };
+function packCut(id, P) {
+  const L = PACK.cut[id]; if (!L || !P) return P;
+  for (const [part, a, b] of L) {
+    const i = P.parts[part]; if (i === undefined) continue;
+    for (const pr of P.meshes[P.nodes[i].mesh]) {
+      const ge = pr.g, pa = ge.attributes.position, n = pa.count, X = pa.array;
+      if (!ge.index || Object.values(ge.attributes).some(A => !A.array)) continue;   // an interleaved or unindexed primitive is left as it is
+      const inn = v => X[v * 3] >= a[0] && X[v * 3] <= b[0] && X[v * 3 + 1] >= a[1] && X[v * 3 + 1] <= b[1] && X[v * 3 + 2] >= a[2] && X[v * 3 + 2] <= b[2];
+      const I = ge.index.array, keep = [];
+      for (let t = 0; t < I.length; t += 3) if (!(inn(I[t]) && inn(I[t + 1]) && inn(I[t + 2]))) keep.push(I[t], I[t + 1], I[t + 2]);
+      if (keep.length === I.length) continue;
+      const map = new Int32Array(n).fill(-1); let m = 0; for (const v of keep) if (map[v] < 0) map[v] = m++;
+      const g2 = new THREE.BufferGeometry();
+      for (const nm in ge.attributes) {
+        const A = ge.attributes[nm], k = A.itemSize, B = new A.array.constructor(m * k);
+        for (let v = 0; v < n; v++) if (map[v] >= 0) for (let c = 0; c < k; c++) B[map[v] * k + c] = A.array[v * k + c];
+        g2.setAttribute(nm, new THREE.BufferAttribute(B, k, A.normalized));
+      }
+      const J = new (m > 65535 ? Uint32Array : Uint16Array)(keep.length); keep.forEach((v, j) => { J[j] = map[v]; });
+      g2.setIndex(new THREE.BufferAttribute(J, 1)); g2.computeBoundingSphere(); g2.computeBoundingBox(); g2.userData = ge.userData; pr.g = g2;
+    }
+  }
+  return P;
+}
 /* the pack's rolling wheels (cf-pol-modelos, WSPIN): in the parts that hold them (wheels, trackL, trackR), the round pieces (connected
    triangles, the vertices at one place taken as one, as wide as high, every vertex within PSPIN.rim radii of the middle seen from the side, and
    at least PSPIN.min of the model's height) are wheels: their
@@ -46119,7 +46249,7 @@ function packGet(id) {
   if (E) return E.st === 1 ? E.d : null;
   const e = (PACK.M[id] = { st: 0, d: null });
   try {
-    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packFix(id, packRead(b)); e.st = 1; PACK.dirty = true; packHangar(id); })
+    fetch(PACK.url + id + '.glb').then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error('HTTP ' + r.status)))).then(b => { e.d = packCut(id, packFix(id, packRead(b))); e.st = 1; PACK.dirty = true; packHangar(id); })
       .catch(er => { e.st = -1; if (id === 'soldier' || id === 'tk_abrams') console.info('pack de modelos: ' + id + ' indisponível (' + (er && er.message) + '); fica o modelo de antes'); });
   } catch (er) { e.st = -1; }
   return null;
@@ -46521,10 +46651,10 @@ function vmBuild(pk) {
     const inv = new THREE.Matrix4().copy(turn.matrixWorld).invert(), B = new THREE.Box3();
     m.traverse(c => { if (c.isMesh) { c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, c.matrixWorld))); } });
     if (pk.scope) {   // a 1944 sniper's scope over the receiver
-      const sc = new THREE.Mesh(new THREE.CylinderGeometry(.017, .02, .26, 10), metal); sc.rotation.z = -Math.PI / 2; sc.position.set(.06, B.max.y + .03, 0); turn.add(sc);
-      B.max.y += .05;
+      const sc = new THREE.Mesh(new THREE.CylinderGeometry(.017, .02, .26, 10), metal); sc.rotation.z = -Math.PI / 2; sc.position.set(.06, B.max.y + .015, (B.min.z + B.max.z) / 2); turn.add(sc);   // resting on the receiver (its axis 5 cm over the bore), on the weapon's own middle (the Kar98's is 3.4 cm off the grip's line)
+      B.max.y += .035;
     }
-    V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H];
+    V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H, (B.min.z + B.max.z) / 2];
   }
   const B = V.box, L = pk.len, lx = pk.cls === 'pistol' ? .01 : pk.cls === 'mort' ? .3 : clamp(.3 * L, .16, .42), ly = pk.cls === 'pistol' ? -.05 : B.min.y * .5 - .02, lz = pk.cls === 'pistol' ? -.03 : 0;
   const R = new THREE.Group(); turn.add(R);
@@ -46533,7 +46663,7 @@ function vmBuild(pk) {
   hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
   if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
     const f = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xffd27a, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-    f.position.set(V.mz[0], V.mz[1], 0); f.visible = false; turn.add(f); V.flash = f;
+    f.position.set(V.mz[0], V.mz[1], V.mz[2] || 0); f.visible = false; turn.add(f); V.flash = f;
   }
   /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
   const ads = VMP[pk.cls][1].slice();

@@ -150,7 +150,7 @@ const RX = {
     if (!model(era, m.cls, m.model)) return send(c.ws, { t: 'error', code: 'model' });
     const room = rooms[m.room];
     if (room.size >= CAP) return send(c.ws, { t: 'error', code: 'full' });
-    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Piloto';
+    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Jogador';   // the page's own default (it was Piloto, also for a soldier)
     c.player = { id: nextId++, name, cls: m.cls, model: m.model, lo: load(m.cls, m.model, m.lo), kills: 0, deaths: 0, ai: 0 };
     const mv = int(m.mv, 1, 99) ? m.mv : 1;   // the map version of the page; the first player's is the room's
     const ns = m.ns === 3 && MAXN[m.room] >= 3 ? 3 : 2;   // and its sides: a page that does not say is of 2

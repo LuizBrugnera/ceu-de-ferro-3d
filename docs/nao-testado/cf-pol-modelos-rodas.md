@@ -1,5 +1,9 @@
 # cf-pol-modelos: rodas que rodam (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em 1944: com um `syncScene` por passo, os 12 veículos que andaram em 2 s giraram as rodas na proporção da distância (caminhões de 50–66 m com giro de 38–47; um tanque de 39 m com 5,9, pela escala do pack). Os parados não giram. Com 2 s de partida entre dois quadros, o giro não anda: é o filtro de salto (`WSPIN.jump`, 12 m por quadro), como desenhado.
+- **Continua sem teste:** o convidado online e as sombras no Alta.
+
 ## O que mudou
 
 Os veículos andavam com as rodas paradas. Agora elas giram com o que o veículo anda, sem chamada de desenho a mais:

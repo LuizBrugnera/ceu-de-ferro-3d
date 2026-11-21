@@ -3,7 +3,7 @@
 ## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): parte, com falhas
 - `tests/ana-mano-net.js`: passou. `tests/ana-man.js`: 25 de 26 (só a checagem de tempo, com a máquina cheia).
 - `tests/approaches.js`: o pool novo passa ("the three squads near an assembly, not the one 4629 m from the nearest (AP.pool 2489 m)"), e o prazo também ("the forming up waits for the farthest walk (2.59 km): 707 s, from 300 to AP.form 900 s"). **Falham** a substituição da esquadra perdida na reunião e o "segue com 2 de 2" no fim do prazo (4 checagens), e na partida de 180 s nenhum assalto abriu. Detalhes e a falha da hora H (pelotão) em `cf-m2-abordagens.md`.
-- `tests/procedures.js`: só a hora H do P1 falha, pelo pelotão (veja `cf-m3-procedimentos.md`).
+- `tests/procedures.js`: só a hora H do P1 falhava, pelo pelotão. Com o teste ajustado (`PEL.on = 0` no cenário), passa inteiro (veja `cf-m3-procedimentos.md`).
 - **Continua sem teste:** `tests/brain-pelotao.js` sobre este código, a velocidade real `dj/ta` numa partida longa, e o torneio antes × depois.
 
 ## O que mudou

@@ -1,5 +1,10 @@
 # cf-pol-modelos: cores do pack consertadas na chegada (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/pack-colors.js` passa sobre a página atual.
+- Hangar pelos botões: o Sherman (1944) com as lagartas em aço escuro, sem o azul-claro de antes. O Tiger (lote 3) e o Abrams sem as cores de brinquedo. Os soldados do pack numa partida com o equipamento na cor do uniforme.
+- **Continua sem teste:** civis e objetos do pack, o destroço dos tanques consertados, a picape-bomba disfarçada na cor dos Insurgentes.
+
 ## O problema
 
 Os modelos do pack (`models/pack/*.glb`) têm duas cores por peça: a "pintura" (tons de cinza que a página tinge com a cor do lado) e a "fixa" (a cor que veio da fonte). Algumas cores fixas eram de brinquedo ou de outro exército:

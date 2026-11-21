@@ -1,5 +1,9 @@
 # cf-moitas-mato: mais moitas e infantaria pelo mato (não testado)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): achado
+- **As sebes do mapa 7 quase sumiram nos mapas de hoje.** Contei as moitas de corredor (`T.cv7`) em `genTerrain`: no mapa 7, 3.212 (1944) e 2.724 (Hoje); no mapa 11 com 2 lados, 1.127 e 333; **no mapa 11 de 3 lados (a frente atual), 0**. Os ids de objeto chegam a 65.448 de 65.536 e não sobra lugar para elas. O mato do mapa 10 (`UG`, 88 mil células, sem ids) cobre o mesmo papel. Não é defeito: é o teto de ids.
+- **Continua sem teste:** as sebes vistas numa partida de 2 lados, o A/B do `HIDE` e o online.
+
 ## O que mudou
 - `Céu de Ferro 3D.html`, **mapa versão 7** (`MAPV = 7`; salas com página antiga ficam no 6 pelo portão de versão do servidor).
 - `COV7` / `coverV7` (logo depois de `coverTerrain`): corredores de moitas determinísticos pela semente do mapa:

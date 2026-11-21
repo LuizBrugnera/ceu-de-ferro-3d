@@ -1,5 +1,11 @@
 # cf-p8-pelotao: o pelotão (não testado além de um exercício curto)
 
+## Testado em e91a33a (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/brain-pelotao.js`: passou inteiro. O pelotão se forma (flanco, Ten. Nogueira). Na hora H a manobra segura pela base (espera, ordem `hold`) e não sai enquanto o pelotão espera; sai 1,6 s depois da hora H, com a base atirando. Sai o evento `pel-assalto`, e o cartão da unidade mostra "Pelotão do assalto sobre o objetivo: Ten. Nogueira no comando · fixar e flanquear | Pelotão: assalto com a base atirando (flanco a 97°)". Com o líder morto, Cb. Moreira assume em 5,1 s, e o diário registra.
+- **O risco 2 se confirmou nas suítes antigas**: `approaches` e `procedures` esperavam o assalto na mesma chamada da hora H e falhavam com o pelotão no meio. Desde o lote 2 desta tarefa os dois rodam a hora H com `PEL.on = 0`, e `procedures` passa inteiro.
+- `tests/brain-honesty.js`: veja `cf-p7-honestidade.md` (a falha é de outra seção).
+- **Continua sem teste:** um assalto de verdade numa partida longa, com o general escolhendo e a ordem pelo rádio; o prazo de 45 s; a defesa com reserva; o custo no `AIB`; o online.
+
 Pedido do capitão: "um líder em cada unidade, que direciona também os NPCs e pensa também, as camadas de liderança". Arquitetura: cf-cerebro-pesquisa, pacote P8 (camada Pelotão, seção 2.2). Construído sobre o contrato P0 (#139), o líder de esquadra P3 (#143) e os procedimentos de assalto que já existiam (`PR`, `prPick`, `prGo`, `prH`, `prWay`, `prFlankOk`).
 
 ## O que mudou

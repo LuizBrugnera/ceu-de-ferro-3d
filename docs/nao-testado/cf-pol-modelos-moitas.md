@@ -1,5 +1,9 @@
 # cf-pol-modelos: moitas com folhas (testado em parte)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): parte
+- Navegador (GPU, ANGLE Vulkan), Assistir em 1944, câmera de comandante a 18 m de uma célula de mato denso do mapa v10: os tufos do mato rasteiro numa partida, com a textura de folhas, mais escuros embaixo e mais claros em cima, e sem cara de pedra. Nenhum erro no console.
+- **Continua sem teste:** as sombras no Alta e a moita derrubada de perto.
+
 ## O que mudou
 
 As moitas do mapa (v6 e v7, até 16 mil por mapa, desenhadas até 2,6 km) eram uma bola facetada de 80 triângulos com cor lisa. O mato rasteiro do mapa v10 era uma de 20 triângulos. As duas pareciam pedras verdes.

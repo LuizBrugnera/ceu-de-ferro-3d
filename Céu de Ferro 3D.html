@@ -260,7 +260,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .spawn-list button[aria-checked="true"]{border-color:var(--accent);color:var(--accent)}
 .spawn-list button:disabled{color:var(--mute);cursor:default}
 @media (max-width:520px){.spawn canvas{width:84px}}
-@media (max-height:800px) and (min-width:601px){.pick .fleet{height:clamp(170px,30vh,250px)}.spawn canvas{width:112px}.spawn-list button{padding:4px 8px;font-size:13px}}   /* 1280×720: the picker with the places to enter (after a death) fits, its button too */
+@media (max-height:800px) and (min-width:601px){.pick-in:has(#swapSpawn:not([hidden])) .fleet{height:clamp(170px,30vh,250px)}.pick-in:not(:has(#swapSpawn:not([hidden]))) .fleet{height:clamp(210px,46vh,360px)}.spawn canvas{width:112px}.spawn-list button{padding:4px 8px;font-size:13px}}   /* 1280×720: with the places to enter (after a death, H on foot) the picker is shorter so its button fits; without them (the requisition, a plane) the load sheet gets the height */
 .touch{position:absolute;inset:auto 0 0 0;display:flex;justify-content:space-between;align-items:flex-end;gap:8px;
   padding-left:var(--gut-l);padding-right:var(--gut-r);padding-bottom:calc(12px + env(safe-area-inset-bottom, 0px));pointer-events:none;user-select:none;-webkit-user-select:none}
 .touch div{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:48%}
@@ -440,8 +440,9 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
 .gen-log .k-fire .kb{color:#ffb347}
 .gen-log .k-rep .kb{color:var(--fg)}
 .gen-keys{position:absolute;left:0;right:0;bottom:10px;margin:0;text-align:center;font-family:var(--f-data);font-size:11.5px;color:var(--mute);pointer-events:none}
+@media (min-width:981px){.gen[data-hold] .gen-keys{left:var(--gut-l);right:var(--gut-r);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:auto;cursor:help}}   /* seated, its long line wrapped into the order bar and off both edges at 1280: one line, the rest in its title (the order buttons show their own keys) */
 .gen[data-rts] .gen-keys{left:50%;right:auto;bottom:6px;transform:translateX(-50%);width:max-content;max-width:calc(100% - 32px);padding:2px 10px;background:rgba(11,17,18,.8);border-radius:3px;color:var(--fg)}   /* over the 3D ground of the commander's camera: on a band, or the light ground swallows it */
-.gen-end{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--panel);border:1px solid var(--line);border-radius:3px;padding:18px 22px;text-align:center;max-width:calc(100% - 32px)}
+.gen-end{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:var(--panel);border:1px solid var(--line);border-radius:3px;border-top:2px solid var(--accent);box-shadow:0 0 0 100vmax rgba(8,12,13,.55),0 12px 40px rgba(0,0,0,.5);z-index:6;padding:18px 22px;text-align:center;max-width:calc(100% - 32px)}   /* the result over the panels: the view dims behind it, as the end sheet does in a match */
 .gen-end h2{margin:0 0 6px;font-family:var(--f-display);font-weight:400;font-size:28px;color:var(--accent)}
 .gen-end p{margin:0 0 12px}
 .gen-end .row{justify-content:center}
@@ -40217,6 +40218,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     const amb = cueAmb(P);
     if (amb) txt(amb === 3 ? 'EMBOSCADA: AGUARDE' : 'EMBOSCADA: FOGO!', cw / 2, ch * .32, 15 * u, amb === 3 ? acc : FOE, 'center', disp);
     const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
+    if (B || S.fm || S.mm) { const bw = Math.min(cw - 32, 620 * u); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, ch * .6 - 30 * u, bw, 86 * u); }   // a band under the build mode's lines: they sit on the bright ghost of the work (cf-pol-hud)
     if (B) {   // build mode: what the outline says
       txt('CONSTRUIR BASE DE SUPRIMENTO', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
       txt(B.why ? BWHY[B.why] : 'Clique: começar a obra aqui  ·  botão direito ou N: cancelar', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
@@ -40596,7 +40598,11 @@ function drawHud() {
   if (S.banner) {
     hx.globalAlpha = clamp(S.banner.life, 0, 1);
     txt(S.banner.text.toUpperCase(), cw / 2, ch * .22, 40 * u, acc, 'center', disp);
-    txt(S.banner.sub, cw / 2, ch * .22 + 48 * u, 15 * u, ink, 'center', "'Barlow Semi Condensed', sans-serif");
+    hx.font = '600 ' + 15 * u + "px 'Barlow Semi Condensed', sans-serif"; hx.textAlign = 'center';   // semibold (the light face washed out on a bright sky), and in lines no wider than the middle of the screen (it ran into the scores at 1280)
+    const sl = [], mw = Math.min(cw * .5, 640 * u); let ln = '';   // half the screen: clear of the scores on the right at 1280
+    for (const w of String(S.banner.sub || '').split(' ')) { const t = ln ? ln + ' ' + w : w; if (ln && hx.measureText(t).width > mw) { sl.push(ln); ln = w; } else ln = t; }
+    if (ln) sl.push(ln);
+    sl.forEach((l, i) => { const ly = ch * .22 + 48 * u + i * 19 * u; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(l, cw / 2 + 1, ly + 1); hx.fillStyle = ink; hx.fillText(l, cw / 2, ly); });
     hx.globalAlpha = 1;
   }
   S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, wy + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
@@ -43128,7 +43134,7 @@ function gorBar() {
   const keys = document.querySelector('.gen-keys');
   if (!GOR.keys0) GOR.keys0 = keys.textContent;
   const kt = seat ? 'Clique/arraste: selecionar · Clique direito: ordem · Alt+arrastar ou WASD: mover o mapa · 1-9: grupos (Shift+número grava) · B: construir · U: rota · J: ordem ampla · O: fortificar · Shift+O: marcar objetivo · N ou F1-F4: abas · Shift+M: missão às selecionadas · Shift+K: despacho da reserva · M ou Tab: fechar' : GOR.keys0;
-  if (keys.textContent !== kt) keys.textContent = kt;
+  if (keys.textContent !== kt) { keys.textContent = kt; keys.title = kt; }   // the title keeps the whole line when the seat's one line is cut
   gorSet('#genOrd', 'hidden', !seat);
   if (!seat) return;
   const men = sel.reduce((a, e) => a + (e.n || 0), 0);
@@ -46895,7 +46901,9 @@ hudMan = (g => (P, u, ink, acc, disp, blink, seat) => {
     txt('✚', q.x, q.y, 16 * u, col, 'center'); txt(Math.round(d) + ' m', q.x, q.y + 15 * u, 10 * u, col, 'center');
   }
   const it = slotIt(P); if (!it || (it.k !== 'band' && it.k !== 'drag')) return;
-  const y = ch * .6, ok = '#8fe39a', back = '  ·  botão direito ou 1: a arma', say = (a, b, bad) => { txt(a, cw / 2, y, 14 * u, acc, 'center', disp); txt(b, cw / 2, y + 20 * u, 12 * u, bad ? FOE : ok, 'center'); };
+  const y = ch * .6, ok = '#8fe39a', back = '  ·  botão direito ou 1: a arma', say = (a, b, bad) => {
+    hx.font = 12 * u + "px 'Share Tech Mono', ui-monospace, monospace"; const bw = Math.min(cw - 32, Math.max(620 * u, hx.measureText(b).width + 40 * u)); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, y - 8 * u, bw, 52 * u);   // the band of the build mode's lines, as wide as the line
+    txt(a, cw / 2, y, 14 * u, acc, 'center', disp); txt(b, cw / 2, y + 20 * u, 12 * u, bad ? FOE : ok, 'center'); };
   if (it.k === 'band') {
     const T = P.mdT;
     if (T) { say('TRATANDO ' + (T.o === P ? 'VOCÊ' : sanName(T.o).toUpperCase()), 'Segure o clique; tiro ou sair de perto interrompe', false); bar(cw / 2 - 90 * u, y + 32 * u, 180 * u, 7 * u, clamp((S.t - T.t0) / T.need, 0, 1), acc); }
@@ -47186,7 +47194,7 @@ gorBar = (g => () => {
   if (!rtsOn()) return;
   const keys = document.querySelector('.gen-keys'), kt = gorSeat() ? 'Clique/arraste: selecionar · Duplo clique: mesmo tipo · Clique direito: ordem (Shift+direito: fila de pontos) · WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · F: foco · 1-9: grupos (Shift ou Ctrl+número grava) · M ou \': mapa · Tab: fechar'
     : 'Arraste ou WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · [ ]: girar · PageUp/PageDown: inclinar · Home: visão geral · M ou \': mapa · Tab: fechar';
-  if (keys && keys.textContent !== kt) keys.textContent = kt;
+  if (keys && keys.textContent !== kt) { keys.textContent = kt; keys.title = kt; }
 })(gorBar);
 /* the scene: who is not seen is not drawn (the vehicles' models here, the soldiers in poseMan and the far specks in syncScene); no body of mine
    drawn round the eye, no weapon in hand, no weapon camera while the commander looks */

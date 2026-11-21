@@ -21995,6 +21995,22 @@ const enetWho = (k, s) => (k === 0 ? 'IA' : k === 2 ? 'modelo (MCP)' : (Net.play
 function enetCtlSync() {
   for (const s of lsN()) { const k = Net.gk[s] || 0; genCtl(s, enetCtl[k] || 'ai', (S.gast || [])[s], enetWho(k, s)); }
 }
+/* the general's view message within the relay's cap for gen (server.js BIG.gen, 8192 bytes): over GENCAP bytes, the largest of the optional
+   layers (GENOPT) is halved when it is a list, else left out, the biggest first, and last the squads' rows, until it fits; the core (the ops,
+   posts, roads, doctrine) always goes. cf-pol-testes-b: in a modern AI battle the defence plans (dfp) alone took 4.9 KB of a message of
+   8.9 KB, which the relay drops without a word, so a guest's view stopped. Bytes as UTF-8 (the relay counts the frame's) */
+const GENCAP = 7800, GENOPT = ['dfp', 'pris', 'sede', 'kz', 'ev', 'mev', 'thb', 'cn'];
+const utf8Len = s => s.length + (s.match(/[\u0080-\u07ff]/g) || []).length + 2 * (s.match(/[\u0800-\uffff]/g) || []).length;
+function genMsg(s, T) {
+  const m = { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) };
+  for (let i = 0; i < 24 && utf8Len(JSON.stringify(Object.assign({ t: 'gen' }, m))) > GENCAP; i++) {
+    let k = null, n = 0; for (const f of GENOPT) if (m.v[f] !== undefined && m.v[f] !== null) { const l = JSON.stringify(m.v[f]).length; if (l > n) { n = l; k = f; } }
+    if (k) { const x = m.v[k]; if (Array.isArray(x) && x.length > 1) m.v[k] = x.slice(0, x.length >> 1); else delete m.v[k]; continue; }
+    if (m.q.length >= 12) { m.q = m.q.slice(0, Math.floor(m.q.length / 12) * 6); continue; }
+    break;
+  }
+  return m;
+}
 /* log rows within the relay's size for glog: the oldest go first */
 function glogFit(rows) { while (rows.length > 1 && JSON.stringify(rows).length > 7000) rows = rows.slice(Math.ceil(rows.length / 8)); return rows; }
 function enetTick(dt) {
@@ -22011,7 +22027,7 @@ function enetTick(dt) {
   }
   if (Net.gen) {
     enetCtlSync();
-    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of lsN()) Net.send('gen', { s, T, v: genPick(genVM(s, false)), q: gsqOf(s) }); }
+    if ((N.gen += dt) >= ENET.gen) { N.gen = 0; for (const s of lsN()) Net.send('gen', genMsg(s, T)); }
     if ((N.glog += dt) >= ENET.glog) {
       N.glog = 0;
       if (Net.glS !== S.glog) { Net.glS = S.glog; Net.gl = lsN().map(() => null); }

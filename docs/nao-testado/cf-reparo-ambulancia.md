@@ -1,5 +1,14 @@
 # cf-reparo-ambulancia: caminhão de reparo e ambulância (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1), pelos botões do hangar (1944, Transporte, até a Kfz. 31) e "Entrar na sala": o cartão da Phänomen Granit com a caixa branca e a cruz vermelha, "Ambulância · Luftwaffe" e o texto da ROE. Na partida, o jogador dirige a ambulância (`svc: amb`); a caixa com a cruz aparece.
+- **Ambulância** (HMMWV M997, Hoje), parada: um soldado caído a 7 m levanta na hora (com uma "vida salva" contada), e um ferido com 30% da vida sara aos poucos.
+- **Caminhão de reparo** (FMTV M1089), parado: um NASAMS com 40% do casco ao lado passa de 20 para 39 (de 50) em 10 s.
+- No diário da IA: "Caminhão de reparo a caminho na retaguarda: 1 avariado" (a IA manda o dela sozinha).
+- `tests/rec.js`: veja o RESULTADO-B.
+- Nenhum erro no console.
+- **Continua sem teste:** a ambulância do jogador embarcando e entregando feridos, a ROE (a IA não mira a ambulância inimiga), o custo em metal isolado, o online.
+
 Pedido do capitão: "adicione caminhão de reparo e ambulância". Implementado sem testes, pela regra de entrega nova.
 
 ## O que mudou
@@ -21,7 +30,6 @@ Pedido do capitão: "adicione caminhão de reparo e ambulância". Implementado s
 ## O que NÃO foi testado
 
 - Nenhuma suíte rodou. Só fiz o smoke: o servidor sobe e serve a página (HTTP 200); pelo harness (com um stub de `aarShow` e `lg: 0`, porque o harness já quebra no main por `aarShow` e `m5Lg`), uma partida IA × IA de 1944 e de hoje carrega e roda alguns segundos sem erro, um caminhão de reparo parado ao lado de um tanque leva o casco de 39 a 51 em 2 s, `disp amb` responde ok e o plano lista `rpr` e `amb`. Esse smoke foi antes de juntar o `origin/main`. Depois do merge, só conferi a sintaxe (`node --check` no script da página, em `server.js` e em `mcp-general.js`) e que o servidor sobe e serve a página (200). O harness não carrega mais o main: além de `aarShow` e `m5Lg`, faltam `mmMan` e `mmW` antes do corte.
-- Navegador: o `chrome-devtools-axi` estourou o tempo ao abrir a página de 2,5 MB, então **não vi a página no navegador**: modelo 3D, cartão do hangar, painel da Visão de General, nada disso foi visto.
 - Online: nada testado (convidado dirigindo ambulância ou caminhão de reparo, fantasma parado reparando o veículo do convidado, servidor aceitando os modelos novos).
 - Ambulância do jogador embarcando e entregando feridos; caminhão de reparo da IA indo e voltando sozinho; `repv`, `disp rpr`; ROE.
 - Logística ligada (`lg: 1`) junto com o REC; o custo em metal sem metal; a produção da IA (pode produzir 2 de cada por causa de reserva + plano).

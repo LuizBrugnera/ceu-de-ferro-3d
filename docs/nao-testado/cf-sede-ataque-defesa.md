@@ -1,5 +1,10 @@
 # A sede atacada e defendida (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): parte
+- Navegador, Assistir em 1944 (lote 3 desta tarefa): no diário dos Aliados, logo no começo, "Sede inimiga localizada: a cidade-sede inimiga (Luftwaffe), a 10,1 km da nossa base (mapa: a cidade marcada \"Sede\")" e "Reconhecimento na retaguarda: achar as instalações da cidade-sede inimiga (Luftwaffe)". O mapa mostra a cidade marcada "Sede".
+- `tests/sede.js`: veja o RESULTADO-B.
+- **Continua sem teste:** o assalto à sede numa partida longa, a sabotagem chegando, a demolição no objetivo, o mapa de 3 lados.
+
 Tarefa `cf-sede-ataque-defesa`. Bug do capitão, jogando: "não estão atacando a sede dos outros e nem defendendo as suas". A sede é a cidade-sede de cada lado (mapa versão 5 em diante: a cidade junto à base principal, com as instalações disfarçadas nos lotes, a fábrica, a usina) e, no mapa de três lados, a aldeia HS2 dos Insurgentes (#92).
 
 ## O que achei (as causas)

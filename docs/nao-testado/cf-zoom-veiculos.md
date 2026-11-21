@@ -1,5 +1,10 @@
 # cf-zoom-veiculos — zoom nos veículos "normais" (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Técnica com DShK (Insurgentes): R passa da visão externa para a mira ×2 (campo de 29°), R para ×4 (14,5°) e R volta à externa (58°), suave em 40 quadros. Sem erro no console.
+- ×4 na ZPU-4: os dois canos emolduram o pé da tela sem tampar a mira. Na DShK e na moto o corpo do veículo do jogador não é desenhado nas cenas montadas pelo console (veja RESULTADO-B), então "o modelo tampa a vista" não foi conferido nelas.
+- **Continua sem teste:** a roda do mouse, o tiro no ×4 indo ao centro, SPG-9, ZU-23 e S-5/S-8, a tela de toque.
+
 ## O que mudou
 - Todo veículo de transporte (`TRNS`: carros, caminhões, técnicas/picapes dos Insurgentes com DShK, SPG-9, ZU-23, S-5/S-8, ZPU e DShK rebocados, caminhão com ZU-23, moto, veículos-rádio com MG, Humvee/Tigr, ambulâncias, caminhões de oficina e recuperação) já tinha um assento de 1ª pessoa `drv_<id>` com um só FOV (72°). Agora ele tem níveis de zoom (`DZ`, perto de `scoped` no script):
   - com arma: `[72, 29, 14.5]` → mira da arma ×2 e ×4 (contado como as lunetas dos tanques, 58 / fov); o assento já olha pela mira (`free`), então o zoom fica alinhado com a arma;

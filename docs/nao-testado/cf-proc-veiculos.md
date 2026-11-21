@@ -1,5 +1,10 @@
 # cf-proc-veiculos: procedimentos de combate de veículos e aeronaves (não testado por inteiro)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados), 3 min de partida: 13 procedimentos dispararam pelo que cada unidade percebe, sem erro no console. Contados por amostra (unidade × procedimento, a cada 0,5 s): `comboio` 872 (caminhões), `radar-silencio` 671 (antiaérea), `passe` 654, `radar-aa` 150, `missil` 140, `cauda` 7 e `avaria` 9 (aviões), `aereo-v` 305 (tanques e blindados saindo do aberto sob avião), `cidade` 159 (tanques na borda de vila), `aereo-c` 160 (caminhões e carros), `contrabateria` 39 (artilharia).
+- `tests/veh-drills.js`: veja o RESULTADO-B.
+- **Continua sem teste:** a emboscada na estrada (`emboscada-v`) e o efeito no tempo dos ataques blindados (o `cidade` segura até 45 s), o custo numa partida longa online.
+
 Pedido do capitão: "vamos colocar algumas situações alguns padrões nos npcs, ja que até militarmente falando tem os procedimentos. [...] implemente como padrões de comportamento no cerebro. [...] 10 para pilotos de avião. 10 para pilotos de tanque. 10 para pilotos de caminhão [...] se achar que deve fazer para outros tambem, pode fazer". Esta tarefa cobre avião, carro de combate, caminhão, helicóptero, artilharia e antiaérea; a infantaria veio no PR #36.
 
 ## O que mudou

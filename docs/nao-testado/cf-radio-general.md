@@ -1,5 +1,9 @@
 # cf-radio-general: o general fica sem rede e não expande a zona de rádio (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/radio-general.js`: passa inteiro. `tests/radio.js` e `tests/comms.js`: veja o RESULTADO-B.
+- **Continua sem teste:** a antena pronta depois da caminhada longa numa partida inteira, a nota na Visão de General no navegador, o convidado online.
+
 Pedido do capitão: "general sempre ficando sem rede e sem expandir a zona de radio".
 
 Entregue pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado").

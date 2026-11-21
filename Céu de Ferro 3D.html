@@ -28148,12 +28148,13 @@ genAnswer = (f => (s, q) => { if (!(q && q.q === 'tmap' && isSide(s))) return f(
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (TM.on && s && s.T && !(s.net && !s.host)) tmStatic(s.T); return s; })(newState);   // the ground's part at the load, not in a frame
 /* the general's studies of a terrain, made once for every match on it, at the load (cf-lag-2) instead of inside the first plans of the
    battle, where they stalled a step of the first seconds (the foot paths' cells, fpCells, a second and more under load): the cross-country
-   cells, where an ambush may lie on the main roads (cmdSites) and on the network (blkSites). Each is built from
+   cells, where an ambush may lie on the main roads (cmdSites) and on the network (blkSites), the forward base's ground (enpGround). Each is built from
    the terrain alone (no number drawn, the bridges standing as at the load), so the plans read the same studies; only where the AI plans */
 function planWarm(s) {
   const T = s.T; if (!T || (s.net && !s.host)) return;
   if (T.net) blkSites();
   cmdSites(); if (T.mv >= 4) fpCells(T);
+  if (T.tms && ENP.on) enpGround({ nx: T.tms.nx, c: T.tms.c, k: T.tms.k });   // the forward base's ground, on the tactical map's cells (tmStatic, just made)
 }
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (s) planWarm(s); return s; })(newState);
 /* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
@@ -36291,13 +36292,13 @@ function enpFobPick(t, C, A) {
     A.fobs.map(f => ({ x: f.x, z: f.z, r: F.apart })), S.base[t] ? [{ x: S.base[t].x, z: S.base[t].z, r: F.apart }] : [],
     (A.fobNo || []).filter(f => S.t - f.T < ENP.redo).map(f => ({ x: f.x, z: f.z, r: F.bad })));   // held points only pt m (the point is the place to firm up), a site given up a while
 
-  let best = null, bs = 0;
+  let best = null, bs = 0; const Gd = enpGround(M);
   for (let q = 0; q < M.k.length; q++) {
     const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
-    if (M.l[q] < -.25 || (M.f && M.f[q] > 3) || !gMapOk(x, z)) continue;   // the layers before the ground (gMapOk reads the height; none of them changes anything)
+    if (M.l[q] < -.25 || (M.f && M.f[q] > 3) || !(Gd ? Gd.ok[q] : gMapOk(x, z))) continue;   // the layers before the ground (gMapOk reads the height; none of them changes anything)
     const kc = M.k[q] >= F.choke ? 1 + M.k[q] : 0, vp = F.v * (M.v ? M.v[q] : 0), lp = .3 * Math.max(0, M.l[q] - .5);
     if (kc + 1.8 - vp - lp <= bs) continue;   // not even the best crest (.8 + 1) would beat the best cell: its five heights are not read (cf-lag-2; v0 below is never more)
-    const h = hgt(x, z), crest = h - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
+    const crest = Gd ? Gd.cr[q] : hgt(x, z) - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
     const sc = kc + (crest > F.crest ? .8 + Math.min(1, crest / 30) : 0); if (sc <= 0) continue;
     const v0 = sc - vp - lp; if (v0 <= bs) continue;   // the known enemy only takes from it: it cannot beat the best, so the dear tests below are not made (cf-lag: 2-4 s a call before)
     const dep = ecoDepth(t, x, z); if (dep < F.dep[0] || dep > F.dep[1]) continue;
@@ -36311,6 +36312,21 @@ function enpFobPick(t, C, A) {
   if (d > 60) { best.x = o.x + dx / d * 60; best.z = o.z + dz / d * 60; }
   const c = clearOf(best.x, best.z, 3, {}); best.x = Math.round(c.x); best.z = Math.round(c.z);
   return best;
+}
+/* the ground's part of a forward base's pick, once a terrain (cf-lag-2): for each cell of the tactical map, whether it is on the map and dry
+   (gMapOk) and its crest (its height over the mean of the four 150 m off), as enpFobPick reads them. Only while no bridge has fallen and no
+   pontoon is up: hgt is then the terrain's own height, so the numbers are the same; else null and the pick reads the heights as before */
+function enpGround(M) {
+  if ((S.gap && S.gap.length) || (S.pg && S.pg.length)) return null;
+  const T = S.T, G = T.fobg, n = M.k.length;
+  if (G && G.nx === M.nx && G.c === M.c && G.n === n && G.HW === S.HW) return G;
+  const ok = new Uint8Array(n), cr = new Float64Array(n);
+  for (let q = 0; q < n; q++) {
+    const x = (q % M.nx + .5) * M.c, z = -S.HW + (((q / M.nx) | 0) + .5) * M.c;
+    if (!gMapOk(x, z)) continue;
+    ok[q] = 1; cr[q] = hgt(x, z) - (hgt(x + 150, z) + hgt(x - 150, z) + hgt(x, z + 150) + hgt(x, z - 150)) / 4;
+  }
+  return (T.fobg = { nx: M.nx, c: M.c, n, HW: S.HW, ok, cr });
 }
 function enpPlan(t, sq) {
   if (!enpOn(t)) return;

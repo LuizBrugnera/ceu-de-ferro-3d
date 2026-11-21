@@ -1,15 +1,16 @@
 'use strict';
 /* The general's one-time studies of a terrain at the load, and the forward base's pick without the heights it does not need (cf-lag-2):
    the same studies and the same picks as before, sooner or cheaper. planWarm builds the cross-country cells (fpCells), the ambush sites
-   of the main roads and of the network (cmdSites, blkSites) when a match is made, not inside its first plans; enpFobPick skips a cell's
-   five heights when not even the best crest would beat the best cell. The reference pick is the old code, copied here */
+   of the main roads and of the network (cmdSites, blkSites) and the forward base's ground (enpGround) when a match is made, not inside its
+   first plans; enpFobPick reads that ground, and skips a cell's five heights when not even the best crest would beat the best cell. The
+   reference pick is the old code, copied here */
 const H = require('./harness'), ok = H.ok;
 const C = H.load({ seed: 7, eco: 1, mapv: 11 }), $ = C.$;
 const S = C.watch('modern', { n: 3 }), T = S.T;
 
 console.log('-- the studies are made at the load, the same as made later in the battle --');
 {
-  ok(!!T.fpc && !!T.amb && !!T.nsite, 'right after the match is made: the foot paths\' cells (' + (T.fpc && T.fpc.nx) + ' x ' + (T.fpc && T.fpc.nz) + '), ' + (T.amb && T.amb.length) + ' ambush sites on the main roads, ' + (T.nsite && T.nsite.length) + ' on the network');
+  ok(!!T.fpc && !!T.amb && !!T.nsite && !!T.fobg, 'right after the match is made: the foot paths\' cells (' + (T.fpc && T.fpc.nx) + ' x ' + (T.fpc && T.fpc.nz) + '), ' + (T.amb && T.amb.length) + ' ambush sites on the main roads, ' + (T.nsite && T.nsite.length) + ' on the network, the forward base\'s ground on ' + (T.fobg && T.fobg.n) + ' cells');
   const was = { fpc: T.fpc, amb: T.amb, nsite: T.nsite };
   C.run(4, null, 1 / 30);
   ok(T.fpc === was.fpc && T.amb === was.amb && T.nsite === was.nsite, 'the plans of the first seconds read them and build nothing again');
@@ -42,12 +43,13 @@ console.log('-- the forward base: the same pick as the old code, with fewer heig
         for (let q = 0; q < M.k.length; q++) { if (rnd() < .03) M.k[q] = rnd(); M.l[q] = Math.max(-1, Math.min(1, keep.l[q] + (rnd() - .5) * trial / 6)); if (M.v) M.v[q] = rnd() < .5 ? keep.v[q] : rnd(); }
         A.fobs = trial % 3 ? [] : [{ x: S.W * rnd(), z: S.HW * (2 * rnd() - 1), T: 0 }];
       }
+      S.pg = trial % 2 ? [{ s: { z: 1e9, ends: [{ x: 0, y: 0 }, { x: 1, y: 0 }], len: 1 } }] : undefined;   // a pontoon up (far away): the pick reads the heights live, not the terrain's study (enpGround)
       const [a, ra] = count(() => old(t, Cm, A)), [b, rb] = count(() => pick(t, Cm, A)); n++; rOld += ra; rNew += rb; cells += M.k.length;
       if (JSON.stringify(a) !== JSON.stringify(b)) bad = [t, trial, JSON.stringify(a), JSON.stringify(b)];
     }
-    for (let q = 0; q < M.k.length; q++) { M.k[q] = keep.k[q]; M.l[q] = keep.l[q]; if (M.v) M.v[q] = keep.v[q]; } A.fobs = keep.fobs;
+    for (let q = 0; q < M.k.length; q++) { M.k[q] = keep.k[q]; M.l[q] = keep.l[q]; if (M.v) M.v[q] = keep.v[q]; } A.fobs = keep.fobs; S.pg = undefined;
   }
   ok(n >= 24 && !bad, 'the same pick (place, reason, score) in ' + n + ' maps of the front of the three sides' + (bad ? ': ' + bad.join(' | ') : ''));
-  ok(rNew < rOld, 'reading ' + rNew + ' heights instead of ' + rOld + ' (' + cells + ' cells)');
+  ok(rNew < rOld / 2, 'reading ' + rNew + ' heights instead of ' + rOld + ' (' + cells + ' cells; the terrain\'s study with no pontoon up, the heights live with one)');
 }
 H.done();

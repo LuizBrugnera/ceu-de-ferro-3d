@@ -7,7 +7,7 @@
    toss k 3 and 4, s on shot and aishot, and the message cmd), eco (the economy: eco, ecs, keep) and gen (the general: gen, glog, gclaim,
    gctl, gcmd, gask, gres; messages private to a side go only to that side's players, and cmd too), sap (the sapper kits and the
    messages mine, mboom, mreq and dint), ana (analytics: the host's events of the match, kept on disk; see below) and sky (day, night and weather: the messages sky and ill)
-   hlp (the units' calls for help: the messages hlp, hask and hacc)
+   hlp (the units' calls for help: the messages hlp, hask and hacc), ped (a player's requests to his general from the map: gped and gpr)
    lg (physical logistics: the crates of a supply base as a ninth number of its base row, of the points as cq's sk, and the messages lsp and lgx)
    rec (vehicle recovery and medical evacuation: the models of SVC in the AI's ground rows, the general's question rec),
    rte (abstract orders and routes: gcmd may carry rt, a route of at most 8 x z pairs),
@@ -168,7 +168,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -706,6 +706,20 @@ RX.ill = (c, m) => {
     c.hkt = now; send(h.ws, { t: 'hask', from: c.player.id, k: m.k, p: m.p, q: m.q });
   };
   RX.hacc = (c, m) => { const h = c.room.host; if (h && h !== c && !c.spec && int(m.id, 1, 1e9)) send(h.ws, { t: 'hacc', from: c.player.id, id: m.id }); };
+}
+/* requests to the general from the map (welcome says ped: 1; cf-pedidos-mapa). gped: a guest asks his side's general for need k (0 to 7:
+   artillery, smoke, air strike, infantry, armour, help where he is, air cover, supply) from p [x, z] at q [x, z], to the host, 1 s apart at
+   least; gpr: the host's answer to that guest alone, to: his id, k, s 0 yes 1 no 2 passed to a person 3 too soon, why (a line), eta s, q [x, z] */
+{
+  RX.gped = (c, m) => {
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.spec || !int(m.k, 0, 7) || !vec(m.p, 2) || !vec(m.q, 2) || now - (c.gpt || 0) < 1000) return;
+    c.gpt = now; send(h.ws, { t: 'gped', from: c.player.id, k: m.k, p: m.p, q: m.q });
+  };
+  RX.gpr = (c, m) => {
+    const o = host(c) && pid(m.to) && [...c.room.values()].find(o => o.player.id === m.to);
+    if (o && o !== c && int(m.k, 0, 7) && int(m.s, 0, 3) && txt(m.why, 160) && int(m.eta, 0, 3600) && vec(m.q, 2)) send(o.ws, { t: 'gpr', k: m.k, s: m.s, why: m.why, eta: m.eta, q: m.q });
+  };
 }
 function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) || 1; for (let i = 0; i < n; i++) send(room.host.ws, { t: 'mine', q: K.q, i, n, e: K.e.slice(i * 40, (i + 1) * 40), s: K.s }); }
 /* suspended matches (welcome says rs: 1). The battle lives in the host's browser, so the server keeps the last word of each kind the host

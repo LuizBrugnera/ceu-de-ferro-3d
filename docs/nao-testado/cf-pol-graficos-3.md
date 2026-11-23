@@ -14,12 +14,20 @@ Polimento dos gráficos do que já existe, visto na GPU daqui (RTX 4060, Chrome 
 ## Sombra dos aviões
 - Era um disco duro de 14 lados bem embaixo de cada avião. Agora é a silhueta borrada de um avião (ou o rotor redondo de um helicóptero), virada para o rumo, projetada ao longo do sol (com o sol nunca mais baixo que uns 20°, PSH.sun), deitada na encosta e fraca sem sol. Na Alta, perto do olho, onde o próprio avião faz sombra de verdade, a falsa some.
 
+## Tiros (segundo PR da rodada)
+- Cada bala em voo era uma linha de uma cor só, inteira e clara: um tiroteio parecia riscos iguais (e de noite uma rede clara), e nenhum soldado mostrava de onde saíam os tiros. Agora a bala é um risco claro na ponta que se apaga até a cauda (o atributo `tc` das linhas): a comum fraca e curta, a traçante (a marca do sim, `b.tr`: uma a cada `TRC.lmg` da metralhadora de esquadra, do cf-pol-armas; as dos aviões, dos veículos e da antiaérea) clara e mais longa (`TRS`, `trcOf`), com a cabeça acesa que já tinha. Nada é sorteado na vista: a traçante é a do sim, a mesma para todos.
+- O soldado que acabou de atirar (`m.shotT`) mostra por `MZ.t` s um clarão na boca da arma (`mzAt`: o olho e então `MZ.l` m ao longo da mira, onde `manFire` solta a bala), um núcleo branco numa estrela laranja que nunca fica menor que uns pixels, então um tiroteio se lê de longe. O jogador em primeira pessoa não ganha esse clarão: a arma na mão tem o dela.
+
 ## Testado
 - `tests/smoke-look.js` (novo): o puff guarda a fonte e sorteia o mesmo; os rastros de míssil sem contas e com o fecho na cauda; a junção dos puffs de um avião e o que não se junta (veículo parado, puffs com 1 s de diferença, 400 m de distância); a sombra ao longo do sol, virada, fraca sem sol, sumida na Alta perto do olho; os uniforms do sol nos dois shaders.
+- `tests/gunfire-look.js` (novo, segundo PR): a traçante é a do sim (`b.tr`), nada sorteado na vista, o único `TRC` é o do sim; os riscos mais claros na ponta; o clarão onde a bala sai, só por `MZ.t` s, nem para mortos, embarcados ou longe demais.
+- `tests/fire-look.js` (novo, terceiro PR): as luzes livres vão aos fogos mais perto, quentes, nada de dia; a cor por luz no shader; as chaves dos programas com `-ill`; pedras e moitas na lista; o laço pulado sem luz; os sprites de fogo como chamas.
 - `tests/sparks-light.js` (atualizado para o sombreamento pelo sol), `tests/gfx.js`, `tests/road-mesh.js`, `tests/sim-split.js`, `tests/road-look.js`, `tests/water-shore.js`, `tests/veg-fade.js`.
 - Capturas antes × depois: explosões de cada classe (granada, morteiro, obus, bomba pesada, 2000 lb) em vários instantes, o rastro de um avião que fumega e de um foguete (sintéticos, na mesma câmera), a sombra de um avião posto sobre o mesmo ponto, de dia e à tarde, e o tempo de GPU de uma cena pesada (12 explosões de obus, uma bomba pesada, 3 aviões fumegando, 6 foguetes), na Média (veja o PR).
 
 ## NÃO testado
+- O fogo e a luz da noite: só um destroço e um veículo queimando num mundo parado, e um sinalizador posto por script, foram vistos. Com o sinalizador iluminando de verdade, a noite com foguetes de iluminação fica bem mais clara do que vinha sendo na Média e na Alta (é o desenho de antes; o raio vem de `SKY.ill`), e não se jogou uma partida noturna para ver se está claro demais. Os veículos e os soldados não recebem essa luz (nunca receberam).
+- Os tiros: só um tiroteio posto por script num mundo parado (soldados com `shotT`, balas e uma rajada de metralhadora de veículo) foi visto, de dia, à noite e a 420 m. Em partida, com o pacote de soldados animados perto do olho, o clarão pode não cair exatamente na boca da arma do modelo (ele vem do olho e da mira do sim). As balas de veículo (metralhadora coaxial) não ganham clarão.
 - Uma partida jogada de verdade com isso: os rastros e a sombra foram vistos num mundo parado, com puffs e foguetes postos por script (o laço do sim reproduzido no script).
 - Online: o convidado faz os mesmos puffs pelos mesmos caminhos, mas não foi visto.
 - A Baixa e a Alta (só a Média foi capturada); 1920 px; neblina; um helicóptero com a sombra nova.

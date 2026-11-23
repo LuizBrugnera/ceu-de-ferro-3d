@@ -41275,6 +41275,22 @@ function tagTxt(s, x, y, size, col, align, up) {
   }
   return false;
 }
+/* a soldier's line (SAY) in a balloon over his head, the tip at x y, the text SAYB.sz × k px (k: the HUD's scale u, 1 on the commander's
+   map), dark on a light box with a dark edge (it holds on a bright sky and at night); the text is centred in the box whatever baseline the
+   canvas had (the HUD's is 'top', which wrote the line under its box: cf-npc-falas) and the box sits on whole pixels so the text is sharp.
+   sayBox is the box [x, y, w, h] (with the font set), for leaving out one that would cover another */
+const SAYB = { sz: 13, pad: 5, tail: 5 };
+function sayBox(g, x, y, t, k) {
+  g.font = (SAYB.sz * k).toFixed(1) + "px 'Share Tech Mono', ui-monospace, monospace";
+  const w = Math.round(g.measureText(t).width + 2 * SAYB.pad * k), h = Math.round((SAYB.sz + 8) * k);
+  return [Math.round(x - w / 2), Math.round(y - h - SAYB.tail * k), w, h];
+}
+function sayBub(g, x, y, t, own, k, b) {
+  const [bx, by, w, h] = b || sayBox(g, x, y, t, k), tx = Math.round(x), tw = 4 * k, th = SAYB.tail * k;
+  g.beginPath(); g.moveTo(bx, by); g.lineTo(bx + w, by); g.lineTo(bx + w, by + h); g.lineTo(tx + tw, by + h); g.lineTo(tx, by + h + th); g.lineTo(tx - tw, by + h); g.lineTo(bx, by + h); g.closePath();
+  g.fillStyle = 'rgba(244,240,226,.95)'; g.fill(); g.lineWidth = 1; g.strokeStyle = 'rgba(8,12,13,.8)'; g.stroke();
+  const tb = g.textBaseline; g.textBaseline = 'middle'; g.textAlign = 'center'; g.fillStyle = own ? '#10281a' : '#5a1210'; g.fillText(t, tx, by + h / 2 + .5); g.textBaseline = tb;
+}
 function bar(x, y, w, h, k, col) { hx.fillStyle = 'rgba(8,12,13,.5)'; hx.fillRect(x, y, w, h); hx.fillStyle = col; hx.fillRect(x, y, w * clamp(k, 0, 1), h); }
 function tri(x, y, a, s, col) { hx.save(); hx.translate(x, y); hx.rotate(a); hx.beginPath(); hx.moveTo(s, 0); hx.lineTo(-s * .7, -s * .7); hx.lineTo(-s * .7, s * .7); hx.closePath(); hx.fillStyle = col; hx.fill(); hx.restore(); }
 function bracket(x, y, r, col, diamond) {
@@ -42390,11 +42406,9 @@ function drawHud() {
   for (const [, g] of says) {
     const s = proj(g.x, g.y + STANCE[g.st].h * MAN.sc + 1.3, g.z); if (!onScr(s) || walled(cp.x, cp.y, cp.z, g.x, g.y + 1.5, g.z)) continue;
     const t = sayText(g); if (!t) continue;
-    const sz = 11 * u; hx.font = sz + "px 'Share Tech Mono', ui-monospace, monospace"; const w = hx.measureText(t).width + 8 * u, h = sz + 6 * u, bx = s.x - w / 2, by = s.y - h - 6 * u;
+    const b = sayBox(hx, s.x, s.y, t, u), [bx, by, w, h] = b;
     if (HTAG.r.some(r => bx < r[0] + r[2] && bx + w > r[0] && by < r[1] + r[3] && by + h > r[1])) continue;
-    HTAG.r.push([bx, by, w, h]);
-    hx.fillStyle = 'rgba(240,236,220,.88)'; hx.fillRect(bx, by, w, h); hx.beginPath(); hx.moveTo(s.x - 4 * u, by + h); hx.lineTo(s.x, by + h + 5 * u); hx.lineTo(s.x + 4 * u, by + h); hx.fill();
-    hx.textAlign = 'center'; hx.fillStyle = g.team === me ? '#15301c' : '#4a1210'; hx.fillText(t, s.x, by + h - 4 * u);
+    HTAG.r.push(b); sayBub(hx, s.x, s.y, t, g.team === me, u, b);
   }
   for (const b of S.sup) {   // supply bases: one's own side's always, the enemy's while it is spotted
     const own = b.team === me, d = hdist(b, P), col = own ? FRIEND : FOE;
@@ -49749,11 +49763,6 @@ function rtsManTxt(q, m) {
   if (m.down) o.push('ferido');
   return o.join(' · ');
 }
-function rtsBubble(g, x, y, t, own) {
-  g.font = gMono(11); const w = g.measureText(t).width + 8, h = 17, bx = x - w / 2, by = y - h - 6;
-  g.fillStyle = 'rgba(240,236,220,.9)'; g.fillRect(bx, by, w, h); g.beginPath(); g.moveTo(x - 4, by + h); g.lineTo(x, by + h + 5); g.lineTo(x + 4, by + h); g.fill();
-  g.textAlign = 'center'; g.fillStyle = own ? '#15301c' : '#4a1210'; g.fillText(t, x, by + h - 5);
-}
 function rtsDraw(V, now) {
   const g = GV.g, lab = !!gLay('lab').on, own = gCol(V, V.t), acc = gAcc(), Q = rtsSqs(V.t);
   g.setTransform(GV.d, 0, 0, GV.d, 0, 0); g.clearRect(0, 0, GV.w, GV.h); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.setLineDash([]); g.lineJoin = 'round'; g.lineCap = 'round';
@@ -49831,9 +49840,9 @@ function rtsDraw(V, now) {
   for (const [, m] of says) {
     const s = rtsXY(m.x, m.y + STANCE[m.st].h * MAN.sc + 1.3, m.z, 0); if (!s) continue;
     const t = sayText(m); if (!t) continue;
-    g.font = gMono(11); const w = g.measureText(t).width + 8, bx = s.x - w / 2, by = s.y - 23;   // rtsBubble's box: 17 high, 6 over the head
-    if (bub.some(r => bx < r[0] + r[2] && bx + w > r[0] && by < r[1] + 17 && by + 17 > r[1])) continue;
-    bub.push([bx, by, w]); rtsBubble(g, s.x, s.y, t, m.team === V.t);
+    const b = sayBox(g, s.x, s.y, t, 1), [bx, by, w, h] = b;
+    if (bub.some(r => bx < r[0] + r[2] && bx + w > r[0] && by < r[1] + r[3] && by + h > r[1])) continue;
+    bub.push(b); sayBub(g, s.x, s.y, t, m.team === V.t, 1, b);
   }
   /* GOR: the route queued, the assault's plan, the build spots, the armed order under the cursor, the box */
   if (GOR.rt && GOR.rt.length) {

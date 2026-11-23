@@ -1,5 +1,14 @@
 # cf-m0-medicao: medição da manobra do general, pacote M0 (testado em parte)
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): ok (parte)
+- `tests/ana-man.js`: 25 de 26. A única falha é a checagem de tempo ("uma olhada a cada 2 s custa 6,08 ms", limite 5 ms), com a conta inteira presa a 12 núcleos e torneios de outras frentes rodando. Antes ela dava 0,3–0,4 ms numa máquina folgada. Não é defeito do código.
+- `tests/ana-mano-net.js`: passou.
+- **"Parado primeiro" (`anaMvLook`), agora com teste**: `tests/ana-parado.js` (novo, no `all.sh`) passou. Um veículo parado há 10 s conta como parado mesmo no trilho ou em viagem, e não soma tráfego. Em movimento, conta como trilho, viagem ou fora, e soma. Parado há 4,5 s (menos que `MVA.park`) ainda conta como em movimento.
+- **Continua sem teste:** o custo do general no `balance.js` (nenhum torneio sem `--nobudget` rodou) e a referência `tools/ref/manobra-base.json` refeita. Os torneios não couberam: a conta tem 12 núcleos para todas as frentes.
+
+## Testado em 806508d: ok (parte)
+- `tests/ana-man.js`: **all passed** (bfbba9e, depois de #75; antes ele morria com `ReferenceError: m5Tank`). `tests/ana-online.js`: **all passed** (depois do #96; a página-anfitriã era derrubada pelo heartbeat do relay nesta máquina carregada).
+
 Pedido do capitão: "ele nunca flanqueiam, ou tentam dominar ruas alternativas, tipo, dar a volta para emboscar uma rua movimentada". Este é o
 pacote M0 da proposta de manobra (todas as decisões D1–D12 na opção A): medir a manobra para que cada pacote seguinte prove que melhorou o
 general.
@@ -25,14 +34,10 @@ termina igual, até o último dígito e o sorteio, com a coleta ligada e desliga
 
 ## O que NÃO foi testado
 
-- O merge com o `main` atual (#36 procedimentos de combate, #38 mapa tático M1, #42 e #43): nenhuma suíte rodou depois. Só o smoke (a
-  página carrega, 25 s de uma partida IA × IA no mapa 6 sem erro e com os eventos novos, o servidor sobe).
-- A correção "parado primeiro" na contagem de veículos (`anaMvLook`): um veículo parado há 5 s ou mais conta como parado mesmo com
-  `u.rail`/`u.trip`, e não soma tráfego. Sem teste.
 - O custo do general por quadro no `balance.js` (`tour.aib` no cabeçalho, linha "Custo do general"): só conferido com números inventados.
   Nenhuma partida de torneio sem `--nobudget` rodou com ele.
 - A referência `tools/ref/manobra-base.json` é de `6002d18`, antes do #36, do #38 e da correção acima: não foi refeita.
-- O `tests/ana-man.js` não ganhou os casos de "parado primeiro" nem de custo.
+- O `tests/ana-man.js` não ganhou o caso do custo (o "parado primeiro" está em `tests/ana-parado.js`).
 
 ## Riscos
 
@@ -45,7 +50,8 @@ termina igual, até o último dígito e o sorteio, com a coleta ligada e desliga
 ## Como testar depois
 
 ```sh
-node tests/ana-man.js                       # ~3 min; acrescentar: veículo parado com u.rail conta como parado e não soma tráfego
+node tests/ana-man.js                       # ~3 min (15–50 min com a máquina cheia)
+node tests/ana-parado.js                    # o "parado primeiro"
 HOST=127.0.0.1 node tests/ana-online.js     # ~1 min
 sh tests/all.sh                             # ou SUITES="ana ana-man ana-online man-a man-b man-c general campaign personality"
 # refazer a referência na base atual (~75 min com 8 núcleos):

@@ -18,7 +18,8 @@
    the tactical map (gask tmap: the asker's side's layer k, one of f v o t p k l, at 1 km; an older server answers shape),
    the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape)
    and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
-   at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10).
+   at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10),
+   and hsc (the engineers' walls, cf-engenharia-pontos: the works of kinds 11 to 13, HESCO tall and low and the T-wall, in fort and fbuild).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas).
    ns (3 sides, cf-3-lados P5; NOT TESTED, see docs/nao-testado/cf-3l-p5-servidor.md): the number of sides of the room, 2 or 3 (3 only in modern:
    0 the USA, 1 Russia, 2 the Insurgents). The first player's join says it (ns, as mv), welcome tells it, and a page of another count is refused
@@ -28,10 +29,14 @@ const { WebSocketServer } = require('ws');
 
 const PORT = +process.env.PORT || 8080, PAGE = path.join(__dirname, 'Céu de Ferro 3D.html'), MAXLEN = 2048, MAXAI = 16384, AICAP = 64, CAP = 16;
 /* valid models per room and class (a model's side is MSIDE's, below); the page's PLANES, TANKS, AAS, ARTS and INF tables are the other copy.
-   inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size */
+   inf: the infantry kits; an AI soldier's snapshot row names its kit by an index the page counts (trnKits), checked here only against the size.
+   The row has 9 numbers, or 10 when its last is what the soldier calls out (SAY, the page's speech balloons): with only 9 allowed, every
+   soldier row of a host whose page had the balloons was dropped and the guests saw none of the AI's infantry (cf-pol-fluxos; tests/relay.js).
+   That last number is the call's kind (5 bits) plus 32 × (13 × its line's slot, up to 1023, + up to 12): below 1 << 19. A cap of 1024 still
+   dropped a third of the soldier messages, the ones with a line spoken in them, and a resumed match came back without those soldiers */
 const MODELS = {
-  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
-  modern: { plane: ['f22', 'a10', 'su57', 'su25'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
+  ww2: { plane: ['stuka', 'bf109', 'spit', 'p47', 'he177', 'b17'], tank: ['tiger', 'pz4', 'sherman', 't34'], aa: ['wirbel', 'm16'], art: ['hummel', 'pzwerfer', 'priest', 'bm13'], inf: ['schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman'], trn: ['kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw'] },
+  modern: { plane: ['f22', 'a10', 'su57', 'su25', 'b2', 'tu160'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
 };
 /* helicopters: aircraft to every check of an AI row or a loss, a class of their own to join, swap and hstate. None in 1944 */
 MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8'];
@@ -54,7 +59,7 @@ const LOADS = {
 };
 const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40 };
 const NST = Object.keys(STW).length;
-const FKINDS = 10;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb; 10: a new bridge, bnb)
+const FKINDS = 13;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb; 10: a new bridge, bnb; 11-13: the HESCO walls and the T-wall, hsc)
 const rooms = { ww2: new Map(), modern: new Map() };
 /* the most sides a room of the era may have; room.ns, the sides of the match in the room (its first player's), 2 until one says 3. The general's
    seats are kept for the most (gen, genk), and a player is told those of the room's sides (gview) */
@@ -86,9 +91,9 @@ const launch = (c, m, o) => { if (mid(m.m) && Math.floor(m.m / 4096) === c.playe
 const armour = c => c.player.cls === 'tank' || c.player.cls === 'art' || c.player.cls === 'trn';
 /* the damage model's fields: d part states (two bits a part for up to 24 parts, bit 48 burning; from a page that takes this server for an
    older one, the first ten parts and bit 20), pt the part a hit struck, k the kind of hit, v the parts behind it on the shot's line, w 1 a high-explosive shell that went in, 2 a
-   shaped charge. dcap, sent after welcome, says the server knows them */
+   shaped charge, s 1 a soldier's small-arms round on a soft vehicle. dcap, sent after welcome, says the server knows them */
 const bits = v => Number.isInteger(v) && v >= 0 && v < 2 ** 49, part = v => Number.isInteger(v) && v >= 0 && v < 24, kind = v => Number.isInteger(v) && v >= 0 && v < 4;
-const via = m => Object.assign({}, Array.isArray(m.v) && m.v.length > 0 && m.v.length <= 3 && m.v.every(part) && { v: m.v }, (m.w === 1 || m.w === 2) && { w: m.w });
+const via = m => Object.assign({}, Array.isArray(m.v) && m.v.length > 0 && m.v.length <= 3 && m.v.every(part) && { v: m.v }, (m.w === 1 || m.w === 2) && { w: m.w }, m.s === 1 && { s: 1 });
 const blow = m => num(m.dmg) && m.dmg > 0 && m.dmg <= 1000 && part(m.pt) && kind(m.k);
 /* world objects: a flat list of pairs, an object's id and its stage (1 damaged, 2 down) or the damage done to it */
 const pairs = (l, ok) => Array.isArray(l) && l.length > 0 && l.length <= 200 && l.length % 2 === 0 && l.every((v, i) => (i % 2 ? ok(v) : Number.isInteger(v) && v >= 0 && v < 65536));
@@ -112,7 +117,7 @@ const host = c => c.room.host === c, toss = m => Number.isInteger(m.k) && m.k >=
 const scores = c => cast(c, { t: 'scores', players: [...c.room.values()].map(o => ({ id: o.player.id, kills: o.player.kills, deaths: o.player.deaths, ai: o.player.ai })) }, true);
 /* one AI entity of a snapshot: [id, model, team, hp, flags, then 10 numbers for a plane (p, q, v) or 8 for a vehicle (p, heading, turret, pitch, vx, vz), then its part states].
    A soldier's row (k 2) is shorter: [id, kit index, team, hp, flags, x, z, heading, stance and weapon and squad packed in one integer] */
-const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && ts(room, e[2]) && (k === 2 ? e.length === 9 && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
+const aiEnt = (room, e, k) => Array.isArray(e) && aid(e[0]) && ts(room, e[2]) && (k === 2 ? (e.length === 9 || (e.length === 10 && Number.isInteger(e[9]) && e[9] >= 0 && e[9] < 1 << 19)) && e.every(num) && Number.isInteger(e[1]) && e[1] >= 0 && e[1] < room.inf.size && Number.isInteger(e[8]) && e[8] >= 0 && e[8] < 256
   : e.length === (k ? (room.gnd.has(e[1]) ? 14 : 0) : room.air.has(e[1]) ? 16 : 0) && e.every((v, i) => i === 1 || num(v)) && bits(e[e.length - 1]));
 const send = (ws, m) => { if (ws.readyState === 1) ws.send(JSON.stringify(m)); };
 const cast = (c, m, all) => { snapIn(c, m); for (const o of c.room.values()) if (all || o !== c) send(o.ws, m); for (const o of c.room.specs || []) if (o !== c) sendSpec(o, m); };
@@ -141,7 +146,7 @@ const RX = {
       if (room.size > 0 && m.ns !== undefined && m.ns !== room.ns) return send(c.ws, { t: 'error', code: 'sides' });   // and the sides', when the page says its own
       const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Espectador';
       c.player = { id: nextId++, name, cls: 'spec', model: '', side: -1, kills: 0, deaths: 0, ai: 0 }; c.spec = 1; c.room = room; room.specs.add(c);
-      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, players: [...room.values()].map(o => o.player) }));
+      send(c.ws, Object.assign({}, room.wf, { t: 'welcome', spec: 1, id: c.player.id, host: room.host ? room.host.player.id : 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, man2: 1, players: [...room.values()].map(o => o.player) }));
       send(c.ws, { t: 'fcap', v: 1 }); send(c.ws, { t: 'dcap', v: 1 });
       if (room.host) send(room.host.ws, { t: 'sjoin', id: c.player.id });
       return;
@@ -149,7 +154,7 @@ const RX = {
     if (!model(era, m.cls, m.model)) return send(c.ws, { t: 'error', code: 'model' });
     const room = rooms[m.room];
     if (room.size >= CAP) return send(c.ws, { t: 'error', code: 'full' });
-    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Piloto';
+    const name = (typeof m.name === 'string' ? m.name.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 16).trim() : '') || 'Jogador';   // the page's own default (it was Piloto, also for a soldier)
     c.player = { id: nextId++, name, cls: m.cls, model: m.model, lo: load(m.cls, m.model, m.lo), kills: 0, deaths: 0, ai: 0 };
     const mv = int(m.mv, 1, 99) ? m.mv : 1;   // the map version of the page; the first player's is the room's
     const ns = m.ns === 3 && MAXN[m.room] >= 3 ? 3 : 2;   // and its sides: a page that does not say is of 2
@@ -162,8 +167,9 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, gq: 1, crl: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
+    send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
     if (sus) snapOut(c);   // a guest of the match that was, until the host message makes it the host: it adopts, as when a host leaves
     cast(c, { t: 'joined', player: c.player });
@@ -211,7 +217,7 @@ const RX = {
   },
   /* a smoke screen where a tank or a gun fired its launchers; an interception: the missile with this id is gone, for everyone */
   smoke(c, m) { if (armour(c) && vec(m.p, 3)) cast(c, { t: 'smoke', from: c.player.id, p: m.p }); },
-  mkill(c, m) { if (mid(m.id)) cast(c, { t: 'mkill', from: c.player.id, id: m.id }); },
+  mkill(c, m) { if (mid(m.id)) cast(c, m.b === 1 ? { t: 'mkill', from: c.player.id, id: m.id, b: 1 } : { t: 'mkill', from: c.player.id, id: m.id }); },   // b: shot down by gunfire, it bursts (cf-intercepta-missil)
   flare(c) { cast(c, { t: 'flare', from: c.player.id }); },
   /* what a missile's seeker did, from the client that owns it (ms: 1 in welcome): k 0 lost, 1 decoyed at p, 2 back, 3 where it is, 4 burst */
   msl(c, m) {
@@ -335,7 +341,10 @@ RX.hstate = (c, m) => {
   cast(c, { t: 'hstate', from: c.player.id, p: m.p, q: m.q, v: m.v, c: m.c, a: m.a, hp: m.hp, f: m.f & 127, d: m.d });
 };
 RX.lift = (c, m) => {
-  const h = c.room.host, o = c.room.get(m.to), kits = v => Array.isArray(v) && v.length > 0 && v.length <= 8 && v.every(k => Number.isInteger(k) && k >= 0 && k < 8);
+  /* kits: the soldiers aboard, each its index in its side's list of kits (the page's INF[era][side]), which is never longer than the era's kits
+     (room.inf). They were checked against 8, from when a side had 8 kits: since the medics, the engineers and the drones a squad with its medic
+     (index 9) was refused, after the host had already taken it off the field, and the guest's helicopter flew empty (cf-pol-fluxos) */
+  const h = c.room.host, o = c.room.get(m.to), kits = v => Array.isArray(v) && v.length > 0 && v.length <= 8 && v.every(k => Number.isInteger(k) && k >= 0 && k < c.room.inf.size);
   if (h === c) { if (o && o !== c && o.player.cls === 'heli' && m.k === 1 && kits(m.n)) send(o.ws, { t: 'lift', k: 1, n: m.n }); return; }
   if (c.player.cls !== 'heli') return;
   if (m.k === 1 && Number.isInteger(m.sq) && m.sq > 0 && m.sq < 32) send(h.ws, { t: 'lift', from: c.player.id, k: 1, sq: m.sq });
@@ -509,6 +518,13 @@ RX.glog = (c, m) => {
   if (!host(c) || !ts(c.room, m.s) || !num(m.T) || !lst(m.e, 80) || !m.e.every(row) || (m.to !== undefined && !pid(m.to))) return;
   castSide(c, Object.assign({ t: 'glog', s: m.s, T: m.T, e: m.e }, m.full === 1 && { full: 1 }), m.s, m.to);
 };
+/* the tunnels (cf-trincheiras-tuneis, NOT TESTED): the host tells each side s its own tunnels and the enemy mouths it found, a row each,
+   [id, side, ax, az, bx, bz, percent dug, found (1 mouth a, 2 mouth b, 3 its own), state (0 open, 1 fallen)]; only that side's players get it */
+RX.tun = (c, m) => {
+  const row = e => vec(e, 9) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 1e6 && ts(c.room, e[1]) && [2, 3, 4, 5].every(i => Math.abs(e[i]) < 1e5) && e[6] >= 0 && e[6] <= 100 && Number.isInteger(e[7]) && e[7] >= 0 && e[7] <= 3 && (e[8] === 0 || e[8] === 1);
+  if (!host(c) || !ts(c.room, m.s) || !lst(m.e, 64) || !m.e.every(row)) return;
+  castSide(c, { t: 'tun', s: m.s, e: m.e }, m.s);
+};
 RX.keep = (c, m) => { if (host(c) && m.e && rec(m.e)) c.room.keep = m.e; };
 RX.gclaim = (c, m) => {
   const room = c.room, s = sideOf(c), id = c.player.id, held = room.gen[s], now = Date.now();
@@ -549,7 +565,7 @@ RX.gcmd = (c, m) => {
 };
 /* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
    lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
-const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap'];
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk', 'dfp', 'emb'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro); dfp: the side's defence plans (cf-defesa-posicoes); emb: the side's infantry rides (cf-infantaria-veiculos)
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
   if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });
@@ -564,10 +580,11 @@ RX.gres = (c, m) => {
   if (o && o !== c && int(m.n, 0, 1e9) && typeof m.ok === 'boolean' && txt(m.why, 12) && Number.isInteger(m.id)) send(o.ws, Object.assign({ t: 'gres', n: m.n, ok: m.ok, why: m.why, id: m.id }, m.r !== undefined && (rec(m.r) || Array.isArray(m.r)) && { r: m.r }));
 };
 /* sappers (welcome says sap: 1): the sapper kits, and three messages. mine: the host's list of the mines, in parts i of n of list q, a row
-   each, [id, kind (0 AT, 1 AP), side, x, z, known (bit s: side s knows it, as many bits as the room has sides)]; each player is passed only the rows of its side's mines and of
+   each, [id, kind (0 AT, 1 AP, 2 a command IED: cf-slots-arma), side, x, z, known (bit s: side s knows it, as many bits as the room has sides)]; each player is passed only the rows of its side's mines and of
    those its side knows, a spectator all of them. The server keeps the host's last whole list, and s its last mine id, and hands them to
    the next host alone, before it is named, so that no side's hidden mines are lost with the old host. mboom: the host says mine id (kind k, side s) went off at p, to the room. mreq: a soldier
-   to the host, k 0 or 1 lay one at p, 2 lift id, 3 its own body or vehicle set id off; 300 ms apart at least. dint: the host says its
+   to the host, k 0 or 1 lay one at p, 2 lift id, 3 its own body or vehicle set id off, 4 lay a command IED at p, 5 its phone sets off
+   its command IEDs, 6 its suicide vest goes off (cf-slots-arma); 300 ms apart at least. dint: the host says its
    anti-rocket dome f engaged the round of key k (drawn from its launch numbers) and stopped it (s 1) or not, to the room */
 {
   const kits = { ww2: ['pionier', 'engineer'], modern: ['blueEng', 'redEng'] };
@@ -576,7 +593,7 @@ RX.gres = (c, m) => {
     if (m.includes(k[0])) throw new Error('sapper kits already there');
     m.splice(m.length / 2, 0, k[0]); m.push(k[1]); for (const id of k) rooms[era].inf.add(id);
   }
-  const row = room => e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1) && ts(room, e[2]) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] <= ALL(room);
+  const row = room => e => vec(e, 6) && Number.isInteger(e[0]) && e[0] > 0 && e[0] < 65536 && (e[1] === 0 || e[1] === 1 || e[1] === 2) && ts(room, e[2]) && Number.isInteger(e[5]) && e[5] >= 0 && e[5] <= ALL(room);
   RX.mine = (c, m) => {
     if (!host(c) || !Number.isInteger(m.q) || m.q < 0 || m.q >= 1e6 || !Number.isInteger(m.i) || !Number.isInteger(m.n) || m.i < 0 || m.i >= m.n || m.n > 4 || !Array.isArray(m.e) || m.e.length > 40 || !m.e.every(row(c.room))) return;
     const r = c.room, b = m.i && r.mbuf && r.mbuf.q === m.q ? r.mbuf : (r.mbuf = { q: m.q, n: m.n, s: 0, e: [] });
@@ -589,11 +606,11 @@ RX.gres = (c, m) => {
     }
   };
   RX.dint = (c, m) => { if (host(c) && Number.isInteger(m.f) && m.f >= 0 && m.f < 65536 && Number.isInteger(m.k) && m.k >= 0 && m.k < 4294967296 && (m.s === 0 || m.s === 1)) cast(c, { t: 'dint', f: m.f, k: m.k, s: m.s }); };
-  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1) && ts(c.room, m.s) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
+  RX.mboom = (c, m) => { if (host(c) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536 && (m.k === 0 || m.k === 1 || m.k === 2) && ts(c.room, m.s) && vec(m.p, 2)) cast(c, { t: 'mboom', id: m.id, k: m.k, s: m.s, p: m.p }); };
   RX.mreq = (c, m) => {
-    const h = c.room.host, now = Date.now(), lay = (m.k === 0 || m.k === 1) && vec(m.p, 2), id = (m.k === 2 || m.k === 3) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536;
-    if (!h || h === c || (c.player.cls !== 'inf' && !(m.k === 3 && id)) || !(lay || id) || now - (c.mrq || 0) < 300) return;
-    c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : { id: m.id }));
+    const h = c.room.host, now = Date.now(), lay = (m.k === 0 || m.k === 1 || m.k === 4) && vec(m.p, 2), id = (m.k === 2 || m.k === 3) && Number.isInteger(m.id) && m.id > 0 && m.id < 65536, det = m.k === 5 || m.k === 6;
+    if (!h || h === c || (c.player.cls !== 'inf' && !(m.k === 3 && id)) || !(lay || id || det) || now - (c.mrq || 0) < 300) return;
+    c.mrq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k }, lay ? { p: m.p } : det ? {} : { id: m.id }));
   };
 }
 /* the side of every model a player or an AI row may have (MSIDE), era by era, in place of the half of each list: 0 the Blue force (in modern
@@ -601,20 +618,20 @@ RX.gres = (c, m) => {
    here, at the end of their lists, so that no older index moves; they field only in a room of 3 sides (join refuses one in a room of 2) */
 const MSIDE = {
   ww2: [
-    ['stuka', 'bf109', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
-    ['spit', 'p47', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
+    ['stuka', 'bf109', 'he177', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
+    ['spit', 'p47', 'b17', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
   modern: [
-    ['f22', 'a10', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
+    ['f22', 'a10', 'b2', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
       'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60'],
-    ['su57', 'su25', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
+    ['su57', 'su25', 'tu160', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
       'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
     ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
-      'tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
+      'tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
 {
   const m = MODELS.modern, R = rooms.modern, add = (cls, ids) => { for (const id of ids) { if (m[cls].includes(id)) throw new Error('insurgent model already there: ' + id); m[cls].push(id); } };
   add('tank', ['t55', 't62']); add('art', ['tec107']);
   add('inf', ['insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber']);
-  add('trn', ['tecDshk', 'tecSpg9', 'tecZu', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']);
+  add('trn', ['tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']);
   for (const id of [...m.tank, ...m.art, ...m.trn]) R.gnd.add(id);
   for (const id of m.inf) R.inf.add(id);
   for (const era in MSIDE) {
@@ -622,6 +639,40 @@ const MSIDE = {
     MSIDE[era].forEach((l, s) => { for (const id of l) { if (id in o) throw new Error('MSIDE: ' + id + ' on two sides'); o[id] = s; } });
     for (const cls in MODELS[era]) for (const id of MODELS[era][cls]) if (!(id in o)) throw new Error('MSIDE: no side for ' + era + ' ' + id);   // a model added without its side
   }
+}
+/* medics (welcome says med: 1; cf-medico, NÃO TESTADO: docs/nao-testado/cf-medico.md): the medic kits of each side, at the end of the lists so
+   that no older index moves, and two more kinds of mreq, from a guest's medic to the host: k 7 he treated AI soldier id, k 8 he drags id to p
+   (or keeps him alive while he treats him). 200 ms apart at least, on a clock of their own (a drag sends often) */
+{
+  const kits = { ww2: ['sanitater', 'medic'], modern: ['blueMedic', 'redMedic', 'insMedic'] };
+  for (const era in kits) kits[era].forEach((id, s) => {
+    if (MODELS[era].inf.includes(id)) throw new Error('medic kit already there: ' + id);
+    MODELS[era].inf.push(id); rooms[era].inf.add(id); MSIDE[era][s].push(id); rooms[era].ms[id] = s;
+  });
+  const old = RX.mreq;
+  RX.mreq = (c, m) => {
+    if (m.k !== 7 && m.k !== 8) return old(c, m);
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.player.cls !== 'inf' || !aid(m.id) || (m.k === 8 && !vec(m.p, 2)) || now - (c.mdq || 0) < 200) return;
+    c.mdq = now; send(h.ws, Object.assign({ t: 'mreq', from: c.player.id, k: m.k, id: m.id }, m.k === 8 ? { p: m.p } : {}));
+  };
+}
+/* bomb vehicles and the disguised bomber (cf-vbied, NÃO TESTADO: docs/nao-testado/cf-vbied.md): the pickup bomb and the truck bomb a player may
+   drive, the Insurgents' kit in plain clothes, at the end of their lists so that no older index moves; and mreq k 9, a guest's driver
+   asks the host to set off its bomb vehicle (500 ms apart at least) */
+{
+  const m = MODELS.modern, R = rooms.modern;
+  for (const [cls, id] of [['trn', 'vbiedPk'], ['trn', 'svbied'], ['inf', 'insCivBomber']]) {
+    if (m[cls].includes(id)) throw new Error('vbied model already there: ' + id);
+    m[cls].push(id); (cls === 'inf' ? R.inf : R.gnd).add(id); MSIDE.modern[2].push(id); R.ms[id] = 2;
+  }
+  const old = RX.mreq;
+  RX.mreq = (c, m) => {
+    if (m.k !== 9) return old(c, m);
+    const h = c.room.host, now = Date.now();
+    if (!h || h === c || c.player.cls !== 'trn' || now - (c.vbq || 0) < 500) return;
+    c.vbq = now; send(h.ws, { t: 'mreq', from: c.player.id, k: 9 });
+  };
 }
 /* the room's sides, said by its first player: the general's seats past them are free again, and a bridge of such a side is told and let go */
 function setNs(room, ns) {
@@ -737,17 +788,21 @@ const partidas = () => {
    batches, and the server keeps one file a match, data/matches/<era>/<date>-<id>.ndjson.gz (ANA_DIR another folder): one JSON event a line,
    each batch a gzip member appended. id is a random name the server gives the match (online: the room's match, which a new host carries on;
    by POST: the page's own random key), never a player's id or name. ana { n the room's match, e the events, end 1 the last batch }: from the
-   host only, at most ANA.rate[0] a window of ANA.rate[1] ms, events of the known kinds, ANA.max bytes a match. At the end (an end event) a
+   host only, at most ANA.rate[0] a window of ANA.rate[1] ms (ANA_RATE, 30: a busy match's brain events fill about ten pieces of the page's
+   ANA.chunk every flush, and with 10 the flush after the end was refused), events of the known kinds (every kind the page sends: a batch with
+   one unknown event is refused whole, so a kind the page adds goes here too and in the page's ANA.kinds; cb are the brain's meters), ANA.max bytes a match. At the end (an end event) a
    summary goes beside it, <date>-<id>.json (the header, the end and the review the page sent as rep). ANALYTICS=0: welcome says ana: 0 and
    nothing is written or served. Files older than ANA_DAYS days (default 90) are deleted at start and every six hours.
    HTTP: GET /ana/list the stored matches, newest first (from their summaries); GET /ana/m/<era>/<name> one match as ndjson; GET /ana/r/<era>/<name>
    its summary; POST /ana { k the page's key, era, e, end } */
 const ANA = { on: process.env.ANALYTICS !== '0', dir: process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(__dirname, 'data', 'matches'),
-  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [10, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
+  days: +process.env.ANA_DAYS || 90, max: 6 << 20, rate: [+process.env.ANA_RATE || 30, 15000], kinds: new Set(['hdr', 'sp', 'ls', 'pt', 'lg', 'sn', 'end', 'rep', 'cv', 'mv', 'ap', 'ab', 'tr', 'el', 'cb', 'g2', 'g2c']), list: 200, keys: new Map(), ips: new Map(), keyMax: +process.env.ANA_KEYS || 4096, dayMax: Math.floor((+process.env.ANA_DAY_MB || 512) * 1048576), day: { d: '', bytes: 0 } };
 const anaName = /^\d{4}-\d{2}-\d{2}-[0-9a-f]{12}$/;
 const anaFile = (era, base, ext) => path.join(ANA.dir, era, base + ext);
-/* a batch is a list of events, each an object of a known kind with its match time */
-const anaOk = e => lst(e, 2000) && e.every(o => rec(o) && o !== null && typeof o.k === 'string' && ANA.kinds.has(o.k) && num(o.t));
+/* a batch's events this server keeps: those of the known kinds with their time; null when the batch is not a list of records (refused). An event
+   of a kind it does not know, or without its time, is left out, not the whole batch: one stray event (a page newer than the server, or a brain
+   event whose payload carried its own k, cf-pol-fluxos) used to drop every batch it rode in, and with them the match's end and its summary */
+const anaEv = e => (lst(e, 2000) && e.every(o => rec(o) && o !== null) ? e.filter(o => typeof o.k === 'string' && ANA.kinds.has(o.k) && num(o.t)) : null);
 /* the rate of one sender: true when it may send now */
 function anaRate(o) {
   const now = Date.now(), r = o.anaR || (o.anaR = { t: now, n: 0 });
@@ -780,9 +835,10 @@ function anaTouch(map, k, make) {
 }
 RX.ana = (c, m) => {
   const room = c.room;
-  if (!ANA.on || !host(c) || !int(m.n, 0, 1e6) || m.n !== (room.cqn || 0) || !anaOk(m.e) || !anaRate(c)) return;
+  const e = ANA.on && host(c) && int(m.n, 0, 1e6) && m.n === (room.cqn || 0) ? anaEv(m.e) : null;
+  if (!e || (!e.length && m.end !== 1) || !anaRate(c)) return;   // nothing to keep and not the end: refused, and not counted in the rate
   if (!room.ana || room.ana.n !== m.n) room.ana = Object.assign(anaNew(Object.keys(rooms).find(k => rooms[k] === room), 'online'), { n: m.n });
-  anaWrite(room.ana, m.e, m.end === 1);
+  anaWrite(room.ana, e, m.end === 1);
 };
 /* the files older than ANA.days, gone */
 function anaPrune() {
@@ -804,10 +860,11 @@ function anaHttp(req, res) {
       if (big) return;
       let m; try { m = JSON.parse(body); } catch (e) { return out(400, { ok: 0 }); }
       const ip = req.socket.remoteAddress || '', who = anaTouch(ANA.ips, ip, () => ({}));
-      if (!m || !rec(m) || typeof m.k !== 'string' || !/^[0-9a-f]{12}$/.test(m.k) || !Object.hasOwn(MODELS, m.era) || !anaOk(m.e)) return out(400, { ok: 0 });
+      const e = m && rec(m) && typeof m.k === 'string' && /^[0-9a-f]{12}$/.test(m.k) && Object.hasOwn(MODELS, m.era) ? anaEv(m.e) : null;
+      if (!e || (!e.length && m.end !== 1)) return out(400, { ok: 0 });
       if (!anaRate(who)) return out(429, { ok: 0 });
       const M = anaTouch(ANA.keys, m.k, () => { const o = anaNew(m.era, 'local'); o.base = o.base.slice(0, 11) + m.k; return o; });
-      out(anaWrite(M, m.e, m.end === 1) ? 200 : 413, { ok: 1 });
+      out(anaWrite(M, e, m.end === 1) ? 200 : 413, { ok: 1 });
     });
     return;
   }
@@ -845,6 +902,12 @@ const server = http.createServer((req, res) => {
   if (req.method === 'GET' && req.url.split('?')[0] === '/partidas') {
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); return res.end(JSON.stringify(partidas()));
   }
+  /* the models pack (models/pack/<id>.glb, tools/pack/build.js): only those file names, read from that folder, cached a day */
+  const pk = req.method === 'GET' && /^\/models\/pack\/([a-z0-9_]+)\.glb$/.exec(req.url.split('?')[0]);
+  if (pk) return fs.readFile(path.join(__dirname, 'models', 'pack', pk[1] + '.glb'), (err, buf) => {
+    if (err) { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('404'); }
+    res.writeHead(200, { 'content-type': 'model/gltf-binary', 'content-length': buf.length, 'cache-control': 'public, max-age=86400' }); res.end(buf);
+  });
   if (req.method !== 'GET' || req.url.split('?')[0] !== '/') { res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('404'); }
   fs.readFile(PAGE, (err, buf) => {
     if (err) { res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' }); return res.end('Não foi possível ler a página do jogo.'); }
@@ -884,7 +947,7 @@ wss.on('connection', ws => {
 });
 const beat = setInterval(() => {
   for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); }
-}, 10000);
+}, Math.max(1000, +process.env.BEAT || 10000));   // BEAT=<ms>: the heartbeat's period (tests/net.js gives its test server a long one)
 wss.on('close', () => clearInterval(beat));
 
 anaPrune(); setInterval(anaPrune, 6 * 3600e3).unref();

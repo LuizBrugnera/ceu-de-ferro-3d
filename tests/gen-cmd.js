@@ -109,8 +109,8 @@ console.log('-- a person at the chair (solo, ww2, seed 41) --');
 }
 
 console.log('-- no random numbers in the commands --');
-{ const src = H.source(), a = src.indexOf('/* ---------- the general\'s commands (GCMD)'), b = src.length;
+{ const src = H.source(), a = src.indexOf('/* ---------- the general\'s commands (GCMD)'), b = a < 0 ? src.length : src.indexOf('\n/* ---------- ', a + 1) >>> 0;   // the GCMD section only: the blocks appended after it (logistics, bridges, M5...) are not commands and draw as they please
   ok(a >= 0, 'the section is in the simulation part of the page');
   const t = src.slice(a, b);
-  ok(a >= 0 && !/Math\.random|\brand\(|\bqr\(/.test(t) && (t.match(/\bpick\(/g) || []).length <= 1, 'it draws only the human tank model'); }
+  ok(a >= 0 && !/Math\.random|\brand\(|\bqr\(/.test(t) && (t.match(/\bpick\(/g) || []).length <= 1, 'it draws only the human tank model (the section, ' + (b - a) + ' chars)'); }
 H.done();

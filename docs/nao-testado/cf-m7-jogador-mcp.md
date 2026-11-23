@@ -1,7 +1,21 @@
 # M7 Jogador e MCP: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): ok (parte)
+- Navegador (Chrome headless, servidor em 127.0.0.1), Assistir em 1944, "Assumir o comando" do lado 0 aos 58 s, Campanha > Manobras:
+  - "Ver abordagens" e um clique em G · Vila do Moinho (pelo `gorTarget` de verdade): 3 abordagens na lista (16° 1,2 km 5,6 min 24% à vista; 88° 1,5 km 7,1 min 27%; 52° 1,9 km 9,2 min 10%), cada uma com "Fixar e flanquear por An", e "Envolver" na A2 e na A3. As três aparecem desenhadas no mapa, cada uma na sua cor, com minutos, % à vista e ângulo.
+  - A linha `#gcM7` cabe na coluna em 1280 e 1920 px (`scrollWidth === clientWidth`, nenhum dos 16 botões fora).
+  - O botão "Fixar e flanquear por A2" abre a manobra. O diário diz "Fixar e flanquear contra G · Vila do Moinho: fixação a 16° do eixo, manobra por 88° (1,5 km, 27% à vista), 2 esquadras". A manobra embarca num caminhão aos 302 s ("segue por estrada 1,4 km") e desembarca aos 346 s no ponto previsto. Aos 540 s ela ainda estava a 1 km da posição de assalto, com a hora H no máximo em 1.322 s. A fixação andava para a base de fogo, a 480 m.
+  - Nenhum erro no console.
+- **Continua sem teste:** a hora H, o fogo, o assalto pelo flanco e "tomado" (a caminhada é longa e a partida no navegador anda a ~0,4× do tempo real nesta máquina); `envelop`, `turn`, `penet` e a guarda com minas numa partida; o relay com convidado mandando as manobras e com servidor antigo; as 5 ferramentas MCP contra um anfitrião real; o `tests/m7.js` sugerido abaixo.
+
+## Testado em 806508d e 1cedd86 (parte)
+- MCP: `tests/mcp-general.js` **all passed** depois do #94. As recusas `ap` e `man2` do M7 (e `nofix`) não tinham o texto em português na ponte, e o teste esperava a versão 2.0.0 e não as ferramentas do M7.
+- `tests/approaches-relay.js`, `tests/ambush.js` (M4), `tests/tmap.js` e `tests/sim-split.js`: passam. `tests/gen-cmd.js`: a única falha era a checagem "sem aleatório", que lia blocos que não são comandos, corrigida no #107. A rodada inteira depois do conserto foi cortada pelo tempo limite no node carregado; os blocos que chegaram a rodar passaram.
+- `tests/approaches.js`: **falha em 2 checagens do M2** (fica para o teste do M2): uma reunião à vista (`v 0.87`) e o tempo de um pedaço da busca (34–45 ms, medido num node muito carregado).
+- Execução headless (1cedd86, 1944, semente 9): `genCmd(0, {c:'man', k:'fixflank', pi})` abre a manobra. O log diz "Fixar e flanquear contra G · Vila do Moinho: fixação a 16° do eixo, manobra por 52° (1,6 km, 24% à vista), 2 esquadras". As esquadras saem (`go`), embarcam e desembarcam do caminhão como previsto. Em 480 s de partida a hora H ainda não tinha chegado (a caminhada é longa). As fases seguintes não foram vistas.
+- Navegador (1cedd86), Visão de General com o comando assumido: a linha de manobras (`#gcM7`) cabe na coluna em 1280 e 1920 px (`scrollWidth === clientWidth`, nenhum botão fora). A abordagem (Auto, A1-A3), a guarda (Posto, Minas) e os chips de camada aparecem. `gask ap` sobre Vila do Moinho volta com 3 abordagens (87° 8,8 min 11% à vista; 6° 6,3 min 21%; 76° 10,9 min 9%).
+
 Tarefa `cf-m7-jogador-mcp`, pacote M7 da proposta de manobra do general (§13, §15, §17; decisões D1-D12 = A).
-Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado**. Rodou só a checagem de fumaça: o servidor sobe e a página carrega no Chrome sem erro lançado (os seis tipos novos e a camada nova aparecem registrados).
 
 ## O que mudou
 
@@ -26,18 +40,14 @@ Pela regra de entrega do capitão ("implemente tudo sem testes e documente o que
 - **Mapa**: camada nova "Abordagens e manobras" (`gAp`). Desenha as 3 abordagens em cores, com minutos, % à vista e ângulo, mais o caminho e o alvo das manobras novas em curso (`genManOp` ganhou `path`/`to` para elas).
 - As esquadras selecionadas vão junto (`ids`). Sem seleção, vão as livres mais perto, até 4,5 km.
 
-## O que NÃO foi testado (tudo)
+## O que NÃO foi testado (o que ainda falta)
 
-- Nenhuma manobra nova foi executada numa partida: nem a abertura, nem as fases (`go`/`fire`/`hit`, `exp`, `set`/`fire`/`back`), nem o fim.
-- A posição de cada esquadra, os caminhos (`apWalk`, `footPath`, `gWay`) e o efeito do `quiet`/`fast` nas ordens `overwatch`, `hold` e `ambush`.
-- A ponte com o M4: `ambush` com `e` (meio da aresta) e `guard` com minas (`genCmd` `fort` logo depois da guarda aberta).
-- O campo minado da guarda (`genCmd` `fort` aninhado dentro de outro `genCmd`).
-- O M2, o M4 e o M7 juntos numa partida (os três disputam as esquadras livres).
+- As fases das manobras novas depois da reunião: a hora H, o fogo, o assalto e o fim (`go`/`fire`/`hit`, `exp`, `set`/`fire`/`back`).
+- A ponte com o M4: `ambush` com `e` (meio da aresta) e `guard` com minas (`genCmd` `fort` aninhado depois da guarda aberta).
+- O M2, o M4 e o M7 disputando as esquadras livres numa partida longa.
 - O relay com as chaves novas, o `man2` no `welcome` e um convidado mandando as manobras pela rede.
 - As 5 ferramentas MCP contra um anfitrião real.
-- O painel e a camada no navegador: botões, cliques no mapa, desenho, largura em 1280 e 1920 px e telefone.
-- O custo por quadro (`apNow` é síncrono na ordem do jogador, como o `gask ap` do M2).
-- Os testes existentes (`tests/*`) não foram rodados.
+- Telefone (largura estreita) e o custo por quadro do `apNow` síncrono.
 
 ## Riscos que vejo
 

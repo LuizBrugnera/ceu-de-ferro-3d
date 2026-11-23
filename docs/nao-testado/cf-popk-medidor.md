@@ -1,5 +1,9 @@
 # cf-popk-medidor: medidor de orçamento da IA (popK) por média sustentada
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em 1944, nesta máquina presa a 12 núcleos (IA do anfitrião de 175–193 ms por quadro): o teto desce 10% a cada 10 s (70% aos 30 s, 60% aos 40 s), como desenhado para sobrecarga sustentada. Cada linha do diário traz os números medidos ("IA do anfitrião em 193,04 ms por quadro em média nos últimos 10 s (orçamento 4 ms; pior quadro 634 ms, comandante 35,9 ms)").
+- **Continua sem teste:** uma máquina com GPU folgada (o caso de 57 qps, onde o teto deve ficar em 100%) e o percentual no painel do convidado online.
+
 Issue: https://github.com/LuizBrugnera/ceu-de-ferro-3d/issues/35
 
 ## O que mudou
@@ -16,10 +20,17 @@ Issue: https://github.com/LuizBrugnera/ceu-de-ferro-3d/issues/35
 - Falham igual no main (pré-existentes, não causados por esta mudança): general (3), eco (1, varia de lado), orders (2, fcap), man-a (1), man-c (7). gen-cmd (1, checagem estática de `rand(`; o diff não chama nenhum) não terminou no main dentro do limite de tempo.
 - Partida assistida no Chrome headless sem GPU, antes e depois: no main, popK foi a 90% aos 10 s com média de 2,8 ms (abaixo do orçamento) e a 50% aos 60 s. Com a correção, ficou em 100% enquanto a média estava abaixo de 4 ms, cortou para 90% aos 30 s (média de 4,04 ms) e esperou.
 
+## Testado em 9f2a313: ok (tarefa cf-testar-ia)
+
+- `tests/production.js`: todas as checagens do medidor passaram (saudável fica em 100%, quadro isolado de 50 ms não corta, sobrecarga sustentada desce de 10 em 10% até o piso em 50 s, volta a 100% abaixo de 3,2 ms, faixa morta, espera pelo corte, números no log). As 7 falhas restantes da suíte são dos tetos e da postura (#77, #70), não do medidor. `tests/frame-budget.js`: passou.
+- Online: `tests/eco-online.js` e `tests/gen-online.js` (HOST=127.0.0.1, sozinhas): passaram.
+- Partidas IA × IA no harness desta máquina carregada (custo da IA de 20 a 150 ms por quadro): o medidor desceu ao piso de 50% e ficou lá, como desenhado para sobrecarga sustentada.
+
 ## O que NÃO foi testado
-- Suítes online (eco-online, gen-online e outras *-online) e o resto de `tests/all.sh`.
-- Partida real com GPU (o caso de 57 fps e 3,65 ms) e partida online com o anfitrião num navegador e convidados: `d.pk` chega ao convidado como antes, mas não foi verificado.
-- Partidas longas (mais de 5 min) numa máquina realmente lenta: a descida agora acompanha o atrito (o corte espera um lado caber no teto). Não foi medido quanto tempo leva para chegar ao piso.
+
+- Partida real com GPU (o caso de 57 fps e 3,65 ms): o Chrome desta máquina não tem GPU.
+- Partida online com o anfitrião num navegador: o percentual do convidado no painel Logística.
+- Quanto tempo uma máquina lenta de verdade leva até o piso numa partida longa.
 
 ## Riscos
 - Numa máquina lenta em impasse, com os dois lados sempre acima do teto, o medidor fica em 90% em vez de descer. O efeito prático é parecido, porque o teto já bloqueia novas entradas, mas o custo cai mais devagar.

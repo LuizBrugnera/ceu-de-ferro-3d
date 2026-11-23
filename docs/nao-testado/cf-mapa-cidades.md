@@ -1,17 +1,16 @@
 # cf-mapa-cidades: cidades nos mapas (não testado)
 
+## Testado em 8624d47 (cf-pol-testes-b, 2026-11-21): ok, com um conserto
+- Navegador (Chrome headless, servidor em 127.0.0.1). Mapa do General em 1920 px (Assistir, Hoje, 3 lados): os nomes das aldeias e vilas aparecem (Aldeia do Açude, Aldeia da Várzea, Aldeia de Alto, Aldeia da Capela, Vila do Carrascal). Mapa de tiro em 1944 (Hummel, M): os nomes aparecem na prancheta (Aldeia do Açude, Vila do Moinho, Sede, Vila das Oliveiras, Três Pinheiros). Nenhum lote disfarçado da sede desenhado. Nenhum erro no console.
+- **Defeito achado** (o cf-pol-hud, #172, consertou o mesmo ao mesmo tempo; ficou a versão do main): no mapa do General, a vila que leva o nome do ponto de conquista saía duas vezes (o nome apagado da vila em cima e o rótulo aceso do ponto embaixo). Agora `drawTownNames(…, 'skip')` deixa esse nome para o ponto, e o mapa da batalha o desce para baixo do anel. Os mapas de tiro e do drone continuam nomeando todas. Teste: `tests/town-names.js` (no `all.sh`).
+- **Continua sem teste:** as pegadas tingidas no minimapa vistas de perto; o mapa do drone com zoom; partida online com dois humanos; mapas antigos sem `T.net`; a orientação das pegadas longe de estrada.
+
 ## O que mudou
 - `Céu de Ferro 3D.html`: novas `burgAng`, `drawTownsFoot`, `townLabel`, `drawTownNames` (antes de `mapImg`).
 - `mapImg` assa a pegada de cada lugar construído (`T.burgs`: vila-sede, vila, aldeia, povoado) como retângulo tingido (ru × rv) girado ao longo da estrada mais próxima. Vale para o minimapa (`mapCv`), o mapa de tiro/artilharia (`mapBig`), o mapa do drone e o mapa do General (`genImg`), que usam `mapImg`.
 - Nomes desenhados ao vivo por zoom (`drawTownNames`): vila a partir de 30 px/km, aldeia 45, povoado 90; fonte 9–13 px, com fade. Usados no General (`gTerrain`, substitui a linha antiga que só nomeava `b.nm`), no mapa de tiro (`fpMap`) e no mapa do drone (`hudDroneMap`). O minimapa pequeno mostra só as pegadas, sem nome.
 - Nome: `b.nm`, senão o nome do ponto do modo conquista (Vila do Moinho, Vila das Oliveiras), senão "Vila"/"Aldeia".
 - Disfarce do W4 mantido: só se usa o tamanho do lugar; os lotes de instalação da sede (`T.lots`) não são lidos nem desenhados.
-
-## NÃO testado
-- Nenhuma suíte, partida ou comparação visual. Só: sintaxe do script principal e a página abre sem erro novo.
-- Aparência em 1280 e 1920 px; legibilidade e poluição dos rótulos; fade com o zoom.
-- Orientação da pegada (`burgAng`): rota/estrada mais próxima; pode ficar torta em povoados longe de estradas.
-- Online (sala com 2 humanos) e modo conquista; mapa v3/v5 versus mapas antigos sem `T.net`.
 
 ## Riscos
 - Pegada retangular pode cobrir a estrada/ícones no minimapa em mapas pequenos.

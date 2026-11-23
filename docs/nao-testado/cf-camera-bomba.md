@@ -1,29 +1,22 @@
-# cf-camera-bomba: câmera das armas (bombas, mísseis, foguetes) (não testado)
+# cf-camera-bomba: câmera das armas (bombas, mísseis, foguetes): testado em parte
 
-## O que mudou
-Tudo em `Céu de Ferro 3D.html`, módulo `WCAM` logo antes de `boot()`, mais um bloco no painel Partida e uma linha em `skyKeys`.
-- Quando o **jogador local** (`S.my`, nunca os outros, offline e online) solta uma bomba (inclui bombardeiros e bombas guiadas), dispara foguete ou míssil (jato, helicóptero, equipes AT/ATGM, SAM), uma janela no canto superior esquerdo segue a arma por trás e por cima até ela acabar (`gone`) e fica ~2 s no estouro.
-- Tecla **`** (Backquote) alterna a janela com a tela cheia. Os controles da vista principal seguem valendo.
-- Míssil guiado à mão (tecla L, `P.las`): a janela mostra o laser como um quadrado vermelho para ajudar a guiar.
-- Ajuste em Partida > "Câmera das armas": Desligada / Ligada (padrão: bombas, mísseis, foguetes) / Com artilharia (obuses e morteiros, `k:'he'`). Guardado em `localStorage` (`ceu-de-ferro-3d-camarma`).
-- Render barato: segunda câmera, `WebGLRenderTarget` 384x216 (960 de largura em tela cheia), 15 Hz; o quadro é desenhado a cada frame num canto com scissor. `render3d` e `drawHud` foram embrulhados (sem mexer no corpo deles).
+O que é (no main): módulo `WCAM` antes de `boot()`. Quando o jogador local solta bomba ou dispara foguete ou míssil, uma janela no canto superior esquerdo segue a arma até ela acabar e fica ~2 s no estouro; **`** alterna com a tela cheia; Partida > "Câmera das armas": Desligada / Ligada / Com artilharia (`localStorage` `ceu-de-ferro-3d-camarma`). Render de 384 × 216 a 15 Hz.
 
-## O que NÃO foi testado
-Só rodei a checagem de sintaxe do script e o servidor subindo e servindo a página (200). **Não abri a página no navegador**; nada do abaixo foi visto rodando.
+## Testado (cf-pol-testes-a)
 
-## Riscos
-- Ordem de cor/brilho do render target vs. canvas (three r128, sem `outputEncoding`): pode sair mais claro ou escuro.
-- Estado por câmera: `skyDome`, escala dos `sparks` e visibilidade dos `bush tiles` são trocados para a segunda câmera; `bushTiles()` volta ao normal no render seguinte. Outros efeitos presos à câmera principal (neblina de rótulos, partículas por distância, névoa/efeitos de tela) podem aparecer errados na janela.
-- A janela fica em x=12,y=58 (CSS px): pode cobrir HUD, mini mapa ou o kit do soldado. Em celular/toque a tecla ` não existe (sem alternância).
-- Detecção por varredura de `S.bombs`/`S.missiles` (`by === S.my`, `WeakSet`); submunição (`o.frag`) ignorada. Foguetes de bombardeiro/helicóptero em rajada (HVAR/Hydra) trocam a câmera a cada disparo.
-- Fim da arma = `gone`/`life<=0`; se algum míssil some da lista sem `gone`, a câmera só fecha após 2 s paradas.
-- Em erro dentro do módulo, ele se desliga sozinho (`WCAM.mode=0`) em vez de quebrar o frame.
-- Online: só olha armas do `S.my` do próprio cliente; fantasmas não disparam câmera. Piloto morto/trocado de veículo fecha a janela (`w.by !== S.my`).
+No Chromium sem tela (WebGL por software), 1280 × 800, partida moderna de B-2 a 500 m (imagens em `/home/luiz/secondmate/data/cf-pol-testes-a/ag1/proof/web/`):
+- Os 3 botões de "Câmera das armas" existem, com "Ligada" marcado (`WCAM.mode` 1).
+- `release` da GBU-31: a janela abre na hora (`WCAM.w`, tipo `BOMBA`) em x 12, y 58, 384 × 216, seguindo a bomba por trás e por cima (`bomb-inset.png`).
+- **`** passa para a tela cheia (`WCAM.full`, rótulo "VOLTA À VISTA NORMAL", `bomb-full.png`).
+- "Desligada" (`WCAM.mode = 0`): outra bomba solta, nenhuma janela.
+- Página sem erro novo no console.
+- **Visto:** a janela cobre o bloco de texto do HUD do avião (velocidade, altitude, armas, teclas): o texto fica desenhado por cima da imagem e as duas coisas ficam difíceis de ler. Não mudei o lugar: à direita, embaixo do mapa, fica o placar dos jogadores online; é decisão de leiaute.
 
-## Como testar depois
-1. `PORT=3917 HOST=127.0.0.1 node server.js`, abrir a página, Partida > conferir os 3 botões de "Câmera das armas" (Ligada marcado).
-2. Jato com bombas (B/V): soltar bomba, ver a janela seguir até o impacto + 2 s do estouro; apertar ` para tela cheia e voltar.
-3. Helicóptero com míssil: L ativa guiado à mão, mover a mira e ver o quadrado vermelho; conferir o míssil indo onde o quadrado manda.
-4. Bombardeiro novo (conferir `k:'bomb'` por solta), foguetes, equipe ATGM/AT a pé, SAM.
-5. Modo "Com artilharia": obus/morteiro mostram a câmera; no modo "Ligada" não.
-6. "Desligada": nenhuma janela. Conferir performance (FPS) com a janela aberta, e online com 2 jogadores (só o dono vê a própria).
+## Não testado
+
+- O fecho da janela no impacto + 2 s: com o WebGL por software a batalha anda devagar (poucos quadros por segundo), e 40 s depois a janela ainda estava aberta (não deu para saber se a bomba já tinha caído no relógio da batalha).
+- Míssil guiado à mão (L) com o quadrado vermelho, foguetes, equipe AT/ATGM a pé, SAM, modo "Com artilharia", celular (sem a tecla `), FPS com a janela aberta, online com 2 jogadores, cor e brilho comparados com a tela.
+
+## Como testar
+
+`node server.js`; jato com bombas: soltar e ver a janela até o estouro + 2 s; **`**; helicóptero com míssil e **L**; "Com artilharia" com obus e morteiro; "Desligada"; online com 2 jogadores (só o dono vê a sua).

@@ -62,19 +62,25 @@ console.log('-- water and bridges --');
 }
 
 console.log('-- the assault freed from the axis, its assembly out of sight --');
-/* side 0's own squads replaced by three free ones on another road 1.5 to 4.2 km from Vila do Moinho; no squad on the objective's road */
+/* side 0's own squads replaced by three free ones of another road, within AP.pool m of an assembly of Vila do Moinho; no squad on the objective's road */
 function field(o) {
   const E = setup(o), { $, S, Cm, tg } = E, R = S.T.routes;
   for (const q of S.squads.filter(q => q.team === 0)) for (const m of q.men) m.dead = true;
   S.squads = S.squads.filter(q => q.team !== 0); S.men = S.men.filter(m => !m.dead);
   let at = null;
-  for (let ri = 0; ri < R.length && !at; ri++) if (ri !== tg.ri) for (let s = 0; s <= R[ri].len; s += 50) { const p = $('routeAt')(R[ri], s), d = Math.hypot(p.x - tg.x, p.z - tg.z); if (d > 1500 && d < 4200 && p.x < tg.x && $('hgt')(p.x, p.z) > S.T.WL + 2) { at = { ri, s, x: p.x, z: p.z }; break; } }
+  /* the place of another road nearest an assembly of the plan, and out in the field toward it to .85 x AP.pool from it when farther: an assault takes squads within AP.pool m of an assembly */
+  const A = $('apNow')(Cm, $('cqObj')(tg), -1).A, AP = $('AP'); let bd = 1e9;
+  for (let ri = 0; ri < R.length; ri++) if (ri !== tg.ri) for (let s = 0; s <= R[ri].len; s += 50) { const p = $('routeAt')(R[ri], s), a = A.reduce((b, x) => (Math.hypot(p.x - x.asm.x, p.z - x.asm.z) < Math.hypot(p.x - b.asm.x, p.z - b.asm.z) ? x : b)), d = Math.hypot(p.x - a.asm.x, p.z - a.asm.z); if (d < bd && p.x < tg.x && $('hgt')(p.x, p.z) > S.T.WL + 2) { bd = d; at = { ri, s, x: p.x, z: p.z, a: a.asm }; } }
+  if (bd > AP.pool * .85) { const k = 1 - AP.pool * .85 / bd; at.x += (at.a.x - at.x) * k; at.z += (at.a.z - at.z) * k; }
+  Cm.apc = null;
   const mk = (job, k, dx) => { const q = $('addSquad')(0, at.x + dx, at.z, at.ri, at.s); q.job = job; q.jk = k; $('setOrd')(q, { k: 'hold', ri: at.ri, s: at.s, x: at.x + dx, z: at.z, R: 9 }); q.live = q.men.length; return q; };
   Cm.atkT = 0; Cm.ops = Cm.ops.filter(op => op.k !== 'atk'); Cm.apc = null; Cm.apQ = [];
   return Object.assign(E, { at, mk, sq: () => S.squads.filter(q => q.team === 0 && q.live > 0 && !q.state) });
 }
 {
   const E = field(), { $, S, Cm, tg, at, mk, sq } = E;
+  $('PR').on = 0;   // M2's own assault: with M3's procedures a strong point draws p12, whose recon walks to the assault positions (tests/procedures.js)
+  try { $('PEL').on = 0; } catch (e) {}   // and without the platoon (P8, #144): at H-hour it holds the assault until its base fires (tests/brain-pelotao.js)
   const a = mk('road', 0, 0), b = mk('road', 1, 40), c3 = mk('road', 2, 80), ri0 = [a.ri, b.ri, c3.ri];
   $('cmdSense')(Cm, sq()); $('tmNow')(0);
   $('cmdAttack')(Cm, sq());
@@ -92,14 +98,16 @@ function field(o) {
     const L = a.men.find(m => !m.dead), w = a.ord.wp;
     ok(Math.hypot(w[0].x - L.x, w[0].z - L.z) < 1 && Math.hypot(w[w.length - 1].x - a.fp.x, w[w.length - 1].z - a.fp.z) < 1, '  from where the squad stands to its place in the assembly (' + (w.len / 1000).toFixed(2) + ' km)');
     const far = Math.max(...op.sq.map(q => q.ord.wp.len)), CMD = $('CMD'), CQ = $('CQ');
-    ok(op.formT === Math.min(CMD.formMax, Math.max(CQ.form, far / $('AP').pace + $('AP').slack)) && op.formT > CQ.form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, not ' + CQ.form);
+    ok(op.formT === Math.min($('AP').form, Math.max(CQ.form, far / $('AP').run + $('AP').slack)) && op.formT >= CQ.form && op.formT <= $('AP').form, '  the forming up waits for the farthest walk (' + (far / 1000).toFixed(2) + ' km): ' + Math.round(op.formT) + ' s, from ' + CQ.form + ' to AP.form ' + $('AP').form + ' s');
     ok((op.ap.length === 2) === (a.ape !== b.ape), '  ' + (op.ap.length === 2 ? 'two elements, two approaches (' + op.ap.map(x => x.ang + '°').join(' and ') + ')' : 'one element, one approach (' + op.ap[0].ang + '°)'));
     /* H-hour: along the approach, through the assault position, into the objective */
     op.st = 'screen'; op.H = S.t; op.smk = false; $('OPS').atk(Cm, op);
     const O = op.O;
     const as = op.sq.filter(q => q.ord.k === 'assault'), ow = op.sq.filter(q => q.ord.k === 'overwatch');
+    const cut = (() => { try { return $('ORG').on ? $('ORG').poly.cut : 1; } catch (e) { return 1; } })();
+    const segNear = (p, c) => { let b = 1e9; for (let i = 1; i < p.length; i++) { const A = p[i - 1], B = p[i], dx = B.x - A.x, dz = B.z - A.z, L = dx * dx + dz * dz || 1, u = Math.max(0, Math.min(1, ((c.x - A.x) * dx + (c.z - A.z) * dz) / L)); b = Math.min(b, Math.hypot(A.x + u * dx - c.x, A.z + u * dz - c.z)); } return b; };
     ok(op.st === 'go' && as.length >= 2 && as.every(q => q.ord.wp && q.ord.wp === q.apw), 'H-hour: ' + as.length + ' squads assault, each along its approach' + (ow.length ? ', ' + ow.length + ' covers them' : ''));
-    ok(as.every(q => { const p = q.ord.wp, e2 = p[p.length - 1], ap = op.ap[q.ape]; return Math.hypot(e2.x - O.x, e2.z - O.z) < 1 && p.some(c => Math.abs(c.x - ap.pos.x) < 1 && Math.abs(c.z - ap.pos.z) < 1); }), '  through its assault position, into the objective');
+    ok(as.every(q => { const p = q.ord.wp, e2 = p[p.length - 1], ap = op.ap[q.ape]; return Math.hypot(e2.x - O.x, e2.z - O.z) < 1 && segNear(p, ap.pos) <= cut; }), '  through its assault position (within ' + cut + ' m: the organic movement rounds the corners), into the objective');
     ok(ow.every(q => q.ord.wp === q.apv && Math.hypot(q.ord.x - op.ap[q.ape].pos.x, q.ord.z - op.ap[q.ape].pos.z) < 1), '  the cover fires from its element\'s assault position, gone there along the approach');
     console.log('    orders: ' + op.sq.map(q => q.ord.k + (q.ord.wp ? ' (way ' + (q.ord.wp.len / 1000).toFixed(2) + ' km)' : '')).join(', '));
     $('opEnd')(Cm, op);
@@ -134,6 +142,64 @@ console.log('-- economy of force: a quiet post lends its squad and gets it back 
     const q = lent[0], back = q.back; $('opEnd')(Cm, op);
     ok(back && back.k === 'hold' && !q.op && q.ord.k === 'hold' && q.ord.x === back.x && q.ord.z === back.z && (q.job === 'line' || q.job === 'wood'), 'the assault over, opFree sends it back to its ' + q.job + ' post (the order it had)');
   }
+}
+
+console.log('-- cf-manobra-fix: assault squads first, more posts lend, a pool within reach, a forming up that is not given up --');
+{
+  const E = field(), { $, S, Cm, mk, sq, at, tg } = E, AP = $('AP'), CMD = $('CMD'), D = Cm.doc;
+  Cm.thr = 0; Cm.want = null; Cm.pn = null;
+  const P0 = $('cmdPosts')(Cm, sq(), {}), ip = P0.findIndex(e => e[0] === 'push');
+  ok(ip >= 0 && P0.slice(0, ip).every(e => e[0] === 'garr' && Cm.thr > 2) && P0[ip][1] >= D.push - 1 && P0.filter(e => e[0] === 'push').length === 1, 'cmdPosts: the assault squads (push) before every other post (' + P0.slice(0, 4).map(e => e[0] + ' ' + e[1]).join(', ') + ' …)');
+  Cm.thr = 3; const P1 = $('cmdPosts')(Cm, sq(), {}); Cm.thr = 0;
+  ok(P1[0][0] === 'garr' && P1[1][0] === 'push', '  a threatened town\'s garrison still first, then the push');
+  Cm.want = { ri: 0, n: D.push }; ok($('cmdPosts')(Cm, sq(), {}).find(e => e[0] === 'push')[1] === D.push, '  "sem força" asks for ' + D.push + ' of them'); Cm.want = null;
+  /* the low-value posts that may lend, quiet */
+  const pt = S.cq.p[1], f = mk('fpost', 0, 0), g1 = mk('garr', 0, 30), g2 = mk('garr', 1, 60), mi = mk('mil', 0, 90), eg = mk('egd', 0, 120), es = { x: at.x, z: at.z, dead: false };
+  g1.ord.tw = g2.ord.tw = pt; mi.ord.tw = pt; eg.ord.es = es;
+  $('cmdSense')(Cm, sq()); $('tmNow')(0); Cm.known = []; $('apQuiet')(Cm, sq());
+  for (const q of [f, g1, g2, mi, eg]) q.apK = S.t - AP.lend.calm - 1;
+  ok(['fpost', 'mil', 'garr', 'egd', 'line', 'wood'].every(j => AP.lend.jobs[j]), 'the posts that may lend: ' + Object.keys(AP.lend.jobs).join(', '));
+  ok($('apLend')(Cm, sq(), f) && $('apLend')(Cm, sq(), eg) && $('apLend')(Cm, sq(), mi) && $('apLend')(Cm, sq(), g1), '  a quiet fortification post, economy guard, militia and town garrison (another squad stays in the point) may lend');
+  f.apK = S.t; ok(!$('apLend')(Cm, sq(), f), '  not one an enemy was known near lately');
+  for (const q of [f, g1, g2, mi, eg]) for (const m of q.men) m.dead = true;
+  S.squads = S.squads.filter(q => q.live > 0 && q.men.some(m => !m.dead)); for (const q of [f, g1, g2, mi, eg]) q.live = 0;
+  /* a squad farther than AP.pool from every assembly is not in the pool */
+  const R = S.T.routes, Pt = $('cqObj')(tg), pl = $('apNow')(Cm, Pt, -1); let far = null;
+  for (let s = 0; s <= R[at.ri].len && !far; s += 50) { const p = $('routeAt')(R[at.ri], s), dA = Math.min(...pl.A.map(a => Math.hypot(p.x - a.asm.x, p.z - a.asm.z))), d = Math.hypot(p.x - tg.x, p.z - tg.z); if (dA > AP.pool + 200 && d < CMD.reach - 200 && $('hgt')(p.x, p.z) > S.T.WL + 2) far = p; }
+  const a = mk('road', 0, 0), b = mk('road', 1, 40), c = mk('road', 2, 80), x = $('addSquad')(0, far.x, far.z, at.ri, 0); x.job = 'road'; x.jk = 3; x.live = x.men.length; $('setOrd')(x, { k: 'hold', ri: at.ri, s: 0, x: far.x, z: far.z, R: 9 });
+  const pool = $('apPool')(Cm, sq(), Pt, -1, Pt, 4), dx = Math.round(Math.min(...pl.A.map(e => Math.hypot(far.x - e.asm.x, far.z - e.asm.z))));
+  ok(pool.length === 3 && !pool.includes(x), 'the pool: the three squads near an assembly, not the one ' + dx + ' m from the nearest (AP.pool ' + AP.pool + ' m)');
+  /* the assault: its true axis; a squad lost forming up replaced; the time up, it goes with the squads there */
+  Cm.apc = null; $('cmdAttack')(Cm, sq()); $('aiDrain')($('apWork')(Cm)); $('cmdAttack')(Cm, sq());
+  const op = Cm.ops.find(o => o.k === 'atk' && !o.over);
+  ok(op && op.formT <= AP.form, 'an assault opens (' + (op ? op.sq.length + ' squads, forming up in ' + Math.round(op.formT) + ' s at most' : 'none') + ')');
+  if (op) {
+    const f0 = $('apObj')({ ri: op.ri, s: op.O.s, x: op.O.x, z: op.O.z }, op.sd).f, d0 = Math.hypot(f0.x - op.O.x, f0.z - op.O.z);
+    ok(Math.abs(op.ax0 - (f0.x - op.O.x) / d0) < 1e-9 && Math.abs(op.az0 - (f0.z - op.O.z) / d0) < 1e-9, '  it keeps the true axis (op.ax0: toward its road\'s forming-up place) apart from op.ax');
+    const y = mk('road', 4, 120), lost = op.sq[0]; for (const m of lost.men) m.dead = true; lost.live = 0;
+    const n0 = op.sq.filter(q => q.live > 0).length; $('OPS').atk(Cm, op);
+    ok(!op.over && op.st === 'form' && op.sq.includes(y) && y.op === op && y.apo === op && y.ord.fast && op.rf === 1, '  a squad lost forming up: a free one takes its place (' + n0 + ' + 1 squads, element ' + y.ape + ')');
+    ok(((S.glog && S.glog.l[0]) || []).some(e => /substitui a perdida/.test(e.s)), '  and the log says so');
+    const live = $('opLive')(op); live.forEach((q, i) => { if (i < 2) { for (const m of q.men) if (!m.dead) { m.x = q.fp.x; m.z = q.fp.z; } q.at = true; } });
+    op.T = S.t - op.formT - 1; $('OPS').atk(Cm, op);
+    ok(!op.over && (op.st === 'prep' || (op.st === 'mv' && op.pr === 'p1')) && live.slice(2).every(q => q.late), 'the time to form up over with 2 of ' + live.length + ' there: it goes with them (st ' + op.st + (op.pr ? ', ' + op.pr : '') + '), the others late');
+    ok(((S.glog && S.glog.l[0]) || []).some(e => /no fim do prazo: segue com 2 de/.test(e.s)), '  and the log says so');
+    /* the analytics count the arrival against the true axis: a squad coming 90° off it is a flank even when op.ax faces its approach */
+    const ANA = $('ANA'), MVA = $('MVA'), was = ANA.on; ANA.on = 1; MVA.live = new Map();
+    op.st = 'go'; const q = live[0], ang = Math.atan2(op.az0, op.ax0) + Math.PI / 2, L = q.men.find(m => !m.dead); L.x = op.O.x + Math.cos(ang) * 600; L.z = op.O.z + Math.sin(ang) * 600;
+    op.ax = Math.cos(ang); op.az = Math.sin(ang);   // prScreen: op.ax toward the manoeuvre's side
+    op.sq = [q]; try { $('anaMvLook')(); } finally { ANA.on = was; }
+    const Ra = MVA.live.get(op); ok(Ra && Ra.a[3] + Ra.a[4] === 1 && Ra.a[0] === 0, 'the analytics: a squad arriving 90° off the true axis counts as a flank (bins ' + (Ra ? Ra.a.join(',') : '-') + '), not head-on by op.ax');
+    $('opEnd')(Cm, op);
+  }
+  /* an occupation open CMD.walkSlot s holds no slot */
+  Cm.ops = Cm.ops.filter(o => o.k !== 'atk'); const room = $('campN')(Cm), ws = [];   // with points the slots are the side's fronts at most (campRoom)
+  for (let i = 0; i < room; i++) ws.push({ k: 'atk', walk: true, T0: S.t, ri: i % R.length, st: 'cons', sq: [], over: false });
+  Cm.ops.push(...ws); Cm.atkT = 0; $('cmdAttack')(Cm, sq());
+  ok(Cm.gate === 'max', room + ' occupations just opened take the ' + room + ' assault slots (gate ' + Cm.gate + ')');
+  for (const o of ws) o.T0 = S.t - CMD.walkSlot - 1; Cm.atkT = 0; $('cmdAttack')(Cm, sq());
+  ok(Cm.gate !== 'max', '  open ' + CMD.walkSlot + ' s, they no longer do (gate ' + (Cm.gate || 'open') + ')');
+  for (const o of Cm.ops) if (!ws.includes(o) && o.k === 'atk') $('opEnd')(Cm, o);
 }
 
 console.log('-- gask ap --');

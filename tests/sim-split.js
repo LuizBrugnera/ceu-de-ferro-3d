@@ -50,4 +50,17 @@ console.log('-- M5 and M6 run without a browser --');
   const conv = (S.lg && S.lg.cv ? S.lg.cv.length : 0);
   ok(!err && !H.nan(S), 'an AI × AI match with the physical logistics runs 150 s' + (err ? ': ' + err.message : '') + (conv ? ' (' + conv + ' convoys)' : ''));
 }
+console.log('-- M5 on a map without a road network --');
+{
+  const C = H.load({ seed: 3, mapv: 1 }), $ = C.$, S = C.watch('ww2', { len: 0 }); C.run(5, null, 1 / 20);
+  const Cm = S.cmd[0], u = S.units.find(v => v.team === 0 && v.ai && !v.net && !v.dead && v.kind === 'tank' && v.rail && !v.fixed);
+  ok(!S.T.net && !!u, 'the old map (no network) with an AI tank on an axis');
+  if (u) {
+    const op = { k: 'atk', id: 1, O: { x: u.x + 800, z: u.z, s: u.s + 800, ri: u.ri }, sq: [{}, {}, {}], by: 'ai', ax: -1, az: 0, walk: false, over: false };
+    const tryIt = f => { try { f(); return null; } catch (e) { return e.message; } };
+    const e1 = tryIt(() => $('m5Atk')(Cm, op)), e2 = tryIt(() => $('m5Spot')(Cm, op, []));
+    u.ai.amb = { x: u.x + 600, z: u.z, T: S.t + 60 }; const e3 = tryIt(() => $('m5Amb')(u)); u.ai.amb = null;
+    ok(!e1 && !e2 && !e3, 'the assault\'s armour, its firing place and the ambush tank do not throw (they stay on the old ways)' + [e1, e2, e3].filter(Boolean).map(e => ': ' + e).join(''));
+  }
+}
 done();

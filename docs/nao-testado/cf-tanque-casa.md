@@ -1,5 +1,10 @@
 # Veículo bate na casa e quebra (cf-tanque-casa)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Tiger I a 25 m de uma casa, acelerando: ele entra na casa a ~4 m/s, a casa passa ao estágio 1 (furada de lado a lado), o tanque perde 6 de 130 de casco e segue, e entra na casa seguinte. Como o documento diz, a casa não desaba. Sem erro no console.
+- `tests/ram.js`: não rodou nesta tarefa (faltou tempo com a máquina cheia).
+- **Continua sem teste:** o online e os caminhões da IA batendo em paredes.
+
 ## O que mudou
 - **`RAM`** (perto de `bump`): cada veículo tem um peso por tipo (tanque 1, artilharia 0,8, antiaérea 0,6, blindado sobre rodas 0,45, caminhão 0,3, carro 0,15, veículo-rádio sobre lagartas 0,35; uma def pode ter `ram` próprio). O golpe é `peso × velocidade de fechamento / 20 m/s`; abaixo de 2,5 m/s não conta. Um golpe por veículo a cada 0,6 s.
 - **`ramHit`**: o golpe de um casco contra o que está de pé.
@@ -10,12 +15,23 @@
 - **Online**: sem mensagem nova. O golpe de um convidado vai ao host pelo `cityBlast`/`hitObj` (`Net.yb`, `Net.ohit`), como um tiro. O dano no próprio veículo é local (`rx`).
 - Pathing: nada novo. Uma casa caída já sai da navegação (`navMark`).
 
-## NÃO testado
-Nada foi rodado além disto: sintaxe do script da página (`node --check`), o servidor sobe e a página abre sem erro de script.
-- Nenhum teste de jogo: não vi um tanque atravessar uma casa, nem um caminhão bater.
-- Os valores (45, 70, 2,5 m/s, 0,25 de batida, 40% de velocidade) não foram calibrados.
-- Online (host e convidado) não foi testado.
-- IA: veículos da IA fora da estrada que roçam paredes podem agora levar dano de batida.
+## Testado em bbd5085: corrigido (tarefa cf-testar-mundo)
+
+`tests/ram.js` (novo, no `tests/all.sh`), https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/115:
+- Tanque a toda velocidade numa casa: a parede abre e ele atravessa a ~40% da velocidade, perdendo ~4% do hp. Abaixo de 2,5 m/s não há golpe.
+- Prédio grande (`block`): ganha buraco e não é atravessado. O soldado no térreo junto ao golpe se fere.
+- Carro na casa: bate, volta e perde hp, e a parede fica de pé. O carro e o caminhão abrem a parede do celeiro, e o carro derruba o poste da base.
+- **Bugs corrigidos:**
+  - O golpe só ia pela explosão (`cityBlast`), cujo dano cai do meio de cada vão: o carro a 28 m/s no celeiro, o caminhão, e até o Tiger num `block` não quebravam nada. Agora o vão atingido (`ramWall`) leva o golpe inteiro, vezes `RAM.shed` (3) para o casco leve contra galpão.
+  - `RAM.crash` 0,25 → 0,1: nos passeios por cidade de `tests/world.js`, caminhões morriam só de bater em parede. Hoje um caminhão aguenta quatro batidas a toda velocidade.
+- Partida IA × IA (1944, mapa 5, 300 s): 14 golpes de tanque (7 de hp no total), nenhuma batida de caminhão ou carro, nenhum veículo morto por batida.
+- `tests/world.js`: com o RAM, o tanque derruba a casa antiga (`OBJ house`) e passa; o teste passou a começar cada direção do estágio testado. `city` passa.
+
+## O que NÃO foi testado
+
+- A casa **não desaba** depois que o tanque atravessa: fica no estágio 1, com o buraco de lado a lado. O esperado do doc era "desaba em alguns segundos". Se uma casa arrombada deve cair é escolha de desenho (o modelo de apoio do `bldSettle`), e ficou como está.
+- Online (anfitrião e convidado batendo na mesma casa) e a cena no navegador.
+- `tests/world.js` ainda falha "town N: nobody stuck" também no main: os veículos parados ali morrem de colisão entre veículos (`cf-colisao-veiculos`), não de batida em parede.
 
 ## Riscos
 - Caminhão ou carro da IA andando rápido numa cidade e se destruindo nas paredes (`RAM.crash` alto demais).

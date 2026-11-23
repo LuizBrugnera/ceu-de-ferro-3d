@@ -5,13 +5,26 @@
    sends its match. About 40 s */
 const fs = require('fs'), path = require('path'), os = require('os'), zlib = require('zlib'), http = require('http'), { spawn } = require('child_process');
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-ana-srv-'));
-process.env.ANA_DIR = DIR;
+process.env.ANA_DIR = DIR; process.env.ANA_RATE = '10';   // the rate this suite counts against (the server's default is 30)
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const get = (p, port) => new Promise(res => http.get({ host: '127.0.0.1', port: port || N.PORT, path: p }, r => { let b = ''; r.on('data', d => { b += d; }); r.on('end', () => res({ code: r.statusCode, b, type: r.headers['content-type'] })); }).on('error', () => res({ code: 0, b: '' })));
 const post = (p, body, port) => new Promise(res => { const q = http.request({ host: '127.0.0.1', port: port || N.PORT, path: p, method: 'POST', headers: { 'content-type': 'application/json' } }, r => { let b = ''; r.on('data', d => { b += d; }); r.on('end', () => res({ code: r.statusCode, b })); }); q.on('error', () => res({ code: 0 })); q.end(typeof body === 'string' ? body : JSON.stringify(body)); });
 const list = era => { try { return fs.readdirSync(path.join(DIR, era)); } catch (e) { return []; } };
 const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
 (async () => {
+  /* every kind of event the page sends is one the server keeps: it refuses a whole batch with one unknown event. The brain's cb meters were
+     not in the server's list, and a brain event whose data had a k of its own (pel-forma's 'def', a cover's 'veiculo') went out under that
+     kind: an online match lost every such batch, its end and summary with them */
+  {
+    const page = fs.readFileSync(H.PAGE, 'utf8'), srv = fs.readFileSync(N.SERVER, 'utf8'), m = srv.match(/kinds: new Set\(\[([^\]]*)\]\)/);
+    const known = new Set(m ? m[1].split(',').map(k => k.trim().replace(/'/g, '')) : []), sent = new Set([...page.matchAll(/anaPush\((?:Object\.assign\()?\{ k: '([a-z0-9]+)'/g)].map(a => a[1]));
+    const miss = [...sent].filter(k => !known.has(k));
+    ok(sent.size >= 10 && !miss.length, 'every kind the page sends (' + [...sent].join(' ') + ') is a kind the server keeps' + (miss.length ? ': not ' + miss.join(', ') : ''));
+    const P = H.load({ ana: true }).$, A = P('ANA'), pk = A.kinds ? [...A.kinds].sort().join() : 'none';
+    ok(pk === [...known].sort().join(), 'the page\'s list of kinds (ANA.kinds) is the server\'s: ' + pk);
+    A.ev = []; A.q = []; P('anaPush')({ k: 'def', t: 1, s: 0, st: 'pel-forma', p: 3 }); P('anaPush')({ k: 'nope', t: 1 });
+    ok(A.ev.length === 1 && A.ev[0].k === 'cb' && A.ev[0].kd === 'def' && A.ev[0].st === 'pel-forma', 'a brain event whose data brought k \'def\' goes as cb (kd def); an unknown event with no subkind is left out');
+  }
   /* an old file and a fresh one, before the server starts: the old one goes */
   fs.mkdirSync(path.join(DIR, 'ww2'), { recursive: true });
   const oldF = path.join(DIR, 'ww2', '2026-01-01-aaaaaaaaaaaa.ndjson.gz'), newF = path.join(DIR, 'ww2', '2026-11-01-bbbbbbbbbbbb.ndjson.gz');
@@ -31,13 +44,15 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   g.send({ t: 'ana', n: 0, e: [sn(5)] }); h.send({ t: 'ana', n: 3, e: [sn(5)] }); h.send({ t: 'ana', n: 0, e: [{ k: 'nope', t: 1 }] }); h.send({ t: 'ana', n: 0, e: [{ k: 'sn' }] }); h.send({ t: 'ana', n: 0, e: 'x' });
   await N.sleep(200);
   ok(lines(F).length === 2, 'refused: a guest\'s batch, another match, an unknown kind, an event without its time, a batch that is not a list');
+  h.send({ t: 'ana', n: 0, e: [sn(7), { k: 'veiculo', t: 7 }, { k: 'cb', t: 7, s: 0, st: 'med' }] }); await N.sleep(200);
+  ok(lines(F).length === 4 && lines(F)[2].k === 'sn' && lines(F)[3].k === 'cb', 'a stray event (unknown kind) is left out and the rest of its batch kept, cb among the known kinds (cf-pol-fluxos: one stray cb lost whole batches, the end with them)');
   const mano = [{ k: 'mv', t: 21, s: 0, id: 2, m: 'flk', by: 'ai', h: 1 }, { k: 'ap', t: 22, s: 0, id: 1, L: 'E', walk: 0, a: [1, 0, 0, 2, 0, 0], off: 2, mv: ['flk'] }, { k: 'ab', t: 23, s: 1, id: 3, f: 'amb', e: 'arm' }, { k: 'tr', t: 24, d: 60, e: null, o: [1, 2], v: [[1, 0, 0, 0], [0, 0, 0, 0]] }];
   h.send({ t: 'ana', n: 0, e: [sn(10)] }); h.send({ t: 'ana', n: 0, e: [sn(20)].concat(mano) }); await N.sleep(200);
-  const L = lines(F); ok(L.length === 8 && L[2].t === 10 && L[3].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
-  ok(L.slice(4).map(e => e.k).join() === 'mv,ap,ab,tr', 'the general\'s manoeuvre events (mv, ap, ab, tr) are known kinds');
+  const L = lines(F); ok(L.length === 10 && L[4].t === 10 && L[5].t === 20 && !JSON.stringify(L).includes('nome real'), 'later batches are appended (gzip members that read as one) and no player name is written');
+  ok(L.slice(6).map(e => e.k).join() === 'mv,ap,ab,tr', 'the general\'s manoeuvre events (mv, ap, ab, tr) are known kinds');
   for (let i = 0; i < 12; i++) h.send({ t: 'ana', n: 0, e: [sn(100 + i)] });
   await N.sleep(300); const n2 = lines(F).length;
-  ok(n2 - 8 === 7, 'too fast: of 12 batches at once, ' + (n2 - 8) + ' kept (10 a window of 15 s, 3 already used)');
+  ok(n2 - 10 === 6, 'too fast: of 12 batches at once, ' + (n2 - 10) + ' kept (10 a window of 15 s, 4 already used)');
   ok(!fs.existsSync(F.replace('.ndjson.gz', '.json')), 'no summary before the end');
   const lp = JSON.parse((await get('/ana/list')).b), inProg = f[0].slice(0, -10);
   ok(lp.m.length === 0 && (await get('/ana/m/ww2/' + inProg)).code === 404 && (await get('/ana/r/ww2/' + inProg)).code === 404, 'a match still in progress is neither listed nor served');
@@ -76,6 +91,7 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   h2.close(); g2.close(); g.close();
   for (const n of list('ww2')) fs.unlinkSync(path.join(DIR, 'ww2', n));
   const C = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: 5, ana: true }), $ = C.$, Net = $('Net');
+  C.newState('ww2', 'tiger', { cls: 'tank' });   // the battlefield built once before it connects: a first newState in the welcome can outlast the relay's 10 s heartbeat on a loaded machine (1006)
   await new Promise((res, rej) => { Net.ui.welcome = () => { C.newState('ww2', 'tiger', { net: true, cls: 'tank', host: Net.host === Net.id }); res(); }; Net.ui.refused = c => rej(new Error(c)); Net.connect('ww2', 'Host', 'tank', 'tiger'); });
   const S = () => $('S'); let i = 0;
   for (; i < 60 * 40; i++) { C.step(1 / 60); Net.tick(1 / 60); if (i === 60 * 32) S().cq.T = .1; if (i % 4 === 0) await new Promise(r => setImmediate(r)); }

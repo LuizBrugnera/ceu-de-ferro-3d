@@ -1,5 +1,9 @@
 # Ponte nova em qualquer ponto do rio (cf-pontes-qualquer-lugar)
 
+## Testado em 01a2c7d (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em 1944: uma ponte nova (obra 10) num trecho do rio, terminada com `fortAt`. O diário diz "Ponte nova pronta: ponte no rio (em campo aberto), uma travessia nova". No mapa do General, traço contínuo (o pontão, tracejado). Na cena, o tabuleiro de lajes de pedra, os pilares na água e as bordas dos parapeitos. Nenhum erro.
+- **Continua sem teste:** a IA escolhendo `nbr` sozinha numa partida longa.
+
 Pedido do capitão: "a ponte pode ser feita em qualquer lugar tambem".
 
 ## O que mudou
@@ -12,14 +16,21 @@ Pedido do capitão: "a ponte pode ser feita em qualquer lugar tambem".
 - A IA usa a manobra `nbr` (pontuação 0,7) quando o inimigo segura a cabeceira de uma ponte caída do seu eixo e ela tem como pagar.
 - Servidor: `FKINDS` 10 e `bnb: 1` no welcome.
 
-## O que NÃO foi testado (nada além do smoke)
-- Construir, terminar, rotear pelo vão, destruir e construir de novo.
-- Sincronização online (linha `fort` tipo 10), incluindo quem entra depois.
-- Escolha da IA (`MANG.nbr`), a manobra (`OPS.nbr`, `brSiteTick` com tipo 10) e as recusas (`cost`, `pcap`, `pont`, `site`).
-- Desenho 3D (tabuleiro de pedra com parapeitos e pilares) e o traço contínuo no mapa 2D.
-- MCP `build_bridge`.
-- Os testes antigos que esperam que o tipo 10 seja inválido (`forts-relay`, `sappers-relay`) e o `FORT.K.length` em `tests/posts.js` vão precisar de ajuste.
-- Só rodou: sintaxe da página, do servidor e do MCP; 40 s de uma partida IA × IA sem NaN; o servidor sobe.
+## Testado em bbd5085: ok (tarefa cf-testar-mundo)
+
+Seções novas em `tests/bridges-build.js`, `bridges-online.js`, `bridges-relay.js` e `mcp-general.js` (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/113):
+- Construir: só num trecho (`brSite`), não na cabeceira de uma ponte caída. Um sapador leva 720 s e quatro, 288 s. Só uma obra por trecho (`pont` para pontão e para outra ponte).
+- Terminar e rotear: pronta, o vão custa 1 (estrada; o pontão custa 1,6). Com todas as pontes caídas, `tripOf` de base a base passa por ela.
+- Destruir e refazer: 1500 de vida e o fuzil não faz nada. `hitObj` fecha o rio e mata quem estava em cima; um `fortStart(10)` novo no mesmo trecho funciona.
+- Limite: pontões e pontes novas contam juntos no limite de 3 por lado (`pcap`). Custo: recusa `cost` com 99 de metal e cobra 20 de energia e 100 de metal.
+- General: `man bridge` abre a op `nbr`, a esquadra constrói, `brg` lista a ponte (própria, aberta), e uma segunda no mesmo trecho é recusada (`pont`). `MANG.nbr` vira candidata (0,7) quando o inimigo segura as cabeceiras das pontes caídas, e não vira com elas livres.
+- Online, pelo servidor de verdade: `bnb: 1`; o pedido do convidado (`fbuild` k 10) faz o anfitrião começar a ponte, que todos têm sob o mesmo id; pronta, ela carrega como estrada em todos; quem entra depois a recebe; destruída, some em todos. Nos relays, `fort`/`fbuild` k 10 passam, k 11 é recusado e `gcmd man bridge` chega.
+- MCP `build_bridge` vira `man {k: bridge, x, z}`. `forts-relay`, `sappers-relay` e `posts` ajustados para o tipo 10.
+
+## O que NÃO foi testado
+
+- O desenho 3D (tabuleiro de pedra, parapeitos, pilares) e o traço contínuo no mapa 2D, no navegador.
+- A IA escolhendo `nbr` numa partida longa por conta própria (só a candidata, com uma esquadra livre posta no lugar).
 
 ## Riscos
 - Uma ponte nova e um pontão disputam o mesmo trecho: só cabe um.

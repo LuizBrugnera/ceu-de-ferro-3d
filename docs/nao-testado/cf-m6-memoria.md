@@ -1,5 +1,9 @@
 # M6 Memória e imprevisibilidade: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): parte
+- Navegador, Assistir em 1944 (9 min): `mmView(0)` responde com a memória do lado. Lá estavam uma manobra (`inf` em Vila do Moinho, −0,14: não tomou o ponto) e a logística: dois eixos para um nó e um trecho da rede mais caros (`lg` 1,49 e 0,72; `le` 2,21) depois de comboios perdidos. Ou seja, a memória de manobras e a de comboios perdidos gravam numa partida de verdade. Nenhum assalto terminou nesses 9 min, então a memória das abordagens (`a`) ficou vazia.
+- **Continua sem teste:** a memória de um assalto que termina, o veto da terceira vez, o efeito da temperatura na diversidade, se o comboio seguinte muda de fato de eixo, o `keep` no relay e o `tests/memoria.js` sugerido abaixo.
+
 Tarefa `cf-m6-memoria`, pacote M6 da proposta de manobra do general (D8 = A: sorteio com temperatura pela personalidade e dificuldade + memória de abordagens). Fica em cima do M2 (abordagens), M3 (procedimentos), M4 e M5.
 Pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado em partida**.
 

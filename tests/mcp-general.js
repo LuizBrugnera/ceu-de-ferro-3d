@@ -10,6 +10,7 @@ fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.ndjson.gz'), zlib.gzipSync('{"
 fs.writeFileSync(path.join(ANAD, 'ww2', MATCH + '.json'), JSON.stringify({ id: MATCH, era: 'ww2', src: 'tourney', hdr: { fac: ['A', 'B'], doc: ['cautious', 'aggressive'] }, end: { win: 0, why: 2, t: 1800 }, rep: { win: 0, dur: 1800, whyTxt: 'o tempo acabou' } }));
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const MCP = path.join(__dirname, '..', 'mcp-general.js'), kids = [];
+const VER = /const VERSION = '([^']+)'/.exec(fs.readFileSync(MCP, 'utf8'))[1];   // the bridge's own version: the check follows it as it grows
 function bridge(env) {
   const p = spawn(process.execPath, [MCP], { env: Object.assign({}, process.env, { CEU_URL: 'ws://localhost:' + N.PORT, CEU_ROOM: 'modern', CEU_SIDE: '1', CEU_KEY: 'secret', CEU_NAME: 'T' }, env), stdio: ['pipe', 'pipe', 'ignore'] });
   kids.push(p);
@@ -81,6 +82,7 @@ function bridge(env) {
   await new Promise(r => setTimeout(r, 300)); const dm = await b.call('demolish_bridge', { x: 12000, z: -2600, why: 'recuo' }); ok(!dm.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'demolish', x: 12000, z: -2600, why: 'recuo' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'demolish_bridge maps to man {k: demolish, x, z}');
   await new Promise(r => setTimeout(r, 300)); const lp = await b.call('lay_pontoon', { x: 12000, z: -2600 }); ok(!lp.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'cross', x: 12000, z: -2600 }).sort()), 'lay_pontoon maps to man {k: cross, x, z}');
   await new Promise(r => setTimeout(r, 300)); const rbr = await b.call('rebuild_bridge', { x: 12000, z: -2600, why: 'eixo' }); ok(!rbr.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'rebuild', x: 12000, z: -2600, why: 'eixo' }).sort()), 'rebuild_bridge maps to man {k: rebuild, x, z}');
+  await new Promise(r => setTimeout(r, 300)); const nbr = await b.call('build_bridge', { x: 7400, z: 2300, why: 'flanco' }); ok(!nbr.isError && last() === JSON.stringify(Object.entries({ c: 'man', k: 'bridge', x: 7400, z: 2300, why: 'flanco' }).sort()), 'build_bridge maps to man {k: bridge, x, z}');
   const nl = seenCmd.length, bad3 = [await b.call('send_convoy', { node: 'X1' }), await b.call('send_convoy', {}), await b.call('set_supply_priority', { node: 'p2', priority: 9 })];
   ok(bad3.every(r => r.isError) && seenCmd.length === nl, 'a node that is not b<id> or p<index>, none, or a priority out of -1..3: refused locally');
   const rv = await b.call('recover_vehicle', { id: 7, why: 'tanque na estrada' }); ok(!rv.isError && last() === JSON.stringify(Object.entries({ c: 'recv', id: 7, why: 'tanque na estrada' }).sort()) && seenCmd[seenCmd.length - 1].d === 'cmd', 'recover_vehicle maps to recv {id, why}');
@@ -154,7 +156,7 @@ function bridge(env) {
   const qn = await b.call('send_command', { question: { q: 'nope' } });
   ok(!qp.length && qn.isError, 'every question the host answers (§10 and W13: ' + qk.length + ') goes through the bridge and the relay to it, an unknown one does not (' + qp.join(', ') + ')');
   const tl2 = (await b.rpc('tools/list')).result.tools.map(t => t.name), initV2 = await b.rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } });
-  ok(['get_threats', 'get_missions', 'get_unit', 'get_lots', 'get_mines', 'create_campaign', 'attach_operation', 'end_campaign', 'set_defence_policy', 'triage_threat', 'send_qrf', 'claim_deposit', 'lay_minefield', 'clear_mines', 'sabotage', 'arm_militia'].every(x => tl2.includes(x)) && initV2.result.serverInfo.version === '2.0.0', 'tools/list has the MCP v2 tools and the server says version 2.0.0');
+  ok(['get_threats', 'get_missions', 'get_unit', 'get_lots', 'get_mines', 'create_campaign', 'attach_operation', 'end_campaign', 'set_defence_policy', 'triage_threat', 'send_qrf', 'claim_deposit', 'lay_minefield', 'clear_mines', 'sabotage', 'arm_militia', 'get_tactical_map', 'plan_approaches', 'order_maneuver', 'plan_ambush', 'guard_route'].every(x => tl2.includes(x)) && initV2.result.serverInfo.version === VER, 'tools/list has the MCP v2 tools and M7\'s manoeuvre tools, and the server says its version ' + VER + ' (' + initV2.result.serverInfo.version + ')');
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');

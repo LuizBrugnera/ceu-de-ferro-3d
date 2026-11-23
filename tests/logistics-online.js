@@ -57,6 +57,37 @@ async function run(secs, each) {
   const u = host.S.lg.cv[0].u; await run(3); const gu = g.S.units.find(o => o.aid === u.aid);
   ok(gu && hd(gu, u) < 30, 'the guests see its truck on the road');
 
+  console.log('-- a guest\'s requisition refunded, and what is refused (W11: the host checks the crates a guest gives back) --');
+  {
+    const RQ = host.$('RQ'), hb = () => host.S.sup.find(o => o.id === b.id), stand = (c, x, z) => { const M = c.S.my; M.x = x; M.z = z; M.y = c.$('hgt')(x, z); M.v = { x: 0, y: 0, z: 0 }; M.inv = 1e9; };
+    const ask = async () => {   // the guest on foot in base b asks for a truck; the host grants it and takes its crates
+      host.S.cq.rq = {}; stand(g, b.x + 6, b.z + 6); await run(1.5, () => stand(g, b.x + 6, b.z + 6));
+      const c0 = hb().lc, why = g.$('rqAsk')('trn', 'hemtt'); await run(4);
+      return { why, paid: c0 - hb().lc, rq: host.Net.lgRq.get(g.id), truck: g.S.cls === 'trn' && !g.S.my.man };
+    };
+    const out = async hp => {   // the guest drives a little, comes back to the base and gets out (F)
+      const V = g.S.my; V.x = b.x + 12; V.z = b.z + 12; V.y = g.$('hgt')(V.x, V.z); V.v = { x: 0, y: 0, z: 0 }; V.sp = 0;
+      await run(1.5); const c0 = hb().lc; if (hp) { V.hp = V.max * hp; await run(.3); V.hp = V.max * hp; }   // hit just before it gets out (a supply base repairs what stands in it)
+      g.$('alight')(g.S.rider); for (let i = 0; i < 30 && hb().lc === c0; i++) await run(.2); await run(1);
+    };
+    const a = await ask(), n = Math.floor(a.paid * RQ.refund);
+    ok(a.why === '' && a.truck && a.paid === LG.cost.truck && a.rq && a.rq.c === a.paid, 'a guest in base ' + b.id + ' requisitions a truck: the host grants it, takes ' + a.paid + ' crates and notes what it was paid (Net.lgRq)');
+    const c1 = hb().lc; await out(); const c2 = hb().lc;
+    ok(c2 === c1 + n && g.S.my.man && !host.Net.lgRq.has(g.id), 'it comes back whole and gets out there: the base gets ' + n + ' crates back (floor(' + a.paid + ' x ' + RQ.refund + '), ' + c1 + ' -> ' + c2 + ') and the record is used up');
+    g.Net.send('lsp', { k: 2, id: b.id, n }); await run(3);
+    ok(hb().lc === c2, 'the same give-back again (lsp k 2, n ' + n + '): refused, one refund a requisition');
+    for (let i = 0; i < 4; i++) { g.Net.send('lsp', { k: 2, id: b.id, n: 20 }); await run(.5); } await run(2);
+    ok(hb().lc === c2, 'a cheat sending lsp {k: 2, n: 20} again and again with no requisition: the base does not change (' + hb().lc + ')');
+    const a2 = await ask(); const c3 = hb().lc;
+    g.Net.send('lsp', { k: 2, id: b.id, n: Math.floor(a2.paid * RQ.refund) }); await run(3);
+    ok(a2.why === '' && a2.truck && hb().lc === c3, 'a give-back while still in the truck (no crew row yet): refused');
+    { const V = g.S.my; V.x = b.x + 700; V.z = b.z; V.y = g.$('hgt')(V.x, V.z); V.v = { x: 0, y: 0, z: 0 }; V.sp = 0; await run(1.5); g.$('alight')(g.S.rider); await run(1.5); }   // out far from any depot: nothing to give back
+    const a3 = await ask(); const c4 = hb().lc;
+    await out(.5);
+    g.Net.send('lsp', { k: 2, id: b.id, n: Math.floor(a3.paid * RQ.refund) }); await run(3);
+    ok(a3.why === '' && a3.truck && hb().lc === c4, 'a truck left at half its hp (under ' + RQ.hp * 100 + '%): no refund, whatever the guest sends (' + (a3.why || 'granted') + ', ' + c4 + ' -> ' + hb().lc + ')');
+  }
+
   console.log('-- the next host keeps the stocks --');
   const keep = { b: b.lc, p: own.map(o => o.lc) }; host.on = false; host.Net.ws.close(); all.splice(all.indexOf(host), 1);
   await run(4);

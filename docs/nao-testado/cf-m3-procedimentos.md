@@ -1,7 +1,11 @@
 # M3 Procedimentos de manobra: o que mudou e o que não foi testado
 
+## Testado em ffff56d (cf-pol-testes-b, 2026-11-20): falha (1 checagem) e uma suíte que cai
+- `tests/procedures.js`: 32 ok e 1 falha. Na hora H do P1, a fixação não está em `overwatch` na base com a manobra em `assault` ("the fixing element fires from its base, the manoeuvre assaults"). A causa da hora H, lida no código: desde o pelotão (P8, #144, `CEREBRO: pelotao`) a manobra segura (`hold`, passo "espera") na hora H até ouvir a base atirar, por até `PEL.fogo.max` = 45 s. O próprio `cf-p8-pelotao.md` avisa (risco 2) e pedia para rodar `approaches` e `procedures` com o pelotão no meio. O cenário do teste chama `OPS.atk` uma vez só, sem base atirando, e encontra `hold, hold, overwatch`. O ajuste dos dois testes é `PEL.on = 0` nesses cenários, como eles já fazem com `PR.on = 0`. O portão do pelotão fica com `tests/brain-pelotao.js`.
+  - **Confirmado em 2026-11-21**: com `PEL.on = 0` no cenário, `procedures` passa inteiro e a hora H do `approaches` passa ("2 squads assault, each along its approach, 1 covers them"). Os dois testes foram ajustados assim (lote 2 desta tarefa). Ficam no `approaches` só as 4 falhas da reunião.
+- `tests/man-c.js` **cai** no meio (`TypeError: Cannot read properties of undefined (reading 'spec')`, `tests/man-c.js:107`): o cenário do `cut` não acha nenhum candidato (`score undefined`) e o teste lê `c.spec` sem conferir. Antes eram 7 falhas (`blk`, `fnt`; veja a memória de falhas antigas). Agora `blk` falha 3 vezes antes da queda. Não consertado: é código da manobra.
+
 Tarefa `cf-m3-procedimentos`, pacote M3 da proposta de manobra do general (D1-D12 = A). Fica em cima das abordagens do M2 (`AP`, `atkAp`).
-Pela regra do capitão ("implemente tudo sem testes e documente o que não foi testado"), **nada disto foi testado em partida**.
 
 ## O que mudou (`Céu de Ferro 3D.html`, bloco `PR` logo depois do M2)
 
@@ -9,7 +13,7 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
   - Nota = valor do objetivo × chance (razão, exposição, ângulo) − custo (minutos da maior caminhada, perdas esperadas pela exposição).
   - A nota é multiplicada pelo gosto do lado (`PR.pw`: o `w` da personalidade, o `MANW` da doutrina e o `taste` da partida).
   - Sorteio entre os 3 melhores, com peso no quadrado da nota. O diário registra "Procedimento do assalto a X: ... (nota; também avaliados ...)". `C.prEv` guarda a última avaliação.
-- **P1 Fixar e flanquear (padrão)**. Exige 2 ou mais esquadras e uma abordagem a ≥ 60° do eixo, com exposição ≤ 0,6 × a do eixo + 10 pontos e comprimento ≤ 1,8×.
+- **P1 Fixar e flanquear (padrão)**. Exige 2 ou mais esquadras e uma abordagem a ≥ 45° do eixo, com exposição ≤ 0,8 × a do eixo + 15 pontos e comprimento ≤ 2,2× (`prFlankOk`; eram 60°, 0,6 × + 10 e 1,8× até o cf-manobra-fix).
   - A fixação vai para a reunião do eixo; a manobra (1 esquadra, ou 2 com 4 ou mais) vai para a do flanco.
   - Reunidas, a manobra anda em silêncio até a posição de assalto e a fixação ocupa em silêncio a base de fogo, a 300-450 m (estado novo `mv`).
   - A hora H é a chegada da manobra. Na hora H há fogo e fumaça, com a cortina virada para o lado da manobra. A manobra assalta e a fixação atira da base (`overwatch`). A fixação entra quando o combate chega ao objetivo.
@@ -33,12 +37,20 @@ Pela regra do capitão ("implemente tudo sem testes e documente o que não foi t
 - O evento `ap` da medição (M0) ganhou o campo `pr`, com o procedimento escolhido.
 - `PR.on = 0` volta ao assalto do M2, para o A/B.
 
+## Testado em 9f2a313 (tarefa cf-testar-ia)
+
+- **Bug corrigido** em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/97: os estados novos `mv` e `rec` não contavam como "antes da hora H" em nenhum outro lugar. Os blindados do eixo deixavam de esperar na linha de partida (andavam sozinhos para o objetivo enquanto a manobra caminhava), a campanha não adiava a hora H por uma frente em `mv`/`rec`, o M5 não chamava os tanques, a finta e o apoio não se ligavam, e a vista mostrava `mv`/`rec` crus. Agora `atkPreH` cobre os dois (o risco "Campanhas" e o do M5 abaixo ficam resolvidos).
+- `tests/procedures.js` (novo, no `tests/all.sh`): o P1 percorre os estados (reunião → `mv` com a manobra para a posição de assalto do flanco e a fixação para a base de fogo a ~430 m → hora H quando a manobra chega → fixação em `overwatch` e manobra em assalto) e o abandono por atraso (cancelado, com o motivo no diário): **ok**. Mais as checagens do bug acima.
+- `tests/approaches.js`, `tests/man-b.js`, `tests/man-view.js`, `tests/personality.js`, `tests/w13.js`: passaram. `tests/campaign.js`: corrigido em https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/116 (o sorteio do `prPick` mudou a partida semeada e o cenário da QRF ficou sem resposta).
+- `general` (3), `gen-cmd` (1), `man-a` (3: notas do `dep`/`gue`, dos embrulhos de nota posteriores), `man-c` (blk e cut): falhas que não são deste pacote (o `blk` já falhava antes; ver a memória de falhas antigas).
+- Partidas no harness: 1944 12 min (lado 1 sorteou P6, P1 e P2) e hoje 15 min (P1): sem erro.
+
 ## O que NÃO foi testado
 
-- Nada rodou em partida: nem um assalto com procedimento, nem o desbordamento, nem a infiltração pelas abordagens. Não sei se algum P1 chega à hora H.
-- Nenhuma suíte foi rodada (`approaches`, `campaign`, `man-a/b/c`, `general`, `drills`, `personality`, `field` ...), nem o A/B, nem custo por quadro.
-- Só se verificou que o script principal compila (`node --check`) e que a página abre no Chrome sem erro de JavaScript (com o servidor em 127.0.0.1).
-- Online: os estados novos (`mv`, `rec`) e o `trn` só rodam no anfitrião. O convidado não foi testado. As chaves novas do relay (`ap`, `ap2`) são do M7 e não entraram.
+- Nenhum assalto com procedimento chegou a `mv` nas duas partidas medidas: o P1 e o P2 ficaram em reunião 200-600 s até o fim (12 e 15 min). Não se sabe se é só a caminhada longa (`op.formT` até 900 s) ou se a reunião trava; falta uma partida de 30 min ou mais com `atklog`.
+- A distribuição P1/P2/P5/P6/P12 em muitas partidas, `PR.late`/`PR.lost`, o desbordamento (`trn`) e a infiltração pelas abordagens em partida, o A/B e o custo por quadro.
+- Online: os estados novos e o `trn` só no anfitrião; o convidado não foi testado.
+- A junção com o M7 (`trn` pelo M3 e pelo M7, `MANT.trn`).
 
 ## Riscos
 

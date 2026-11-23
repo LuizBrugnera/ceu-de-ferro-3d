@@ -1,5 +1,11 @@
 # cf-radio-rede: antenas de rádio e brechas na rede de comando (não testado)
 
+## Testado em c397126 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- Navegador, Assistir em Hoje (3 lados): a IA do lado 0 ergueu sozinha uma antena aos 147 s ("Antena de rádio pronta junto a E · Vila das Oliveiras: a rede cobre 4,4 km em volta"). Na cena, o mastro treliçado com o rádio no pé; na Visão de General, a antena no mapa. Nenhum erro no console.
+- Achado: na Visão de General, perto de um ponto com muitas esquadras e obras (Vila das Oliveiras), os rótulos das unidades se amontoam num nó ilegível.
+- `tests/radio.js`: 55 ok e 3 falhas (2 de custo com a máquina cheia; a da mensagem da Visão de General acima do limite, consertada: veja `cf-radio-general.md`). `tests/comms.js`: as seções medidas passaram.
+- **Continua sem teste:** o convidado de infantaria construindo a antena com N, o servidor antigo recusando, o anel de brecha e o botão Rádio vistos de perto.
+
 Pedido do capitão: "muitas vezes o general fica com muitas areas do mapa sem rede, deve ser possivel construir radios e andar com carros ou tropas de radio tambem deve resolver esse problema e expandir a zona do radio".
 
 ## O que mudou
@@ -12,19 +18,32 @@ Pedido do capitão: "muitas vezes o general fica com muitas areas do mapa sem re
 - **MCP**: `build_defence` e `request_support` aceitam `radio`; textos novos `rcap`, `nrad`, `crl` na tabela PT.
 - Docs: README (parágrafo "Antenas de rádio e brechas na rede", ciclo do N) e MCP.md.
 
+## Testado em bbd5085: ok (tarefa cf-testar-mundo)
+
+`tests/radio.js` roda inteiro, com as batalhas IA × IA de 240 s nas duas épocas, e entrou no `tests/all.sh` (https://github.com/LuizBrugnera/ceu-de-ferro-3d/pull/119). As falhas eram do teste:
+- a economia só existe numa partida (conquista solo esvaziada, como `posts.js`);
+- o limite de obras agora vem de `fortCap`;
+- o custo da antena é cobrado na ordem;
+- a meta de 300 s era mais curta que a caminhada de 1 km dos engenheiros (o general fecha a brecha em ~330 s);
+- o anel da brecha na vista é a lista do planejador, a cada 5 s.
+
+Verificado:
+- a antena pelo caminho do general fica pronta, é paga (30 de energia, 40 de metal) e devolve os construtores;
+- o veículo-rádio e o operador como nós;
+- `req radio` (veículo, operador, `nrad`) e `fort radio` (`rcap`, `crl`);
+- a brecha fechada pelo general da IA, com a antena longe da vigilância e do inimigo;
+- a radiogoniometria e o alvo da artilharia;
+- o atraso das ordens pela antena;
+- o custo: olhar da rede ~0,43 ms por chamada e planejador de brechas ~0,16 ms (pior 2 e 4 ms).
+
+`comms`, `comms-relay`, `forts-online`, `mcp-general` e `frame-budget` passam. Em `tests/forts.js`, o N de 1944 agora vai 3, 4, 5, a antena (8) e fecha.
+
 ## O que NÃO foi testado
 
-Nada disso passou por suíte de testes, pipeline ou partida A/B (regra do capitão). Só o smoke: o script da página faz parse, duas partidas IA × IA de 25 s (moderna e 1944, economia ligada) rodam sem erro e sem NaN, uma antena é iniciada no sandbox e o servidor sobe. Custo medido nesse smoke: olhar da rede ~0,7–1 ms por chamada (1 por segundo, inclui o `cnLook` que já existia), planejador de brechas ~1,1 ms por chamada (a cada 5 s por lado), pior caso 9 ms.
-
-Em especial, sem verificação:
-- a antena realmente fica pronta pelo caminho do general (fortPlan com `O.dig.k = 8`) e os construtores são devolvidos;
-- o veículo-rádio chega, segura e não volta para a frente; o que acontece se a viagem é interrompida (`CNR.near` = 1200 m);
-- o general da IA fecha uma brecha em tempo razoável e não fica espalhando antenas pelo mapa (pode querer cobrir missões de ataque no fundo do inimigo);
-- artilharia inimiga atirando na antena e a explosão derrubando-a;
-- online: linha `fort` de tipo 8 para convidados e para quem entra depois, `fbuild` de tipo 8 de um convidado, servidor antigo recusando;
-- desenho do mastro, rótulos e anel de brecha na Visão de General, botão Rádio, HUD do N;
-- MCP com `radio`;
-- `tests/comms.js` passou uma vez antes da regra nova (SECS=60), já com a mudança no `cnLook`; o resto da linha de base não foi rodado.
+- Online à mão: o convidado de infantaria construindo a antena com N, quem entra depois, e o servidor antigo recusando, em dois navegadores.
+- O desenho do mastro, os rótulos, o anel de brecha na Visão de General, o botão Rádio e o HUD do N, no navegador.
+- Uma partida longa vendo se a IA espalha antenas pelo mapa (nas batalhas de 240 s: no máximo 1 brecha e nenhuma antena começada).
+- `tests/orders.js` e as outras falhas de `forts.js` (limites de trincheira e muro, esquadras da IA cavando) falham também no main e não são da antena.
 
 ## Riscos
 

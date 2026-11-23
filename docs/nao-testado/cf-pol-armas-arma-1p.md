@@ -1,5 +1,10 @@
 # cf-pol-armas: o tiro da arma em 1ª pessoa (testado por suíte e no navegador, em imagens paradas)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): ok (parte)
+- `tests/arma-1p.js`: passa (22 ok).
+- Navegador (Chrome headless com GPU), **em movimento**, quadro a quadro: rajada de 20 quadros da M249 com o clarão em 14 de 40 quadros e até 2 cápsulas no ar ao mesmo tempo; o Kar 98k com um tiro, o clarão em 2 quadros e a cápsula só depois do ferrolho (nenhuma aos 0,2 s). **De noite** (M249): a estrela do clarão aparece contra o escuro, com a arma em silhueta. Nenhum erro no console.
+- **Continua sem teste:** a pistola, o ferrolho mirando, o tamanho de 0,17 m do clarão medido na tela, o online.
+
 ## O que mudou
 
 - **O clarão da boca era um quadrado.** O `SpriteMaterial` do clarão não tinha textura, então o sprite desenhava o quadro inteiro: um losango amarelo-claro de uns 13 cm na frente da arma a cada tiro, girando ao acaso. Agora ele tem uma textura feita uma vez num canvas (`vmFlashMat`): uma estrela de sete pontas em volta de um núcleo branco que some na borda. É um pouco maior (0,17 m no fuzil, 0,1 m na pistola), porque o brilho da estrela ocupa menos que o quadrado.

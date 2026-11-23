@@ -1,5 +1,8 @@
 # cf-pol-armas: o marcador de acerto (testado por suíte e no navegador)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/hitmarker.js`: passa (19 ok). O que este documento diz que falta é de ouvido ou de veículo, online ou com outra arma, e não coube antes do prazo da tarefa (09:00Z).
+
 ## O que mudou
 
 Até aqui, o acerto do jogador só aparecia como o texto flutuante sobre o alvo ("tronco", "+150 T-90A"). Agora, quando uma bala, um foguete, um projétil ou uma bomba do jogador fere um inimigo, aparecem quatro traços curtos em volta dele na tela, com um tique:

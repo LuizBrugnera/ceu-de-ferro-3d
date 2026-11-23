@@ -76,6 +76,7 @@ node tests/bases-online.js  # bases pelo servidor de verdade: pedido do convidad
 node tests/heli.js           # helicóptero, voo: pairado, subida, descida, velocidades, curva, limites de pouso, rotor contra o mundo, autorrotação (alturas na escala do mundo, ASPD), perda de cada peça, lei do mouse
 node tests/heli-arms.js      # torre fora do nariz, foguetes, míssil guiado e fumaça, flares (TRIALS=30), metralhadoras de porta, pelotão embarca e desembarca
 node tests/foguete-alcance.js # o foguete não guiado (avião, helicóptero, casulo de técnica) voa 8 s antes de explodir sozinho, o dobro dos 4 s de antes (Su-25 ~5,2 km, AH-64 ~3,6 km), e acerta um caminhão a 1,5x o alcance antigo
+node tests/antiaereo-improvisado.js # o RPG dos insurgentes atira no helicóptero que combate perto deles (pairando a 200 m: ~1 em 4 foguetes acerta; numa passada a 45 m/s, quase nunca), não no que está longe ou fora da luta; a DShK da técnica derruba o que paira a 400 m
 node tests/heli-ai.js        # IA: esconde, sobe, atira e desce (tempo exposto), volta ferido, transporte entrega, o que a outra IA faz com um helicóptero (TRIALS=10, SECS=420)
 node tests/heli-relay.js     # servidor: classe, hstate, lift, linhas da IA, troca
 node tests/heli-online.js    # anfitrião e dois convidados de helicóptero pelo servidor de verdade

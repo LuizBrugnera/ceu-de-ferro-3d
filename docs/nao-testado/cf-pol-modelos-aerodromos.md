@@ -40,10 +40,10 @@ O desenho dos aeródromos saiu de `buildWorld` para `baseScene(b, t)`, com o vis
   - As marcas da pista economizam 8 chamadas por aeródromo, e o esconderijo sem pista outras 10.
   - Numa batalha (cerca de 630 mil triângulos à vista), isso não aparece.
 - GPU de verdade, cena fixa sobre a cidade na batalha de demonstração, 2 rodadas alternadas de 15 s com a máquina carregada (carga ~12): main 14,5 / 15,6 fps, aqui 26,2 / 35,7 fps. Não há queda.
+- Visto depois, na página (GPU de verdade): cada hangar e a torre destruídos (`S.os` 2, `lookObj`) ficam com o escombro do primeiro objeto (altura a 0,12 e 0,07) e os detalhes somem (portas, costelas, cabine, mastro); o mastro e a bandeira somem inteiros, como antes. Numa partida aos poucos não foi visto.
 
 ## O que NÃO foi testado
 
-- Um aeródromo destruído aos poucos numa partida: os escombros do primeiro objeto e os detalhes sumindo.
 - Os galpões do esconderijo atingidos (o tiro já parava neles; agora dá para vê-los).
 - O mapa de três lados de outras sementes, além da demonstração e do teste.
 

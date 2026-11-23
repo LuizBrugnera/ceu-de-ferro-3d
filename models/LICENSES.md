@@ -1,6 +1,6 @@
 # Licenças dos modelos
 
-Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/models/pack/`) saem de fontes livres pelo `tools/pack/build.js`, que os converte, corta em partes e recolore. Só fontes que permitem redistribuir: CC0 (domínio público) e CC-BY (com crédito, abaixo). O `f22.glb` é do Hernani (modelo próprio do projeto).
+Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/models/pack/`) saem de fontes livres pelo `tools/pack/build.js`, que os converte, corta em partes e recolore. Só fontes que permitem redistribuir: CC0 (domínio público) e CC-BY (com crédito, abaixo). Os aviões de `models/` (`f22.glb`, `a10.glb`, `b2.glb`, `su25.glb`, `su57.glb` e `tu160.glb`) são do Hernani (modelos próprios do projeto).
 
 | Arquivo(s) | Fonte | Autor | Licença |
 | --- | --- | --- | --- |

@@ -69,6 +69,9 @@ const rooms = { ww2: new Map(), modern: new Map() };
 const MAXN = { ww2: 2, modern: 3 };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].ns = 2; rooms[era].gen = Array(MAXN[era]).fill(0); rooms[era].genk = Array(MAXN[era]).fill(0); rooms[era].host = null; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
+/* the paratroopers' transports (welcome says para: 1; cf-paraquedistas): AI rows only, never a player's model; the page's PLANES with para: 1 */
+const PARAS = { ww2: ['ju52', 'c47'], modern: ['c130', 'il76'] };
+for (const era in PARAS) for (const id of PARAS[era]) rooms[era].air.add(id);
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
 /* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
    the repair trucks are a player's too, so they are also in the trn lists above, each on its side in MSIDE */
@@ -170,7 +173,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -711,19 +714,22 @@ RX.ill = (c, m) => {
   };
   RX.hacc = (c, m) => { const h = c.room.host; if (h && h !== c && !c.spec && int(m.id, 1, 1e9)) send(h.ws, { t: 'hacc', from: c.player.id, id: m.id }); };
 }
-/* requests to the general from the map (welcome says ped: 1; cf-pedidos-mapa). gped: a guest asks his side's general for need k (0 to 7:
-   artillery, smoke, air strike, infantry, armour, help where he is, air cover, supply) from p [x, z] at q [x, z], to the host, 1 s apart at
-   least; gpr: the host's answer to that guest alone, to: his id, k, s 0 yes 1 no 2 passed to a person 3 too soon, why (a line), eta s, q [x, z] */
+/* requests to the general from the map (welcome says ped: 1; cf-pedidos-mapa). gped: a guest asks his side's general for need k (0 to 9:
+   artillery, smoke, air strike, infantry, armour, help where he is, air cover, supply, a paratroopers' drop, his own parachute jump) from
+   p [x, z] at q [x, z], to the host, 1 s apart at least; gpr: the host's answer to that guest alone, to: his id, k, s 0 yes 1 no 2 passed
+   to a person 3 too soon, why (a line), eta s, q [x, z], v the transport he rides (its AI id; a jump's, cf-paraquedistas).
+   pdr: the host's paratroopers in the air, e [[AI id, height, 1 falling 2 under the canopy, heading]], 64 at most, to the room */
 {
   RX.gped = (c, m) => {
     const h = c.room.host, now = Date.now();
-    if (!h || h === c || c.spec || !int(m.k, 0, 7) || !vec(m.p, 2) || !vec(m.q, 2) || now - (c.gpt || 0) < 1000) return;
+    if (!h || h === c || c.spec || !int(m.k, 0, 9) || !vec(m.p, 2) || !vec(m.q, 2) || now - (c.gpt || 0) < 1000) return;
     c.gpt = now; send(h.ws, { t: 'gped', from: c.player.id, k: m.k, p: m.p, q: m.q });
   };
   RX.gpr = (c, m) => {
     const o = host(c) && pid(m.to) && [...c.room.values()].find(o => o.player.id === m.to);
-    if (o && o !== c && int(m.k, 0, 7) && int(m.s, 0, 3) && txt(m.why, 160) && int(m.eta, 0, 3600) && vec(m.q, 2)) send(o.ws, { t: 'gpr', k: m.k, s: m.s, why: m.why, eta: m.eta, q: m.q });
+    if (o && o !== c && int(m.k, 0, 9) && int(m.s, 0, 3) && txt(m.why, 160) && int(m.eta, 0, 3600) && vec(m.q, 2)) send(o.ws, Object.assign({ t: 'gpr', k: m.k, s: m.s, why: m.why, eta: m.eta, q: m.q }, aid(m.v) && { v: m.v }));
   };
+  RX.pdr = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 64 && m.e.every(e => vec(e, 4) && aid(e[0]) && (e[2] === 1 || e[2] === 2))) cast(c, { t: 'pdr', e: m.e }); };
 }
 function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) || 1; for (let i = 0; i < n; i++) send(room.host.ws, { t: 'mine', q: K.q, i, n, e: K.e.slice(i * 40, (i + 1) * 40), s: K.s }); }
 /* suspended matches (welcome says rs: 1). The battle lives in the host's browser, so the server keeps the last word of each kind the host

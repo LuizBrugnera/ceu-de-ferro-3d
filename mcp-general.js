@@ -39,7 +39,7 @@ const WebSocket = require('ws');
 const ENV = process.env;
 const URL = ENV.CEU_URL || 'ws://localhost:8080', ROOM = ENV.CEU_ROOM || 'modern', SIDE = +(ENV.CEU_SIDE || 0), KEY = ENV.CEU_KEY || '', NAME = ENV.CEU_NAME || 'Claude';
 const AUTOSEAT = ENV.CEU_SEAT !== '0', DOMS = ['eco', 'atk', 'def', 'sup'], DOM0 = (ENV.CEU_DOMAINS === undefined ? 'eco' : ENV.CEU_DOMAINS).split(',').filter(d => DOMS.includes(d)), WAITMAX = 60;
-const VERSION = '2.5.0';   // 2.5: bomb vehicles (car_bomb, get_car_bombs; cf-vbied, NOT TESTED);   // 2.4: tunnels (dig_tunnel, use_tunnel, destroy_tunnel; cf-trincheiras-tuneis, NOT TESTED);   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
+const VERSION = '2.6.0';   // 2.6: paratroopers (paratroopers; get_state para; cf-paraquedistas);   // 2.5: bomb vehicles (car_bomb, get_car_bombs; cf-vbied, NOT TESTED);   // 2.4: tunnels (dig_tunnel, use_tunnel, destroy_tunnel; cf-trincheiras-tuneis, NOT TESTED);   // 2.3: the strategic strike (strategic_strike, get_strikes; the kinds strat, svbied, shahed);   // 2.2: three sides (cf-3-lados P5, NOT TESTED): CEU_SIDE 2, factions by name, tickets by faction;   // 2.1: M7, the manoeuvre tools (get_tactical_map, plan_approaches, order_maneuver, plan_ambush, guard_route);   // 2: MCP v2 (W13), the general's whole funnel: campaigns, the threat board, defence policies, deposits, mines, sabotage, the militia, missions and the unit card
 const LEGACY = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'], MODERN = ['2026-07-28'];   // handshake-based versions and the stateless one
 const META_V = 'io.modelcontextprotocol/protocolVersion';
 const CMD_GAP = 300, ASK_GAP = 1100, CLAIM_GAP = 1100, TIMEOUT = 8000, QMAX = 12;   // server allows gcmd 250 ms, gask 1 s, gclaim 1 s apart
@@ -541,6 +541,13 @@ const TOOLS = [
       const c = Object.assign({ c: 'vbied' }, pick(a, ['kind', 'site_id', 'point', 'x', 'z', 'why'], { kind: 'k', site_id: 'id', point: 'pi' }));
       if (a.model === 'pickup') c.m = 'pk';
       return runCmd(c, 'cmd');
+    } },
+  { name: 'paratroopers', description: 'Drop a squad of paratroopers (cf-paraquedistas) from your side\'s transport (Ju 52 or C-47 in 1944, C-130J or Il-76MD today; the Insurgents have none) on a point index (point) or x, z: it takes a squad from your reserve, flies from your base at about 320 m, the men jump near the point and form a squad there that holds it (mission attack). The transport and the men under their canopies can be shot down: avoid known anti-aircraft. One drop of your side in the air at a time and 300 s between drops. Accepted (id: the drop) or refused: pnone (no transport), plive (one in the air), pcd (too soon), pop, res (no squad in the reserve), at, map. get_state para says the type, the wait and the last drops.',
+    inputSchema: { type: 'object', properties: { point: { type: 'integer', minimum: 0, description: 'point index from get_state map.points' }, ...xz, why: WHYP }, additionalProperties: false },
+    run: async a => {
+      const e = need(a, { point: ['i', false, 0, 999], x: ['n', false], z: ['n', false], why: ['s', false] }); if (e) throw new Error(e);
+      if (a.point === undefined && (a.x === undefined || a.z === undefined)) throw new Error('give point, or both x and z');
+      return runCmd(Object.assign({ c: 'para' }, pick(a, ['point', 'x', 'z', 'why'], { point: 'pi' })), 'cmd');
     } },
   { name: 'get_car_bombs', description: 'Ask the host for your side\'s bomb vehicles (the Insurgents): the caps, how many cars and trucks are out, the trucks in the reserve, and each one alive (id, car or truck, name, x z, driven by a player, suspect: the enemy has marked it). One host question a second.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },

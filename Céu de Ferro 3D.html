@@ -21831,7 +21831,7 @@ function ecoCmd(t, c, by) {
       if (u[4] && u[4] !== S.era) return no('era');
       if (!stkHas(t, c.k)) return no('fac');
       const n = num(c.n || 1, 1, 5); if (d.q.length + n > ECO.q) return no('q');
-      if (STK.k[c.k] && stkOwn(t, c.k) + n > STK.cap.own) return no('scap');
+      if (STK.k[c.k] && stkOwn(t, c.k) + n > stkCap(c.k, 'own')) return no('scap');
       const id = E.seq; for (let i = 0; i < n; i++) d.q.push({ id: E.seq++, k: c.k, cat: u[3], at: null, p: 0, why: '', paid: { en: 0, mt: 0 } });
       const r = tail('Produz ' + n + ' × ' + tx.u[c.k].toLowerCase()); r.id = id; return r;
     }
@@ -28205,7 +28205,7 @@ anaBegin = (g => () => { g(); const h = ANA.ev.find(e => e.k === 'hdr'); if (h) 
      ECO.unit's price is given back as it is paid). every: s between two looks */
 const INS = { every: 5,
   ied: { every: 75, h: .3, apart: 600, base: 1500, max: 4, arm: 25, life: 600, r: 10, watch: 300, dmg: 260, blast: 9 },
-  bomb: { every: 90, reach: 6000, car: 1, man: 2, still: 1.8, val: { tank: 4, aa: 4, art: 4, rad: 4, lav: 3, truck: 2, car: 1.5, sup: 5, eco: 5 } },
+  bomb: { every: 90, reach: 6000, car: 3, man: 2, still: 1.8, val: { tank: 4, aa: 4, art: 4, rad: 4, lav: 3, truck: 2, car: 1.5, sup: 5, eco: 5 } },
   fpv: { cap: 4 },
   hr: { sc: 1.2, t: 60, ref: 1500 },
   dis: { pad: 40, calm: 30, near: 150, every: 2 },
@@ -31546,11 +31546,11 @@ ecoUnpack = (g => K => {
 })(ecoUnpack);
 /* Everything above runs without a browser (tests/harness.js, the headless tools): simulation code goes above this line, view code below it (tests/sim-split.js) */
 /* ---------- the strategic strike (STK; NOT TESTED, see docs/nao-testado/cf-bombardeiro.md) ----------
-   A side's strategic weapons, dear and one at a time, ordered at a point, an enemy site or supply base, or a point of the map: the bomber of
+   A side's strategic weapons, dear and one at a time (the truck bomb several: STK.cap.k), ordered at a point, an enemy site or supply base, or a point of the map: the bomber of
    its era (ERAS side.bomber: B-2 and Tu-160 today, He 177 and B-17 in 1944) and, for a faction with no air force (the Insurgents of
    cf-insurgentes-conteudo, STK.fac), a heavy truck bomb (svbied) and a salvo of long-range one-way drones (shahed: the delta 'owa' of DRONES
    with a bigger charge). Each is an economy kind (ECO.unit strat, svbied, shahed: cat 'strat', the HQ's own slot), made one at a time
-   (cap.own of a kind owned: reserve, queue and out; cap.live out at once), drawn from the reserve by the general's command
+   (cap.own of a kind owned: reserve, queue and out; cap.live out at once; cap.k a kind's own: several trucks), drawn from the reserve by the general's command
    bomb { k, x z | id (an enemy site or supply base) | pi, a: the run's heading, why } (domain sup), which the AI general, a person (the
    General's view, Campanha: Bombardeio) and the MCP (strategic_strike) give alike. The AI general (stkAI) strikes only with what is in its
    reserve, at what is worth it (STK.ai.val: a site, a supply base, a cluster of vehicles it believes in), and never where its own troops or
@@ -31564,10 +31564,10 @@ ecoUnpack = (g => K => {
    client (Net.ord), the truck's and the drones' bursts are the host's (the damage goes out as any other). */
 const STK = {
   k: { strat: 1, svbied: 1, shahed: 1 },
-  cap: { own: 2, live: 1 },
+  cap: { own: 2, live: 1, k: { svbied: { own: 6, live: 4 } } },   // k: a kind's own limits (cf-bomba-limite: several truck bombs out at once)
   any: 0,   // 1: every side may use every weapon of its era (to test the Insurgents' before the three sides exist)
   hunt: 2500,   // m off an enemy bomber's score for a fighter: it goes for it first
-  ai: { every: 30, first: 300, min: 6, eco: .5, clus: 220, val: { fab: 9, mine: 6, pow: 5, sup: 6 } },
+  ai: { every: 30, first: 300, min: 6, eco: .5, own: { svbied: 2 }, clus: 220, val: { fab: 9, mine: 6, pow: 5, sup: 6 } },
   run: { alt: 900, back: 2500, climb: 800, far: 7000, home: 1800, out: 3, pass: 2, tol: 40, tolK: .01, lo: 300, slope: .12, gain: 1.5 },
   fx: { crater: [.22, 40], keep: 40, cloud: [.55, .6, 22], fire: 14, shake: 1 / 45 },
   fac: { insurgentes: ['svbied', 'shahed'] },
@@ -31601,6 +31601,7 @@ function stkKinds(t) {
   return sd.bomber && PLANES[sd.bomber] ? ['strat'] : [];
 }
 const stkHas = (t, k) => !STK.k[k] || stkKinds(t).includes(k);
+const stkCap = (k, w) => (STK.cap.k && STK.cap.k[k] && STK.cap.k[k][w]) || STK.cap[w];   // w: own or live
 const stkLive = (t, k) => (S.stk || []).filter(s => s.t === t && (!k || s.k === k) && !s.end);
 function stkOwn(t, k) {
   const d = S.eco && S.eco.d[t];
@@ -31636,7 +31637,7 @@ GC.bomb = { d: 'sup', f(t, c, by) {
   if (Number.isInteger(c.id)) { tg = S.sup.concat(ecoFoe(t)).find(b => b.id === c.id && !b.dead && foeSide(t, b.team) && spotted(b, t)); if (!tg) return gBad('id'); x = tg.x; z = tg.z; }
   else if (Number.isInteger(c.pi)) { const P = gPts()[c.pi]; if (!P) return gBad('at'); x = P.x; z = P.z; }
   if (!Number.isFinite(x) || !Number.isFinite(z) || !gMapOk(x, z)) return gBad('map');
-  if (stkLive(t, k).length >= STK.cap.live) return gBad('slive');
+  if (stkLive(t, k).length >= stkCap(k, 'live')) return gBad('slive');
   if (k === 'shahed' && !droneOn()) return gBad('sdr');
   if (k === 'svbied' && !(S.T.mv >= 4)) return gBad('mv');
   const P = popOf(t), U = popUse(t);
@@ -31838,7 +31839,7 @@ function stkAI(C) {
   const t = C.t;
   if (!stkSim() || !S.eco || !S.cq || S.cq.ph || genBy(t, 'sup') !== 'ai' || S.t < (C.stkT || STK.ai.first)) return;
   C.stkT = S.t + STK.ai.every;
-  const ks = stkKinds(t).filter(k => stkRes(t, k) > 0 && stkLive(t, k).length < STK.cap.live); if (!ks.length) return;
+  const ks = stkKinds(t).filter(k => stkRes(t, k) > 0 && stkLive(t, k).length < stkCap(k, 'live')); if (!ks.length) return;
   const V = STK.ai.val, cand = [];
   for (const e of ecoFoe(t)) if (spotted(e, t)) cand.push({ x: e.x, z: e.z, v: V[e.k] || 4, id: e.id, o: e, nm: ECO.tx.nm[e.k] });
   for (const b of S.sup) if (!b.dead && foeSide(t, b.team) && spotted(b, t)) cand.push({ x: b.x, z: b.z, v: V.sup, id: b.id, o: b, nm: 'base de suprimento' });
@@ -31867,7 +31868,7 @@ cmdReq = (g => C => { g(C); stkAI(C); })(cmdReq);
 function stkEcoAI(t, V, out) {
   if (out.length >= 2 || V.T < ECO.ai.at[0]) return;
   for (const k of stkKinds(t)) {
-    const c = V.costs[k]; if (!c || stkOwn(t, k) > 0) continue;
+    const c = V.costs[k]; if (!c || stkOwn(t, k) >= (STK.ai.own[k] || 1)) continue;
     if (V.stock.en < ECO.ai.keep.en + c[0] * STK.ai.eco || V.stock.mt < ECO.ai.keep.mt + c[1] * STK.ai.eco) continue;
     out.push({ c: 'make', k, n: 1, why: 'arma estratégica: o estoque permite', key: 'mkstk' + k }); return;
   }
@@ -31907,7 +31908,7 @@ genQuery = (g => (t, q) => (q && q.q === 'stk' ? stkView(t) || gBad('off') : g(t
      regulars' AI fires on it first (manThink, pickGround), the side's log says so once. HESCO and walls already stop a hull (bump), and a
      bomb that hits one at speed goes off there. */
 const VBM = {
-  cap: { car: 2, truck: 1 },
+  cap: { car: 6, truck: 4 },   // alive at once per side, the AI's and the strategic truck included (cf-bomba-limite: was 2 and 1); each still costs its own
   rq: { vbied: 3, svbied: 6 },
   imp: 8, fx: 1,
   route: { r: 450, w: 3, post: 2, base: 4, max: 6 },
@@ -32055,7 +32056,7 @@ insBombTgt = (g => C => {
 /* a bomb at target a { x, z, v, o, nm }: the truck when its reserve has one and a is worth it, else a car; true when one went */
 function vbGo(C, a, why) {
   const t = C.t, F = vbFac(t); if (!F || !a) return false;
-  if (a.v >= VBM.ai.truck && stkKinds(t).includes('svbied') && stkRes(t, 'svbied') > 0 && !stkLive(t, 'svbied').length) {
+  if (a.v >= VBM.ai.truck && stkKinds(t).includes('svbied') && stkRes(t, 'svbied') > 0 && stkLive(t, 'svbied').length < stkCap('svbied', 'live')) {
     const r = genCmd(t, { c: 'vbied', k: 'truck', x: Math.round(a.x), z: Math.round(a.z), why }, 'ai'); if (r && r.ok) return true;
   }
   const r = genCmd(t, { c: 'vbied', k: 'car', m: Math.random() < .5 ? 'pk' : 'sedan', x: Math.round(a.x), z: Math.round(a.z), o: a.o && (a.o.man || a.o.def) ? a.o : null, why }, 'ai');

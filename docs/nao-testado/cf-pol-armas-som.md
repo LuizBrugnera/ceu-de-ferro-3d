@@ -1,5 +1,8 @@
 # cf-pol-armas: o som das armas (testado por suíte e no navegador, não de ouvido)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/som.js`: passa (52 ok). O que este documento diz que falta é de ouvido ou de veículo, online ou com outra arma, e não coube antes do prazo da tarefa (09:00Z).
+
 ## O que mudou
 
 Tudo na seção `sound` da página (`SND`), sem arquivos de som:

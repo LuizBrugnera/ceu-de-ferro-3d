@@ -1,5 +1,9 @@
 # cf-pol-fluxos: os fluxos do jogo percorridos no navegador
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/fluxos.js` passa (30 ok). **`tests/state-gc.js`: 1 falha** ("the first battle filled the caches: 0 cells in HONU, a soldier looked at under the trees"): a preparação do teste não encheu o cache que ele quer ver esvaziar, então a checagem não chega a medir o vazamento; as outras 4 passam. Não investigado (prazo da tarefa).
+- O "Não resolvido" abaixo não coube.
+
 Percorridos num Chrome headless com GPU (Intel UHD 770 via D3D12 no WSL: `GALLIUM_DRIVER=d3d12`, `--use-angle=gl-egl`), com o `server.js` em 127.0.0.1 e roteiros playwright fora do repositório. Os consertos estão nas PRs de cf-pol-fluxos, cada um com teste em `tests/fluxos.js`, `tests/rematch.js` ou `tests/state-gc.js`.
 
 ## Percorrido e funcionando

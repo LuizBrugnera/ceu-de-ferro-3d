@@ -73,6 +73,7 @@ node tests/world-online.js   # objetos do mundo pelo servidor de verdade: dano d
 node tests/bases-online.js  # bases pelo servidor de verdade: pedido do convidado, estágios em todos, quem entra depois, entrada na base, carga do convidado, troca de anfitrião no meio da obra; BW=1 só mede o que o anfitrião envia numa batalha cheia
 node tests/heli.js           # helicóptero, voo: pairado, subida, descida, velocidades, curva, limites de pouso, rotor contra o mundo, autorrotação (alturas na escala do mundo, ASPD), perda de cada peça, lei do mouse
 node tests/heli-arms.js      # torre fora do nariz, foguetes, míssil guiado e fumaça, flares (TRIALS=30), metralhadoras de porta, pelotão embarca e desembarca
+node tests/foguete-alcance.js # o foguete não guiado (avião, helicóptero, casulo de técnica) voa 8 s antes de explodir sozinho, o dobro dos 4 s de antes (Su-25 ~5,2 km, AH-64 ~3,6 km), e acerta um caminhão a 1,5x o alcance antigo
 node tests/heli-ai.js        # IA: esconde, sobe, atira e desce (tempo exposto), volta ferido, transporte entrega, o que a outra IA faz com um helicóptero (TRIALS=10, SECS=420)
 node tests/heli-relay.js     # servidor: classe, hstate, lift, linhas da IA, troca
 node tests/heli-online.js    # anfitrião e dois convidados de helicóptero pelo servidor de verdade

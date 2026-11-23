@@ -14935,13 +14935,14 @@ function pedDecide(P, k, x, z) {
   try { r = pedRun(P, k, x, z); } catch (e) { r = { st: 'no', why: GEN.no.bug }; }
   r.x = x; r.z = z; T._ = S.t; T[k] = S.t + (r.st === 'no' ? PED.no : PED.cd[k]);
   if (r.st === 'ok' && PED.side[k]) A.s[sk] = S.t + PED.side[k];
-  const who = helpWho(P);
+  const who = pedWho(P);
   if (r.st === 'ok') gLog(P.team, 'help', 'General atende ' + who + ': ' + PED.s[k] + ' ' + gNear(x, z) + (r.eta ? ', em ~' + r.eta + ' s' : '') + (r.why ? ' (' + r.why + ')' : ''), { x, z }, null, { x, z });
   else if (r.st === 'no') gLog(P.team, 'help', 'General nega a ' + who + ': ' + PED.s[k] + ' ' + gNear(x, z) + ' (' + r.why + ')', { x, z });
   return r;
 }
+const pedWho = P => { const pl = P.pid && Net.players && Net.players.get(P.pid); return pl && pl.name ? pl.name : helpWho(P); };   // a guest by his name in the room
 function pedRun(P, k, x, z) {
-  const t = P.team, seat = genSeat(t), who = helpWho(P), why = 'pedido de ' + who, dP = Math.hypot(P.x - x, P.z - z);
+  const t = P.team, seat = genSeat(t), who = pedWho(P), why = 'pedido de ' + who, dP = Math.hypot(P.x - x, P.z - z);
   const no = w => ({ st: 'no', why: w }), bad = r => no(PED.w[r.why] || GEN.no[r.why] || r.why || GEN.no.bug), cmd = c => genCmd(t, c, 'sys');
   if (S.cq && S.cq.ph) return no(GEN.no.over);
   if (!gMapOk(x, z)) return no(GEN.no.map);
@@ -15013,12 +15014,13 @@ function pedRun(P, k, x, z) {
 function pedShow(r, k) {
   if (!S) return;
   const N = PED.s[k], M = S.pedM || (S.pedM = []), ok = r.st === 'ok', sent = r.st === 'sent';
+  const head = sent ? 'Pedido ao general: ' + N : ok ? 'General: ' + N + ' a caminho' : r.st === 'fwd' ? 'Pedido encaminhado: ' + N : r.st === 'wait' ? 'Rádio ocupado' : 'General: ' + N + ' negado';
+  const sub = sent ? 'Aguardando a resposta pelo rádio' : (r.why || '') + (ok && r.eta ? (r.why ? ' · ' : '') + 'chega em ~' + r.eta + ' s' : '');
   if (r.st !== 'wait') { for (const m of M) if (m.k === k && m.st === 'sent') m.end = S.t; M.push({ k, x: r.x, z: r.z, st: r.st, eta: r.eta || 0, T: S.t, end: S.t + (ok ? (r.eta || 0) + PED.keep : sent ? 20 : 15) }); if (M.length > 12) M.shift(); }
+  S.pedL = { head, sub, st: r.st, T: S.t };   // the last answer, for the battle map, which covers the banner
   const C = S.pedC || (S.pedC = {});
   if (r.st === 'wait') C[k] = Date.now() + (r.eta || 1) * 1000;
   else if (!sent) C[k] = Date.now() + (r.st === 'no' ? PED.no : PED.cd[k]) * 1000;
-  const head = sent ? 'Pedido ao general: ' + N : ok ? 'General: ' + N + ' a caminho' : r.st === 'fwd' ? 'Pedido encaminhado: ' + N : r.st === 'wait' ? 'Rádio ocupado' : 'General: ' + N + ' negado';
-  const sub = sent ? 'Aguardando a resposta pelo rádio' : (r.why || '') + (ok && r.eta ? (r.why ? ' · ' : '') + 'chega em ~' + r.eta + ' s' : '');
   S.banner = { text: head, sub, life: ok || r.st === 'no' ? 4 : 2.5 };
   if (!sent && r.st !== 'wait') { S.feed.push({ text: 'Rádio: ' + head + (sub ? ' · ' + sub : ''), life: 7, team: S.my ? S.my.team : S.me }); if (S.feed.length > 4) S.feed.shift(); }
 }
@@ -50446,9 +50448,14 @@ cueMarks = (g => (X, Y, me, u, big) => { g(X, Y, me, u, big); pedMarks(X, Y, u, 
 bmDraw = (g => () => {   // under the map's title box, the line that says how
   g(); if (pedMenu.el && !bmLive()) pedClose();
   if (!bmLive() || sw.on) return;
-  const u = hudU(), W = Math.min(cw - 28, 440 * u), y = 8 + 74 * u;
-  hx.fillStyle = 'rgba(8,12,13,.72)'; hx.fillRect(14, y, W, 18 * u);
+  const u = hudU(), W = Math.min(cw - 28, 440 * u), y = 8 + 74 * u, L = S.pedL, on = L && S.t - L.T < 8;
+  const n = Math.max(20, Math.floor((W - 16) / (6.4 * u))), ln = [];   // the reason, in lines of n characters at most (two)
+  if (on) { let l = ''; for (const w of String(L.sub).split(' ')) { if (l && (l + ' ' + w).length > n) { ln.push(l); l = w; } else l = l ? l + ' ' + w : w; } if (l) ln.push(l); ln.length = Math.min(ln.length, 2); }
+  hx.fillStyle = 'rgba(8,12,13,.72)'; hx.fillRect(14, y, W, (on ? 38 + 15 * ln.length : 18) * u);
   txt('Clique direito: pedir ao general (fogo, avião, reforços, ajuda)', 22, y + 3 * u, 11 * u, S.modern ? '#63d2e6' : '#e6b53a');
+  if (!on) return;   // the last answer, which the banner under the map would say
+  txt(L.head, 22, y + 19 * u, 12 * u, PEDUI.col[L.st] || '#ffffff');
+  ln.forEach((l, i) => txt(l, 22, y + (35 + 15 * i) * u, 11 * u, S.modern ? '#c4f1f7' : '#f3ead2'));
 })(bmDraw);
 /* ===== end of the requests to the general ===== */
 /* ---------- CEREBRO: defesa on the general's view (DFP; NÃO TESTADO, see docs/nao-testado/cf-defesa-posicoes.md) ----------

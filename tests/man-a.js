@@ -46,7 +46,7 @@ for (const era of ['ww2', 'modern']) {
   { const { S, q } = mkRes(at0), Cm = $('cmdOf')(0);
     $('cmdSense')(Cm, S.squads.filter(s => s.team === 0));
     const X = { t: 0, C: Cm, sq: S.squads, free: [], room: 3, doc: 'balanced', ds: -1, live: Cm.man }, cs = $('MANG').mres(Cm, X), c = cs[0];
-    ok(cs.length === 1 && c.k === 'mres' && c.sc > 0 && c.sc <= 1.5 && c.spec.c === 'reserve' && Number.isFinite(c.spec.x) && c.at && /pontos em até/.test(c.why), 'mres: a candidate when the reserve stands off the best node and the side holds 3 points, score ' + (c && c.sc.toFixed(2)) + ', ' + (c && c.why));
+    ok(cs.length === 1 && c.k === 'mres' && c.sc > 0 && c.sc <= 1.5 * ($('stgAct')(Cm) ? $('stgMul')(Cm, $('STG').man, 'mres') : 1) + 1e-9 && c.spec.c === 'reserve' && Number.isFinite(c.spec.x) && c.at && /pontos em até/.test(c.why), 'mres: a candidate when the reserve stands off the best node and the side holds 3 points, score ' + (c && c.sc.toFixed(2)) + ', ' + (c && c.why));
     ok($('MANG').mres(Cm, X).length === 0, 'mres: it looks only every ' + $('MANT').mres.every + ' s');
     Cm.mrT = 0; const r = genCmd(0, { c: 'man', k: c.spec.c === 'reserve' ? 'reserve' : '', x: c.spec.x, z: c.spec.z, why: c.spec.why }, 'ai', { spec: c.spec, res: c.res });
     const op = Cm.man.find(o => o.k === 'mres'), po = $('post')(0, 'base', 0);
@@ -128,12 +128,12 @@ for (const era of ['ww2', 'modern']) {
     ok(r.ok && !!op && Cm.gue && Cm.gue.op === op && op.teams.length === 2 && op.teams.every(T => T.q.op === op), 'gue: opened through genCmd ai: two teams of one squad each, C.gue set');
     ok(logOf(S, 0, /^Em inferioridade \([\d,]+:1\): fustigar e evitar combate decisivo$/).length === 1, 'gue: the log says it: ' + (logOf(S, 0, /fustigar/)[0] || {}).s);
     ok($('cmdPosts')(Cm, S.squads.filter(q => q.team === 0), {}).some(e => e[0] === 'amb' && e[1] >= $('MANT').gue.amb), 'gue: while on, cmdPosts asks at least ' + $('MANT').gue.amb + ' ambushes');
-    let err = null, strikes = 0, gate = 0, atk = 0; const seen = new Set(), tmax = op.Tmax;
+    let err = null, strikes = 0, gate = 0, atk = 0, walks = 0; const seen = new Set(), tmax = op.Tmax;
     Cm.atkT = 0; Cm.upos = R.map(() => ({ k: 'atk', T: 1e9 }));
-    try { tick(C, S, tmax + 20, () => { for (const T of op.teams) seen.add(T.st); if (Cm.ev && Cm.ev.some(e => e.why === 'gue')) gate++; if (Cm.ops.some(o => o.k === 'atk' && !o.over)) atk++; if (op.over) return false; }, true); } catch (e) { err = e; }
+    try { tick(C, S, tmax + 20, () => { for (const T of op.teams) seen.add(T.st); if (Cm.ev && Cm.ev.some(e => e.why === 'gue')) gate++; if (Cm.ops.some(o => o.k === 'atk' && !o.over && !o.walk)) atk++; if (Cm.ops.some(o => o.k === 'atk' && !o.over && o.walk)) walks++; if (op.over) return false; }, true); } catch (e) { err = e; }
     strikes = logOf(S, 0, /^Fustigamento contra o inimigo/).length;
     ok(!err && op.over && !Cm.gue && !Cm.man.includes(op) && own.every(q => !(q.op && q.op.man)) && !H.nan(S), 'gue: it runs to its end (t ' + (S.t | 0) + ' s, states seen ' + [...seen].join('/') + ', ' + strikes + ' strikes, ' + op.nStrike + ' counted); squads released, C.gue cleared' + (err ? err.stack : ''));
-    ok(gate > 0 && atk === 0, 'gue: while on, cmdAttack only walks into empty points (the gate fired ' + gate + ' times, assaults ' + atk + ')');
+    ok(gate > 0 && atk === 0, 'gue: while on, cmdAttack only walks into empty points (the gate fired ' + gate + ' times, assaults ' + atk + ', walks ' + walks + ')');
     ok(logOf(S, 0, /^Fim do fustigamento|encerrada: tempo esgotado|^Fustigamento encerrado/).length >= 1, 'gue: its end is in the log: ' + (logOf(S, 0, /^Fim do fustigamento|encerrada: tempo esgotado|^Fustigamento encerrado/)[0] || {}).s);
   }
   { /* gue, a person (JSON only), ended by even forces, cancelled: a fresh battlefield with no enemy */

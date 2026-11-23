@@ -69,7 +69,8 @@ if (process.env.BATTLE) {
       const back = { x: u.x, z: u.z }, tr = $('tripTo')(u, TG.x, TG.z, { drop: true, back, gone: true });
       ok(tr && tr.ri === 2 && u.rail, 'a truck on axis 0 is given a trip to ' + TG.id + ' (' + (tr && tr.p.len | 0) + ' m, ends on axis ' + (tr && tr.ri) + ')');
       let on = 0, n = 0, dropped = null, away = 0; const P1 = tr.p;
-      C.run(400, () => { if (u.trip && u.trip.p === P1) { n++; let b = 1e9; for (let i = 1; i < P1.length; i += 1) b = Math.min(b, hdist(u, P1[i])); if (b < 60) on++; } if (dropped === null && !u.cargo) { dropped = S.t; away = hdist(u, TG); } if (u.dead) return false; }, 1 / 30);
+      C.run(400, () => { for (const o of S.units) if (o.team !== 1 && !o.dead) o.dead = o.gone = true;   // the battlefield kept empty: an AI car sent at the truck is no part of this (it gives a trip up near an enemy, MANT.trip.fight)
+        if (u.trip && u.trip.p === P1) { n++; if (hdist(u, $('routeAt')(P1, $('polyNearS')(P1, u))) < 60) on++; } if (dropped === null && !u.cargo) { dropped = S.t; away = hdist(u, TG); } if (u.dead) return false; }, 1 / 30);
       ok(n > 0 && on / n >= .9 && dropped !== null && away < 120 && S.men.length === $('SQUAD')[era].length, 'it rides the trip (' + (100 * on / (n || 1)).toFixed(0) + '% of the steps on it), drops its squad ' + away.toFixed(0) + ' m from ' + TG.id + ' at t = ' + (dropped || 0).toFixed(0) + ' s');
       ok(u.dead && u.gone, 'and drives back and is gone'); }
     /* a tank on a trip that meets an enemy leaves the trip and fights */

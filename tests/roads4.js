@@ -100,7 +100,7 @@ for (const era of ['ww2', 'modern']) {
   ok(T.keep && T.same, 'it is the same squad throughout: same object, id, order, op (op.sq holds it), all ' + T.n0 + ' men counted aboard, and one squad of the side afterwards');
   ok(T.liveAfter === T.n0 && T.men === T.n0, 'the men are back in the world as soldiers of that squad (' + T.men + ' of ' + T.n0 + ')');
   const wpS = T.q.rd ? 0 : 0; void wpS;
-  ok(T.mrd.planned === 1 && T.landAt && T.wp.some(p => hdist(p, T.landAt) < 120) && hdist(T.landAt, T.wp[T.wp.length - 1]) >= $('MAN').ride.keep - 150, 'it gets out at the planned drop on its own way, ' + (T.landAt ? hdist(T.landAt, T.wp[T.wp.length - 1]).toFixed(0) : '-') + ' m short of its end (keep ' + $('MAN').ride.keep + ')');
+  ok(T.mrd.planned === 1 && T.landAt && hdist($('routeAt')(T.wp, $('polyNearS')(T.wp, T.landAt)), T.landAt) < 120 && hdist(T.landAt, T.wp[T.wp.length - 1]) >= $('MAN').ride.keep - 150, 'it gets out at the planned drop on its own way, ' + (T.landAt ? hdist(T.landAt, T.wp[T.wp.length - 1]).toFixed(0) : '-') + ' m short of its end (keep ' + $('MAN').ride.keep + ')');
   ok(T.arrive !== null && T.arrive < foot.arrive * .8 && T.q.ord === T.O, 'and walks on with the same order and arrives at t = ' + (T.arrive || 0).toFixed(0) + ' s against ' + foot.arrive.toFixed(0) + ' s on foot');
   ok(!T.u.trip && !T.u.mr && !T.u.cargo && !T.u.dead, 'the truck is back to its own business (no trip, no cargo)');
   /* the ride ends early when the op ends, and a squad lost with its vehicle is lost */

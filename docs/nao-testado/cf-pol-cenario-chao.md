@@ -1,5 +1,8 @@
 # cf-pol-cenario: o chão desenhado e o que fica em cima dele
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/ground-mesh.js`: passa (29 ok). Nada do que falta (placa de vídeo, 1944 no navegador, ponte, tampas das trincheiras sobre a malha nova, casas) coube antes do prazo da tarefa.
+
 ## O defeito
 
 A partida pisa em `hgtT`: a altura de um ponto é a mistura (bilinear) dos quatro nós da célula da grade (100 a 140 m de lado). A cena desenhava o terreno como um `THREE.PlaneGeometry`: dois triângulos planos por célula. Triângulos planos não desenham a mistura, e no morro os dois ficavam até 46 m um do outro (em média 0,3 m). Medido nos mapas da versão 11:

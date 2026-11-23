@@ -1,5 +1,8 @@
 # cf-pol-armas: o acerto no jogador, ouvido (testado por suíte, não de ouvido)
 
+## Testado em 8bc0243 (cf-pol-testes-b, 2026-11-21): parte
+- `tests/hurt.js`: passa (14 ok). O que este documento diz que falta é de ouvido ou de veículo, online ou com outra arma, e não coube antes do prazo da tarefa (09:00Z).
+
 ## O que mudou
 
 Quando uma bala ou um projétil acertava o tanque, o avião ou o soldado do jogador, só a vista tremia. Agora ele ouve onde foi acertado (`fx.hurt`, `HURT`):

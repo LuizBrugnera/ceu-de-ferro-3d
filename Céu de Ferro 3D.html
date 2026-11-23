@@ -18200,11 +18200,21 @@ function cmdEdges(C, sq) {
   for (const u of S.units) if (!u.dead && u.team === C.t && !u.fixed && !u.net) mine.push(u);
   for (const q of sq) { const L = q.men.find(m => !m.dead); if (L) mine.push(L); }
   E.forEach((e, i) => {
-    let a = 0; const smp = e.smp;
-    for (const p of smp) { const k = clamp((p.z + S.HW) / G | 0, 0, nz - 1) * nx + clamp(p.x / G | 0, 0, nx - 1); a += Math.max(0, -I[k]) * K.k + (Z ? Z[k] * K.kz : 0); }
-    if (es[i] < S.t && mine.some(o => smp.some(p => Math.abs(o.x - p.x) < 300 && Math.abs(o.z - p.z) < 300 && Math.hypot(o.x - p.x, o.z - p.z) < 300))) es[i] = S.t;
+    let a = 0, x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; const smp = e.smp;
+    for (const p of smp) { const k = clamp((p.z + S.HW) / G | 0, 0, nz - 1) * nx + clamp(p.x / G | 0, 0, nx - 1); a += Math.max(0, -I[k]) * K.k + (Z ? Z[k] * K.kz : 0); if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z; }
+    if (es[i] < S.t && cmdEdgeSeen(mine, smp, x0 - 301, x1 + 301, z0 - 301, z1 + 301)) es[i] = S.t;
     et[i] = a / smp.length + (S.t - es[i] > 300 ? K.fog : 0);
   });
+}
+/* one of the side's units within 300 m of one of the edge's samples: the same question as mine.some(o => smp.some(p => ...)), in plain
+   loops and with the edge's box (its samples' x0..x1, z0..z1 widened by 301 m) first, so that a unit far from the edge costs four
+   comparisons. It was a closure a unit an edge, the general's dearest piece of work (a third of plan's time in the #170 scene, cf-lag-3) */
+function cmdEdgeSeen(mine, smp, x0, x1, z0, z1) {
+  for (let j = 0; j < mine.length; j++) {
+    const o = mine[j], ox = o.x, oz = o.z; if (!(ox >= x0 && ox <= x1 && oz >= z0 && oz <= z1)) continue;
+    for (let k = 0; k < smp.length; k++) { const p = smp[k]; if (Math.abs(ox - p.x) < 300 && Math.abs(oz - p.z) < 300 && Math.hypot(ox - p.x, oz - p.z) < 300) return true; }
+  }
+  return false;
 }
 /* where an ambush may lie, once a terrain: every 80 m of road, a place is worth its bend, the dense wood or the high ground beside it
    (pos: where the men lie, the best first), a town's exit or a river crossing by it; the best, 400 m apart at least */
@@ -30921,7 +30931,7 @@ const STK = {
   run: { alt: 900, back: 2500, climb: 800, far: 7000, home: 1800, out: 3, pass: 2, tol: 40, tolK: .01, lo: 300, slope: .12, gain: 1.5 },
   fx: { crater: [.22, 40], keep: 40, cloud: [.55, .6, 22], fire: 14, shake: 1 / 45 },
   fac: { insurgentes: ['svbied', 'shahed'] },
-  K: { svbied: { name: 'Caminhão-bomba pesado', hp: 90, dmg: 1800, r: 120, trig: 22, foe: 16, men: 3, kill: .6, T: 900 },
+  K: { svbied: { name: 'Caminhão-bomba pesado', hp: 90, dmg: 2350, r: 155, trig: 22, foe: 16, men: 3, kill: .6, T: 900 },
     shahed: { n: 5, bat: 1500, dmg: 520, r: 60, spread: 120 } },
   nm: { strat: 'bombardeiro', svbied: 'caminhão-bomba', shahed: 'salva de drones' }
 };
@@ -31115,6 +31125,7 @@ function stkSvbGo(u) {
   const V = u.svb, K = STK.K.svbied; if (!V || V.go) return; V.go = 1;
   const x = u.x, y = u.y + 1.5, z = u.z;
   explode(x, y, z, K.r, K.dmg, u, u.team, false, 1, K.dmg * CITY.chg.ied); stkFx(x, y, z, K.r);   // cf-vbied: and the buildings near it
+  svbBurst(x, y, z, K.r, u, u.team);   // cf-svbied-buff: the heavier look and the cluster
   const s = (S.stk || []).find(s => s.id === V.s); if (s) { s.res = 'ok'; s.st = 'detonado ' + ecoNear(x, z); }
   gLog(u.team, 'atk', 'Caminhão-bomba detonado ' + ecoNear(x, z), { x, z }, 'stkv');
   if (!u.dead) { u.cqd = 1; killUnit(u, true); }   // spent, not lost
@@ -31466,6 +31477,64 @@ function vbView(t) {
 }
 genState = (g => t => { const o = g(t); if (o) o.vb = vbView(t); return o; })(genState);
 genQuery = (g => (t, q) => (q && q.q === 'vb' ? vbView(t) || gBad('fac') : g(t, q)))(genQuery);
+/* ---- the truck bomb's heavier burst and its cluster (cf-svbied-buff; NÃO TESTADO, see docs/nao-testado/cf-vbied.md) ----
+   The captain: "pode bufar mais um pouco a explosão do caminhão bomba, colocar uma cluster tambem". The truck's charge (STK.K.svbied, and
+   BOMB.truck from it, the same for the player's truck and the strategic one) went from 1800 over 120 m to 2350 over 155 m. Both ways it goes
+   off (bombGo for a driven one, stkSvbGo for the strategic one) end in svbBurst: on top of stkFx, a brighter flash, more fire thrown higher,
+   a column of smoke, a ring of dust running out along the ground, a harder shake and a nearer boom (svbFx); then the cluster (SVB.c): n
+   burning submunitions thrown out on arcs (S.svbC) to a ring d (shares of r) round the truck, each landing T s later (the farther, the later)
+   and going off small there (explode dmg over r, by the truck and its side: the score, friendly fire and the log are the truck's). Only where
+   the battle is simulated (bombSim: solo and the host), as the main burst: a guest sees the truck's end as any vehicle's.
+   A dozen objects at most, stepped by step; each leaves a puff of fire every trail s. g: the arcs' gravity (higher arcs than a stone's) */
+const SVB = {
+  fx: { flash: 2.2, fire: 10, col: 9, ring: 18, shake: 1 / 30, boom: 2500 },
+  c: { n: 12, d: [.55, 1.7], T: [.5, 2.2], dmg: 260, r: 18, g: 25, trail: .12 }
+};
+function svbFx(x, y, z, r) {
+  const F = SVB.fx, g = hgt(x, z);
+  puff(x, y + 8, z, 'flash', r / F.flash);
+  for (let i = 0; i < F.fire; i++) puff(x, y + 3 + i, z, 'fire', r / 9, rand(-1, 1) * r * .18, rand(12, 42), rand(-1, 1) * r * .18);
+  for (let i = 0; i < F.col; i++) puff(x + rand(-4, 4), y + 6 + i * r * .09, z + rand(-4, 4), 'smoke', r / 8 * (1 + i * .12), rand(-3, 3), rand(14, 26) + i * 2, rand(-3, 3));
+  for (let i = 0; i < F.ring; i++) { const a = i * TAU / F.ring + rand(-.1, .1), v = rand(.5, .8) * r; puff(x + Math.cos(a) * 4, g + 1, z + Math.sin(a) * 4, 'dust', r / 9, Math.cos(a) * v, rand(1, 4), Math.sin(a) * v); }
+  const d = Math.hypot(x - S.ear.x, y - S.ear.y, z - S.ear.z);
+  S.shake = Math.max(S.shake, r * F.shake * Math.max(.2, 1 - d / 5000));
+  if (d < F.boom) fx.boom(r * 1.5, d, 1);
+}
+/* the cluster: n submunitions out on arcs from x y z to the ring round it */
+function svbCluster(x, y, z, r, by, team) {
+  const C = SVB.c, L = S.svbC || (S.svbC = []), a0 = rand(0, TAU);
+  for (let i = 0; i < C.n; i++) {
+    const a = a0 + i * TAU / C.n + rand(-.2, .2), f = rand(0, 1), d = r * (C.d[0] + (C.d[1] - C.d[0]) * f), T = C.T[0] + (C.T[1] - C.T[0]) * f * rand(.85, 1);
+    const tx = clamp(x + Math.cos(a) * d, 5, S.W - 5), tz = clamp(z + Math.sin(a) * d, -S.HW + 5, S.HW - 5), ty = hgt(tx, tz), y0 = y + 3;
+    L.push({ x, y: y0, z, vx: (tx - x) / T, vy: (ty - y0 + .5 * C.g * T * T) / T, vz: (tz - z) / T, tx, ty, tz, t: 0, T, p: 0, by, team });
+  }
+}
+function svbBurst(x, y, z, r, by, team) {
+  if (!bombSim()) return;
+  svbFx(x, y, z, r); svbCluster(x, y, z, r, by, team);
+}
+/* each step: the submunitions fly, trail fire and go off where they land */
+function svbStep(dt) {
+  const L = S.svbC; if (!L || !L.length) return;
+  const C = SVB.c;
+  for (let i = L.length - 1; i >= 0; i--) {
+    const o = L[i]; o.t += dt;
+    if (o.t >= o.T) {
+      L.splice(i, 1);
+      explode(o.tx, o.ty + .5, o.tz, C.r, C.dmg, o.by, o.team, 1, 1);
+      for (let k = 0; k < 3; k++) puff(o.tx, o.ty + 1, o.tz, 'fire', C.r / 9, rand(-4, 4), rand(4, 12), rand(-4, 4));
+      continue;
+    }
+    o.x += o.vx * dt; o.z += o.vz * dt; o.y += o.vy * dt - .5 * C.g * dt * dt; o.vy -= C.g * dt;
+    if ((o.p -= dt) <= 0) { o.p = C.trail; puff(o.x, o.y, o.z, 'fire', .9, 0, 0, 0, o); if (Math.random() < .5) puff(o.x, o.y, o.z, 'smoke', .7, 0, 1, 0, o); }
+  }
+}
+step = (g => dt => { g(dt); svbStep(dt); })(step);
+bombGo = (g => o => {
+  const B = bombOf(o), v = !!B && B === BOMB.truck && !o.man && !o.bGone, x = o.x, y = (o.y || hgt(o.x, o.z)) + 1, z = o.z;
+  g(o);
+  if (v) svbBurst(x, y, z, B.r * VBM.fx, o, o.team);
+})(bombGo);
 /* ---------- end of cf-vbied (the sim) ---------- */
 /* ---------- combined arms (CA; não testado, see docs/nao-testado/cf-armas-combinadas.md): tanks and infantry as teams, at the unit level ----------
    The captain: "tanques devem apoiar a infantaria e vice versa". Every CA.every s each side's general pairs each of its tanks and armoured cars
@@ -46492,10 +46561,13 @@ genPanels = (f => V => {
    sink at the nodes the match sank (S.brn), so the river is seen where it is (a road under its water). A pontoon: its deck at the road's height from the bank it was
    started on, as far as it is built, on floats down to the water. The 2D maps cross out a fallen bridge and dash a pontoon */
 const BLOOK = { stone: [0x8c8577, 0x9a9a94], dark: .62, pont: [0x5d6b47, 0x56605a], float: 0x2f3530, scaf: 0x6f5b3c, seg: 12, rail: [1.1, .5], post: [.8, 1.6], deck: .45 };
-const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), was: new Set(), box: null, mats: {} };
+/* Every box of every bridge is one instance of a single instanced mesh (im), its colour the instance's (the material white, as gFort's):
+   one draw call. A mesh a box, as before, was ~600 meshes and ~550 draw calls on map 11 whenever the river was in view, about a third of
+   the frame's calls (cf-lag-3). L: the boxes of the build under way, 9 numbers each (x, y, z, sx, sy, sz, a, hex, tilt) */
+const BR3 = { at: null, g: null, ter: null, roads: [], key: null, sunk: new Set(), was: new Set(), box: null, mat: null, im: null, L: [] };
 function br3Init() {
   const K = BR3;
-  K.at = scene; K.key = null; K.sunk = new Set(); K.was = new Set(); K.roads = []; K.ter = null;
+  K.at = scene; K.key = null; K.sunk = new Set(); K.was = new Set(); K.roads = []; K.ter = null; K.im = null; K.L = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry || !o.geometry.attributes || !o.geometry.attributes.position) return;
     if (!K.ter && o.userData.ground) K.ter = o;
@@ -46504,9 +46576,22 @@ function br3Init() {
   if (!K.box) K.box = new THREE.BoxGeometry(1, 1, 1);
   K.g = new THREE.Group(); scene.add(K.g);
 }
-const br3Mat = hex => BR3.mats[hex] || (BR3.mats[hex] = mat(hex));
-function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) {
-  const m = new THREE.Mesh(BR3.box, br3Mat(hex)); m.position.set(x, y, z); m.scale.set(sx, sy, sz); m.rotation.set(tilt || 0, a, 0, 'YXZ'); BR3.g.add(m); return m;
+function br3Box(x, y, z, sx, sy, sz, a, hex, tilt) { BR3.L.push(x, y, z, sx, sy, sz, a, hex, tilt || 0); }
+/* the boxes of the build into the instanced mesh (made again, larger, when they outgrow it) */
+function br3Flush() {
+  const K = BR3, L = K.L, n = L.length / 9;
+  if (!K.im || K.im.userData.cap < n) {
+    if (K.im) { K.g.remove(K.im); if (K.im.dispose) K.im.dispose(); }   // its instance buffers freed (the box geometry is shared and stays)
+    const cap = Math.max(64, Math.ceil(n * 1.25)), im = new THREE.InstancedMesh(K.box, K.mat || (K.mat = mat(0xffffff)), cap);
+    im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3); im.frustumCulled = false; im.userData.cap = cap;
+    K.g.add((K.im = im));
+  }
+  const im = K.im, M = new THREE.Matrix4(), Q = new THREE.Quaternion(), E = new THREE.Euler(), P = new THREE.Vector3(), Z = new THREE.Vector3(), C = new THREE.Color();
+  for (let i = 0; i < n; i++) {
+    const o = i * 9; Q.setFromEuler(E.set(L[o + 8], L[o + 6], 0, 'YXZ'));
+    im.setMatrixAt(i, M.compose(P.set(L[o], L[o + 1], L[o + 2]), Q, Z.set(L[o + 3], L[o + 4], L[o + 5]))); im.setColorAt(i, C.setHex(L[o + 7]));
+  }
+  im.count = n; im.visible = n > 0; im.instanceMatrix.needsUpdate = true; im.instanceColor.needsUpdate = true; K.L = [];
 }
 /* the ground and the roads where the match sank the grid */
 function br3Sink() {
@@ -46529,7 +46614,7 @@ function br3Sink() {
 }
 function br3Build() {
   const K = BR3, T = S.T, era = S.modern ? 1 : 0;
-  for (const c of K.g.children.slice()) K.g.remove(c);
+  K.L = [];
   for (const b of brs()) {
     const a = Math.atan2(-b.dz, b.dx), e0 = b.ends[0], e1 = b.ends[1], n = Math.max(3, Math.round(b.len / BLOOK.seg)), hd = b.o.hd, st = S.os[b.id], c0 = BLOOK.stone[era];
     const hex = st ? new THREE.Color(c0).multiplyScalar(BLOOK.dark).getHex() : c0, at = t => ({ x: e0.x + (e1.x - e0.x) * t, z: e0.z + (e1.z - e0.z) * t }), yAt = p => hgtT(T, p.x, p.z) + BRDH;
@@ -46572,6 +46657,7 @@ function br3Build() {
       else if (y > T.WL + 1) br3Box(x, (y + T.WL - 1) / 2, s.z, 1.6, y - T.WL + 1, BR.pw * 1.6, 0, BLOOK.float);
     }
   }
+  br3Flush();
 }
 function br3Scene() {
   if (!S || !S.T || !S.T.net) return;
@@ -49262,6 +49348,22 @@ Net.rx.mreq = (g => m => {
   if (G.bArm !== undefined && S.t < G.bArm) return;
   bombGo(G);
 })(Net.rx.mreq);
+/* the driver's lines at the top, while he is in it (cf-svbied-buff, the captain: "explicar ali no topo como usa ele, enquanto esta dentro
+   dele"): in hudWarn's column under the scoreboard, after its warnings (nothing there writes over them, the crosshair or the banner below),
+   the charge arming with its seconds, then armed and what sets it off */
+function vbHint(P) {
+  const B = P && !P.man && !P.dead && !P.bGone && bombOf(P); if (!B) return null;
+  const T = P.bArm !== undefined ? P.bArm : (P.vbA || (P.vbA = S.t + B.arm)), nm = (P.def && P.def.name || 'Veículo-bomba').replace(/\s*\(.*\)\s*$/, '');
+  if (S.t < T) return [nm + ': armando… (' + Math.ceil(T - S.t) + ' s)', 'Depois: 5 detona (raio de ' + B.r + ' m)', 0];
+  return [nm + ' armado — 5 detona', 'Batida forte ou inimigo a ' + B.trig + ' m também detonam · raio de ' + B.r + ' m', 1];
+}
+hudWarn = (g => (P, u, disp, blink, y) => {
+  y = g(P, u, disp, blink, y);
+  const h = vbHint(P); if (!h) return y;
+  txt(h[0].toUpperCase(), cw / 2, y, 14 * u, h[2] ? '#ff8a5c' : '#ffd24a', 'center', disp); y += 18 * u;
+  txt(h[1], cw / 2, y, 12 * u, S.modern ? '#c4f1f7' : '#f3ead2', 'center'); y += 18 * u;
+  return y;
+})(hudWarn);
 /* the driver's line: what 5 does, once when it enters */
 spawnPlayer = (g => (...a) => {
   const p = g(...a), B = p && !p.man && bombOf(p);

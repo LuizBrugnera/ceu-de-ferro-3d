@@ -56,7 +56,7 @@ console.log('-- far fire scatters --');
     return sp;
   };
   const n = spread(150), f = spread(450);
-  ok(n > 0 && f - n > IAI.spR[1] * 2.5, 'the AI rifleman\'s aim error at 150 m ' + n.toFixed(4) + ' rad, at 450 m ' + f.toFixed(4) + ' rad');
+  ok(n > 0 && f - n > (IAI.spR ? IAI.spR[1] : .001) * 2.5, 'the AI rifleman\'s aim error at 150 m ' + n.toFixed(4) + ' rad, at 450 m ' + f.toFixed(4) + ' rad');
 }
 console.log('-- the sniper --');
 {

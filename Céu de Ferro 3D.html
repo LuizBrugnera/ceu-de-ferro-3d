@@ -7162,7 +7162,7 @@ function rixScanN(X, k, x, z) {
    netNear: the nearest point of any edge. netPath: the cheapest way between two nodes (Dijkstra, ties by index); cost(e) defaults to the edge's
    length times RN.cls[mode][class]; the default ones are cached in T.pc by a,b,mode. tripOf: a polyline in the shape of a route from a point to a
    point by the network (start, its projection on the nearest edge, the path, the target's projection, the target), with ri and s1 when the end
-   lies on a main road (a vehicle or a squad rides it as it rides the route) */
+   lies on a main road (a vehicle or a squad rides it as it rides the route); or, when it costs less, the way across country (XC, xcTrip) */
 function netNear(x, z, T) {
   T = T || S.T; const N = T.net, X = rixNet(N, T);
   if (!rixNear(X, x, z, rixScanN)) return netAll(N.e, 0, x, z, { e: -1, s: 0, d: 1e9, x: 0, z: 0 });   // off the grid, or not a number: every edge, as before
@@ -7227,6 +7227,203 @@ function tripLen(p) {
   if (r) for (let i = 0; i < r.length; i += 2) L += (r[i + 1] - r[i]) * (1 / DIRT.wh[1] - 1);
   return L;
 }
+/* ---------- the way across country (cf-path-fora-estrada): a trip need not keep to the roads ----------
+   tripOf weighs, beside the network's way, the cheapest way over the ground: an A* over a grid of XC.cell m (xcGrid, built once a terrain and
+   its pass again when a bridge falls or a pontoon goes up), each cell costing per metre, by mode (foot, veh: wheels, trk: tracks), the road's
+   class where a road runs (RN.cls, the cheapest class in the cell), else XC.open (open ground, almost the road's: wheels keep DIRT.wh of their
+   pace off it), more in a wood (XC.wood x its share squared; over XC.wmax no way), among houses (over XC.bld of them, no way for a vehicle),
+   and on a slope (1 + XC.slope x the grade; over XC.gmax no way); water no way (each crossing's whole stretch of river is water, its dry
+   bed too) but where a road runs that is not cut (a standing bridge, a pontoon, a bridge built in the match: S.bre). With a team, each cell times 1 + what side's commander knows of the enemy there (as its edges, cmdEdges: the enemy
+   influence times MANT.thr.k, its own losses times MANT.thr.kz). The way is pulled straight between cells where that costs no more than
+   XC.pull of the cells' way; across the water it keeps to the road of the bridge (a deck, G.dk). Both ways are weighed by that same cost (xcLine), the network's start and end legs too; the way across country is
+   taken when it costs under XC.gain of the other. Its off-road stretches are unpaved runs (dr), so wheels keep DIRT.wh of their pace there.
+   XC.on 0: only the network, as before. XCB: what it has cost, read only */
+const XC = { on: 1, cell: 100, gain: .92, pull: 1.03, min: 300, open: { foot: 1, veh: 1.4, trk: 1.1 }, wood: { foot: 1.5, veh: 3, trk: 2 },
+  wmax: { foot: 2, veh: .35, trk: .55 }, bld: { foot: 99, veh: 2, trk: 3 }, slope: { foot: 1.5, veh: 6, trk: 4 }, gmax: { foot: .8, veh: .3, trk: .45 }, cache: 256 };
+const XCB = { n: 0, ms: 0, worst: 0, xc: 0, build: 0 };
+/* the ground at XC.cell m: height, wood, houses, the road classes (bits), water, and by the bridges' state where one may pass */
+function xcGrid(T) {
+  let G = T.xcg; const N = T.net, key = (S && S.T === T && S.brk ? S.brk : '') + '|' + (N ? N.e.length : 0);
+  if (!G) {
+    const t0 = AIB.now(), c = XC.cell, W = T.W || S.W, HW = T.HW || S.HW, nx = Math.ceil(W / c), nz = Math.ceil(2 * HW / c), n = nx * nz, m = 3;
+    const h = new Float32Array(n), wood = new Float32Array(n), wat = new Float32Array(n), bld = new Uint8Array(n), rd = new Uint8Array(n);
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      let w = 0, v = 0, y = 0;
+      for (let b = 0; b < m; b++) for (let a = 0; a < m; a++) {
+        const x = (i + (a + .5) / m) * c, z = -HW + (j + (b + .5) / m) * c, k = clamp(Math.round((z - T.z0) / T.cz), 0, T.N) * (T.N + 1) + clamp(Math.round((x - T.x0) / T.cx), 0, T.N), g = hgtT(T, x, z);
+        if (T.kind[k] === 1) w++; if (g <= T.WL + .3) v++; y += g;
+      }
+      const q = j * nx + i; wood[q] = w / (m * m); wat[q] = v / (m * m); h[q] = y / (m * m);
+    }
+    const cell = (x, z) => clamp((z + HW) / c | 0, 0, nz - 1) * nx + clamp(x / c | 0, 0, nx - 1);
+    for (const o of T.houses || []) { const q = cell(o.x, o.z); if (bld[q] < 255) bld[q]++; }
+    if (T.rx) for (let z = -HW; z <= HW; z += 20) { const x = T.rx(z); if (x > 0 && x < W && hgtT(T, x, z) <= T.WL + .3) wat[cell(x, z)] = 1; }   // the river's own course
+    const gr = new Float32Array(n);   // the grade: the steepest of the four neighbours
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const q = j * nx + i; let d = 0; if (i > 0) d = Math.max(d, Math.abs(h[q] - h[q - 1])); if (i < nx - 1) d = Math.max(d, Math.abs(h[q] - h[q + 1])); if (j > 0) d = Math.max(d, Math.abs(h[q] - h[q - nx])); if (j < nz - 1) d = Math.max(d, Math.abs(h[q] - h[q + nx])); gr[q] = d / c; }
+    G = T.xcg = { key: null, c, nx, nz, n, W, HW, h, wood, wat, bld, rd, gr, cell, pass: null, cost: {}, cm: null, cmN: 0, pc: new Map(),
+      g: new Float64Array(n), via: new Int32Array(n), st: new Uint32Array(n), cl: new Uint32Array(n), stamp: 0 };
+    XCB.build = AIB.now() - t0;
+  }
+  if (G.key === key) return G;
+  /* the roads (edges added in the match, a pontoon's or a rebuilt bridge's, too) and where one may pass */
+  const c = G.c, n = G.n, rd = G.rd, pass = new Uint8Array(n), wet = new Uint8Array(n), br = new Uint8Array(n), bm = S && S.T === T ? S.bre : null;
+  rd.fill(0);
+  if (N && T.rx) for (const b of brOf(T)) for (let z = b.z0 - 20; z <= b.z1 + 20; z += 10) for (let d = -b.gw - 20; d <= b.gw + 20; d += 10) { const x = T.rx(z) + d; if (x > 0 && x < G.W) wet[G.cell(x, z)] = 1; }   // a crossing's stretch of river (its dry bed sinks when the bridge falls) is water but where a road that stands runs
+  const dk = new Map();   // the decks: a wet cell a road that stands runs through, with that road's samples there (edge, s, ...): the way keeps to the road in it
+  if (N) for (const E of N.e) {   // every road is a way where it runs, over the water too, unless it is cut (a fallen bridge: S.bre)
+    const P = E.p, bit = 1 << clamp(E.c | 0, 0, 3), up = !(bm && bm[E.i] === Infinity);
+    for (let s = 0; s <= E.len; s += 10) {
+      const p = routeAt(P, s), q = G.cell(p.x, p.z); rd[q] |= bit; if (!up) continue;
+      br[q] = 1; if (G.wat[q] > AP.wet || wet[q]) { let l = dk.get(q); if (!l) dk.set(q, (l = [])); l.push(E.i, s); }
+    }
+  }
+  for (let q = 0; q < n; q++) pass[q] = (G.wat[q] > AP.wet || wet[q]) && !br[q] ? 0 : 1;
+  G.pass = pass; G.dk = dk; G.cost = {}; G.pc.clear(); G.key = key; return G;
+}
+/* each cell's cost per metre for a mode (Infinity: no way) */
+function xcCost(G, mode) {
+  if (G.cost[mode]) return G.cost[mode];
+  const n = G.n, a = new Float32Array(n), cls = RN.cls[mode] || RN.cls.veh, md = XC.open[mode] !== undefined ? mode : 'veh';
+  const op = XC.open[md], wd = XC.wood[md], wm = XC.wmax[md], bl = XC.bld[md], sl = XC.slope[md], gm = XC.gmax[md];
+  for (let q = 0; q < n; q++) {
+    if (!G.pass[q]) { a[q] = Infinity; continue; }
+    const r = G.rd[q];
+    if (r) { let b = Infinity; for (let k = 0; k < 4; k++) if (r & (1 << k)) b = Math.min(b, cls[k]); a[q] = b; continue; }
+    const w = G.wood[q], g = G.gr[q];
+    a[q] = w > wm || G.bld[q] >= bl || g > gm ? Infinity : (op + wd * w * w) * (1 + sl * g);
+  }
+  return (G.cost[mode] = a);
+}
+/* with a team: each cell's threat factor from its commander's influence grid and losses (null: none known) */
+function xcThr(G, team) {
+  const C = team !== undefined && S.cmd ? S.cmd[team] : null; if (!C || !C.inf || !C.nx) return null;
+  const K = MANT.thr, Gc = CMD.cell, I = C.inf, Z = C.kz && C.kz.length === C.nx * C.nz ? C.kz : null;
+  if (!G.cm || G.cmN !== C.nx * C.nz) { G.cm = new Int32Array(G.n); G.cmN = C.nx * C.nz; for (let q = 0; q < G.n; q++) { const x = (q % G.nx + .5) * G.c, z = -G.HW + ((q / G.nx | 0) + .5) * G.c; G.cm[q] = clamp((z + S.HW) / Gc | 0, 0, C.nz - 1) * C.nx + clamp(x / Gc | 0, 0, C.nx - 1); } }
+  const cm = G.cm; let any = false; for (let k = 0; k < I.length; k++) if (I[k] < 0 || (Z && Z[k] > 0)) { any = true; break; }
+  return any ? q => { const k = cm[q]; return 1 + Math.max(0, -I[k]) * K.k + (Z ? Z[k] * K.kz : 0); } : null;
+}
+/* the cost of polyline pts over the grid (a cell with no way counts 4 x the open ground's: a way of the network may cross what this grid calls none) */
+function xcLine(G, cost, thr, pts, md) {
+  const c = G.c, hard = 4 * XC.open[md]; let s = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], L = hdist(a, b), k = Math.max(1, Math.ceil(L / (c / 4)));
+    for (let j = 0; j < k; j++) { const t = (j + .5) / k, q = G.cell(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t), v = cost[q]; s += (L / k) * (v === Infinity ? hard : v) * (thr ? thr(q) : 1); }
+  }
+  return s;
+}
+/* a straight leg a to b over the grid: its cost, each cell it crosses (an exact walk of the cells, Amanatides & Woo) for the length it runs in
+   it, or Infinity where one has no way, or where it passes a corner beside one (the A*'s rule), or crosses a deck it does not start or end in;
+   the end cells qa qb pass: the ends are where they are */
+function xcSeg(G, cost, thr, a, b, qa, qb) {
+  const c = G.c, nx = G.nx, nz = G.nz, L = hdist(a, b), dx = b.x - a.x, dz = b.z - a.z, gx = a.x / c, gz = (a.z + G.HW) / c;
+  let i = clamp(Math.floor(gx), 0, nx - 1), j = clamp(Math.floor(gz), 0, nz - 1);
+  const si = dx > 0 ? 1 : dx < 0 ? -1 : 0, sj = dz > 0 ? 1 : dz < 0 ? -1 : 0, ti = si ? Math.abs(c / dx) : Infinity, tj = sj ? Math.abs(c / dz) : Infinity;
+  let mi = si ? ((si > 0 ? i + 1 - gx : gx - i) * c) / Math.abs(dx) : Infinity, mj = sj ? ((sj > 0 ? j + 1 - gz : gz - j) * c) / Math.abs(dz) : Infinity, t = 0, s = 0;
+  const ea = G.cell(a.x, a.z), eb = G.cell(b.x, b.z), at = q => { const v = cost[q]; return v === Infinity && (q === qa || q === qb) ? 4 : G.dk.has(q) && q !== ea && q !== eb ? Infinity : v; };   // a deck only at the leg's own ends: across the water the way keeps to the road
+  for (let k = 0; k < nx + nz + 2; k++) {
+    const q = j * nx + i, v = at(q); if (v === Infinity) return Infinity;
+    const t1 = Math.min(1, mi, mj); s += (t1 - t) * L * v * (thr ? thr(q) : 1); t = t1;
+    if (t >= 1) break;
+    if (Math.abs(mi - mj) < 1e-9) {   // through a corner: the two cells beside it must pass too
+      const ni = i + si, nj = j + sj; if (ni < 0 || nj < 0 || ni >= nx || nj >= nz) break;
+      if (at(j * nx + ni) === Infinity || at(nj * nx + i) === Infinity) return Infinity;
+      i = ni; j = nj; mi += ti; mj += tj;
+    } else if (mi < mj) { i += si; mi += ti; if (i < 0 || i >= nx) break; } else { j += sj; mj += tj; if (j < 0 || j >= nz) break; }
+  }
+  return s;
+}
+/* the cheapest way across country from x0 z0 to x1 z1 for mode md (null: none): { pts, c its cost, off its share off the roads } */
+function xcPath(G, md, x0, z0, x1, z1, thr) {
+  const cost = xcCost(G, md), nx = G.nx, nz = G.nz, c = G.c, a = G.cell(x0, z0), b = G.cell(x1, z1), g = G.g, via = G.via, st = G.st, cl = G.cl;
+  const stamp = ++G.stamp; if (stamp >= 4294967295) { G.st.fill(0); G.cl.fill(0); G.stamp = 1; }
+  const S0 = G.stamp, kq = q => (q === a || q === b ? Math.min(cost[q], 4 * XC.open[md]) : cost[q]) * (thr ? thr(q) : 1);
+  const cls = RN.cls[md] || RN.cls.veh, lo = Math.min(XC.open[md], cls[0], cls[1], cls[2], cls[3]), bi = b % nx, bj = b / nx | 0;
+  const hx = q => { const dx = Math.abs(q % nx - bi), dz = Math.abs((q / nx | 0) - bj); return lo * c * (Math.max(dx, dz) + .4142 * Math.min(dx, dz)); };
+  const H = g2Heap(); st[a] = S0; g[a] = 0; via[a] = -1; H.push(hx(a), a); let found = false;
+  while (H.n) {
+    const u = H.pop(); if (cl[u] === S0) continue; cl[u] = S0; if (u === b) { found = true; break; }
+    const ui = u % nx, uj = u / nx | 0, ku = kq(u);
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const v = j * nx + i; if (cl[v] === S0) continue;
+      const kv = kq(v); if (kv === Infinity) continue;
+      if (di && dj && (cost[uj * nx + i] === Infinity || cost[j * nx + ui] === Infinity)) continue;   // no corner cut past a cell with no way
+      const w = g[u] + (di && dj ? 1.4142 : 1) * c * .5 * (ku + kv);
+      if (st[v] !== S0 || w < g[v]) { st[v] = S0; g[v] = w; via[v] = u; H.push(w + hx(v), v); }
+    }
+  }
+  if (!found) return null;
+  const cells = []; for (let q = b; q !== -1; q = via[q]) cells.push(q); cells.reverse();
+  /* the points: the cells' middles, and across each run of decks the road's own way (from the road that has the most samples in it, 20 m past
+     them each end), its points fixed: nothing is pulled across them */
+  const P = [], gc = [], fx = [], put = (p, v, f) => { P.push(p); gc.push(v); fx.push(f); }, E = S.T.net ? S.T.net.e : [];
+  put({ x: x0, z: z0 }, 0, 1);
+  for (let i = 1; i < cells.length - 1; i++) {
+    const q = cells[i];
+    if (!G.dk.has(q)) { put({ x: (q % nx + .5) * c, z: -G.HW + ((q / nx | 0) + .5) * c }, g[q], 0); continue; }
+    let k = i; while (k + 1 < cells.length - 1 && G.dk.has(cells[k + 1])) k++;
+    const cnt = new Map(); for (let r = i; r <= k; r++) { const l = G.dk.get(cells[r]); for (let m = 0; m < l.length; m += 2) cnt.set(l[m], (cnt.get(l[m]) || 0) + 1); }
+    let ei = -1, bn = 0; for (const [x, v] of cnt) if (v > bn || (v === bn && x < ei)) { bn = v; ei = x; }
+    let s0 = Infinity, s1 = -Infinity; for (let r = i; r <= k; r++) { const l = G.dk.get(cells[r]); for (let m = 0; m < l.length; m += 2) if (l[m] === ei) { s0 = Math.min(s0, l[m + 1]); s1 = Math.max(s1, l[m + 1]); } }
+    const R = E[ei]; if (!R) { i = k; continue; }
+    s0 = Math.max(0, s0 - 20); s1 = Math.min(R.len, s1 + 20);
+    const pv = P[P.length - 1], fw = hdist(pv, routeAt(R.p, s0)) <= hdist(pv, routeAt(R.p, s1)), m = Math.max(1, Math.ceil((s1 - s0) / 20));
+    for (let t = 0; t <= m; t++) { const o = routeAt(R.p, fw ? s0 + (s1 - s0) * t / m : s1 - (s1 - s0) * t / m); put({ x: o.x, z: o.z }, g[cells[i]] + (g[cells[k]] - g[cells[i]]) * t / m, 1); }
+    i = k;
+  }
+  put({ x: x1, z: z1 }, g[b], 1);
+  /* pulled straight: from each kept point on to the farthest point before the next fixed one that the straight leg reaches for no more than XC.pull
+     of the cells' way (three misses in a row end the look) */
+  const nf = new Int32Array(P.length); for (let k = P.length - 1, f = P.length - 1; k >= 0; k--) { nf[k] = f; if (fx[k]) f = k; }
+  const out = [P[0]], cs = [-1]; let i = 0;
+  while (i < P.length - 1) {
+    let j = i + 1;
+    for (let k = i + 2, e = Math.min(nf[i], i + 120); k <= e && k - j <= 3; k++) if (xcSeg(G, cost, thr, P[i], P[k], a, b) <= XC.pull * (gc[k] - gc[i]) + 1) j = k;
+    out.push(P[j]); i = j;
+  }
+  let off = 0, L = 0;
+  for (let k = 1; k < out.length; k++) {   // each leg's class: unpaved (3) where most of it runs off the roads
+    const A = out[k - 1], B = out[k], l = hdist(A, B), m = Math.max(1, Math.ceil(l / (c / 4))); let o = 0;
+    for (let j = 0; j < m; j++) { const t = (j + .5) / m; if (!G.rd[G.cell(A.x + (B.x - A.x) * t, A.z + (B.z - A.z) * t)]) o++; }
+    off += l * o / m; L += l; cs.push(o * 2 > m ? 3 : 0);
+  }
+  return { pts: out, cs, c: xcLine(G, cost, thr, out, XC.open[md] !== undefined ? md : 'veh'), off: L ? off / L : 0 };
+}
+/* the share of polyline p's length that runs off every road (at the grid's grain) */
+function xcOff(p, T) {
+  const G = xcGrid(T || S.T), c = G.c; let o = 0, L = 0;
+  for (let i = 1; i < p.length; i++) { const a = p[i - 1], b = p[i], l = hdist(a, b), m = Math.max(1, Math.ceil(l / (c / 4))); let k = 0; for (let j = 0; j < m; j++) { const t = (j + .5) / m; if (!G.rd[G.cell(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t)]) k++; } o += l * k / m; L += l; }
+  return L ? o / L : 0;
+}
+/* tripOf's way across country, when it beats the network's (road: its corner-to-corner points, null when the network has none): a way in the
+   shape of tripOf's (its unpaved runs dr, ri s1 where it ends on an axis: n1 E1, the target's nearest edge), xc 1 and off its share off the
+   roads; else null. The cells' way is kept by its end cells, mode, team and the bridges' state (G.pc, a team's for 10 s) */
+function xcTrip(T, mode, team, x0, z0, x1, z1, road, n1, E1) {
+  if (!XC.on || !(T.mv >= 4) || !T.net || Math.hypot(x1 - x0, z1 - z0) < XC.min) return null;
+  const t0 = AIB.now(), G = xcGrid(T), md = XC.open[mode] !== undefined ? mode : 'veh', thr = xcThr(G, team), qa = G.cell(x0, z0), qb = G.cell(x1, z1);
+  const key = qa + ',' + qb + ',' + md + (thr ? ',' + team + ',' + (S.t / 10 | 0) : '');
+  let X = G.pc.get(key);
+  if (X === undefined) {
+    X = xcPath(G, md, x0, z0, x1, z1, thr);
+    if (G.pc.size >= XC.cache) G.pc.delete(G.pc.keys().next().value);
+    G.pc.set(key, X);
+  }
+  let out = null;
+  if (X) {
+    const pts = X.pts.slice(); pts[0] = { x: x0, z: z0 }; pts[pts.length - 1] = { x: x1, z: z1 };
+    const rc = road ? xcLine(G, xcCost(G, md), thr, road, md) : Infinity;
+    if (X.c < XC.gain * rc) {
+      const pl = polyOf(pts), L0 = pl.len; out = orgPoly(pl);
+      out.dr = dirtRuns(pts, X.cs, out.len / (L0 || 1)); out.xc = 1; out.off = X.off;
+      if (E1.c === 0 && n1.d < RN.onAx) { out.ri = E1.ax[0]; out.s1 = E1.ax[1] + n1.s; }
+      else if (E1.a2 && n1.d < RN.onAx) { out.ri = E1.a2[0]; out.s1 = E1.a2[1] + E1.a2[2] * n1.s; }
+      XCB.xc++;
+    }
+  }
+  const ms = AIB.now() - t0; XCB.n++; XCB.ms += ms; if (ms > XCB.worst) XCB.worst = ms;
+  return out;
+}
+newState = (g => (e, m, o) => { const s = g(e, m, o); if (XC.on && s && s.T && s.T.net && s.T.mv >= 4 && !(s.net && !s.host)) xcGrid(s.T); return s; })(newState);   // the grid at the load, not in the first trip's frame
 function tripOf(x0, z0, x1, z1, o) {
   o = o || {}; const T = S.T, N = T.net, mode = o.mode || 'veh', Cm = o.team !== undefined && !o.cost && T.mv >= 4 && S.cmd ? S.cmd[o.team] : null, cost = o.cost || (Cm && Cm.et ? edgeCostOf(Cm, mode) : null), bm = S.bre || null, f0 = cost || (e => e.len * RN.cls[mode][e.c]);
   const na0 = N.n.findIndex(q => Math.hypot(q.x - x0, q.z - z0) < 1), na1 = N.n.findIndex(q => Math.hypot(q.x - x1, q.z - z1) < 1), bk = S.t / 10 | 0, key = (!o.cost && na0 >= 0 && na1 >= 0) ? 't' + na0 + ',' + na1 + ',' + mode + (cost ? ',' + Cm.t : '') + (bm ? S.brk : '') : null;
@@ -7241,7 +7438,7 @@ function tripOf(x0, z0, x1, z1, o) {
     const p = netPath(A, B, cost, mode); if (!p) continue;
     const c = da * f0(E0) / E0.len + p.c + db * f0(E1) / E1.len; if (!best || c < best.c) best = { c, A, B, p };
   }
-  if (!best) return null;
+  if (!best) return xcTrip(T, mode, o.team, x0, z0, x1, z1, null, n1, E1);   // no way by the network (a fallen bridge): perhaps one across country
   const inner = (E, s0, s1) => { const lo = Math.min(s0, s1), hi = Math.max(s0, s1), m = E.p.filter(q => q.s > lo + 1e-6 && q.s < hi - 1e-6); return s1 >= s0 ? m : m.reverse(); };
   const pts = [{ x: x0, z: z0 }, { x: n0.x, z: n0.z }], cs = [-1, -1], put = (c, l) => { for (const p of l) { pts.push(p); cs.push(c); } };   // cs: the class of the road each point is reached by (-1 off the roads)
   if (!best.p) put(E0.c, inner(E0, n0.s, n1.s));
@@ -7257,8 +7454,9 @@ function tripOf(x0, z0, x1, z1, o) {
   if (T.mv >= 8) out.dr = dirtRuns(pts, cs, out.len / (L0 || 1));   // map version 8: where the way is unpaved, for the pace of wheels on it (tripMove); s scaled to the rounded way
   if (E1.c === 0 && n1.d < RN.onAx) { out.ri = E1.ax[0]; out.s1 = E1.ax[1] + n1.s; }
   else if (E1.a2 && n1.d < RN.onAx) { out.ri = E1.a2[0]; out.s1 = E1.a2[1] + E1.a2[2] * n1.s; }   // a class 1 edge of the centre axis (map version 4)
-  if (key) (pm || T.pc).set(key, out);
-  return out;
+  const xo = xcTrip(T, mode, o.team, x0, z0, x1, z1, pts, n1, E1);   // the way across country, when it costs less (XC)
+  if (key) (pm || T.pc).set(key, xo || out);
+  return xo || out;
 }
 /* nsq: how many of the trucks carry a squad, while there is room under the cap */
 function spawnColumn(team, nt, na, ntr, ri, s0, nar, nsq) {
@@ -18771,6 +18969,9 @@ const mrd = () => S.mrd || (S.mrd = { go: 0, boarded: 0, landed: 0, planned: 0, 
 const mrw = k => { const w = mrd().why; w[k] = (w[k] || 0) + 1; return false; };   // why a ride was not made, counted (the tests and the probes read it)
 /* the straight way from the network to a place (a stub of a ride) crosses no water */
 const rideDry = (a, b) => { const n = Math.ceil(hdist(a, b) / 40); for (let i = 1; i < n; i++) { const x = a.x + (b.x - a.x) * i / n, z = a.z + (b.z - a.z) * i / n; if (hgt(x, z) <= S.T.WL + .5) return false; } return true; };
+/* a place a vehicle may meet or let off a squad: within r m of the network by a dry stub, or (XC) a place wheels may reach across country, whose
+   trip p must then be one across country (p.xc; without p, only the place is looked at) */
+const rideAt = (nn, P, r, p) => (nn.d <= r && rideDry(nn, P)) || (XC.on && S.T.mv >= 4 && (p ? !!p.xc : xcCost(xcGrid(S.T), 'veh')[xcGrid(S.T).cell(P.x, P.z)] < Infinity));
 function rideFind(t, q, P) {
   const K = MAN.ride, n = manLive(q); let best = null, bd = K.near;
   for (const u of S.units) {
@@ -18787,11 +18988,12 @@ function rideDrop(C, q, wp, P, sP) {
   for (let s = wp.len - K.keep; s >= sP + K.far * .5 && tries < K.tries; s -= K.step) {
     const D = routeAt(wp, s);
     const nn = netNear(D.x, D.z);
-    if (nn.d > K.stub || !rideDry(nn, D)) { mrw('stub'); continue; }
+    if (!rideAt(nn, D, K.stub)) { mrw('stub'); continue; }
     if (cmdKnown(C, D.x, D.z, K.safe) > 0 || mbThr(C, D.x, D.z) > K.thr) { mrw('known'); continue; }
     tries++;
     const p2 = tripOf(P.x, P.z, D.x, D.z, { mode: 'veh', team: q.team });
     if (!p2) { mrw('p2'); continue; }
+    if (!rideAt(nn, D, K.stub, p2)) { mrw('stub'); continue; }
     if (p2.len > K.detour * (s - sP) + 300) { mrw('detour'); continue; }
     if (mbMeanThr(C, p2) > K.pthr) { mrw('pthr'); continue; }
     return { D: { x: D.x, z: D.z }, s, p2 };
@@ -18802,9 +19004,10 @@ function rideGo(C, q, op, O, now) {
   const K = MAN.ride, wp = O.wp, u = rideFind(q.team, q, now); if (!u) return mrw('vehicle');
   const spd = u.def.spd * GSPD * K.spd; let n = 0;
   for (let sP = q.ts + K.lead; sP <= wp.len - K.keep - K.far * .5 && n < K.tries; sP += K.step) {   // the first meeting place on the way that the vehicle reaches about when the squad does
-    const P = routeAt(wp, sP), nn = netNear(P.x, P.z); if (nn.d > K.pick || !rideDry(nn, P)) { mrw('pick'); continue; }
+    const P = routeAt(wp, sP), nn = netNear(P.x, P.z); if (!rideAt(nn, P, K.pick)) { mrw('pick'); continue; }
     n++;
     const p1 = tripOf(u.x, u.z, P.x, P.z, { mode: 'veh', team: q.team }); if (!p1) { mrw('p1'); continue; }
+    if (!rideAt(nn, P, K.pick, p1)) { mrw('pick'); continue; }
     const tu = p1.len / spd, ts = (sP - q.ts) / MAN.pace; if (tu - ts > K.waitMax) { mrw('wait'); continue; }
     const d = rideDrop(C, q, wp, P, sP); if (!d) { mrw('drop'); continue; }
     if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - q.ts) / MAN.pace * K.gain)) { mrw('gain'); continue; }
@@ -36183,11 +36386,12 @@ function embDrop(C, q, W, P, sP, keep) {
   const K = MAN.ride; let tries = 0;
   for (let s = W.len - keep; s >= sP + K.far * .5 && tries < K.tries; s -= K.step) {
     const D = routeAt(W, s), nn = netNear(D.x, D.z);
-    if (nn.d > K.stub || !rideDry(nn, D)) { mrw('stub'); continue; }
+    if (!rideAt(nn, D, K.stub)) { mrw('stub'); continue; }
     if (cmdKnown(C, D.x, D.z, K.safe) > 0 || mbThr(C, D.x, D.z) > K.thr) { mrw('known'); continue; }
     if (embClosed(D.x, D.z)) { mrw('closed'); continue; }
     tries++;
     const p2 = tripOf(P.x, P.z, D.x, D.z, { mode: 'veh', team: q.team }); if (!p2) { mrw('p2'); continue; }
+    if (!rideAt(nn, D, K.stub, p2)) { mrw('stub'); continue; }
     if (p2.len > K.detour * (s - sP) + 300) { mrw('detour'); continue; }
     if (mbMeanThr(C, p2) > K.pthr) { mrw('pthr'); continue; }
     return { D: { x: D.x, z: D.z }, s, p2 };
@@ -36201,9 +36405,10 @@ function embGo(C, q, w) {
   const spd = u.def.spd * GSPD * K.spd, keep = embKeep(q); let n = 0;
   for (let sP = here ? s0 : s0 + K.lead; sP <= W.len - keep - K.far * .5 && n < K.tries; sP += K.step) {
     const P = routeAt(W, sP), nn = netNear(P.x, P.z), stop = () => (here ? 'stop' : 0);
-    if (nn.d > K.pick || !rideDry(nn, P)) { mrw('pick'); if (stop()) break; continue; }
+    if (!rideAt(nn, P, K.pick)) { mrw('pick'); if (stop()) break; continue; }
     n++;
     const p1 = tripOf(u.x, u.z, P.x, P.z, { mode: 'veh', team: t }); if (!p1) { mrw('p1'); if (stop()) break; continue; }
+    if (!rideAt(nn, P, K.pick, p1)) { mrw('pick'); if (stop()) break; continue; }
     const tu = p1.len / spd, ts = (sP - s0) / MAN.pace; if (tu - ts > (here ? EMB.wait : K.waitMax)) { mrw('wait'); if (stop()) break; continue; }
     const d = embDrop(C, q, W, P, sP, keep); if (!d) { mrw('drop'); if (stop()) break; continue; }
     if (!(Math.max(tu, ts) + d.p2.len / spd + K.load < (d.s - s0) / MAN.pace * K.gain)) { mrw('gain'); if (stop()) break; continue; }

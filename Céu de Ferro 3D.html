@@ -28446,6 +28446,461 @@ function planWarm(s) {
   if (T.tms && ENP.on) enpGround({ nx: T.tms.nx, c: T.tms.c, k: T.tms.k });   // the forward base's ground, on the tactical map's cells (tmStatic, just made)
 }
 newState = (g => (e, m, o) => { const s = g(e, m, o); if (s) planWarm(s); return s; })(newState);
+/* ---------- GENERAL 2: mundo (G1 of the General 2, cf-g2-g1-mundo; measured by tests/g2-mundo.js, the rest NÃO TESTADO: docs/nao-testado/cf-g2-g1-mundo.md) ----------
+   The world as the General 2 sees it (report cf-ia-opensource, sections 5.2 and 6, package G1): the ground in regions, the different ways
+   between its places, what each region is worth to a side and what the side believes is in it. It decides nothing and orders nothing: the
+   packages above it read it (G2 the simulation, G3 the planner, G4 the operation), so the battle is the same with it on or off (G2W.on).
+   1. The ground (g2Ground, once a terrain and the state of its bridges, like the tactical map's ground: TM): the passable cells of the tactical
+      map (TM.cell m; apPass: water is no way but where a standing bridge or ford crosses it) cut into regions around seeds: every capture point
+      and base, each side's seat town, the choke points of the tactical map (k G2W.seed.k or more: bridges and fords, junctions, a town's
+      exits), the crests (G2W.seed.crest m over the ground around), the woods (G2W.seed.woodN cells or more of wood) and a lattice every
+      G2W.seed.lat m to fill the rest, no two seeds closer than G2W.seed.near m (a point always stays). A cell goes to the seed it is quickest
+      to walk to (one Dijkstra from all of them, at the foot's time: G2W.spd by road, open ground and wood, G2W.up s more a metre climbed); two
+      regions that touch make an edge, through the quickest pair of cells on their border, with its way (cells, seed to seed), length, time on
+      foot, on wheels and on tracks, share of road and of wood, cover (the map's o), worst choke (k) and whether it crosses a bridge. tt: the
+      foot's time from every region to every other. A fallen bridge or a new pontoon builds it again, a piece a frame (g2Step); the old one
+      serves until then.
+   2. The routes (g2Routes(W, a, b), a and b regions): up to G2W.rt.n ways from a to b that differ, the axes a plan chooses from, on the cells.
+      The first is the quickest. Each next one is a Dijkstra in which a cell within one cell of a way before (but within G2W.rt.end m of a or
+      b, where every way starts and ends) costs G2W.rt.pen times more, and which comes into the ring G2W.rt.arr m about b from a bearing
+      G2W.rt.ang degrees or more off every way before, then on to b the quickest way; no longer than G2W.rt.long times the first. One that
+      still runs within a cell of a way before over more than G2W.rt.lap of its length (the ends left out) is tried again with the penalty
+      doubled, G2W.rt.tries times. A route: its cells, the regions it crosses (rg), length, foot time, the bearing it arrives by, its overlap
+      with each way before (lap) and the smallest angle between their arrivals (ang), div when both pass. Built when asked (g2Ask: a piece a
+      frame in g2Step; g2Now: at once, for a question), kept until the ground changes. g2Pairs: every point to every other, the criterion of G1.
+   3. The belief of a side (g2Sense, every G2W.bel.every s a side, inside the commanders' share of the frame): by region, the enemy strength
+      the side knows of (C.known, where it was reported: sX, sZ, CMD.val by class) remembered with its age (half every G2W.bel.half s, every
+      G2W.bel.seen s where its own forces are and see nothing there), when it was last seen, the most it has seen at once (peak), its own
+      strength (its squads, and its own vehicles: each side's roll of the vehicles it fielded, S.g2r, never the world's list), who holds the
+      region's point (all sides see it), the enemy's sight and traffic there (the side's tactical map: v, t), the danger each region is in
+      (Freeciv's assess_danger: the enemy believed in each region over the time to walk from it, G2W.bel.eta) and what each region is worth
+      (4). g2Hyp(C, n, k): n guesses of what the side does not see (the determinization of section 5.1): what it has seen at most less what
+      it knows of, and G2W.bel.prior more, spread over the regions it does not watch, more where the enemy holds a point and on the enemy's
+      side of the front; the draws are a hash of the side, k and the clock, never Math.random (the battle draws the same).
+   4. The values (in g2Sense): what each region is worth to the side, to keep (vo: the points it holds and its base, its seat town, its own
+      economy sites, supply bases, radio nodes and domes) and to take (ve: the points it does not hold and the enemy's base, an enemy seat it
+      knows of (sedeKn), the enemy sites it has identified (ECO kn), the enemy guns it knows of), G2W.val each, times its doctrine's
+      weights (G2W.dw: keep, take) and its personality's (G2W.pw, by kind of value).
+   Honest: nothing here reads S.men, S.units, S.bombs or S.planes (tests/g2-mundo.js: the code and a count with a Proxy on S); the enemy is
+   only what the side knows, its own is its own. gask mundo: the regions, the edges and the side's belief and values; with x z, the routes
+   to the region nearest x z (a point within G2W.ask m) from region id (the side's base without it). G2W.on 0 leaves it all out (the battle
+   as before: a measurement's control). G2WB: the cost, read only */
+const G2W = { on: 1,
+  seed: { near: 900, lat: 1800, k: .5, crest: 20, crestR: 3, wood: .6, woodN: 10, snap: 2 },
+  spd: { foot: [3.5, 3, 2.2], wheel: [14, 5, 2.5], track: [9, 6, 4] }, up: 1.5, road: .02,
+  rt: { n: 3, pen: 3, long: 1.8, ang: 45, arr: 600, end: 600, lap: .4, tries: 3, pops: 2500, per: 1 },
+  bel: { every: 4, half: 180, seen: 20, prior: 6, hold: 3, front: 1.5, eta: 120 },
+  val: { base: 10, seat: 8, town: 4, vil: 3, pt: 2, eco: { fab: 3, pow: 2, mine: 1 }, sup: 2, rad: 1.5, dome: 2, art: 2 },
+  dw: { cautious: [1.3, .8], balanced: [1, 1], aggressive: [.8, 1.3] },
+  pw: { ret: { keep: 1.2 }, blz: { base: 1.5, seat: 1.5 }, gue: { eco: 1.5, sup: 1.3 }, art: { art: 2 }, log: { sup: 2, rad: 1.5 } },
+  ask: 800, pts: 40,
+  K: ['base', 'pt', 'seat', 'bridge', 'choke', 'crest', 'wood', 'open'],
+  nm: { base: 'base', pt: 'ponto', seat: 'cidade-sede', bridge: 'ponte', choke: 'gargalo', crest: 'crista', wood: 'mata', open: 'campo' } };
+const G2WB = { build: 0, builds: 0, cells: 0, routes: 0, rms: 0, rworst: 0, sense: 0, senses: 0, sworst: 0,
+  stat() { const r = v => Math.round(v * 100) / 100; return { build: r(G2WB.build), builds: G2WB.builds, routes: G2WB.routes, route: r(G2WB.routes ? G2WB.rms / G2WB.routes : 0), routeWorst: r(G2WB.rworst), sense: r(G2WB.senses ? G2WB.sense / G2WB.senses : 0), senseWorst: r(G2WB.sworst), senses: G2WB.senses }; } };
+const g2Can = () => !!(G2W.on && S && S.T && S.cq && S.T.mv >= 4);
+/* a binary heap of cells by cost */
+function g2Heap() {
+  const hk = [], hv = [];
+  const less = (i, j) => hk[i] < hk[j] || (hk[i] === hk[j] && hv[i] < hv[j]), swap = (i, j) => { const a = hk[i]; hk[i] = hk[j]; hk[j] = a; const b = hv[i]; hv[i] = hv[j]; hv[j] = b; };
+  return {
+    get n() { return hk.length; },
+    push(k, q) { hk.push(k); hv.push(q); let i = hk.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (!less(i, p)) break; swap(i, p); i = p; } },
+    pop() { const q = hv[0], m = hk.length - 1; swap(0, m); hk.pop(); hv.pop(); let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let w = i; if (l < m && less(l, w)) w = l; if (r < m && less(r, w)) w = r; if (w === i) break; swap(i, w); i = w; } return q; } };
+}
+/* m/s of class sp (G2W.spd) in cell q: the road's, else between the open ground's and the wood's by its share of wood */
+const g2Spd = (sp, Z, q) => (Z.road[q] > G2W.road ? sp[0] : sp[1] + (sp[2] - sp[1]) * Z.wood[q]);
+/* the cell nearest x z that a squad may walk, within G2W.seed.snap cells, or -1 */
+function g2Snap(Z, pass, x, z) {
+  const q0 = apCell(Z, x, z); if (pass[q0]) return q0;
+  const i0 = q0 % Z.nx, j0 = q0 / Z.nx | 0, R = G2W.seed.snap; let b = -1, bd = 1e18;
+  for (let j = Math.max(0, j0 - R); j <= Math.min(Z.nz - 1, j0 + R); j++) for (let i = Math.max(0, i0 - R); i <= Math.min(Z.nx - 1, i0 + R); i++) {
+    const q = j * Z.nx + i, p = apXZ(Z, q), d = (p.x - x) * (p.x - x) + (p.z - z) * (p.z - z); if (pass[q] && d < bd) { bd = d; b = q; }
+  }
+  return b;
+}
+/* the ground's model of terrain T as it stands (null: none on this map): made at once the first time (now: at once in any case, the load), and
+   when a bridge fell or a pontoon went up, again a piece a frame (g2Step) while the old one serves */
+function g2Ground(T, now) {
+  if (!g2Can() || T !== S.T) return null;
+  const Z = tmStatic(T), W = T.g2w, sig = S.g2sig || (S.g2sig = g2Sig());   // the points and the seat towns of this match (they do not move)
+  if (W && W.Z === Z && W.sig === sig) return W;
+  if (W && W.sig === sig && !now) { if (!S.g2J) S.g2J = g2Job(T); return W; }
+  S.g2J = null; aiDrain(g2Job(T)); return T.g2w;
+}
+const g2Sig = () => S.cq.p.map(p => Math.round(p.x) + ',' + Math.round(p.z)).join(';') + '|' + SIDES().map(t => { const w = aidSeat(t); return w ? Math.round(w.x) + ',' + Math.round(w.z) : '-'; }).join(';');
+/* the build, a piece at a time: the seeds, the regions, the edges, the times between regions; T.g2w when done */
+function* g2Job(T) {
+  let a0 = AIB.now(), ms = 0; const lap = () => { ms += AIB.now() - a0; };
+  const Z = tmStatic(T), pass = apPass(Z), nx = Z.nx, nz = Z.nz, n = nx * nz, c = Z.c, K = G2W.seed, F = G2W.spd.foot;
+  const tf = new Float32Array(n); for (let q = 0; q < n; q++) tf[q] = pass[q] ? c / g2Spd(F, Z, q) : Infinity;
+  /* the seeds */
+  const nd = [], near = (x, z, r) => nd.some(o => Math.abs(o.x - x) < r && Math.abs(o.z - z) < r && Math.hypot(o.x - x, o.z - z) < r);
+  const add = (x, z, k, o) => { const q = g2Snap(Z, pass, x, z); if (q < 0) return null; const p = apXZ(Z, q), r = Object.assign({ i: nd.length, k, x: o && o.exact ? x : p.x, z: o && o.exact ? z : p.z, q, p: -1, seat: -1, e: [] }, o); delete r.exact; nd.push(r); return r; };
+  S.cq.p.forEach((p, i) => add(p.x, p.z, p.base >= 0 ? 'base' : 'pt', { exact: 1, p: i, nm: gName(p) }));
+  for (const t of SIDES()) { const w = aidSeat(t); if (!w) continue; const o = nd.find(o => hdist(o, w) < K.near); if (o) o.seat = t; else { const r = add(w.x, w.z, 'seat', { seat: t }); if (r) r.nm = w.nm || 'Sede'; } }
+  const ck = []; for (let q = 0; q < n; q++) if (pass[q] && Z.k[q] >= K.k) ck.push(q);
+  ck.sort((a, b) => Z.k[b] - Z.k[a] || a - b);
+  for (const q of ck) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, Z.k[q] >= TM.k.bridge ? 'bridge' : 'choke'); }
+  const cr = [], R = K.crestR;
+  for (let j = R; j < nz - R; j++) for (let i = R; i < nx - R; i++) {
+    const q = j * nx + i; if (!pass[q]) continue; let s = 0, m = 0, top = true;
+    for (let b = j - R; b <= j + R && top; b++) for (let a = i - R; a <= i + R; a++) { const h = Z.h[b * nx + a]; if (h > Z.h[q]) { top = false; break; } s += h; m++; }
+    if (top && Z.h[q] - s / m >= K.crest) cr.push([q, Z.h[q] - s / m]);
+  }
+  cr.sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  for (const [q] of cr) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, 'crest'); }
+  lap(); yield; a0 = AIB.now();
+  const seen = new Uint8Array(n), wd = [];
+  for (let q0 = 0; q0 < n; q0++) {
+    if (seen[q0] || !pass[q0] || Z.wood[q0] < K.wood) continue;
+    const st = [q0], l = []; seen[q0] = 1;
+    while (st.length) { const u = st.pop(); l.push(u); const ui = u % nx, uj = u / nx | 0; for (const [di, dj] of DIR8) { if (di && dj) continue; const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue; const v = j * nx + i; if (!seen[v] && pass[v] && Z.wood[v] >= K.wood) { seen[v] = 1; st.push(v); } } }
+    if (l.length < K.woodN) continue;
+    let mx = 0, mz = 0; for (const u of l) { const p = apXZ(Z, u); mx += p.x; mz += p.z; } mx /= l.length; mz /= l.length;
+    let b = l[0], bd = 1e18; for (const u of l) { const p = apXZ(Z, u), d = (p.x - mx) ** 2 + (p.z - mz) ** 2; if (d < bd) { bd = d; b = u; } }
+    wd.push([b, l.length]);
+  }
+  wd.sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  for (const [q] of wd) { const p = apXZ(Z, q); if (!near(p.x, p.z, K.near)) add(p.x, p.z, 'wood'); }
+  for (let x = K.lat / 2; x < Z.W; x += K.lat) for (let z = -Z.HW + K.lat / 2; z < Z.HW; z += K.lat) if (!near(x, z, K.near)) { const q = apCell(Z, x, z); if (pass[q]) add(x, z, 'open'); }
+  lap(); yield; a0 = AIB.now();
+  /* the regions: a Dijkstra from every seed at once */
+  const D = new Float64Array(n).fill(Infinity), via = new Int32Array(n).fill(-1), lab = new Int32Array(n).fill(-1), done = new Uint8Array(n), H = g2Heap(), up = G2W.up, h = Z.h;
+  const stp = (a, b, dg) => (tf[a] + tf[b]) * (dg ? .7071 : .5) + up * Math.max(0, h[b] - h[a]);
+  for (const o of nd) if (lab[o.q] < 0) { lab[o.q] = o.i; D[o.q] = 0; H.push(0, o.q); }
+  let k = 0;
+  while (H.n) {
+    const u = H.pop(); if (done[u]) continue; done[u] = 1; const ui = u % nx, uj = u / nx | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const q = j * nx + i; if (done[q] || !pass[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const w = D[u] + stp(u, q, di && dj); if (w < D[q]) { D[q] = w; via[q] = u; lab[q] = lab[u]; H.push(w, q); }
+    }
+    if (++k % 3000 === 0) { lap(); yield; a0 = AIB.now(); }
+  }
+  /* the edges: the quickest pair of cells across each border */
+  const best = new Map();
+  for (let q = 0; q < n; q++) {
+    if (lab[q] < 0) continue; const ui = q % nx, uj = q / nx | 0;
+    for (const [di, dj] of DIR8) {
+      if (dj < 0 || (dj === 0 && di < 0)) continue;   // each pair once
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const v = j * nx + i; if (lab[v] < 0 || lab[v] === lab[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const a = Math.min(lab[q], lab[v]), b = Math.max(lab[q], lab[v]), qa = lab[q] === a ? q : v, qb = qa === q ? v : q, w = D[qa] + stp(qa, qb, di && dj) + D[qb], key = a * 65536 + b, o = best.get(key);
+      if (!o || w < o.w) best.set(key, { a, b, qa, qb, w });
+    }
+  }
+  lap(); yield; a0 = AIB.now();
+  const chain = q => { const l = []; for (let w = q; w !== -1; w = via[w]) l.push(w); return l; };
+  const E = [];
+  for (const o of [...best.values()].sort((x, y) => x.a - y.a || x.b - y.b)) {
+    const cells = chain(o.qa).reverse().concat(chain(o.qb)), e = Object.assign({ i: E.length, a: o.a, b: o.b, cells: Int32Array.from(cells), tf: o.w }, g2Way(Z, cells));
+    E.push(e); nd[o.a].e.push(e.i); nd[o.b].e.push(e.i);
+  }
+  /* each region: its size, cover, wood, height; the foot's time from each to each */
+  const N = nd.length, cnt = new Float32Array(N), co = new Float32Array(N), cw = new Float32Array(N), ch = new Float32Array(N);
+  for (let q = 0; q < n; q++) { const r = lab[q]; if (r < 0) continue; cnt[r]++; co[r] += Z.o[q]; cw[r] += Z.wood[q]; ch[r] += Z.h[q]; }
+  for (const o of nd) { const m = cnt[o.i] || 1; Object.assign(o, { n: cnt[o.i], o: co[o.i] / m, wood: cw[o.i] / m, y: ch[o.i] / m }); if (!o.nm) o.nm = g2Nm(nd, o); }
+  const tt = new Float32Array(N * N).fill(Infinity);
+  for (let s = 0; s < N; s++) {
+    const d = tt.subarray(s * N, s * N + N), dn = new Uint8Array(N), G = g2Heap(); d[s] = 0; G.push(0, s);
+    while (G.n) { const u = G.pop(); if (dn[u]) continue; dn[u] = 1; for (const ei of nd[u].e) { const e = E[ei], v = e.a === u ? e.b : e.a, w = d[u] + e.tf; if (w < d[v]) { d[v] = w; G.push(w, v); } } }
+  }
+  lap(); G2WB.build = ms; G2WB.builds++; G2WB.cells = n;
+  T.g2w = { T: S.t, Z, sig: S.g2sig || (S.g2sig = g2Sig()), pass, tf, lab, n: nd, e: E, tt, N, rc: new Map(), to: new Map(), rq: [], ms };
+  S.g2J = null;
+}
+/* the way along cells (seed to seed): length, the time of each class, its share of road and of wood, mean cover, worst choke, a bridge */
+function g2Way(Z, cells) {
+  const c = Z.c, sp = G2W.spd; let len = 0, tw = 0, tk = 0, rd = 0, wd = 0, o = 0, k = 0, br = 0;
+  for (let i = 0; i < cells.length; i++) {
+    const q = cells[i]; o += Z.o[q]; if (Z.k[q] > k) k = Z.k[q]; if (Z.k[q] >= TM.k.bridge) br = 1;
+    if (!i) continue;
+    const p = cells[i - 1], dl = (Math.abs(q - p) === 1 || Math.abs(q - p) === Z.nx ? c : c * 1.4142);
+    len += dl; tw += dl * .5 * (1 / g2Spd(sp.wheel, Z, p) + 1 / g2Spd(sp.wheel, Z, q)); tk += dl * .5 * (1 / g2Spd(sp.track, Z, p) + 1 / g2Spd(sp.track, Z, q));
+    if (Z.road[q] > G2W.road) rd += dl; if (Z.wood[q] > .5) wd += dl;
+  }
+  const L = Math.max(1, len);
+  return { len: Math.round(len), tw: Math.round(tw), tk: Math.round(tk), road: Math.round(rd / L * 100) / 100, wd: Math.round(wd / L * 100) / 100, o: Math.round(o / cells.length * 100) / 100, k: Math.round(k * 100) / 100, br };
+}
+/* a region's name: its point's, its seat town's, else its kind and how far it is from the nearest point */
+function g2Nm(nd, o) {
+  let b = null, bd = 1e9; for (const p of nd) if (p.p >= 0 && p !== o) { const d = hdist(p, o); if (d < bd) { bd = d; b = p; } }
+  return b ? G2W.nm[o.k] + ' a ' + gN(bd / 1000) + ' km de ' + b.nm : G2W.nm[o.k];
+}
+/* the region of x z (-1 off the ground: deep water) */
+function g2At(W, x, z) {
+  const Z = W.Z, q = apCell(Z, x, z); if (W.lab[q] >= 0) return W.lab[q];
+  const i0 = q % Z.nx, j0 = q / Z.nx | 0;
+  for (let r = 1; r <= 3; r++) for (let j = Math.max(0, j0 - r); j <= Math.min(Z.nz - 1, j0 + r); j++) for (let i = Math.max(0, i0 - r); i <= Math.min(Z.nx - 1, i0 + r); i++) { const v = W.lab[j * Z.nx + i]; if (v >= 0) return v; }
+  return -1;
+}
+/* the ground's model now (null: none) */
+const g2W = () => (g2Can() ? g2Ground(S.T) : null);
+/* a search over W's cells from cell s, a piece of G2W.rt.pops cells at a time (yields): toward s (rev: the cost of walking into s) or away
+   from it, each cell entered pen[cell] times dearer where pen is given. With g, an A*: what is left is at least the straight way to within
+   g.r m of g.x g.z at the road's foot pace, and it stops once nothing left can beat g.best (g.at(q): what ending at q costs in all,
+   Infinity for a cell that does not end it; g.q the best); without, it stops once the cheapest left costs more than stop. Fills D (the cells
+   it did not settle Infinity) and via */
+function* g2Dij(W, s, rev, pen, stop, D, via, g) {
+  const Z = W.Z, nx = Z.nx, nz = Z.nz, c = Z.c, HW = Z.HW, pass = W.pass, tf = W.tf, h = Z.h, up = G2W.up, H = g2Heap(), n = nx * nz, done = new Uint8Array(n), vm = 1 / G2W.spd.foot[0];
+  const hx = g ? q => { const dx = (q % nx + .5) * c - g.x, dz = -HW + ((q / nx | 0) + .5) * c - g.z, d = Math.sqrt(dx * dx + dz * dz) - g.r; return d > 0 ? d * vm : 0; } : () => 0;
+  D.fill(Infinity); via.fill(-1); D[s] = 0; H.push(hx(s), s); let k = 0, cut = false;
+  while (H.n) {
+    const u = H.pop(); if (done[u]) continue;
+    if (g) { if (D[u] + hx(u) >= g.best) { cut = true; break; } } else if (D[u] > stop) { cut = true; break; }
+    done[u] = 1;
+    if (g) { const v = g.at(u); if (v < g.best) { g.best = v; g.q = u; } }
+    const ui = u % nx, uj = u / nx | 0;
+    for (const [di, dj] of DIR8) {
+      const i = ui + di, j = uj + dj; if (i < 0 || j < 0 || i >= nx || j >= nz) continue;
+      const q = j * nx + i; if (done[q] || !pass[q] || (di && dj && !pass[uj * nx + i] && !pass[j * nx + ui])) continue;
+      const a = rev ? q : u, b = rev ? u : q;
+      let w = (tf[a] + tf[b]) * (di && dj ? .7071 : .5) + up * Math.max(0, h[b] - h[a]); if (pen) w *= pen[q];
+      w += D[u]; if (w < D[q]) { D[q] = w; via[q] = u; H.push(w + hx(q), q); }
+    }
+    if (++k % G2W.rt.pops === 0) yield;
+  }
+  if (cut) for (let q = 0; q < n; q++) if (!done[q]) D[q] = Infinity;
+}
+/* the tree toward region r's cell from the cells within reach of its ring (G2W.rt.arr m; the ways' last stretch), kept on W */
+function* g2Tree(W, r) {
+  const o = W.to.get(r); if (o) return o;
+  const n = W.pass.length, D = new Float32Array(n), via = new Int32Array(n);
+  yield* g2Dij(W, W.n[r].q, true, null, 3 * (G2W.rt.arr + W.Z.c) / G2W.spd.foot[2], D, via);
+  const t = { D, via }; W.to.set(r, t); return t;
+}
+/* the cells of the way to cell q down a tree (from its root to q; rev: from q to the root) */
+function g2Cells(tr, q, rev) { const l = []; for (let w = q; w !== -1; w = tr.via[w]) l.push(w); if (l.length && tr.D[l[l.length - 1]] !== 0) return null; return rev ? l : l.reverse(); }
+/* the bearing (radians, atan2 z x) from region b's place of the last cell of a way G2W.rt.arr m or more from it (walking back from b) */
+function g2Arr(W, cells, b) {
+  const o = W.n[b];
+  for (let i = cells.length - 1; i >= 0; i--) { const p = apXZ(W.Z, cells[i]); if (hdist(p, o) >= G2W.rt.arr) return Math.atan2(p.z - o.z, p.x - o.x); }
+  const p = apXZ(W.Z, cells[0]); return Math.atan2(p.z - o.z, p.x - o.x);
+}
+/* the share of way A's cells (but its ends) within a cell of way B's, both ways round the larger (0 to 1) */
+function g2Lap(W, A, B, a, b) {
+  const Z = W.Z, nx = Z.nx, E = G2W.rt.end, oa = W.n[a], ob = W.n[b], far = q => { const p = apXZ(Z, q); return hdist(p, oa) > E && hdist(p, ob) > E; };
+  const one = (X, Y) => {
+    const m = new Set(); for (const q of Y) { const i = q % nx, j = q / nx | 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) m.add((j + dj) * nx + i + di); }
+    let n = 0, k = 0; for (const q of X) if (far(q)) { n++; if (m.has(q)) k++; }
+    return n ? k / n : 0;
+  };
+  return Math.max(one(A, B), one(B, A));
+}
+const g2Ang = (a, b) => Math.abs(wrap(a - b)) * 180 / Math.PI;
+/* a route of the cells of a way: length, foot time, the regions it crosses, its arrival and how it stands against the ways before (R) */
+function g2Rt(W, cells, a, b, R) {
+  const w = g2Way(W.Z, cells), rg = []; for (const q of cells) { const r = W.lab[q]; if (r >= 0 && rg[rg.length - 1] !== r) rg.push(r); }
+  let tf = 0; for (let i = 1; i < cells.length; i++) { const p = cells[i - 1], q = cells[i], dg = !(Math.abs(q - p) === 1 || Math.abs(q - p) === W.Z.nx); tf += (W.tf[p] + W.tf[q]) * (dg ? .7071 : .5) + G2W.up * Math.max(0, W.Z.h[q] - W.Z.h[p]); }
+  const arr = g2Arr(W, cells, b), lap = R.map(o => g2Lap(W, cells, o.cells, a, b)), ang = R.map(o => g2Ang(arr, o.arr));
+  return Object.assign(w, { cells: Int32Array.from(cells), rg, tf: Math.round(tf), arr, lap: lap.length ? Math.max(...lap) : 0, ang: ang.length ? Math.min(...ang) : 180,
+    div: R.every((o, i) => lap[i] <= G2W.rt.lap && ang[i] >= G2W.rt.ang) });
+}
+/* a job's pieces, each timed into M.ms (not the frames between them) */
+function* g2Run(J, M) { for (;;) { const t = AIB.now(), r = J.next(); M.ms += AIB.now() - t; if (r.done) return r.value; yield; } }
+/* the routes from region a to region b, a piece at a time (yields); the list, also kept on W */
+function* g2RouteJob(W, a, b) {
+  const key = a * 65536 + b; if (W.rc.has(key)) return W.rc.get(key);
+  const M = { ms: 0 }, R = yield* g2Run(g2Way3(W, a, b), M);
+  G2WB.routes++; G2WB.rms += M.ms; if (M.ms > G2WB.rworst) G2WB.rworst = M.ms;
+  W.rc.set(key, R); return R;
+}
+function* g2Way3(W, a, b) {
+  const P = G2W.rt, Z = W.Z, n = W.pass.length, R = [];
+  if (a === b || !W.n[a] || !W.n[b]) return R;
+  const oa = W.n[a], ob = W.n[b], sa = oa.q, sb = ob.q, D = new Float32Array(n), via = new Int32Array(n);
+  const g1 = { x: ob.x, z: ob.z, r: 0, best: Infinity, q: -1, at: q => (q === sb ? D[q] : Infinity) };
+  yield* g2Dij(W, sa, false, null, Infinity, D, via, g1);
+  const c1 = g1.q === sb ? g2Cells({ D, via }, sb, false) : null;
+  if (!c1) return R;
+  R.push(g2Rt(W, c1, a, b, R));
+  const to = yield* g2Tree(W, b);
+  /* the ring about b: its cells that reach b and their bearings */
+  const ring = [], Rc = Math.ceil(P.arr / Z.c) + 1, bi = sb % Z.nx, bj = sb / Z.nx | 0, ok = new Uint8Array(n), pen = new Float32Array(n), E = P.end;
+  for (let j = Math.max(0, bj - Rc); j <= Math.min(Z.nz - 1, bj + Rc); j++) for (let i = Math.max(0, bi - Rc); i <= Math.min(Z.nx - 1, bi + Rc); i++) {
+    const q = j * Z.nx + i, p = apXZ(Z, q), d = hdist(p, ob); if (Math.abs(d - P.arr) <= Z.c * .75 && to.D[q] < Infinity) ring.push([q, Math.atan2(p.z - ob.z, p.x - ob.x)]);
+  }
+  for (let k = 1; k < P.n && ring.length; k++) {
+    let best = null; ok.fill(0); let any = false;
+    for (const [q, br] of ring) if (R.every(o => g2Ang(br, o.arr) >= P.ang)) { ok[q] = 1; any = true; }
+    if (!any) break;
+    for (let tr = 0, f = P.pen; tr < P.tries; tr++, f *= 2) {
+      pen.fill(1);
+      for (const o of R) for (const q of o.cells) { const i = q % Z.nx, j = q / Z.nx | 0; for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) { const v = (j + dj) * Z.nx + i + di; if (v >= 0 && v < n && pen[v] === 1) { const p = apXZ(Z, v); if (hdist(p, oa) > E && hdist(p, ob) > E) pen[v] = 1 + f; } } }
+      const g = { x: ob.x, z: ob.z, r: P.arr + Z.c * .75, best: Infinity, q: -1, at: q => (ok[q] ? D[q] + to.D[q] : Infinity) };
+      yield* g2Dij(W, sa, false, pen, Infinity, D, via, g);
+      if (g.q < 0) break;
+      const head = g2Cells({ D, via }, g.q, false), tail = g2Cells(to, g.q, true); if (!head || !tail) break;
+      const r = g2Rt(W, head.concat(tail.slice(1)), a, b, R);
+      if (r.len > P.long * R[0].len) break;
+      if (!best || (r.div && !best.div) || (r.div === best.div && r.lap < best.lap)) best = r;
+      if (r.div) break;
+    }
+    if (!best) break;
+    R.push(best);
+  }
+  return R;
+}
+/* the routes from a to b while the ground stands: at once (a question, a test) */
+function g2Now(W, a, b) { const k = a * 65536 + b; return W.rc.has(k) ? W.rc.get(k) : (() => { const J = g2RouteJob(W, a, b); let r; do r = J.next(); while (!r.done); return r.value; })(); }
+/* the routes from a to b if made (null: asked, a piece a frame in g2Step) */
+function g2Routes(W, a, b) { const k = a * 65536 + b; if (W.rc.has(k)) return W.rc.get(k); if (!W.rq.some(o => o[0] === a && o[1] === b)) W.rq.push([a, b]); return null; }
+const g2Ask = g2Routes;
+/* every point to every other: the routes and whether the pair has two different ones (overlap G2W.rt.lap or less and arrivals G2W.rt.ang
+   degrees or more apart: the criterion of G1). out: { pairs, ok, share, byPt: [{ nm, n, ok }], laps, angs, ratio } */
+function g2Pairs(W) {
+  const P = W.n.filter(o => o.p >= 0), out = { pairs: 0, ok: 0, share: 0, byPt: P.map(o => ({ nm: o.nm, n: 0, ok: 0 })), laps: [], angs: [], ratio: [], none: 0 };
+  P.forEach((pb, ib) => P.forEach(pa => {
+    if (pa === pb) return;
+    const R = g2Now(W, pa.i, pb.i); out.pairs++; out.byPt[ib].n++;
+    let ok = false, bl = 1, ba = 0;
+    for (let i = 0; i < R.length; i++) for (let j = i + 1; j < R.length; j++) {
+      const l = g2Lap(W, R[i].cells, R[j].cells, pa.i, pb.i), g = g2Ang(R[i].arr, R[j].arr);
+      if (l <= G2W.rt.lap && g >= G2W.rt.ang) { ok = true; if (l < bl || !(bl <= G2W.rt.lap)) { bl = l; ba = g; } }
+      else if (!ok && (l < bl)) { bl = l; ba = g; }
+    }
+    if (R.length < 2) out.none++;
+    if (ok) { out.ok++; out.byPt[ib].ok++; }
+    if (R.length >= 2) { out.laps.push(bl); out.angs.push(ba); out.ratio.push(R[R.length - 1].len / Math.max(1, R[0].len)); }
+  }));
+  out.share = out.pairs ? out.ok / out.pairs : 0;
+  return out;
+}
+/* side t's belief, made or kept */
+function g2Bel(C, W) {
+  const N = W.n.length, B = C.g2;
+  if (B && B.W === W) return B;
+  const o = { W, T: -1, f: new Float32Array(N), ft: new Float32Array(N).fill(-1), now: new Float32Array(N), art: new Uint8Array(N), fo: new Float32Array(N), sq: new Uint16Array(N), veh: new Uint16Array(N), watch: new Uint8Array(N),
+    hold: new Int8Array(N).fill(-1), v: new Float32Array(N), tr: new Float32Array(N), l: new Float32Array(N), dng: new Float32Array(N), vo: new Float32Array(N), ve: new Float32Array(N), peak: 0, n: 0 };
+  if (B && B.W && B.W.N !== undefined) {   // a new ground: carry what was known over to the regions now at the same places
+    for (let r = 0; r < B.W.n.length; r++) if (B.f[r] > 0) { const s = g2At(W, B.W.n[r].x, B.W.n[r].z); if (s >= 0) { o.f[s] += B.f[r]; o.ft[s] = Math.max(o.ft[s], B.ft[r]); } }
+    o.peak = B.peak;
+  }
+  return (C.g2 = o);
+}
+/* the side's own vehicles: its roll, the dead and the lost taken off */
+function g2Own(t) { const R = S.g2r && S.g2r[t]; if (!R) return []; const l = R.filter(u => !u.dead && !u.gone && u.team === t); S.g2r[t] = R.filter(u => !u.dead && !u.gone); return l; }
+/* one look of side C at the world: its belief and its values, by region */
+function g2Sense(C) {
+  const W = g2W(); if (!W || !C) return null;
+  const a0 = AIB.now(), t = C.t, V = CMD.val, B = g2Bel(C, W), N = W.N, dt = B.T >= 0 ? Math.max(0, S.t - B.T) : 0, Bl = G2W.bel;
+  B.T = S.t; B.n++;
+  const now = B.now.fill(0), art = B.art.fill(0), fo = B.fo.fill(0), sq = B.sq.fill(0), veh = B.veh.fill(0), watch = B.watch.fill(0);
+  for (const o of C.known) {
+    if (o.dead) continue;
+    const r = g2At(W, sX(o, t), sZ(o, t)); if (r < 0) continue;
+    now[r] += o.man ? V.inf : V[tk(o)] || 1; if (!o.man && tk(o) === 'art') art[r]++;
+  }
+  for (const q of S.squads) {
+    if (q.team !== t || q.net || !(q.live > 0)) continue;
+    const L = q.men.find(m => !m.dead); if (!L) continue;
+    const r = g2At(W, L.x, L.z); if (r >= 0) { fo[r] += q.live * V.inf; sq[r]++; watch[r] = 1; }
+  }
+  for (const u of g2Own(t)) { if (u.fixed || !V[u.kind]) continue; const r = g2At(W, u.x, u.z); if (r >= 0) { fo[r] += V[u.kind]; veh[r]++; watch[r] = 1; } }
+  let tot = 0, sum = 0;
+  for (let r = 0; r < N; r++) {
+    const k = Math.pow(.5, dt / (watch[r] ? Bl.seen : Bl.half)), f = Math.max(now[r], B.f[r] * k);
+    B.f[r] = f < .05 ? 0 : f; if (now[r] > 0) B.ft[r] = S.t;
+    tot += now[r]; sum += B.f[r];
+  }
+  B.peak = Math.max(tot, B.peak * Math.pow(.5, dt / (Bl.half * 4)), 0);
+  for (const o of W.n) B.hold[o.i] = o.p >= 0 ? S.cq.p[o.p].hold : -1;
+  const M = C.tm, v = B.v.fill(0), tr = B.tr.fill(0), l = B.l.fill(0);
+  if (M && M.v && M.v.length === W.lab.length) {
+    const cn = new Float32Array(N);
+    for (let q = 0; q < W.lab.length; q++) { const r = W.lab[q]; if (r < 0) continue; cn[r]++; v[r] += M.v[q]; l[r] += M.l[q]; if (M.t[q] > tr[r]) tr[r] = M.t[q]; }
+    for (let r = 0; r < N; r++) if (cn[r]) { v[r] /= cn[r]; l[r] /= cn[r]; }
+  }
+  const dng = B.dng.fill(0), tt = W.tt, eta = Bl.eta;
+  for (let s = 0; s < N; s++) { const f = B.f[s]; if (!(f > 0)) continue; for (let r = 0; r < N; r++) { const d = tt[s * N + r]; if (d < Infinity) dng[r] += f * eta / (eta + d); } }
+  g2Val(C, W, B);
+  const ms = AIB.now() - a0; G2WB.senses++; G2WB.sense += ms; if (ms > G2WB.sworst) G2WB.sworst = ms;
+  B.tot = sum; return B;
+}
+/* what each region is worth to side C: to keep (vo) and to take (ve) */
+function g2Val(C, W, B) {
+  const t = C.t, Vl = G2W.val, dw = G2W.dw[docK(C)] || G2W.dw.balanced, pw = (S.per && G2W.pw[S.per[t]]) || {}, w = k => pw[k] || 1, vo = B.vo.fill(0), ve = B.ve.fill(0);
+  const keep = (x, z, v, k) => { const r = g2At(W, x, z); if (r >= 0) vo[r] += v * w(k) * (pw.keep || 1) * dw[0]; }, take = (x, z, v, k) => { const r = g2At(W, x, z); if (r >= 0) ve[r] += v * w(k) * dw[1]; };
+  for (const p of S.cq.p) {
+    const v = p.base >= 0 ? Vl.base : p.tw ? (p.big ? Vl.town : Vl.vil) : Vl.pt, k = p.base >= 0 ? 'base' : 'pt';
+    if (p.hold === t || p.base === t) keep(p.x, p.z, v, k); else take(p.x, p.z, v, k);
+  }
+  for (const f of SIDES()) {
+    const s = aidSeat(f); if (!s) continue;
+    if (f === t) keep(s.x, s.z, Vl.seat, 'seat'); else if (foeSide(t, f) && typeof sedeKn === 'function' && sedeKn(C, f)) take(s.x, s.z, Vl.seat, 'seat');
+  }
+  if (S.eco) {
+    for (const e of S.eco.l) if (e.team === t && !e.dead) keep(e.x, e.z, Vl.eco[e.k] || 1, 'eco');
+    const kn = S.eco.d && S.eco.d[t] ? S.eco.d[t].kn : null;
+    if (kn) for (const id in kn) { const e = kn[id]; if (e && !e.dead && e.t !== t && foeSide(t, e.t)) take(e.x, e.z, Vl.eco[e.k] || 1, 'eco'); }
+  }
+  for (const b of S.sup) if (b.team === t && !b.dead && !b.gone) keep(b.x, b.z, Vl.sup, 'sup');
+  if (S.cn && S.cn.nodes && S.cn.nodes[t]) for (const o of S.cn.nodes[t]) keep(o.x, o.z, Vl.rad, 'rad');
+  for (const f of S.forts) if (f.team === t && !f.dead && f.k === POSTS.dome.k && f.prog >= 1) keep(f.x, f.z, Vl.dome, 'dome');
+  for (let r = 0; r < W.N; r++) if (B.art[r]) ve[r] += Vl.art * B.art[r] * w('art') * dw[1];
+}
+/* a small hash draw: the side, k and the clock (never Math.random) */
+function g2Rng(t, k) { let s = (Math.imul(t + 1, 0x9e3779b1) ^ Math.imul(k + 7, 0x85ebca6b) ^ Math.imul(Math.floor(S.t) + 13, 0xc2b2ae35)) >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
+/* n guesses of the enemy side C does not see, each the strength by region: what it knows of, and the rest of what it has seen at most and
+   G2W.bel.prior more, spread over the regions it does not watch (more where the enemy holds the point, and on its side of the front) */
+function g2Hyp(C, n, k) {
+  const W = g2W(); if (!W || !C) return [];
+  const B = C.g2 && C.g2.W === W ? C.g2 : g2Sense(C), N = W.N, Bl = G2W.bel, rest = Math.max(0, B.peak - B.tot) + Bl.prior, wt = new Float32Array(N), out = [];
+  let sw = 0;
+  for (let r = 0; r < N; r++) { if (B.watch[r]) continue; const e = B.hold[r] >= 0 && foeSide(C.t, B.hold[r]) ? Bl.hold : 1; wt[r] = e * (1 + Bl.front * Math.max(0, -B.l[r])); sw += wt[r]; }
+  for (let h = 0; h < n; h++) {
+    const g = g2Rng(C.t, (k || 0) * 31 + h), d = new Float32Array(N); let s = 0;
+    for (let r = 0; r < N; r++) if (wt[r] > 0) { d[r] = -Math.log(1 - g() * .999999) * wt[r]; s += d[r]; }
+    for (let r = 0; r < N; r++) d[r] = B.f[r] + (s > 0 ? rest * d[r] / s : 0);
+    out.push(d);
+  }
+  return out;
+}
+/* each frame on the host (after the tactical map's): the ground's rebuild when a bridge fell, a piece of an asked route, each side's look on its turn */
+function g2Step(dt) {
+  if (!g2Can() || !S.cmd) return;
+  g2Ground(S.T);
+  if (S.g2J) S.g2J = aiJob(S.g2J, 1);
+  const W = S.T.g2w; if (!W) return;
+  if (!S.g2R && W.rq.length) { const [a, b] = W.rq.shift(); S.g2R = g2RouteJob(W, a, b); }
+  if (S.g2R) S.g2R = aiJob(S.g2R, G2W.rt.per);
+  if (!S.g2T || S.g2T.length !== SIDES().length) S.g2T = bySide(t => (t + 1) * G2W.bel.every / SIDES().length);
+  for (const t of SIDES()) if (S.cmd[t] && (S.g2T[t] -= dt) <= 0) { S.g2T[t] += G2W.bel.every; g2Sense(S.cmd[t]); }
+}
+tmStep = (g => dt => { g(dt); if (G2W.on) g2Step(dt); })(tmStep);
+/* each side's roll of the vehicles it fielded (its own, never the world's list) */
+addUnit = (g => (...a) => { const u = g(...a); if (u && S && isSide(u.team)) { const R = S.g2r || (S.g2r = []); (R[u.team] || (R[u.team] = [])).push(u); } return u; })(addUnit);
+/* gask mundo: side t's regions (x, z, kind, its own strength, the enemy it believes there, s since it was last seen (-1 never), worth to keep and
+   to take, who holds it), the edges (a, b, m, s on foot) and, with x z, the routes to the region nearest x z (a point within G2W.ask m) from
+   region id (its base's without it): m, minutes on foot, on wheels and on tracks, the bearing it arrives by (degrees on the map: 0 along +x, 90 along +z), its overlap with the ones before
+   (%), different (1), the enemy's sight along it (%), the most enemy believed on it, every other cell (G2W.pts at most) */
+function g2Answer(t, q) {
+  if (!G2W.on) return { why: 'off' };
+  const W = g2W(); if (!W) return { why: 'off' };
+  const C = cmdOf(t), B = C.g2 && C.g2.W === W ? C.g2 : g2Sense(C), R = v => Math.round(v), r1 = v => Math.round(v * 10) / 10;
+  const out = { age: Math.round((S.t - B.T) * 10) / 10, k: G2W.K,
+    n: W.n.map(o => [R(o.x), R(o.z), G2W.K.indexOf(o.k), r1(B.fo[o.i]), r1(B.f[o.i]), B.ft[o.i] < 0 ? -1 : R(S.t - B.ft[o.i]), r1(B.vo[o.i]), r1(B.ve[o.i]), B.hold[o.i]]),
+    nm: W.n.map(o => o.nm), e: W.e.map(e => [e.a, e.b, e.len, R(e.tf)]) };
+  if (Number.isFinite(q.x) && Number.isFinite(q.z)) {
+    if (!gMapOk(q.x, q.z)) return { why: 'map' };
+    let b = -1, bd = G2W.ask; for (const o of W.n) if (o.p >= 0) { const d = hdist(o, q); if (d < bd) { bd = d; b = o.i; } }
+    if (b < 0) b = g2At(W, q.x, q.z); if (b < 0) return { why: 'map' };
+    const a = Number.isInteger(q.id) && q.id >= 0 && q.id < W.N ? q.id : g2At(W, S.base[t].x, S.base[t].z);
+    if (a < 0 || a === b) return { why: 'way' };
+    const M = C.tm, rts = g2Now(W, a, b);
+    out.r = { a, b, nm: [W.n[a].nm, W.n[b].nm], w: rts.map(r => {
+      let v = 0, f = 0; for (const c of r.cells) { if (M && M.v) v += M.v[c]; if (B.f[W.lab[c]] > f) f = B.f[W.lab[c]]; }
+      return { len: r.len, min: r1(r.tf / 60), wh: r1(r.tw / 60), tr: r1(r.tk / 60), arr: R(((r.arr * 180 / Math.PI) % 360 + 360) % 360), lap: R(r.lap * 100), div: r.div ? 1 : 0,
+        exp: R(v / Math.max(1, r.cells.length) * 100), f: r1(f), rg: r.rg, pts: [...r.cells].filter((c, i) => i % 2 === 0 || i === r.cells.length - 1).slice(-G2W.pts).map(c => { const p = apXZ(W.Z, c); return [R(p.x), R(p.z)]; }) };
+    }) };
+  }
+  return out;
+}
+genQuery = (f => (t, q) => (q && q.q === 'mundo' && isSide(t) ? g2Answer(t, q) : f(t, q)))(genQuery);
+genAnswer = (f => (s, q) => { if (!(q && q.q === 'mundo' && isSide(s))) return f(s, q); const r = g2Answer(s, q); return r.why ? { ok: false, why: r.why, id: 0 } : { ok: true, why: '', id: 0, r }; })(genAnswer);
+newState = (g => (e, m, o) => { const s = g(e, m, o); if (G2W.on && s && s.T && !(s.net && !s.host)) { s.g2J = s.g2R = null; g2Ground(s.T, true); } return s; })(newState);   // the ground's part at the load, not in a frame
 /* ---------- M4 of the general's manoeuvre: ambushes and alternate streets (procedures P7, P8, P9 and P11), over the tactical map (M1) ----------
    Four procedures of the general, made through opNew (so the person and the MCP have them too: man k=ambush | interdict | guard, x z), each
    reading only side C's tactical map C.tm (what the side knows) and its habits of the enemy (C.hu, C.hp: what the side itself has seen pass):
@@ -39116,8 +39571,13 @@ function buildWorld() {
   gSup = new THREE.Group(); gEco = new THREE.Group(); gGhost = new THREE.Mesh(new THREE.BoxGeometry(BLD.size[0], BLD.size[2], BLD.size[1]), new THREE.MeshBasicMaterial({ color: 0x6fd67a, transparent: true, opacity: .34, depthWrite: false }));
   gGhost.add(new THREE.LineSegments(new THREE.EdgesGeometry(gGhost.geometry), new THREE.LineBasicMaterial({ color: 0xffffff }))); gGhost.visible = false;
   scene.add(gPlanes, gUnits, gWrecks, gDebris, gBombs, gMissiles, gFlares, gSup, gEco, gGhost); buildMen();
-  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3));
-  tracers = new THREE.LineSegments(bg, new THREE.LineBasicMaterial({ color: 0xffeeb0, fog: false })); tracers.frustumCulled = false; scene.add(tracers);
+  /* the rounds in flight: a streak from the round back along its path, its colour and opacity per end (tc: bright at the round, fading to
+     its tail), so that a burst reads as streaks and not as scratches of one colour (TRC) */
+  const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXB * 6), 3)); bg.setAttribute('tc', new THREE.BufferAttribute(new Float32Array(MAXB * 8), 4));
+  tracers = new THREE.LineSegments(bg, new THREE.ShaderMaterial({ transparent: true, depthWrite: false,
+    vertexShader: 'attribute vec4 tc; varying vec4 vc; void main(){ vc = tc; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: 'varying vec4 vc; void main(){ gl_FragColor = vc; }' }));
+  tracers.frustumCulled = false; scene.add(tracers);
   const pg = new THREE.BufferGeometry();
   pg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(MAXP * 3), 3));
   pg.setAttribute('pc', new THREE.BufferAttribute(new Float32Array(MAXP * 4), 4));
@@ -39280,7 +39740,7 @@ function vegMat(o) {
   const m = new THREE.MeshLambertMaterial({ color: o.color || 0xffffff, map: o.map || null, vertexColors: true, side: THREE.DoubleSide, alphaTest: o.map ? .42 : 0 });
   m.userData.band = { value: new THREE.Vector4(-2, -1, 1e9, 2e9) };
   const tn = o.kind === 'grass' ? null : vegTone(), ts = tn ? 1 - (1 - tn.sat) * VEG.treeSat : 1, key = 'veg-' + o.kind + (tn ? '-' + ts.toFixed(3) + '-' + tn.tone.toFixed(3) : '');
-  m.customProgramCacheKey = () => key;
+  m.customProgramCacheKey = () => key + (typeof SKY3 === 'object' && SKY3.u ? '-ill' : '');   // -ill: with the flares' light, a program of its own
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = VU.uTime; sh.uniforms.uWind = VU.uWind; sh.uniforms.uBand = m.userData.band; sh.uniforms.uEye = VU.uEye;
     let vs = 'uniform float uTime, uWind; uniform vec4 uBand; uniform vec3 uEye; varying float vFade, vAk;\n' + (o.head || '') + sh.vertexShader;
@@ -39294,6 +39754,7 @@ function vegMat(o) {
     if (tn) fs = fs.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .59, .11))), diffuseColor.rgb, ' + ts.toFixed(3) + ') * ' + tn.tone.toFixed(3) + ';');   // the ground's sober tone, a little less of it
     if (o.map) fs = fs.replace('#include <alphatest_fragment>', ' diffuseColor.a *= vAk;\n#include <alphatest_fragment>');
     sh.fragmentShader = fs;
+    if (typeof SKY3 === 'object' && SKY3.u) sky3Ill(sh);   // a flare's or a fire's light (cf-pol-graficos 3): the trees and the grass drawn here never took it, only the ground under them
   };
   return m;
 }
@@ -39974,6 +40435,22 @@ function pjJoin(o, q, put) {
   for (let i = 1; i <= n; i++) { const f = i / (n + 1); put(o.x + (q.x - o.x) * f, o.y + (q.y - o.y) * f, o.z + (q.z - o.z) * f, (ao + (a - ao) * f) * .5 * kk, so + (sz - so) * f); }
   return kk;
 }
+/* the rounds' streaks (TRS, cf-pol-graficos 3): a plain round (0) faint and short, fading to nothing; a tracer (the sim's b.tr: one round in
+   TRC.lmg of a squad machine gun's belt, a plane's or a helicopter's gun, 1; a vehicle's machine gun or an AA gun, 2) bright, longer, its tail
+   kept a little, with the glowing head it had. len s of flight the streak is long; a and tail: the opacity at the round and at its tail;
+   c: the colours [plain, b.tr 1, b.tr 2] */
+const TRS = { len: [.028, .05, .05], a: [.5, 1, 1], tail: [0, .2, .25], c: [[1, .94, .8], [1, .93, .69], [1, .62, .3]] };
+const trcOf = b => (b.tr === 2 ? 2 : b.tr ? 1 : 0);
+/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle (the eye, then l m along the aim, as manFire lets the round go),
+   within far m of the eye; its size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest; an
+   orange halo halo times as wide */
+const MZ = { t: .06, l: 1, far: 1800, s: .35, px: 2.4, halo: 2.5 };
+function mzAt(m, now, cam) {
+  const a = now - m.shotT; if (m.dead || m.in || !(a >= 0 && a < MZ.t)) return null;
+  if (Math.abs(m.x - cam.x) > MZ.far || Math.abs(m.z - cam.z) > MZ.far) return null;
+  const f = m.f || { x: Math.cos(m.h), y: 0, z: -Math.sin(m.h) }, e = STANCE[m.st].eye * MAN.sc;
+  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, 1 - .45 * a / MZ.t];
+}
 function pjTrail(o, p, on) {
   let t = PJ.tr.get(o);
   if (!t) { t = { a: new Float32Array(PJ.n * 4), i: 0, n: 0, at: -1 }; PJ.tr.set(o, t); }
@@ -40018,20 +40495,28 @@ function syncScene(dt) {
   sync(S.bombs, gBombs, b => (b.k === 'shell' ? new THREE.Mesh(cylX(.3, .3, 9, 5), new THREE.MeshBasicMaterial({ color: 0xffd9a0, fog: false })) : b.k === 'he' ? pjMesh(pjKind(b)) : b.k === 'nade' || b.k === 'smk' ? new THREE.Mesh(new THREE.SphereGeometry(.16, 6, 4), mat(0x30342c)) : b.k === 'heat' ? new THREE.Mesh(cylX(.09, .16, 1.3, 6), mat(0x4a4d42)) : new THREE.Mesh(b.k === 'bomb' ? cylX(.2, .45, 3.4, 6) : b.o && b.o.vis ? cylX(b.o.vis[0], b.o.vis[0], b.o.vis[1], 5) : cylX(.14, .14, 2.6, 5), mat(b.k === 'bomb' ? 0x2c2f2c : 0xd9d9d2))), (b, m) => { m.position.set(b.x, b.y, b.z); along(m, b.vx, b.vy, b.vz); });
   sync(S.missiles, gMissiles, () => pjMesh('msl'), (o, m) => { m.position.set(o.x, o.y, o.z); along(m, o.d.x, o.d.y, o.d.z); });
   sync(S.flares, gFlares, () => new THREE.Mesh(new THREE.SphereGeometry(1.6, 6, 5), new THREE.MeshBasicMaterial({ color: 0xfff3c8, fog: false })), (f, m) => m.position.set(f.x, f.y, f.z));
-  let n = 0; const bp = tracers.geometry.attributes.position.array; PJ.pt.clear();
+  let n = 0; const bp = tracers.geometry.attributes.position.array, tc = tracers.geometry.attributes.tc.array; PJ.pt.clear();
   let k = 0; const pp = sparks.geometry.attributes.position.array, pc = sparks.geometry.attributes.pc.array, ps = sparks.geometry.attributes.size.array;
   const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value, TB = MAXP - MAXPR;
   for (const b of S.bullets) {
     if (n >= MAXB) break;
-    const tl = b.tr ? .05 : .028; bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); n++;
-    if (!b.tr || k >= MAXP - 1) continue;   // jet cannon and AA rounds carry a glowing head that never shrinks below a few pixels, so the stream reads from far away
+    const t = trcOf(b), tl = TRS.len[t], C = TRS.c[t];
+    bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); tc.set([C[0], C[1], C[2], TRS.a[t], C[0], C[1], C[2], TRS.tail[t]], n * 8); n++;
+    if (!t || k >= MAXP - 1) continue;   // a tracer (jet cannon, AA, a squad machine gun's) carries a glowing head that never shrinks below a few pixels, so the stream reads from far away
     const sz = Math.max(.4, px * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z));   // a coloured halo under a white-hot core
     pp.set([b.x, b.y, b.z, b.x, b.y, b.z], k * 3); pc.set(b.tr === 2 ? [1, .38, .12, .75, 1, .9, .7, 1] : [1, .7, .2, .75, 1, 1, .85, 1], k * 4);
     ps[k++] = sz * 3.2; ps[k++] = sz;
   }
+  for (const m of S.men) {   // a soldier's muzzle flash (mzAt): a white-hot core in an orange star, never under a few pixels, so a firefight reads from far
+    if (k >= MAXP - 1) break;
+    if (m === S.my && fp) continue;   // in first person the weapon in hand shows its own
+    const p = mzAt(m, S.t, cam); if (!p) continue;
+    const s = Math.max(MZ.s, px * MZ.px * Math.hypot(p[0] - cam.x, p[1] - cam.y, p[2] - cam.z)) * p[3];
+    pp.set([p[0], p[1], p[2], p[0], p[1], p[2]], k * 3); pc.set([1, .6, .22, .8, 1, .95, .82, 1], k * 4); ps[k++] = s * MZ.halo; ps[k++] = s;
+  }
   for (const q of S.parts) {
     const a = q.life / q.max;
-    if (q.k === 'tr') { if (n < MAXB) { bp.set([q.x, q.y, q.z, q.x2, q.y2, q.z2], n * 6); n++; } continue; }
+    if (q.k === 'tr') { if (n < MAXB) { bp.set([q.x, q.y, q.z, q.x2, q.y2, q.z2], n * 6); tc.set([1, .93, .69, .9, 1, .93, .69, .35], n * 8); n++; } continue; }
     if (k >= MAXP) break;
     pp.set([q.x, q.y, q.z], k * 3);
     if (q.k === 'smoke') {   // a puff left by something on the move (q.e) is joined to the one before it from the same source (pjJoin)
@@ -40084,7 +40569,7 @@ function syncScene(dt) {
       pc.set([.74 + h3 * .1, .75 + h3 * .1, .73 + h3 * .1, a * .96], k * 4); ps[k++] = (27 + 13 * h1) * grow * SR / SMOKE.r;
     }
   }
-  tracers.geometry.setDrawRange(0, n * 2); tracers.geometry.attributes.position.needsUpdate = true;
+  tracers.geometry.setDrawRange(0, n * 2); tracers.geometry.attributes.position.needsUpdate = tracers.geometry.attributes.tc.needsUpdate = true;
   const ga = sparks.geometry; ga.setDrawRange(0, k); ga.attributes.position.needsUpdate = ga.attributes.pc.needsUpdate = ga.attributes.size.needsUpdate = true;
   pshFrame();
 }
@@ -46288,17 +46773,22 @@ function sky3Init() {
   K.basic = []; K.lr = -1;
   scene.traverse(o => { const m = o.material; if (o.isMesh && m && m.isMeshBasicMaterial && m.fog !== false && !m.transparent && !m.vertexColors && !K.basic.some(q => q[0] === m)) K.basic.push([m, m.color.clone()]); });
   /* the ground, the trees and the houses glow where a flare lights them: up to 4 lights, nearest the camera first, in uniforms they share */
-  K.u = K.u || { uIll: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uIllK: { value: 0 } };
+  sky3U();
   const lit = [];
   scene.traverse(o => { if (o.isMesh && o.material && o.material.vertexColors && o.userData.ground) lit.push(o.material); });
-  if (wo) for (const k of ['trees', 'houses', 'roofs']) if (wo[k]) lit.push(wo[k].material);
+  if (wo) for (const k of ['trees', 'houses', 'roofs', 'rocks', 'bushes']) if (wo[k] && !lit.includes(wo[k].material)) lit.push(wo[k].material);   // the rocks and the bushes too (cf-pol-graficos 3: black on the lit ground)
+  if (wo && wo.ug && wo.ug.mat && !lit.includes(wo.ug.mat)) lit.push(wo.ug.mat);
   for (const m of lit) { m.onBeforeCompile = sky3Ill; m.needsUpdate = true; }
 }
-/* a flare's light on a lit material (its emissive part), from the 4 lights sky3Init keeps in SKY3.u; the roads take it too (envApply) */
+/* the 4 lights' uniforms, made once (the first world builds them, envApply, so that every shader that takes them is compiled with them the
+   first time: vegWarm compiles them before the sky's first frame) */
+function sky3U() { const K = SKY3; return K.u || (K.u = { uIll: { value: [0, 1, 2, 3].map(() => new THREE.Vector4()) }, uIllC: { value: [0, 1, 2, 3].map(() => new THREE.Vector3(1, 1, 1)) }, uIllK: { value: 0 } }); }
+/* a flare's light on a lit material (its emissive part), from the 4 lights sky3Init keeps in SKY3.u, each of its colour (uIllC: white for a flare,
+   warm for a fire, xFireLights); the roads take it too (envApply) */
 function sky3Ill(sh) {
   Object.assign(sh.uniforms, SKY3.u);
   sh.vertexShader = 'varying vec3 vIllW;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n#ifdef USE_INSTANCING\n vIllW = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;\n#else\n vIllW = (modelMatrix * vec4(transformed, 1.0)).xyz;\n#endif');
-  sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\nuniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n for (int i = 0; i < 4; i++) { float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / max(uIll[i].w, 1.0), 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * k * k * uIllK; }');
+  sh.fragmentShader = 'varying vec3 vIllW;\nuniform vec4 uIll[4];\n' + (SKY3.u && SKY3.u.uIllC ? 'uniform vec3 uIllC[4];\n#define ILLC(i) uIllC[i]\n' : '#define ILLC(i) vec3(1.0)\n') + 'uniform float uIllK;\n' + sh.fragmentShader.replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n if (uIllK > 0.0) for (int i = 0; i < 4; i++) { if (uIll[i].w <= 0.0) continue; float k = clamp(1.0 - distance(vIllW, uIll[i].xyz) / uIll[i].w, 0.0, 1.0); totalEmissiveRadiance += diffuseColor.rgb * ILLC(i) * k * k * uIllK; }');
 }
 const skyMix = (out, a, b, k) => out.copy(a).lerp(b, clamp(k, 0, 1));
 function skyScene() {
@@ -46489,14 +46979,15 @@ function envTerrainHook(sh) {
   Object.assign(sh.uniforms, ENV.tu);
   sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
-  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nuniform float uWet;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
   sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
 	vec2 eG = vec2( 0.0 );
 	vec2 eUv = vEnvW.xz;
+	float eWk = uWet, eRef = 0.0;
 	vec4 d1 = texture2D( tEnv, eUv * ( 1.0 / 23.0 ) );
 #if ENV_Q == 0
-	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) );
+	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) ) * ( 1.0 - 0.28 * eWk );
 #else
 	vec4 d2 = texture2D( tEnv, eUv * ( 1.0 / 181.0 ) + vec2( 0.37, 0.71 ) );
 	vec4 d3 = texture2D( tEnv, eUv * ( 1.0 / 1637.0 ) + vec2( 0.13, 0.29 ) );
@@ -46523,20 +47014,35 @@ function envTerrainHook(sh) {
 	eDet = mix( eDet, mix( 0.5, d4.r, eNear ), 0.35 );
 	eG += n4.rg * eNear * ( 1.0 - eRock ) * 0.6;
 #endif
+	eWk = uWet * ( 1.0 - eSnow ) * ( 1.0 - 0.4 * eRock );   // rain: the ground darker and glossy, and in its flat low spots puddles that mirror the sky
+	float ePud = smoothstep( 0.3, 0.8, uWet ) * smoothstep( 0.64, 0.74, d1.b * 0.6 + d2.b * 0.4 ) * smoothstep( 0.975, 0.995, vEnvN.y ) * ( 1.0 - eSand ) * ( 1.0 - eSnow ) * ( 1.0 - eWet );
+	eB *= ( 1.0 - 0.28 * eWk ) * ( 1.0 - 0.3 * ePud );
+	eRef = eWk * 0.45 + ePud; eWk = min( 1.0, eWk + ePud );
 	diffuseColor.rgb = eB * uTone * ( 0.9 + 0.2 * eDet );
 	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
-#endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif');
+#endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif')
+    .replace('#include <lights_phong_fragment>', '#include <lights_phong_fragment>\n\tmaterial.specularShininess = mix( material.specularShininess, 48.0, eWk );\n\tmaterial.specularColor = mix( material.specularColor, vec3( 0.14 ), eWk );')
+    .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_FOG\n\tif ( eRef > 0.0 ) totalEmissiveRadiance += fogColor * pow( 1.0 - clamp( dot( normalize( cameraPosition - vEnvW ), normalize( vEnvN ) ), 0.0, 1.0 ), 3.0 ) * eRef * 0.5;\n#endif');   // the wet ground mirrors the sky (the haze\'s colour) at a grazing look
+}
+/* rain wets the ground (cf-pol-graficos 3): how wet it is goes toward the rain's strength, quickly while it rains harder (up s) and slowly
+   as it dries (dry s), by the battle's clock; a world that starts in the rain starts wet. The ground and the roads darken with it, take a
+   sharper glint of the sun, mirror the sky at a grazing look, and the flat low spots hold puddles (envTerrainHook, envRoadHook) */
+const ENVW = { up: 20, dry: 150 };
+function envWet(r) {
+  const t = S.t, dt = ENV.wt === undefined ? 0 : clamp(t - ENV.wt, 0, 1); ENV.wt = t;
+  if (ENV.wet === undefined) return (ENV.wet = r);
+  return (ENV.wet += (r - ENV.wet) * (1 - Math.exp(-dt / (r > ENV.wet ? ENVW.up : ENVW.dry))));
 }
 /* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
    the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
    uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
    off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
 function envRoadHook(sh, u) {
-  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u });
+  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u, uWet: ENV.tu.uWet || { value: 0 } });
   if (SKY3.u) sky3Ill(sh);
   sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
-  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nuniform float uWet;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	{
 		vec2 rp = vRdW.xz;
 		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
@@ -46548,8 +47054,8 @@ function envRoadHook(sh, u) {
 		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
 		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
 		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
-		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 );
-	}`);
+		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 ) * ( 1.0 - 0.32 * uWet * ( 1.0 - 0.3 * rut ) );   // rain: darker, the ruts holding water darkest
+	}`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_FOG\n\ttotalEmissiveRadiance += fogColor * uWet * ( 0.06 + 0.22 * smoothstep( 15.0, 260.0, vRdD ) );\n#endif');   // and sheen with the sky, more the flatter it is seen (farther)
 }
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
 const ENV_SKY_V = 'varying vec3 vDir;\nvoid main() { vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 ); }';
@@ -46611,12 +47117,12 @@ void main() {
 const ENV_CLOUD_F = 'uniform sampler2D tPuff; uniform vec3 uLit; uniform vec3 uShade; uniform float uOp; varying vec2 vUv; varying float vY; varying float vA;\nvoid main() { float a = texture2D( tPuff, vUv ).a * uOp * vA; if ( a < 0.01 ) discard; gl_FragColor = vec4( mix( uShade, uLit, smoothstep( -0.5, 0.45, vY ) ), a ); }';
 /* after buildWorld(): the ground, the sky, the water and the clouds of the new scene take the level's look */
 function envApply() {
-  gfxAuto();
+  gfxAuto(); sky3U();   // the flares' lights before any shader that takes them is compiled
   const Q = GFXQ[GFX.lv], T = S.T, P = PAL[S.era], E = S.E, L = ENVL;
-  ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
+  ENV.at = scene; ENV.terrain = ENV.water = ENV.cloud = ENV.sh = null; ENV.wet = ENV.wt = undefined; ENV.c = ENV.c || { a: new THREE.Color(), b: new THREE.Color(), v: new THREE.Vector3() };
   ENVU.fp.x = 1 / L.H; ENVU.fp.y = T.WL; ENVU.fp.z = L.k; ENVU.fp.w = 1;
   const tex = envTex(); tex.anisotropy = Math.min(Q.aniso, renderer.capabilities.getMaxAnisotropy()); tex.needsUpdate = true;
-  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL } };
+  ENV.tu = { tEnv: { value: tex }, tEnvN: { value: ENV.nrm }, uSand: { value: envCol(L.sand) }, uSnow: { value: envCol(L.snow) }, uRock: { value: envCol(L.rock) }, uSoil: { value: envCol(L.soil) }, uBump: { value: L.bump }, uSat: { value: L.sat }, uTone: { value: L.tone }, uWL: { value: T.WL }, uWet: { value: 0 } };
   const clouds = [];
   scene.traverse(o => {
     if (!o.isMesh || !o.geometry) return;
@@ -46635,7 +47141,7 @@ function envApply() {
     for (let k = T.h.length, N = T.N, q = 0; k < n; k++, q++) for (let e = 0, a = Math.floor(q / N) * (N + 1) + q % N; e < 3; e++) col[k * 3 + e] = (col[a * 3 + e] + col[(a + 1) * 3 + e] + col[(a + N + 1) * 3 + e] + col[(a + N + 2) * 3 + e]) / 4;   // a middle, its corners' colour again
     g.setAttribute('envS', new THREE.BufferAttribute(s, 2)); g.attributes.color.needsUpdate = true;
     const m = new THREE.MeshPhongMaterial({ color: 0xffffff, vertexColors: true, shininess: 3, specular: 0x0c0c0c });
-    m.onBeforeCompile = envTerrainHook; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv;
+    m.onBeforeCompile = sh => { sky3Ill(sh); envTerrainHook(sh); }; m.customProgramCacheKey = () => 'env-terrain-' + GFX.lv + (m.onBeforeCompile !== envTerrainHook ? '-ill' : '');   // with the flares' light from the first compile (-ill: a program of its own; sky3Init wraps it the same way)
     ENV.terrain.material.dispose(); ENV.terrain.material = m;
   }
   /* the roads and the towns' streets: lit, worn, rutted (envRoadHook) instead of flat and darkened by hand at night; one program for all, each class its uniforms */
@@ -46645,7 +47151,7 @@ function envApply() {
     const c = o.userData.road, b = o.material, st = c < 0, paved = st || (S.modern && c < 2);   // c -1: a town's street (cityScene)
     const u = { value: new THREE.Vector4(st ? o.userData.hw : RN.w[c], st ? 0 : c >= 2 ? 1 : S.modern ? 0 : .5, S.modern && !c ? 1 : 0, paved ? .2 : .55) };
     const m = new THREE.MeshLambertMaterial({ color: b.color.clone().multiplyScalar(paved ? .8 : 1), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: b.polygonOffsetFactor, polygonOffsetUnits: b.polygonOffsetUnits });
-    m.onBeforeCompile = sh => envRoadHook(sh, u); m.customProgramCacheKey = () => 'env-road';
+    m.onBeforeCompile = sh => envRoadHook(sh, u); m.customProgramCacheKey = () => 'env-road' + (SKY3.u ? '-ill' : '');
     o.geometry.computeVertexNormals(); b.dispose(); o.material = m; o.receiveShadow = !!Q.shadow;
   }
   /* the sky dome: the same mesh, its own shader; skyScene() still sets material.color (night, weather), which tints the zenith */
@@ -46702,6 +47208,10 @@ sky3Init = (g => () => {
   if (K.hemi) K.hemi.groundColor.setHex(L.gc);
   const m = ENV.terrain && ENV.terrain.material, f = m && m.onBeforeCompile;   // the flares' light on the ground (sky3Init) and then this ground
   if (m && f !== envTerrainHook) { m.onBeforeCompile = sh => { f(sh); envTerrainHook(sh); }; m.needsUpdate = true; }
+  /* the roads and the vegetation take the flares' light when the sky has it (SKY3.u, made just now the first time): those compiled before
+     it are made again, under keys of their own (-ill). Until cf-pol-graficos 3 the programs were kept by keys that did not say so, and the
+     ground, the roads, the trees and the grass were drawn without the flares' light (tests/fire-look.js) */
+  scene.traverse(o => { const q = o.isMesh && o.material; if (q && !Array.isArray(q) && q.customProgramCacheKey && /^(veg-|env-road)/.test(q.customProgramCacheKey())) q.needsUpdate = true; });
 })(sky3Init);
 buildWorld = (g => () => { g(); envApply(); })(buildWorld);
 /* each frame, after skyScene(): the sun's colour and glow by its height, the evening's warmth in the haze, the zenith, the clouds, the water */
@@ -46735,6 +47245,7 @@ skyScene = (g => () => {
     } else { m.color.setScalar(.25 + .75 * Lr); m.opacity = .7 + .25 * W.r; }
   }
   if (ENV.water && ENV.wu) { ENV.t += 1 / 60; ENV.wu.uT.value = ENV.t; ENV.wu.uLit.value = Lr; ENV.wu.uRain.value = clamp(W.r, 0, 1); envBedSync(); }
+  if (ENV.tu && ENV.tu.uWet) ENV.tu.uWet.value = envWet(clamp(W.r, 0, 1));
   if (ENV.sh) {   // the shadow's box follows the camera, snapped to its texels so the edges do not crawl
     const cp = camera.position, r = GFXQ[GFX.lv].shadow, st = r * 2 / 2048, x = Math.round(cp.x / st) * st, z = Math.round(cp.z / st) * st, y = hgt(cp.x, cp.z);
     ENV.sh.target.position.set(x, y, z); ENV.sh.target.updateMatrixWorld(); ENV.sh.position.set(x + v.x * 3000, y + v.y * 3000, z + v.z * 3000);
@@ -47294,14 +47805,16 @@ const XNR = 4, XNS = 20, XNV = 1 + XNR * XNS;   // a mark's disc: rings and sect
 const xCls = r => { const c = XFX.cut; return r < c[0] ? 0 : r < c[1] ? 1 : r < c[2] ? 2 : r < c[3] ? 3 : 4; };
 const XV = 'attribute float size; attribute float sd; attribute vec4 pc; varying vec4 vc; varying float vs; varying float vf; varying vec3 vSun; uniform float scale; uniform float fN; uniform float fF; uniform vec3 sunW;' +
   'void main(){ vc = pc; vs = sd; vec4 mv = modelViewMatrix * vec4(position, 1.0); vSun = normalize((viewMatrix * vec4(sunW, 0.0)).xyz); gl_PointSize = clamp(size * scale / max(-mv.z, 0.1), 1.5, 640.0); vf = smoothstep(fN, fF, -mv.z); gl_Position = projectionMatrix * mv; }';
-/* the smoke and the dust: a ball lit by the sun (sunK of it; the old light from above at night and under rain), its normal bent by the puff's own
+/* the fire's sprites (sd 2 and up, xFrame) are flames: narrow at the top, hot at the foot, their edge torn by the noise; the rest round.
+   the smoke and the dust: a ball lit by the sun (sunK of it; the old light from above at night and under rain), its normal bent by the puff's own
    noise so that it billows, and darker where it is thick */
 const XF = add => 'varying vec4 vc; varying float vs; varying float vf; varying vec3 vSun; uniform vec3 fC; uniform float amb; uniform float sunK;' +
   'float xh(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }' +
   'float xn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f); return mix(mix(xh(i), xh(i + vec2(1.0, 0.0)), f.x), mix(xh(i + vec2(0.0, 1.0)), xh(i + vec2(1.0, 1.0)), f.x), f.y); }' +
   'void main(){ vec2 p = gl_PointCoord - 0.5; float d = length(p) * 2.0; if (d > 1.0) discard;' +
   ' float n = 0.62 * xn(p * 4.0 + vs * 17.0) + 0.38 * xn(p * 9.0 - vs * 11.0);' +
-  (add ? ' float a = vc.a * (1.0 - smoothstep(0.0, 1.0, d)) * (0.7 + 0.6 * n); gl_FragColor = vec4(vc.rgb * (1.0 - vf * 0.85), a); }'
+  (add ? ' float fl = step(1.5, vs); vec2 q = vec2(p.x * (1.0 + fl * 1.5 * clamp(0.25 - p.y * 2.0, 0.0, 1.25)), p.y - fl * 0.06); float df = mix(d, length(q) * 2.0 + (n - 0.5) * 0.45, fl);' +
+      ' float a = vc.a * (1.0 - smoothstep(0.0, 1.0, df)) * (0.7 + 0.6 * n); gl_FragColor = vec4(vc.rgb * (1.0 + fl * 0.4 * p.y) * (1.0 - vf * 0.85), a); }'
     : ' float a = vc.a * (1.0 - smoothstep(0.25 + 0.35 * n, 1.0, d)) * (0.55 + 0.75 * n);' +
       ' vec3 nn = normalize(vec3(p.x * 2.0 + (n - 0.5) * 0.9, -p.y * 2.0 + (n - 0.5) * 0.9, sqrt(max(0.0, 1.0 - d * d)) + 0.2)); float w = dot(nn, vSun) * 0.5 + 0.5;' +
       ' vec3 c = vc.rgb * amb * mix(1.12 - 0.4 * gl_PointCoord.y, (0.5 + 0.72 * w) * (1.08 - 0.16 * n), sunK); gl_FragColor = vec4(mix(c, fC, vf), min(a, 1.0)); }');
@@ -47456,7 +47969,7 @@ function xFrame() {
     if (P[j + 1] < P[j + 14]) { P[j + 7] = 0; continue; }   // a clod or an ember back on the ground
     const k = P[j + 10], v = t / L, s0 = P[j + 8], s1 = P[j + 9], x = P[j], y = P[j + 1], z = P[j + 2], sd = P[j + 15];
     if (k === 0) xPut(A, x, y, z, 1, .93, .75, (1 - v) * (1 - v), s0 + (s1 - s0) * Math.sqrt(v), sd);
-    else if (k === 1) { const e = v < .35 ? v / .35 : (v - .35) / .65; xPut(A, x, y, z, v < .35 ? 1 : xMix(1, .6, e), v < .35 ? xMix(.95, .55, e) : xMix(.55, .15, e), v < .35 ? xMix(.7, .15, e) : xMix(.15, .05, e), .95 * Math.pow(1 - v, 1.5), s0 + (s1 - s0) * (1 - (1 - v) * (1 - v)), sd); }
+    else if (k === 1) { const e = v < .35 ? v / .35 : (v - .35) / .65; xPut(A, x, y, z, v < .35 ? 1 : xMix(1, .6, e), v < .35 ? xMix(.95, .55, e) : xMix(.55, .15, e), v < .35 ? xMix(.7, .15, e) : xMix(.15, .05, e), .95 * Math.pow(1 - v, 1.5), s0 + (s1 - s0) * (1 - (1 - v) * (1 - v)), sd + 2); }   // sd + 2: drawn as a flame
     else if (k === 2) xPut(A, x, y, z, 1, xMix(.85, .3, v), xMix(.5, .05, v), 1 - v * v, s0, sd);
     else if (k === 3) { const e = Math.min(1, v * 2.2); xPut(B, x, y, z, xMix(.09, .4, e), xMix(.085, .38, e), xMix(.08, .36, e), .8 * sstep(0, .06, v) * Math.pow(1 - v, 1.3), s0 + (s1 - s0) * Math.sqrt(v), sd); }
     else if (k === 4) xPut(B, x, y, z, .55, .47, .35, .6 * sstep(0, .05, v) * Math.pow(1 - v, 1.2), s0 + (s1 - s0) * Math.sqrt(v), sd);
@@ -47542,6 +48055,30 @@ function xBurn(dt) {
   }
 }
 fx.blast = (x, y, z, r) => { try { return xBlast(x, y, z, r); } catch (e) { if (!XFX.err++) console.warn('XFX', e); return false; } };
+/* the fires' light at night (cf-pol-graficos 3): of the four lights the flares cast on the ground, the trees and the houses (SKY3.u, sky3Ill),
+   those no flare takes go to the fires nearest the eye, within far m: a crater that burns on (E), a burning wreck (wreck), a vehicle on fire or
+   under hurt[1] of its hull; warm (col), r m round it [a vehicle, a wreck, a crater at its start], flickering by fl of it. Nothing by day:
+   sky3Ill's strength (uIllK) goes with the dark */
+const XFL = { col: [.85, .42, .16], r: [20, 28, 42], fl: .2, far: 1500 };
+function xFireLights() {
+  const u = typeof SKY3 === 'object' && SKY3.u; if (!u || !u.uIllC || !S || !camera || !XFX.E) return 0;
+  const U = u.uIll.value, C = u.uIllC.value, cp = camera.position, F = XFX, L = [];
+  for (let j = 0; j < 4; j++) C[j].set(1, 1, 1);
+  if (!(u.uIllK.value > 0)) return 0;
+  const add = (x, y, z, r) => { const d = Math.hypot(x - cp.x, z - cp.z); if (d < XFL.far) L.push([d, x, y, z, r]); };
+  for (const e of F.E) if (e.on) add(e.x, e.y + 2, e.z, Math.max(XFL.r[0], XFL.r[2] * (1 - e.t / e.L)));
+  for (const w of S.wrecks) if (w.u && w.life > F.wreck) add(w.u.x, w.u.y + 2.5, w.u.z, XFL.r[1]);
+  for (const o of S.units) if (!o.dead && !o.gone && o.def && o.def.hp > 0 && (o.burn || o.hp / o.def.hp < F.hurt[1])) add(o.x, o.y + 2.5, o.z, XFL.r[0]);
+  L.sort((a, b) => a[0] - b[0]);
+  let n = 0;
+  for (let j = 0; j < 4 && n < L.length; j++) {
+    if (U[j].w > 0) continue;   // a flare's
+    const f = L[n++], k = 1 - XFL.fl * (.5 + .5 * Math.sin(S.t * 17 + j * 2.1) * Math.sin(S.t * 7.3 + j));
+    U[j].set(f[1], f[2], f[3], f[4] * k); C[j].set(XFL.col[0], XFL.col[1], XFL.col[2]);
+  }
+  return n;
+}
+skyScene = (g => () => { g(); try { xFireLights(); } catch (e) { if (!XFX.err++) console.warn('XFX', e); } })(skyScene);
 syncScene = (g => dt => { g(dt); try { xFrame(); } catch (e) { if (!XFX.err++) console.warn('XFX', e); } })(syncScene);
 /* ---- the General's view: Campanha, the strike button (a click on the map) and the list of the side's strikes ---- */
 GORW.bomb = 1;

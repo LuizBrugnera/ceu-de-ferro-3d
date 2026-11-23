@@ -16,7 +16,8 @@
    gq (the general's tools for everyone: gask missions, unit with an id, lots and mines),
    crl (the radio relay of the command net: the work of kind 8 in fort and fbuild),
    the tactical map (gask tmap: the asker's side's layer k, one of f v o t p k l, at 1 km; an older server answers shape),
-   the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape)
+   the approaches (gask ap: the asker's side's three ways to the objective nearest x z, from side a; an older server answers shape),
+   the General 2's world (gask mundo: the regions, edges and the asker's side's belief; with x z, the different routes there from region id)
    and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
    at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10),
    and hsc (the engineers' walls, cf-engenharia-pontos: the works of kinds 11 to 13, HESCO tall and low and the T-wall, in fort and fbuild).
@@ -565,7 +566,7 @@ RX.gcmd = (c, m) => {
 };
 /* the questions a side may ask its host (gask): the last four are the general's tools for everyone (W13, welcome gq: 1): missions, unit { id } (a squad's card),
    lots (the seat town's), mines. A question passes on k (a word), x, z, a (numbers) and id (an integer) */
-const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk', 'dfp', 'emb'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro); dfp: the side's defence plans (cf-defesa-posicoes); emb: the side's infantry rides (cf-infantaria-veiculos)
+const GASK = ['spots', 'why', 'view', 'state', 'pool', 'amb', 'fire', 'report', 'plan', 'logi', 'rec', 'brg', 'threats', 'missions', 'unit', 'lots', 'mines', 'tmap', 'ap', 'stk', 'dfp', 'emb', 'mundo'];   // stk: the side's strategic strikes (the bombers, cf-bombardeiro); dfp: the side's defence plans (cf-defesa-posicoes); emb: the side's infantry rides (cf-infantaria-veiculos); mundo: the General 2's model of the world, the side's (cf-g2-g1-mundo)
 RX.gask = (c, m) => {
   const h = c.room.host, q = m.q, n = int(m.n, 0, 1e9) ? m.n : 0, now = Date.now();
   if (!q || !rec(q) || !GASK.includes(q.q) || now - (c.ga || 0) < 1000) return send(c.ws, { t: 'gres', n, ok: false, why: 'shape', id: 0 });

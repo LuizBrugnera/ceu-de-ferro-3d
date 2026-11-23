@@ -41386,7 +41386,11 @@ bombGo = (g => o => {
 /* ---------- cf-bomba-killcam: whoever sets off a bomb vest, car bomb or truck bomb dies in it, and a player killed by one sees the blast ----------
    bombGo and stkSvbGo note the blast (S.kcB); a vehicle bomb's own seats are thrown dead (u.bKill: thrown with no chance of living, online the
    eject carries a mortal dmg). playerDown within KC.win s of a blast, the player within KC.near radii of it, starts the kill cam (S.kc): for KC.t s
-   the camera circles the blast, zooming out from the fireball to frame the whole blast radius (kcZoom), the swap screen waits, and the respawn is at least KC.t + KC.after s away */
+   the camera circles the blast, zooming out from the fireball to frame the whole blast radius (kcZoom), the swap screen waits, and the respawn is at least KC.t + KC.after s away.
+   cf-killcam-zoom2: the blasts of the last KC.win s are kept (S.kcL) and the kill cam frames the biggest one in reach, so a car bomb set off
+   by the truck bomb's blast no longer shrinks the truck's shot to the car's; a player riding a vehicle that the blast kills with him (killed
+   in his seat through the hull, then thrown out dead) now goes down (playerDown: the kill cam, the banner, the respawn) instead of staying dead
+   with no death at all; and a guest who sets off his own bomb notes it himself (the host runs bombGo), so he gets the same kill cam */
 const KC = { t: 6.5, after: 1.5, win: 3, near: 1.8, spin: .22,
   // the zoom-out: the camera starts close on the fireball (D0 = r·d0 + n0, height e0 of the distance) and pulls back and up over zt s
   // (ease-out) to frame the whole blast radius (D1 = r·d1 + n1, height e1), then holds there, still circling, to the end
@@ -41394,7 +41398,9 @@ const KC = { t: 6.5, after: 1.5, win: 3, near: 1.8, spin: .22,
 // the kill cam's distance and height (fraction of the distance) s seconds into it, for a blast of radius r
 const kcZoom = (r, s) => { const u = clamp(s / KC.zt, 0, 1), e = 1 - (1 - u) ** 3, D0 = r * KC.d0 + KC.n0, D1 = r * KC.d1 + KC.n1, D = D0 + (D1 - D0) * e;
   return { D, h: D * (KC.e0 + (KC.e1 - KC.e0) * e) }; };
-const kcNote = (x, y, z, r, k) => { S.kcB = { x, y, z, r, k, t: S.t }; };
+const kcNote = (x, y, z, r, k) => { const B = { x, y, z, r, k, t: S.t }; S.kcL = (S.kcL || []).filter(o => S.t - o.t <= KC.win).concat(B); S.kcB = B; };
+// the blast the kill cam frames for the player P: the biggest of the last KC.win s with P within KC.near of its radius (null: none)
+const kcPick = P => (S.kcL || []).filter(B => S.t - B.t <= KC.win && Math.hypot(P.x - B.x, P.z - B.z) <= B.r * KC.near + 10).reduce((a, B) => (!a || B.r > a.r ? B : a), null);
 bombGo = (g => o => {
   const B = bombOf(o); if (!B || o.bGone) return g(o);
   kcNote(o.x, (o.y || hgt(o.x, o.z)) + 1, o.z, B.r, o.man ? 'man' : B === BOMB.truck ? 'truck' : 'car');
@@ -41409,14 +41415,24 @@ thrown = (g => (u, m, by, f) => {
 })(thrown);
 playerDown = (g => (by, left) => {
   g(by, left);
-  const B = S.kcB, P = S.my;
-  if (left || S.demo || !B || !P || S.t - B.t > KC.win || Math.hypot(P.x - B.x, P.z - B.z) > B.r * KC.near + 10) return;
+  const P = S.my; if (P) P.pdn = 1;
+  const B = !left && !S.demo && P && kcPick(P);
+  if (!B) return;
   S.kc = { x: B.x, y: B.y, z: B.z, r: B.r, k: B.k, t0: S.t, end: S.t + KC.t, a: Math.atan2(P.z - B.z, P.x - B.x) };
   S.respawn = Math.max(S.respawn, KC.t + KC.after);
   const n = { man: 'Homem-bomba', car: 'Carro-bomba', truck: 'Caminhão-bomba' }[B.k];
   if (S.banner) S.banner.sub = n + ' · ' + S.banner.sub;
 })(playerDown);
 const kcOn = () => !!(S && S.kc && S.my && S.my.dead && S.t < S.kc.end);
+/* a guest asked the host to set off his own bomb P (mreq k 6 or 9): he notes the blast where he is, as bombGo does where it runs */
+const kcSelf = P => { const B = bombOf(P); if (B) kcNote(P.x, (P.y || hgt(P.x, P.z)) + 1, P.z, B.r, P.man ? 'man' : B === BOMB.truck ? 'truck' : 'car'); };
+/* the player killed in his seat (paxHit) while S.my is still the vehicle goes down with nobody's playerDown: killMan's is for S.my, and when
+   the same blast kills the vehicle, alight hands S.my back to the dead man before ruin looks (u === S.my). Thrown out dead: he goes down now */
+thrown = (g => (u, m, by, f) => {
+  const was = m === S.rider && S.my === u && m.dead;
+  g(u, m, by, f);
+  if (was && S.my === m && m.dead && !m.pdn) playerDown(m.lastBy || by);
+})(thrown);
 /* ---------- end of cf-bomba-killcam (the sim) ---------- */
 /* ---------- combined arms (CA; não testado, see docs/nao-testado/cf-armas-combinadas.md): tanks and infantry as teams, at the unit level ----------
    The captain: "tanques devem apoiar a infantaria e vice versa". Every CA.every s each side's general pairs each of its tanks and armoured cars
@@ -59807,6 +59823,9 @@ addEventListener('keydown', e => {
   if (!bombOf(S.my)) return;
   const w = vbMe(); if (w) S.banner = { text: (S.my.def.name || 'Veículo-bomba').toUpperCase(), sub: w, life: VBK.say };
 });
+/* cf-killcam-zoom2: a guest's bomb goes off on the host (bombGo there); the guest notes it himself, for his kill cam */
+vbMe = (g => () => { const P = S.my, w = g(); if (w === 'Detonando') kcSelf(P); return w; })(vbMe);
+vestGo = (g => P => { const w = g(P); if (w === 'Detonando') kcSelf(P); return w; })(vestGo);
 Net.rx.mreq = (g => m => {
   if (!m || m.k !== 9) return g(m);
   const G = Net.ghosts.get(m.from);

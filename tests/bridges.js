@@ -48,8 +48,10 @@ console.log('-- what brings one down --');
   const c = L[2]; let shells = 0;
   while (S.os[c.id] < 2 && shells < 200) { const a = shells * 2.4, r = 6 + (shells % 7) * 4; $('explode')(c.x + Math.cos(a) * r, c.y + .5, c.z + Math.sin(a) * r, 36, 130, null, 1, 1, $('OBJD').he.blast); shells++; }
   ok(shells > 3 && shells < 30, 'a 15 cm howitzer\'s rounds landing on and around a secondary-road bridge bring it down in ' + shells);
-  const d = L[1]; $('explode')(d.x + 8, d.y + 1, d.z, 70, 300, null, 1, 1, $('OBJD').bomb.blast); const h1 = S.os[d.id]; $('explode')(d.x - 5, d.y + 1, d.z + 3, 70, 300, null, 1, 1, $('OBJD').bomb.blast);
-  ok(h1 === 1 && S.os[d.id] === 2, 'two 500 kg bombs on a main-road bridge: hurt by the first, down at the second');
+  const d = L[1], bomb = (x, z) => $('explode')(d.x + x, d.y + 1, d.z + z, 70, 300, null, 1, 1, $('OBJD').bomb.blast); let bombs = 0;
+  bomb(8, 0); bomb(-5, 3); const h2 = S.os[d.id]; bombs = 2;
+  while (S.os[d.id] < 2 && bombs < 20) { bomb((bombs % 3 - 1) * 6, (bombs % 2) * 4); bombs++; }
+  ok(h2 < 2 && bombs >= 5 && bombs <= 8, '500 kg bombs on a main-road bridge: it stands after two, down at the ' + bombs + 'th');
 }
 
 console.log('-- what a fall does --');

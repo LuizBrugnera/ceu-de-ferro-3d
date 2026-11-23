@@ -11020,7 +11020,7 @@ function supStep(dt) {
     const b = S.sup.find(b => !b.dead && b.prog >= 1 && b.team === u.team && b.ri === u.ri && Math.abs(b.s - u.s) < BLD.ai.fall);
     if (b && hdist(u, b) > BLD.r * .6) A.reloc = b.s;
   }
-  for (let _i = 0, _l = S.chg, c = _l[0]; _i < _l.length; c = _l[++_i]) if (S.t >= c.T) { c.gone = true; blastFx(c.x, c.y + 1, c.z, 12); if (!c.b.dead) hitObj(c.b.o, BLD.charge.dmg, c.by); }
+  for (let _i = 0, _l = S.chg, c = _l[0]; _i < _l.length; c = _l[++_i]) if (S.t >= c.T) { c.gone = true; blastFx(c.x, c.y + 1, c.z, 12); if (!c.b.dead) hitObj(c.b.o, c.dmg || BLD.charge.dmg, c.by); }   // c.dmg: a bridge's charge (BR.dmg)
   if (S.chg.length) S.chg = alive(S.chg);
   if (S.sup.some(b => b.gone)) S.sup = alive(S.sup);
 }
@@ -27136,10 +27136,12 @@ Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host
 
 /* ---------- bridges and pontoons (BR: W20, §13c T11 of the General's design) ----------
    Every place a road of the network (map version 2 on) crosses the river is a bridge: a world object (kind bridge) under id BR.id + its
-   index, hp by the road's class, kept in T.byId like the terrain's own objects but on no grid (nothing bumps into it, nothing sees through
+   index, hp by the road's class (the captain: "deixe as pontes mais resistentes": three times what it was, 600/450/300/250, so that a bridge takes
+   a concentrated attack: some six 500 kg bombs or fourteen 15 cm rounds on a main road's, two to four bombs on a track's), kept in T.byId like the terrain's own objects but on no grid (nothing bumps into it, nothing sees through
    it), so that hitObj, setObj and the room's obj and ohit lines carry its stage as any object's. The generated terrain does not change (no
    new map version): the road keeps its embankment over the river, which is the bridge while it stands. Bursts take it down (blastObjs: artillery, rockets, bombs; take [bullet, hit, burst]),
-   and demolition charges set at either end of it (a soldier's N within reach m of an end; dmg each, as against a base). Small arms do nothing.
+   and demolition charges set at either end of it (a soldier's N within reach m of an end; dmg each, three times a base's so that a demolition takes the
+   same 4/3/2/2 charges it did before the bridges grew tougher). Small arms do nothing.
    Down, its edge of the network is cut: the stretch of river it raised (z0..z1 along the river's middle, its own half where two crossings
    share one, BR.edge m wider) sinks: the nodes of the height grid there within b.gw of the middle (gw, or more than half a cell so that
    every row has one) are put sink m under the water for the match (S.brn, which hgt reads: brH), and the scene sinks the same nodes, so
@@ -27159,7 +27161,7 @@ Net.rx.host = (old => m => { old(m); if (m.id === Net.id && S && S.net && S.host
    score grows with the enemy's worth (k). Crossing (tra): a side with every crossing it needs cut (no open
    one at all, or vehicles held at a fallen bridge for wait s) sends a free squad within reach m, sappers first, to lay a pontoon at the
    fallen bridge whose bank end has no known enemy within safe m. hold: s a vehicle held at a bank waits before it looks again for a way */
-const BR = { id: 100, hp: [600, 450, 300, 250], dmg: 150, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 8, kill: 5000,
+const BR = { id: 100, hp: [1800, 1350, 900, 750], dmg: 450, gw: 40, sink: 6, edge: 20, end: 8, pw: 7, reach: 12, put: 40, pslow: 1.6, step: 1, hold: 8, kill: 5000,
   ai: { foe: 1500, near: 700, at: 300, min: 8, own: .5, held: 1.5, k: 12, reach: 3500, safe: 400, wait: 30, T: 600, cd: 90 } };
 OBJ.bridge = { hp: [0, 0], take: [0, .5, 1] };
 OBJ.pont = { hp: [280, 0], take: [.15, .6, 1], dug: 99, veh: () => 1 };
@@ -27305,14 +27307,14 @@ setObj = (g => (o, st, by, quiet) => {
   if (!quiet) gLogBoth(brName(o.br) + ' destruída', o.br);
 })(setObj);
 const gLogBoth = (s, at) => { if (S.cmd) for (const t of SIDES()) gLog(t, 'eng', s, at, 'brx' + s); };
-/* a demolition charge at either end of a bridge, as against a base (S.chg; the charge is the soldier's) */
+/* a demolition charge at either end of a bridge, as against a base but of BR.dmg (S.chg; the charge is the soldier's) */
 const brEnd = (b, p, R) => b.ends.find(e => hdist(e, p) < (R || BR.reach)) || null;
 function brPlant(m, b) {
   if (!(m.chg > 0) || brDown(b) || !brEnd(b, m) || !brOn()) return false;
-  m.chg--; S.chg.push({ b: { dead: false, o: b.o, br: b }, by: m, x: m.x, y: m.y, z: m.z, T: S.t + BLD.charge.fuse }); return true;
+  m.chg--; S.chg.push({ b: { dead: false, o: b.o, br: b }, by: m, x: m.x, y: m.y, z: m.z, T: S.t + BLD.charge.fuse, dmg: BR.dmg }); return true;
 }
 /* a soldier's own charge on a bridge goes off where it lies: a burst, and the bridge takes the charge's whole damage. (S.chg's base entries with
-   a bridge, b.br: supStep hits b.o with the charge's damage as it does a base) */
+   a bridge, b.br: supStep hits b.o with its dmg, BR.dmg, where a base takes BLD.charge.dmg) */
 const brNear = (p, R) => brs().find(b => !brDown(b) && brEnd(b, p, R)) || null;
 build = (g => (P, I, key, trig) => {
   const b = key && !S.bm && !S.fm && !S.mm && P.man && P.chg > 0 ? brNear(P) : null;
@@ -27755,7 +27757,7 @@ step = (g => dt => { g(dt); brUrgent(); })(step);
    again. It counts against the same cap a side (ps.cap) and one work a site. Online with a server that says bnb: 1 (fort kind 10).
    The general: the manoeuvre nbr ('bridge' command, MCP build_bridge) at a point as cross takes a site; the AI chooses it (MANG.nbr) for a fallen
    bridge on one of its axes whose ends the enemy holds (no rebuild, no pontoon there), at the nearest safe site, when it can pay, a little below a crossing by pontoon */
-OBJ.nbridge = { hp: [1500, 0], take: [0, .35, .8], dug: 99, veh: () => 1 };
+OBJ.nbridge = { hp: [4500, 0], take: [0, .35, .8], dug: 99, veh: () => 1 };
 FORT.nbr = { k: 10, name: 'Ponte nova', obj: 'nbridge', size: [80, 2 * BR.pw, 1], time: 720, cap: 2, put: [5, 9], pad: 0, road: 0, min: 1, near: 0, back: 0, conceal: 0, pitch: 99, span: 1, eng: .5, max: 4, cost: [20, 100], garr: [] };
 FORT.K[10] = FORT.nbr;
 function brNewCost(t) { const F = FORT.nbr; if (!F.cost || !ecoSim() || !S.eco.d[t]) return ''; const d = S.eco.d[t]; return d.en < F.cost[0] || d.mt < F.cost[1] ? 'cost' : ''; }

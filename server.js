@@ -53,12 +53,14 @@ const LOADS = {
   a10: [3300, { mk82: 6, mk84: 2, cbu87: 4, gbu12: 4 }, { agm65: 6, mk82: 6, cbu87: 4, hydra: 28 }, { aim9: 2, hydra: 14 }],
   su57: [2300, { kh38: 2, kab500: 2, fab500: 2, fab250: 4, kab500kr: 2 }, { r77: 6 }, { r73: 2 }],
   su25: [3300, { kh25: 4, kab500: 2, fab500: 4, rbk500: 4, kab500kr: 2 }, { s8: 80, fab250: 4, rbk500: 2 }, { r73: 2 }],
+  b2: [18000, { gbu31: 8, b83: 1 }],
+  tu160: [40000, { fab500m: 24, rdsn: 1 }],
   ah64: [1400, { hydra19: 38, hellfire: 8, hellfirel: 8 }, { hellfire: 8, hellfirel: 8, hydra19: 38 }, { atas: 4 }, { ammo30: 1 }],
   mi28: [1700, { s8: 40, s13: 10, ataka: 8 }, { ataka: 8, s8: 40 }, { iglav: 4 }],
   uh60: [1100, { hydra: 14, hydra19: 38 }, { hellfire: 8, atas: 4 }, { ammo762: 1 }],
   mi8: [1800, { s8: 40, s13: 10 }, { s8: 40, ataka: 4, iglav: 4 }, { ammo762: 1 }]
 };
-const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40 };
+const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40, gbu31: 925, fab500m: 500, b83: 1100, rdsn: 1100 };
 const NST = Object.keys(STW).length;
 const FKINDS = 13;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb; 10: a new bridge, bnb; 11-13: the HESCO walls and the T-wall, hsc)
 const rooms = { ww2: new Map(), modern: new Map() };

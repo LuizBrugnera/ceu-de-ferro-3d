@@ -49207,7 +49207,16 @@ function vegTreeGeo(kind, lod, cards) {
 }
 /* the shader of every piece: a Lambert material whose two faces are lit alike, the wind, the dither between the bands (band: [in from,
    in to, out from, out to] m, by the instance's distance), and cut-out cards that do not thin away with the distance */
-const VU = { uTime: { value: 0 }, uWind: { value: .5 }, uEye: { value: null } };   // uEye: the eye, which three.js does not give a Lambert material
+const VU = { uTime: { value: 0 }, uWind: { value: .5 }, uEye: { value: null }, uCut: typeof THREE !== 'undefined' ? { value: new THREE.Vector4() } : null };   // uEye: the eye, which three.js does not give a Lambert material; uCut: camClip's pivot and radius
+/* a tree in the way of the eye (cf-camera-3p): its fragments within the radius uCut.w of the line from the eye to the pivot uCut.xyz (the
+   radius from half of it at the eye to all of it at the pivot; a share over that softened) and those within CUTD.eye radii of the eye itself are
+   dithered down to CUTD.keep of them, so the trunk and the crown stand as a lace the soldier or the vehicle is seen through, and the woods
+   around stay whole. Only in a third-person view: from a seat or the soldier's own eye a trunk in front stays a trunk. Before, the eye's near plane cut them off: every tree within 21 m of the eye behind a vehicle in a wood, and at 2 m on foot */
+const CUTD = { keep: .25, eye: [.4, 1.8], soft: .35 };
+const VCUT = ' if (uCut.w > 0.0) { vec3 cutA = uCut.xyz - uEye; float cutT = dot(vCutP - uEye, cutA) / max(dot(cutA, cutA), 1e-4);\n' +
+  '  if (cutT > 0.0 && cutT < 1.0) { float cutR = uCut.w * (.5 + .5 * cutT), cutD = distance(vCutP, uEye + cutA * cutT), cutK = 1.0 - smoothstep(cutR * ' + (1 - CUTD.soft) + ', cutR, cutD);\n' +
+  '   if (cutK > 0.0 && ign > 1.0 - cutK * ' + (1 - CUTD.keep) + ') discard; }\n' +
+  '  float eyeK = 1.0 - smoothstep(uCut.w * ' + CUTD.eye[0] + ', uCut.w * ' + CUTD.eye[1] + ', distance(vCutP, uEye)); if (eyeK > 0.0 && ign > 1.0 - eyeK * ' + (1 - CUTD.keep) + ') discard; }\n';
 function vegMat(o) {
   const m = new THREE.MeshLambertMaterial({ color: o.color || 0xffffff, map: o.map || null, vertexColors: true, side: THREE.DoubleSide, alphaTest: o.map ? .42 : 0 });
   m.userData.band = { value: new THREE.Vector4(-2, -1, 1e9, 2e9) };
@@ -49215,14 +49224,17 @@ function vegMat(o) {
   m.customProgramCacheKey = () => key + (typeof SKY3 === 'object' && SKY3.u ? '-ill' : '');   // -ill: with the flares' light, a program of its own
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = VU.uTime; sh.uniforms.uWind = VU.uWind; sh.uniforms.uBand = m.userData.band; sh.uniforms.uEye = VU.uEye;
-    let vs = 'uniform float uTime, uWind; uniform vec4 uBand; uniform vec3 uEye; varying float vFade, vAk;\n' + (o.head || '') + sh.vertexShader;
+    const cut = (o.kind === 'near' || o.kind === 'mid') && VU.uCut;   // the trees (not the grass, nor the far impostors) clear the eye's way (VCUT)
+    if (cut) sh.uniforms.uCut = VU.uCut;
+    let vs = 'uniform float uTime, uWind; uniform vec4 uBand; uniform vec3 uEye; varying float vFade, vAk;\n' + (cut ? 'varying vec3 vCutP;\n' : '') + (o.head || '') + sh.vertexShader;
     vs = vs.replace('#include <begin_vertex>', '#include <begin_vertex>\n' + o.vert);
+    if (cut) vs = vs.replace('#include <project_vertex>', '#include <project_vertex>\n vec4 cutW = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\n cutW = instanceMatrix * cutW;\n#endif\n vCutP = (modelMatrix * cutW).xyz;');
     if (o.normal) vs = vs.replace('#include <beginnormal_vertex>', '#include <beginnormal_vertex>\n' + o.normal);
     if (o.color2) vs = vs.replace('#include <fog_vertex>', '#include <fog_vertex>\n' + o.color2);   // after the vertex's own values are made
     sh.vertexShader = vs;
-    let fs = 'varying float vFade, vAk; uniform vec3 uEye;\n#define cameraPosition uEye\n' + sh.fragmentShader;
+    let fs = 'varying float vFade, vAk; uniform vec3 uEye;\n' + (cut ? 'varying vec3 vCutP; uniform vec4 uCut;\n' : '') + '#define cameraPosition uEye\n' + sh.fragmentShader;
     fs = fs.replace('( gl_FrontFacing ) ? vIndirectFront : vIndirectBack', 'vIndirectFront').replace('( gl_FrontFacing ) ? vLightFront : vLightBack', 'vLightFront');
-    fs = fs.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));\n if (vFade >= 0.0 ? ign > vFade : ign < -vFade) discard;');
+    fs = fs.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(.06711056, .00583715))));\n if (vFade >= 0.0 ? ign > vFade : ign < -vFade) discard;\n' + (cut ? VCUT : ''));
     if (tn) fs = fs.replace('#include <color_fragment>', '#include <color_fragment>\n diffuseColor.rgb = mix(vec3(dot(diffuseColor.rgb, vec3(.3, .59, .11))), diffuseColor.rgb, ' + ts.toFixed(3) + ') * ' + tn.tone.toFixed(3) + ';');   // the ground's sober tone, a little less of it
     if (o.map) fs = fs.replace('#include <alphatest_fragment>', ' diffuseColor.a *= vAk;\n#include <alphatest_fragment>');
     sh.fragmentShader = fs;
@@ -50148,10 +50160,12 @@ function specCam(dt) {
   return true;
 }
 function updateCamera(dt) {
+  if (VU.uCut) VU.uCut.value.w = 0;   // the dither round the line to the pivot: off unless a third-person view sets it (camClip)
   if (S.watch && specCam(dt)) return;
   let p = S.my;
   if (S.demo) { if (!S.eye || S.eye.gone || S.eye.dead) S.eye = S.planes.find(q => !q.dead) || S.eye; p = S.eye; }
   if (!p) return;
+  camRaw(p);
   const f = p.f, u = p.u, cp = camera.position, seat = p.dead ? null : curSeat(), calm = reduced ? .25 : 1, hit = S.t - p.hitT < .35 ? 1 - (S.t - p.hitT) / .35 : 0;
   const g = seat && !p.kind ? p.g : 1;
   camSt.gl = seat ? clamp(camSt.gl + (g > 6 ? (g - 6) * .45 : -.6) * dt, 0, 1) : 0; camSt.rl = seat ? clamp(camSt.rl + (g < -1.2 ? (-g - 1.2) * .7 : -.9) * dt, 0, 1) : 0;
@@ -50236,6 +50250,7 @@ function updateCamera(dt) {
   }
   fortCam(p);
   bldCam(p);
+  camClip(p, seat, dt);
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp);
   S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
@@ -50345,8 +50360,8 @@ function preview(m, L, canvas, ang) {
    ghost: the outline of what the build mode would start. tree: a tree a burst brought down is charred; tint: how much the standing
    ones differ; trunk: [m of bare trunk under the crown, the crown's radius], for a tree of scale 1; lie: a felled tree is pressed flat
    [s after it fell, how high its trunk then lies, what is left of the crown's height]. eye: the lowest the eye goes over the ground in a trench, where the near plane comes in to `near` so that the ground at
-   the soldier's chin is still drawn; wood: the near plane behind a vehicle in a dense wood */
-const FLOOK = { max: 3400, every: 20, earth: 0x5d4e37, spoil: 0x6a593f, floor: 0x17130f, plank: 0x6f5b3c, bag: [0x9a8c69, 0x8c7f5f], bank: [.26, .2, 1.5, 1.2], tree: 0x8c8073, tint: .16, trunk: [11, 8.5], lie: [1, 1.3, .28], eye: .4, near: .3, wood: 21 };
+   the soldier's chin is still drawn */
+const FLOOK = { max: 3400, every: 20, earth: 0x5d4e37, spoil: 0x6a593f, floor: 0x17130f, plank: 0x6f5b3c, bag: [0x9a8c69, 0x8c7f5f], bank: [.26, .2, 1.5, 1.2], tree: 0x8c8073, tint: .16, trunk: [11, 8.5], lie: [1, 1.3, .28], eye: .4, near: .3 };
 let gFort = null, gFortGhost = null, fortSeen = -1, fortTick = 0;
 const FTQ = typeof THREE !== 'undefined' ? new THREE.Quaternion() : null;
 function fortBoxes(put) {
@@ -50443,12 +50458,13 @@ function hudFort(P, u, ink, acc, disp) {
   }
   if (P.fc && (P.fc.k === 2 || P.dg > .5)) { hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - 92 * u, ch - 62 * u, 184 * u, 19 * u); txt('ABRIGADO  ·  ' + (P.fc.k === 1 ? 'TRINCHEIRA' : 'SACOS DE AREIA'), cw / 2, ch - 59 * u, 12 * u, '#8fe39a', 'center'); }
 }
-/* the eye of a soldier in a trench: never under the ground the scene draws, and a near plane that keeps the ground at its chin. Behind
-   a vehicle in a dense wood the near plane goes out instead, so that the crowns between the eye and the hull are not drawn */
+/* the eye of a soldier in a trench: never under the ground the scene draws, and a near plane that keeps the ground at its chin. (Behind a
+   vehicle in a dense wood the near plane went out to FLOOK.wood m, which wiped every tree within it off the screen: the crowns between the
+   eye and the hull are dithered now, vegMat and camClip) */
 function fortCam(p) {
   const cp = camera.position, low = !!p && !!p.man && !p.dead && p.dg > .1;
   if (low) { const g = hgt(cp.x, cp.z), cut = FHOLE.on ? trenchAt(cp.x, cp.z, -.25) : null; cp.y = Math.max(cp.y, cut ? g - cut.F.depth * cut.prog + FLOOK.eye : g + FLOOK.eye); }   // in the cut (FHOLE) the eye stays over its floor
-  camera.near = low ? FLOOK.near : p && p.kind && !p.man && !p.dead && !S.demo && !curSeat() && (kindAt(p.x, p.z) === 1 || kindAt(cp.x, cp.z) === 1) ? FLOOK.wood : 2;
+  camera.near = low ? FLOOK.near : 2;
 }
 /* ---------- buildings: what is seen of them ----------
    Every building of a stretch of town (chunk m square) is merged into two meshes: its shell (outer walls, roof, footing, rubble) and
@@ -50717,13 +50733,79 @@ function citySync() {
   if (any) cityFlush();
   for (const ch of gCity.list) ch[1].mesh.visible = Math.hypot(cp.x - ch.c.center.x, cp.y - ch.c.center.y, cp.z - ch.c.center.z) < CLOOK.lod + ch.c.radius;
 }
-/* the eye of a soldier among walls: a near plane that keeps them, and behind the shoulder never the far side of one */
+/* the eye of a soldier among walls: a near plane that keeps them, and inside, never under the floor he stands on (a wall between the
+   shoulder and the eye is camClip's) */
 function bldCam(p) {
   if (!p || !p.man || p.dead || !(p.cbo || bldAt(camera.position.x, camera.position.z, 3))) return;
-  const cp = camera.position, e = manEye(p), dx = cp.x - e.x, dy = cp.y - e.y, dz = cp.z - e.z, d = Math.hypot(dx, dy, dz);
+  const cp = camera.position;
   camera.near = Math.min(camera.near, CLOOK.near);
-  if (d > .5 && ray(e.x, e.y, e.z, cp.x, cp.y, cp.z, 0) && RAY.o.B) { const k = Math.max(.05, RAY.t - CLOOK.cam / d); cp.set(e.x + dx * k, e.y + dy * k, e.z + dz * k); }
   if (p.cbo && p.cbin) cp.y = Math.max(cp.y, p.cbo.y + (p.cbl | 0) * p.cbo.B.sh + .3);
+}
+/* ---------- the third-person eye against the world (cf-camera-3p) ----------
+   From a pivot on what I am (the soldier's eye; a vehicle's hull, at hull of its gun's height, so that an eye drawn in close still has the
+   hull in view; the aircraft) to where the view puts the eye, the first thing on the way stops the eye pad m short of it: the ground (the
+   drawn one or the match's, gnd m over it; every step m, then halved), and any solid object (ray mode 0: walls, roofs and floors of the
+   towns, the airfield's buildings, rocks, the works). A town's building the pivot is not in stops it at its outer box, windows and doors
+   and all: a ray alone went through a window, and the eye stood in the room behind the wall, looking out at the soldier through it. A
+   tree does not stop it: a trunk at the eye pushes it off sideways (pulling a vehicle's eye in to every trunk it met in a wood made the
+   view pump), and a trunk on the way and the crowns are dithered (vegMat, uCut). The eye comes in at once and goes back out at out a second, so that a post the eye passes
+   does not jerk the view; it never goes nearer the pivot than min m. The near plane comes in with the room left around the eye (room of
+   it, from 2 m down to near), so that nothing at the eye is cut away: at 2 m it cut open the ground of a slope under a low eye. cut: the
+   radius of the dither round the line from the eye to the pivot: on foot, and for a vehicle a share of its width (a helicopter its
+   rotor's radius) and a margin. The chase views of the aircraft ease from the eye they had, so they get that eye back first (camRaw) */
+const CAM = { pad: .45, gnd: .5, step: 1.25, out: 3, min: .4, near: .15, room: .55, cut: [1.4, .55, 1.5], hull: .6 };
+function camRaw(p) {
+  const R = camSt.raw;
+  if (R && R.on && R.of === p) camera.position.set(R.x, R.y, R.z);
+}
+const camGnd = (x, z) => Math.max(hgt(x, z), gndY(x, z));
+/* the share of the way from a along d (0 to 1) where it enters o's outer box (its footprint, from a metre under its foot to its top): 1 if it
+   does not, 0 if a is in it */
+function camBox(o, ax, ay, az, dx, dy, dz) {
+  const px = ax - o.x, pz = az - o.z, lo = o.y - 1, top = topOf(o), my = (lo + top) / 2;
+  const L = [px * o.c - pz * o.s, ay - my, px * o.s + pz * o.c], V = [dx * o.c - dz * o.s, dy, dx * o.s + dz * o.c], H = [o.hw, (top - lo) / 2, o.hd];
+  let t0 = 0, t1 = 1;
+  for (let i = 0; i < 3; i++) {
+    if (Math.abs(V[i]) < 1e-9) { if (Math.abs(L[i]) > H[i]) return 1; continue; }
+    let a = (-H[i] - L[i]) / V[i], b = (H[i] - L[i]) / V[i]; if (a > b) { const t = a; a = b; b = t; }
+    t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 > t1) return 1;
+  }
+  return t0;
+}
+/* the room around the eye: the ground under it and the nearest footprint (a tree's trunk, a wall); the near plane is a share of it */
+function camRoom(held) {
+  const cp = camera.position; let room = cp.y - camGnd(cp.x, cp.z);
+  for (const q of near(cp.x, cp.z, 2)) if (S.os[q.id] < 2 && !q.K.veil && cp.y < topOf(q) + 1) room = Math.min(room, footD(q, cp.x, cp.z));
+  if (held) room = Math.min(room, CAM.pad);
+  camera.near = Math.min(camera.near, clamp(room * CAM.room, CAM.near, 2));
+}
+function camClip(p, seat, dt) {
+  const cp = camera.position, R = camSt.raw || (camSt.raw = { x: 0, y: 0, z: 0, on: false, of: null, k: 1 });
+  const air = !p.kind && !p.man, on = !!p && !p.dead && !seat && !S.demo && !(p.man && p.dg > .1) && !(p.heli && camSt.hz) && !(air && !p.heli && camSt.pz);
+  if (!on) { R.on = false; if (p && !p.dead && !S.demo && (p.man || p.kind)) camRoom(false); return; }
+  const o = p.man ? manEye(p) : { x: p.x, y: p.y + (p.kind ? p.def.mh * CAM.hull : 1), z: p.z };
+  R.x = cp.x; R.y = cp.y; R.z = cp.z;
+  if (R.of !== p || !R.on) R.k = 1;
+  R.on = true; R.of = p;
+  const dx = cp.x - o.x, dy = cp.y - o.y, dz = cp.z - o.z, L = Math.hypot(dx, dy, dz);
+  if (L < .5) return;
+  let t = 1;
+  const g0 = o.y - camGnd(o.x, o.z), m = Math.min(CAM.gnd, Math.max(0, g0 - .05)), n = Math.ceil(L / CAM.step), under = s => o.y + dy * s < camGnd(o.x + dx * s, o.z + dz * s) + m;
+  for (let i = 1; i <= n; i++) if (under(i / n)) { let a = (i - 1) / n, b = i / n; for (let j = 0; j < 6; j++) { const c = (a + b) / 2; if (under(c)) b = c; else a = c; } t = a; break; }
+  for (let s = 0, k = 0; k < 6 && s < t; k++) {   // the first solid object; a tree's trunk on the way is passed over
+    if (!ray(o.x + dx * s, o.y + dy * s, o.z + dz * s, cp.x, cp.y, cp.z, 0)) break;
+    const h = RAY.o, at = s + (1 - s) * RAY.t;
+    if (h.k !== 'tree') { t = Math.min(t, at); break; }
+    s = at + (2 * h.rd + .2) / L;
+  }
+  for (const q of near(o.x + dx / 2, o.z + dz / 2, L / 2 + 2)) if (q.B && S.os[q.id] < 2) { const b = camBox(q, o.x, o.y, o.z, dx, dy, dz); if (b > 0) t = Math.min(t, b); }   // windows and doors stop it too
+  const trunk = (x, y, z) => { for (const q of near(x, z, 2)) if (q.k === 'tree' && S.os[q.id] < 2 && y > q.y - 2 && y < topOf(q) && footD(q, x, z) < CAM.pad) return q; return null; };
+  const want = t < 1 ? Math.max(CAM.min / L, t - CAM.pad / L) : 1;
+  R.k = want < R.k ? want : R.k + (want - R.k) * (1 - Math.exp(-dt * CAM.out));
+  cp.set(o.x + dx * R.k, o.y + dy * R.k, o.z + dz * R.k);
+  for (let k = 0; k < 2; k++) { const q = trunk(cp.x, cp.y, cp.z); if (!q || !pushOut(q, cp.x, cp.z, CAM.pad)) break; cp.x += PUSH.x; cp.z += PUSH.z; }   // in or at a trunk: off it, sideways
+  camRoom(R.k < .999);
+  if (VU.uCut) VU.uCut.value.set(o.x, o.y, o.z, p.man ? CAM.cut[0] : p.heli && p.def.R ? p.def.R + CAM.cut[2] : Math.max(3, (p.def.w || 4) * CAM.cut[1] + CAM.cut[2]));
 }
 /* ---------- HUD (2D overlay) ---------- */
 /* the HUD's scale: 1 from 1000 to 1280 px wide (down to .62 on a narrow screen), and over 1280×674 it grows with the screen, both ways, up to 1.25

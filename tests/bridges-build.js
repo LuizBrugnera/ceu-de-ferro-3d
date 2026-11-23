@@ -244,8 +244,9 @@ console.log('-- the AI chooses them --');
   const g3 = H.load({ mapv: 5, seed: 5 }), $3 = g3.$, S = g3.watch('ww2', {}), L = $3('brs()'), C = $3('cmdOf')(0);
   const X = () => ({ t: 0, C, sq: S.squads.filter(q => q.team === 0), free: $3('manFree')(S.squads.filter(q => q.team === 0 && !q.net && q.live > 0 && !q.state)), room: 3 });
   const pick = () => L.find(b => b.rs.length && b.ends.some(e => $3('brHome')(0, e)) && $3('brSquad')(X(), b.ends.find(e => $3('brHome')(0, e)), true, true));
-  g3.run(60); let ax = pick();
-  while (!ax && S.t < 120) { g3.run(5); ax = pick(); }   // a bridge of its own bank with a free squad within reach: where the AI's squads are after a minute or two (they walk across country, XC)
+  const MG = $3('MANG'), keep = Object.assign({}, MG); for (const k in MG) MG[k] = () => [];   // no manoeuvre in the warm-up: a squad it would take (they reach farther across country, XC) stays free for the bridges
+  g3.run(60); Object.assign(MG, keep); let ax = pick();
+  while (!ax && S.t < 120) { g3.run(5); ax = pick(); }   // a bridge of its own bank with a free squad within reach
   if (!ok(!!ax, 'a bridge on side 0\'s bank with a free squad within reach (t ' + Math.round(S.t) + ' s)')) { done(); process.exit(); }
   C.known.length = 0;   // what the side knows of the enemy is set by hand below
   ok(!$3('MANG').reb(C, X()).length, 'every bridge standing: nothing to rebuild');

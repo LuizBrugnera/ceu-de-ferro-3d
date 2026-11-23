@@ -32,4 +32,43 @@ console.log('-- the player as the victim --');
   ok(P.dead && S.kc && S.kc.k === 'car', 'a rifleman 8 m off the car bomb dies and sees the blast'); }
 { const S = bare(6), x = S.W / 2, P = me(S, $('INF').modern[S.fac[0]][0], x + 30, 0, 0);
   P.hp = 1; $('killMan')(P, null); ok(P.dead && !S.kc, 'a death with no bomb near: no kill cam'); }
+console.log('-- cf-killcam-zoom2: every way the player dies in a bomb gets the kill cam, on the right blast --');
+const TR = $('TRNS'), BB = $('BOMB'), rnd = Math.random;
+// (addUnit puts a vehicle on the road: it is moved where it is wanted)
+const put = (o, x, z) => { o.x = x; o.z = z; if (!o.man) o.y = $('hgt')(x, z); o.ai = null; return o; };
+const bomb = (id, team, x, z) => { const o = put(id === 'insBomber' ? C.addMan(id, team, x, z, 0) : C.addUnit(TR[id].kind, team, x, z, id, false), x, z); o.bArm = $('S').t; return o; };
+const back = (S, n) => { C.run(KC.t + KC.after + 1.5); ok(!S.my.dead, '  ' + n + ': back after it (' + (S.my.def && S.my.def.name) + ')'); };
+// the victim on foot and the victim riding a vehicle the blast kills, for the vest, the car bomb and the truck bomb (the hp of the man is 1:
+// what is checked is the camera, not how far each bomb kills)
+for (const [id, k, d] of [['insBomber', 'man', 3], ['vbied', 'car', 8], ['svbied', 'truck', 10]]) {
+  { const S = bare(5), x = S.W / 2, P = me(S, $('INF').modern[S.fac[0]][0], x + d, 0, 0); P.inv = 0; P.hp = 1;
+    $('bombGo')(bomb(id, 2, x, 0)); C.run(.1);
+    ok(P.dead && S.kc && S.kc.k === k && S.kc.r === BB[k].r, k + ': a rifleman ' + d + ' m off dies and sees the ' + (S.kc && S.kc.k) + ' blast (r ' + (S.kc && S.kc.r) + ')'); back(S, k); }
+  { const S = bare(6), x = S.W / 2, P = me(S, $('INF').modern[S.fac[0]][0], x + d, 0, 0), u = put(C.addUnit('car', 0, x + d, 0, undefined, false), x + d, 0); C.board(P, u, 0);
+    const rode = S.my === u; P.hp = 1; $('bombGo')(bomb(id, 2, x, 0)); C.run(.1);
+    ok(rode && P.dead && S.my === P && S.kc && S.kc.k === k, k + ': the player driving a car ' + d + ' m off, killed in his seat (' + (P.dead ? 'dead' : 'alive') + ', the car ' + (u.dead ? 'destroyed' : 'standing') + '), goes down with the kill cam (' + (S.kc ? S.kc.k : 'none') + ')'); back(S, k); }
+}
+{ const S = bare(7), x = S.W / 2, P = me(S, $('INF').modern[S.fac[0]][0], x + 10, 0, 0); P.inv = 0; P.hp = 1;
+  const o = put(C.addUnit(TR.svbied.kind, 2, x, 0, 'svbied', false), x, 0); o.svb = { x, z: 0, s: -1, look: 0 }; $('stkSvbGo')(o); C.run(.1);
+  ok(P.dead && S.kc && S.kc.k === 'truck' && S.kc.r === $('STK').K.svbied.r, 'the strategic truck bomb (the general\'s): a rifleman 10 m off sees the truck blast'); }
+// the truck bomb's blast sets off a car bomb beside it: the camera frames the truck's blast, not the later and smaller car's
+{ const S = bare(3), x = S.W / 2, m = me(S, 'insRifle', x, 0), o = put(C.addUnit(TR.svbied.kind, 2, x, 0, 'svbied', false), x, 0); C.board(m, o, 0);
+  const c = bomb('vbied', 0, x + 15, 0); c.bArm = S.t - 1; c.hp = 1; Math.random = () => 0; o.bArm = S.t; $('bombGo')(o); Math.random = rnd; C.run(.1);
+  ok(c.bGone && m.dead && S.kc && S.kc.k === 'truck' && S.kc.r === BB.truck.r, 'the truck bomber with an enemy car bomb set off by his blast (' + (c.bGone ? 'went off' : 'did not go off') + '): the kill cam frames the truck (' + (S.kc && S.kc.k) + ')'); }
+// a guest's bomb goes off on the host: he notes it himself (kcSelf, from vbMe and vestGo) and his death in it gets the kill cam
+for (const [id, k] of [['insBomber', 'man'], ['vbied', 'car'], ['svbied', 'truck']]) {
+  const S = bare(8), x = S.W / 2, m = me(S, 'insRifle', x, 0); let o = m;
+  if (id === 'insBomber') m.def = $('KITS').insBomber; else { o = C.addUnit(TR[id].kind, 2, x, 0, id, false); o.ai = null; C.board(m, o, 0); }
+  $('kcSelf')(o); C.run(.3); m.hp = 1; if (o !== m) { o.hp = 1; $('ruin')(o, 1e4, null); } else $('killMan')(m, null); C.run(.1);
+  ok(m.dead && S.kc && S.kc.k === k, k + ': a guest who set his bomb off gets the kill cam on it (' + (S.kc && S.kc.k) + ')');
+}
+console.log('-- the kill cam zooms out from the fireball to the whole blast radius --');
+{ const Z = $('kcZoom'), B = $('BOMB');
+  for (const k of ['man', 'car', 'truck']) {
+    const r = B[k].r, d = [0, .5, 1, 2, KC.zt, KC.t].map(s => Z(r, s));
+    ok(d.every((q, i) => !i || q.D >= d[i - 1].D && q.h >= d[i - 1].h) && d[0].D < r && d[4].D > 2 * r && d[5].D === d[4].D,
+      k + ' (r ' + r + ' m): ' + d.map(q => q.D.toFixed(0)).join(' → ') + ' m out, ' + d.map(q => q.h.toFixed(0)).join(' → ') + ' m up, then held');
+  }
+  ok(Z(B.truck.r, KC.t).D > Z(B.car.r, KC.t).D && Z(B.car.r, KC.t).D > Z(B.man.r, KC.t).D, 'the truck bomb pulls back farthest, the vest least');
+  ok(KC.zt < KC.t, 'the zoom ends (' + KC.zt + ' s) before the kill cam does (' + KC.t + ' s)'); }
 done();

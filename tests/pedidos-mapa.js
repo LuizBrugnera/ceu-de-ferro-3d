@@ -78,6 +78,17 @@ ok(a && a.t === 'gpr' && a.to === 5 && a.s === 0 && a.eta > 0 && a.q[0] === Math
 $('Net').rx.gped({ from: 5, k: $('PEDK').indexOf('arty'), p: [0, 0], q: [Math.round(fx), Math.round(fz)] }); a = sent.pop();
 ok(a && a.s === 3 && /aguarde/.test(a.why), '  his next one at once: wait (his own radio, not the host player\'s)');
 later(PED.cd.smk); r = D('smk', sx + 600, sz); ok(r.st !== 'wait', '  while the host\'s player is not held by the guest\'s limit (' + r.st + ')');
+/* a guest in the general's seat (cf-anfitriao-bug). The host stores any person there as 'me': the seat's player id (Net.gn) says who. The
+   guest general's own request was sent to his own log ('fwd'), and the host player, asking while the guest held the seat, was told he is the general */
+const gn0 = Net.gn, id0 = Net.id; Net.id = 1; Net.gn = [5, 0]; C.genCtl(0, 'me');
+later(Math.max(PED.gap, PED.no, PED.cd.smk, PED.cd.arty) + .1);
+$('Net').rx.gped({ from: 5, k: $('PEDK').indexOf('smk'), p: [Math.round(g.x), Math.round(g.z)], q: [Math.round(fx), Math.round(fz)] }); a = sent.pop();
+ok(a && a.t === 'gpr' && a.to === 5 && a.s === 1 && /você é o general/.test(a.why), 'a guest who holds the general\'s seat is sent to his own view (' + (a && a.why) + ')');
+r = D('smk', sx + 600, sz);
+ok(!/você é o general/.test(r.why || ''), '  and the host\'s player, asking then, is answered (the guest general\'s or the AI\'s part), not told he is the general (' + r.st + ': ' + r.why + ')');
+Net.gn = [1, 0]; later(Math.max(PED.gap, PED.no, PED.cd.smk) + .1); r = D('smk', sx + 600, sz);
+ok(r.st === 'no' && /você é o general/.test(r.why), '  the host\'s player in the seat himself is sent to his view');
+C.genCtl(0, 'ai'); Net.gn = gn0; Net.id = id0;
 S.host = false; Net.ped = false; S.pedM = [];
 r = $('pedAsk')('cas', tgt.x, tgt.z); ok(!r && /servidor/.test(S.banner.sub), 'a guest on an older server is told so');
 Net.ped = true; r = $('pedAsk')('cas', tgt.x, tgt.z); a = sent.pop();

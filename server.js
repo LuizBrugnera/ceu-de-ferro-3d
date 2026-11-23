@@ -53,12 +53,14 @@ const LOADS = {
   a10: [3300, { mk82: 6, mk84: 2, cbu87: 4, gbu12: 4 }, { agm65: 6, mk82: 6, cbu87: 4, hydra: 28 }, { aim9: 2, hydra: 14 }],
   su57: [2300, { kh38: 2, kab500: 2, fab500: 2, fab250: 4, kab500kr: 2 }, { r77: 6 }, { r73: 2 }],
   su25: [3300, { kh25: 4, kab500: 2, fab500: 4, rbk500: 4, kab500kr: 2 }, { s8: 80, fab250: 4, rbk500: 2 }, { r73: 2 }],
+  b2: [18000, { gbu31: 8, b83: 1 }],
+  tu160: [40000, { fab500m: 24, rdsn: 1 }],
   ah64: [1400, { hydra19: 38, hellfire: 8, hellfirel: 8 }, { hellfire: 8, hellfirel: 8, hydra19: 38 }, { atas: 4 }, { ammo30: 1 }],
   mi28: [1700, { s8: 40, s13: 10, ataka: 8 }, { ataka: 8, s8: 40 }, { iglav: 4 }],
   uh60: [1100, { hydra: 14, hydra19: 38 }, { hellfire: 8, atas: 4 }, { ammo762: 1 }],
   mi8: [1800, { s8: 40, s13: 10 }, { s8: 40, ataka: 4, iglav: 4 }, { ammo762: 1 }]
 };
-const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40 };
+const STW = { gbu39: 130, agm65: 300, kh38: 520, kh25: 300, aim120: 160, aim9: 86, r77: 190, r73: 105, s8: [15, 20], mk82: 227, mk83: 450, fab250: 250, fab500: 500, mk84: 925, aim9x: 85, cbu87: 430, rbk500: 500, gbu12: 277, gbu32: 470, kab500: 525, hydra: [14, 7], sc50: 50, sc250: 250, sc500: 500, sc1000: 1000, ab250: 220, wgr21: 110, lb250: 113, lb500: 227, lb1000: 454, hvar: [64, 2], ammo20: 80, ammo50: 80, kab500kr: 520, hellfire: [49, 4], hellfirel: [50, 4], ataka: [50, 4], hydra19: [14, 19], s13: [69, 5], atas: [16, 2], iglav: [18, 2], ammo30: 210, ammo762: 40, gbu31: 925, fab500m: 500, b83: 1100, rdsn: 1100 };
 const NST = Object.keys(STW).length;
 const FKINDS = 13;   // the kinds of work fort and fbuild carry (7: the pontoon, br; 8: the radio relay, crl; 9: a bridge's rebuild, brb; 10: a new bridge, bnb; 11-13: the HESCO walls and the T-wall, hsc)
 const rooms = { ww2: new Map(), modern: new Map() };
@@ -472,6 +474,8 @@ RX.grant = (c, m) => {
     const h = c.room.host;
     if (h && h !== c && Array.isArray(m.h) && m.h.length > 0 && m.h.length <= 40 && m.h.length % 2 === 0 && m.h.every((v, i) => (i % 2 ? num(v) && v > 0 && v <= 200 : Number.isInteger(v) && v >= 0 && v < 65536))) send(h.ws, { t: 'civhit', from: c.player.id, h: m.h });
   };
+  /* amb: what the host's evacuation did with a guest's ambulance (k 1 handed over, 0 taken aboard; n of them, c aboard now), to that guest alone */
+  RX.amb = (c, m) => { const o = c.room.get(m.to); if (host(c) && o && o !== c && (m.k === 0 || m.k === 1) && Number.isInteger(m.n) && m.n > 0 && m.n <= 64 && Number.isInteger(m.c) && m.c >= 0 && m.c <= 64) send(o.ws, { t: 'amb', k: m.k, n: m.n, c: m.c }); };
   RX.civrec = (c, m) => { const h = c.room.host; if (h && h !== c && c.player.cls === 'inf' && Number.isInteger(m.id) && m.id >= 0 && m.id < 65536) send(h.ws, { t: 'civrec', from: c.player.id, id: m.id }); };
 }
 /* the economy and the general (welcome eco: 1, gen: 1). A side's private word (ecs, gen, glog) goes to that side's players and its MCP
@@ -940,26 +944,47 @@ wss.on('connection', ws => {
     if (binary || data.length > MAXAI) return;
     let m; try { m = JSON.parse(data); } catch (e) { return; }
     if (!m || typeof m !== 'object' || typeof m.t !== 'string' || !Object.hasOwn(RX, m.t) || data.length > (Object.hasOwn(BIG, m.t) ? BIG[m.t] : MAXLEN)) return;
-    if (m.t !== 'join' && !c.room) return;
+    if ((m.t !== 'join' && !c.room) || c.left) return;
+    c.at = Date.now();   // the last word from this page (HOSTIDLE)
     if (c.spec) return;   // a spectator sends nothing the room or the host reads
     if (c.gen && !GENRX.has(m.t)) return;
     RX[m.t](c, m);
   });
-  ws.on('close', () => {
-    if (!c.room) return;
-    const room = c.room;
-    if (c.spec) { room.specs.delete(c); return; }
-    if (c.gen) { room.gens.delete(c); return genFree(room, c); }
-    room.delete(c.player.id); cast(c, { t: 'left', id: c.player.id }); genFree(room, c);
-    if (!room.size) suspend(room);
-    if (room.size === 0) room.mv = 0;
-    if (room.host !== c) return;
-    room.host = room.values().next().value || null;
-    if (room.host) { if (room.keep) send(room.host.ws, { t: 'keep', e: room.keep }); if (room.mines) mineKeep(room); cast(c, { t: 'host', id: room.host.player.id }); }   // the backup first: the page adopts on host
-    for (const g of room.gens) send(g.ws, { t: 'host', id: room.host ? room.host.player.id : 0 });
-    if (!room.host) for (const o of room.specs) send(o.ws, { t: 'host', id: 0 });   // nobody left to play: the spectators are told
-  });
+  ws.on('close', () => leave(c));
 });
+/* a player is out of the room: on the socket's close, or before it when its page has gone quiet as the host (HOSTIDLE). Once only */
+function leave(c) {
+  if (!c.room || c.left) return;
+  c.left = true;
+  const room = c.room;
+  if (c.spec) { room.specs.delete(c); return; }
+  if (c.gen) { room.gens.delete(c); return genFree(room, c); }
+  room.delete(c.player.id); cast(c, { t: 'left', id: c.player.id }); genFree(room, c);
+  if (!room.size) suspend(room);
+  if (room.size === 0) room.mv = 0;
+  if (room.host !== c) return;
+  room.host = room.values().next().value || null;
+  if (room.host) { if (room.keep) send(room.host.ws, { t: 'keep', e: room.keep }); if (room.mines) mineKeep(room); cast(c, { t: 'host', id: room.host.player.id }); }   // the backup first: the page adopts on host
+  for (const g of room.gens) send(g.ws, { t: 'host', id: room.host ? room.host.player.id : 0 });
+  if (!room.host) for (const o of room.specs) send(o.ws, { t: 'host', id: 0 });   // nobody left to play: the spectators are told
+}
+/* a host whose page went quiet. The battle is simulated in the host's page only, and a page in a tab in the background, minimized or
+   frozen stops its frame loop, while the browser still answers the heartbeat's ping: the room kept a host that sent nothing and answered
+   nothing, and every other player was a guest waiting on it ("O anfitrião não respondeu" to a vehicle, "O anfitrião recusou a obra" to a
+   base: cf-anfitriao-bug, the captain's own older tab of the same preview). A host sends its state 20 times a second; one silent for
+   HOSTIDLE ms (default 20000; 0 never) while another player is in the room is let go as if it had left, so the next player adopts the
+   battle, and its socket is closed with code 4001 (the page says why when it wakes). A host alone in its room is never let go */
+const HOSTIDLE = process.env.HOSTIDLE === undefined ? 20000 : Math.max(0, +process.env.HOSTIDLE || 0);
+const idle = setInterval(() => {
+  if (!HOSTIDLE) return;
+  const now = Date.now();
+  for (const era in rooms) {
+    const room = rooms[era], h = room.host;
+    if (!h || room.size < 2 || now - (h.at || 0) < HOSTIDLE) continue;
+    leave(h); try { h.ws.close(4001, 'host idle'); } catch (e) { h.ws.terminate(); }
+  }
+}, 1000);
+if (idle.unref) idle.unref();
 const beat = setInterval(() => {
   for (const ws of wss.clients) { if (!ws.alive) { ws.terminate(); continue; } ws.alive = false; ws.ping(); }
 }, Math.max(1000, +process.env.BEAT || 10000));   // BEAT=<ms>: the heartbeat's period (tests/net.js gives its test server a long one)

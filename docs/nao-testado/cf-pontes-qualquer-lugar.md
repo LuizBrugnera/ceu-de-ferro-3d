@@ -9,7 +9,7 @@ Pedido do capitão: "a ponte pode ser feita em qualquer lugar tambem".
 ## O que mudou
 - Obra tipo 10, "Ponte nova" (`FORT.nbr`). Usa os mesmos trechos do pontão fora das pontes (`brSite`): até 280 m de água, margens baixas, a 300 m ou mais de uma ponte, com estrada ao alcance.
 - Leva 12 min com um construtor e menos de 5 min com até 4 construtores. Custa 20 de energia e 100 de metal com a economia ligada.
-- É mais resistente que o pontão (`OBJ.nbridge`: 1500 de vida, tiro de fuzil não faz nada).
+- É mais resistente que o pontão (`OBJ.nbridge`: 4500 de vida, tiro de fuzil não faz nada).
 - Pronta, o vão entra na rede de estradas com custo de estrada (o pontão é mais lento). Destruída, fecha o rio e pode ser construída de novo no mesmo trecho.
 - Conta no limite de 3 por lado junto com os pontões fora das pontes, e só cabe uma obra por trecho.
 - Jogador: sapador, N até PONTE NOVA. General e modelo: `man` `bridge`, e no MCP a ferramenta `build_bridge`.

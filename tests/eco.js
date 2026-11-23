@@ -32,7 +32,8 @@ function section(era, secs) {
   const C = H.load({ seed: 41, eco: true }), $ = C.$, ECO = $('ECO'), S = C.newState(era, $('ERAS')[era].sides[0].fighter, { cls: 'plane' });
   ok(!!S.eco, 'the economy exists in a solo conquest');
   if (!S.eco) return null;
-  ok(S.eco.dep.length === 8, 'eight deposits, four a half (' + S.eco.dep.length + ')');
+  const npt = S.cq.p.filter(p => p.base < 0).length;   // and one for each point but the bases (ECO.pt, cf-economia-expansao)
+  ok(S.eco.dep.filter(q => q.half >= 0).length === 8 && S.eco.dep.filter(q => q.pt >= 0).length === npt && S.eco.dep.every((q, i) => q.i === i), 'eight deposits, four a half, and one a point (' + npt + ')');
   for (const t of [0, 1]) {
     const L = S.eco.l.filter(e => e.team === t && !e.dead), mine = L.find(e => e.k === 'mine');
     ok(L.length === 3 && L.every(e => e.prog === 1), 'side ' + t + ': ' + L.length + ' sites, all built (' + L.map(e => e.k).join(' ') + ')');
@@ -40,7 +41,7 @@ function section(era, secs) {
     ok(L.every(e => S.wob[e.id - S.T.nid] === e.o && S.os[e.id] === 0), 'side ' + t + ': the sites are world objects');
   }
   ok(J(JSON.parse(J(C.ecoView(0)))) === J(C.ecoView(0)) && J(JSON.parse(J(C.ecoView(1)))) === J(C.ecoView(1)), 'the view is plain JSON: it survives a round trip');
-  const v = C.ecoView(0); ok(v.stock.en === ECO.start.en && v.sites.length === 3 && v.q.length === 0 && v.dep.length === 8 && !!v.costs.squad, 'the view: stock ' + v.stock.en + '/' + v.stock.mt + ', ' + v.sites.length + ' sites, the era\'s costs');
+  const v = C.ecoView(0); ok(v.stock.en === ECO.start.en && v.sites.length === 3 && v.q.length === 0 && v.dep.length === S.eco.dep.length && !!v.costs.squad, 'the view: stock ' + v.stock.en + '/' + v.stock.mt + ', ' + v.sites.length + ' sites, the era\'s costs');
   const sp = C.ecoAsk(0, { q: 'spots', k: 'pow' });
   ok(sp.length > 0 && sp.length <= 5 && sp.every(s => Number.isFinite(s.x) && Number.isFinite(s.sc) && typeof s.why === 'string' && s.why), 'ecoAsk spots: ' + sp.length + ' places, the best "' + (sp[0] && sp[0].why) + '"');
   ok(sp.every(s => C.ecoAsk(0, { q: 'why', k: 'pow', x: s.x, z: s.z, a: s.a }) === ''), 'ecoAsk why: the places it offers have no reason against');
@@ -82,7 +83,7 @@ function section(era, secs) {
     const V = C.genVM(0, false);
     ok(V.eco.rows.some(r => (r.label + ': ' + r.value).startsWith('Energia')) && V.eco.rows.some(r => r.label === 'Instalações'), 'the view model has the economy rows: ' + V.eco.rows.slice(0, 3).map(r => r.label + ': ' + r.value).join(' | '));
     const own = V.eco.sites.filter(s => s.t === 0), fnd = V.eco.sites.filter(s => s.t !== 0), kn0 = S.eco.d[0].kn;   // since slice 3 the enemy's sites side 0 has found (kn) are shown too, never the others
-    ok(own.length >= 4 && own.length === S.eco.l.filter(e => e.team === 0).length && V.eco.dep.length === 8 && V.eco.sites.every(s => Number.isFinite(s.x))
+    ok(own.length >= 4 && own.length === S.eco.l.filter(e => e.team === 0).length && V.eco.dep.length === S.eco.dep.length && V.eco.sites.every(s => Number.isFinite(s.x))
       && fnd.length === Object.keys(kn0).length && fnd.every(s => s.t === 1 && s.age >= 0 && Object.values(kn0).some(k => k.k === s.k && Math.abs(k.x - s.x) < 1 && Math.abs(k.z - s.z) < 1)),
       'the view model shows its own sites, the deposits, and of the enemy\'s only those side 0 has found (' + own.length + ' own, ' + fnd.length + ' found)');
     ok(C.genVM(0, true).eco.sites.some(s => s.t === 1), 'all: the enemy\'s sites too');
@@ -94,7 +95,7 @@ function section(era, secs) {
       ok(pow.dead, 'a usina hit hard is dead');
       ok(S.glog.l[1].some(e => e.k === 'eco' && /^Perdemos/.test(e.s)), 'its side wrote "' + (S.glog.l[1].filter(e => /^Perdemos/.test(e.s)).pop() || { s: '-' }).s + '"');
       ok(S.cq.tk[1] <= tk0 - ECO.site.pow.tk + 1e-9 || S.cq.ph, 'it cost its side ' + ECO.site.pow.tk + ' tickets');
-      C.run(1); ok(S.eco.d[1].inc.en < inc0 && S.eco.d[1].inc.en >= ECO.hq.en * 60 - 1e-6, 'its income dropped on the next pass: ' + Math.round(inc0) + ' -> ' + Math.round(S.eco.d[1].inc.en) + ' a minute');
+      C.run(1); ok(S.eco.d[1].inc.en < inc0 && S.eco.d[1].inc.en >= (ECO.hq.en + C.ecoPtInc(1).en) * 60 - 1e-6, 'its income dropped on the next pass: ' + Math.round(inc0) + ' -> ' + Math.round(S.eco.d[1].inc.en) + ' a minute');
     }
   }
 }

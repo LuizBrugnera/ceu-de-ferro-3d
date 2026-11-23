@@ -14869,6 +14869,181 @@ Net.rx.hask = m => {
   const R = helpAsk(g, NEEDK[m.k], g, { x: m.q[0], z: m.q[1] }); if (R) R.pid = m.from;
 };
 Net.rx.hacc = m => { const g = Net.ghosts.get(m.from), R = S && S.help && S.help.l.find(R => R.id === m.id); if (S && S.net && S.host && g && !g.dead && R) helpTake(R, g); };
+/* ---------- requests to the general from the map (cf-pedidos-mapa) ----------
+   A player on foot, in a vehicle or in the air (not the commander: the general's view has its own orders) right-clicks his battle map (M)
+   and asks his side's general for one of PEDK at that point: artillery, smoke, an air strike, infantry or armour, help where he is, air
+   cover, a supply truck. Where the battle is simulated, pedDecide answers: a domain a person holds (genBy) gets the request on the
+   general's log and decides it himself; the AI weighs it by what the side knows (an air strike, armour or help only where an enemy was seen
+   in the last PED.mem s,
+   never on friends, an air strike not into known anti-aircraft) and by what it has, through the funnel's own refusals (no battery in reach,
+   nothing in the reserve, the population cap, few tickets), and says yes with an ETA or no and why. One request per PED.gap s, the same
+   kind again after PED.cd s (after a refusal PED.no s); an air strike or armour for the side once per PED.side s. A guest's request goes
+   to the host (gped) and the answer to him alone (gpr) */
+const PED = { gap: 8, no: 10, close: 120, mates: 50, aaR: 1500, tk: .2, keep: 40, mem: 45, far: 420,
+  cd: { arty: 45, smk: 30, cas: 120, inf: 90, arm: 150, help: 60, aa: 120, sup: 90 }, side: { cas: 60, arm: 60 },
+  foe: { arty: 300, cas: 350, arm: 900, help: 500, aa: 3500 },
+  d: { arty: 'sup', smk: 'sup', cas: 'atk', inf: 'atk', arm: 'atk', help: 'def', aa: 'atk', sup: 'sup' },
+  s: { arty: 'artilharia (HE)', smk: 'cortina de fumaça', cas: 'ataque aéreo', inf: 'reforço de infantaria', arm: 'reforço blindado', help: 'ajuda na sua posição', aa: 'cobertura antiaérea', sup: 'caminhão de suprimento' },
+  ab: { arty: 'ARTILHARIA', smk: 'FUMAÇA', cas: 'ATAQUE AÉREO', inf: 'INFANTARIA', arm: 'BLINDADO', help: 'AJUDA', aa: 'COBERTURA AA', sup: 'SUPRIMENTO' },
+  st: ['ok', 'no', 'fwd', 'wait'],
+  w: { off: 'nesta partida o general não despacha reforços', res: 'nada na reserva do general: ele precisa produzir antes', pop: 'o lado está no teto de população',
+    nores: 'sem esquadra na reserva', busy: 'a reserva já está numa operação', reach: 'a reserva não chega lá pela estrada dela', far: 'a esquadra da reserva está longe demais para chegar a tempo', max: 'as baterias já estão em outras missões', kind: 'seu lado não tem isso' } };
+const PEDK = Object.keys(PED.s);
+const pedSeen = (u, t) => S.t - sT(u, t) < (u.sup === 1 ? BLD.keep : PED.mem);
+const pedNear = (g, t, x, z, r) => { const gx = sX(g, t), gz = sZ(g, t); return Math.hypot((gx === undefined ? g.x : gx) - x, (gz === undefined ? g.z : gz) - z) < r; };
+/* the enemies side t knows (seen in the last PED.mem s, where it saw them) within r of x z: on the ground, or (air) in the air; aa: only its anti-aircraft vehicles */
+function pedFoes(t, x, z, r, air, aa) {
+  let n = 0;
+  if (air) { for (const p of S.planes) if (!p.dead && p.team !== t && pedSeen(p, t) && pedNear(p, t, x, z, r)) n++; return n; }
+  for (const u of S.units) if (!u.dead && u.team !== t && (!aa || u.kind === 'aa') && pedSeen(u, t) && pedNear(u, t, x, z, r)) n++;
+  if (aa) return n;
+  for (const g of S.men) if (!g.dead && !g.civ && g.team !== t && pedSeen(g, t) && pedNear(g, t, x, z, r)) n++;
+  for (const b of S.sup) if (!b.dead && b.team !== t && pedSeen(b, t) && pedNear(b, t, x, z, r)) n++;
+  return n;
+}
+/* a friend of side t within r of x z (the player who asks counts too: fire on his own head is no help) */
+function pedMates(t, x, z, r) {
+  for (const g of S.men) if (!g.dead && !g.in && g.team === t && Math.hypot(g.x - x, g.z - z) < r) return true;
+  for (const u of S.units) if (!u.dead && u.team === t && Math.hypot(u.x - x, u.z - z) < r) return true;
+  return false;
+}
+const pedR5 = s => Math.max(5, Math.round(s / 5) * 5);
+/* when it gets there, s: the nearest gun in reach (laying and the shells' flight), an aircraft from its base or where it flies, a column along its road */
+function pedEtaFire(t, x, z) {
+  let d = 1e9;
+  for (const m of S.men) if (m.def.mort && !m.dead && m.team === t && m.ai) d = Math.min(d, Math.hypot(m.x - x, m.z - z));
+  for (const u of S.units) if (u.kind === 'art' && !u.dead && u.team === t && u.ai) d = Math.min(d, Math.hypot(u.x - x, u.z - z));
+  return pedR5(12 + (d < 1e9 ? d / 300 : 10));
+}
+function pedEtaAir(t, x, z, p) {
+  const o = p || S.base[t], v = p ? Math.hypot(p.v ? p.v.x : 0, p.v ? p.v.z : 0) || 120 : 120;
+  return pedR5(8 + Math.hypot(o.x - x, o.z - z) / Math.max(80, v));
+}
+function pedEtaRoad(t, x, z, o) {
+  if (o) return pedR5(10 + Math.hypot(o.x - x, o.z - z) / 3);   // a squad already in the field, on foot
+  const p = lsRail(t, x, z), s0 = entryS(t, p.ri);
+  return pedR5(15 + Math.abs(p.s - s0) / GAI.march + Math.hypot(p.x - x, p.z - z) / 3);
+}
+/* player P (the host's own, or a guest's ghost) asks for k at x z: { st: ok | no | fwd | wait, why, eta, x, z } */
+function pedDecide(P, k, x, z) {
+  if ((S.net && !S.host) || !P || P.dead || !PED.s[k]) return { st: 'no', why: GEN.no.off, x, z };
+  if (k === 'help') { x = P.x; z = P.z; }
+  const key = P === S.my ? 'me' : 'p' + (P.pid || 0), A = S.ped || (S.ped = { p: {}, s: {} }), T = A.p[key] || (A.p[key] = { _: -1e9 }), sk = P.team + k;
+  const wait = Math.max(T._ + PED.gap - S.t, (T[k] || -1e9) - S.t, (A.s[sk] || -1e9) - S.t);
+  if (wait > 0) return { st: 'wait', why: 'aguarde ' + Math.ceil(wait) + ' s para pedir de novo', eta: Math.ceil(wait), x, z };
+  let r;
+  try { r = pedRun(P, k, x, z); } catch (e) { r = { st: 'no', why: GEN.no.bug }; }
+  r.x = x; r.z = z; T._ = S.t; T[k] = S.t + (r.st === 'no' ? PED.no : PED.cd[k]);
+  if (r.st === 'ok' && PED.side[k]) A.s[sk] = S.t + PED.side[k];
+  const who = helpWho(P);
+  if (r.st === 'ok') gLog(P.team, 'help', 'General atende ' + who + ': ' + PED.s[k] + ' ' + gNear(x, z) + (r.eta ? ', em ~' + r.eta + ' s' : '') + (r.why ? ' (' + r.why + ')' : ''), { x, z }, null, { x, z });
+  else if (r.st === 'no') gLog(P.team, 'help', 'General nega a ' + who + ': ' + PED.s[k] + ' ' + gNear(x, z) + ' (' + r.why + ')', { x, z });
+  return r;
+}
+function pedRun(P, k, x, z) {
+  const t = P.team, seat = genSeat(t), who = helpWho(P), why = 'pedido de ' + who, dP = Math.hypot(P.x - x, P.z - z);
+  const no = w => ({ st: 'no', why: w }), bad = r => no(PED.w[r.why] || GEN.no[r.why] || r.why || GEN.no.bug), cmd = c => genCmd(t, c, 'sys');
+  if (S.cq && S.cq.ph) return no(GEN.no.over);
+  if (!gMapOk(x, z)) return no(GEN.no.map);
+  if (seat !== 'ai' && (seat === 'me' ? P === S.my : seat === P.pid)) return no('você é o general: dê a ordem na Visão de General (Tab)');
+  if (genBy(t, PED.d[k]) !== 'ai') {   // a person holds that part of the command: it is his to decide
+    gLog(t, 'help', 'Pedido de ' + who + ' ao general: ' + PED.s[k] + ' ' + gNear(x, z), { x, z }, null, { x, z });
+    return { st: 'fwd', why: 'quem decide é o general do seu lado (uma pessoa): o pedido está no diário dele' };
+  }
+  const side = S.E.sides[S.fac[t]], tk = () => S.cq && S.cq.tk0 && S.cq.tk[t] < S.cq.tk0 * PED.tk;
+  switch (k) {
+    case 'arty': case 'smk': {
+      if (k === 'arty' && dP < PED.close) return no('perigo próximo: o alvo está a ' + Math.round(dP) + ' m de você (no mínimo ' + PED.close + ' m)');
+      if (k === 'arty' && pedMates(t, x, z, PED.mates)) return no('tropas amigas no alvo');
+      const seen = k === 'arty' && pedFoes(t, x, z, PED.foe.arty) > 0, n = k === 'smk' ? 3 : seen ? 4 : 2;
+      const r = cmd({ c: 'fire', k: k === 'smk' ? 'smk' : 'he', x, z, n }); if (!r.ok) return bad(r);
+      return { st: 'ok', why: n + ' tiros' + (k === 'arty' && !seen ? ', só para regular: nenhum inimigo conhecido ali' : ''), eta: pedEtaFire(t, x, z) };
+    }
+    case 'cas': {
+      if (!side.cas) return no('seu lado não tem aviação');
+      if (dP < PED.close) return no('perigo próximo: o alvo está a ' + Math.round(dP) + ' m de você (no mínimo ' + PED.close + ' m)');
+      if (pedMates(t, x, z, PED.mates * 2)) return no('tropas amigas no alvo');
+      if (!pedFoes(t, x, z, PED.foe.cas)) return no('nenhum inimigo conhecido ali: o general não manda avião às cegas');
+      if (pedFoes(t, x, z, PED.aaR, false, true)) return no('antiaérea inimiga conhecida perto do alvo');
+      const r = cmd({ c: 'disp', k: 'cas', n: 1, mk: 'cas', x, z, r: 400, why });
+      if (r.ok) return { st: 'ok', why: 'um avião de ataque sai da base', eta: pedEtaAir(t, x, z) };
+      const p = S.planes.find(p => !p.dead && p.ai && !p.net && p.team === t && p.role === 'cas');
+      if (!p) return bad(r);
+      if (p.mis) Object.assign(p.mis, { area: { x, z, r: 400 }, why });
+      cmd({ c: 'focus', x, z, r: 400 }); cmd({ c: 'mark', x, z });
+      return { st: 'ok', why: 'o avião de ataque que já está no ar vai à marca', eta: pedEtaAir(t, x, z, p) };
+    }
+    case 'inf': case 'help': {
+      if (k === 'help' && !pedFoes(t, x, z, PED.foe.help)) return no('nenhum inimigo conhecido perto de você');
+      if (k === 'inf' && tk()) return no('tíquetes baixos: o general guarda o que resta');
+      let call = '';
+      if (k === 'help') {   // the friends near answer first, as the radio's 9 does
+        let f = null, fd = 1e9;
+        for (const g of S.men.concat(S.units)) if (!g.dead && !g.civ && g.team !== t && pedSeen(g, t) && pedNear(g, t, x, z, PED.foe.help)) { const d = Math.hypot(g.x - x, g.z - z); if (d < fd) { fd = d; f = g; } }
+        if (f && !P.def.vmax && helpCall(P, P.kind ? (P.hp < P.max * .7 ? 'repair' : 'clear') : 'fire', sX(f, t) === undefined ? f.x : sX(f, t), sZ(f, t) === undefined ? f.z : sZ(f, t))) call = 'os que estão perto foram chamados; ';
+      }
+      const res = gResv(t), far = res && pedEtaRoad(t, x, z, helpAt(res)) > PED.far, mv = () => { if (far) return gBad('far'); const r = cmd({ c: 'res', x, z }); return r.ok ? { st: 'ok', why: call + 'a esquadra da reserva vai até lá', eta: pedEtaRoad(t, x, z, res && helpAt(res)) } : r; };
+      const dsp = () => { const r = cmd({ c: 'disp', k: 'squad', n: 1, mk: 'defend', x, z, r: 150, why }); return r.ok ? { st: 'ok', why: call + 'uma esquadra nova sai da base', eta: pedEtaRoad(t, x, z) } : r; };
+      let r = k === 'help' ? mv() : dsp(); if (r.st === 'ok') return r;
+      const r2 = k === 'help' ? (tk() ? r : dsp()) : mv(); if (r2.st === 'ok') return r2;
+      return call ? { st: 'ok', why: call + 'o general não tem esquadra para mandar (' + (PED.w[r.why] || GEN.no[r.why] || r.why) + ')' } : bad(r);
+    }
+    case 'arm': {
+      if (tk()) return no('tíquetes baixos: o general guarda o que resta');
+      if (!pedFoes(t, x, z, PED.foe.arm)) return no('nenhum inimigo conhecido a menos de ' + PED.foe.arm + ' m: os blindados vão aonde há contato');
+      const r = cmd({ c: 'disp', k: 'tank', n: 1, mk: 'defend', x, z, r: 250, why }); if (!r.ok) return bad(r);
+      return { st: 'ok', why: 'um carro de combate sai da base', eta: pedEtaRoad(t, x, z) };
+    }
+    case 'aa': {
+      if (!pedFoes(t, x, z, PED.foe.aa, true)) return no('nenhuma aeronave inimiga conhecida por perto');
+      const r = side.fighter ? cmd({ c: 'disp', k: 'fighter', n: 1, mk: 'cap', x, z, r: 1500, why }) : gBad('kind');
+      if (r.ok) return { st: 'ok', why: 'um caça patrulha o céu de lá', eta: pedEtaAir(t, x, z) };
+      const r2 = cmd({ c: 'disp', k: 'aa', n: 1, mk: 'defend', x, z, r: 200, why });
+      if (r2.ok) return { st: 'ok', why: 'uma antiaérea sai da base', eta: pedEtaRoad(t, x, z) };
+      return bad(r.why === 'kind' ? r2 : r);
+    }
+    case 'sup': {
+      const r = cmd({ c: 'disp', k: 'truck', n: 1, mk: 'support', x, z, r: 150, why }); if (!r.ok) return bad(r);
+      return { st: 'ok', why: 'um caminhão sai da base', eta: pedEtaRoad(t, x, z) };
+    }
+  }
+  return no(GEN.no.kind);
+}
+/* the answer on the player's screen and map (S.pedM, drawn by pedMarks): a banner, a radio line in the feed */
+function pedShow(r, k) {
+  if (!S) return;
+  const N = PED.s[k], M = S.pedM || (S.pedM = []), ok = r.st === 'ok', sent = r.st === 'sent';
+  if (r.st !== 'wait') { for (const m of M) if (m.k === k && m.st === 'sent') m.end = S.t; M.push({ k, x: r.x, z: r.z, st: r.st, eta: r.eta || 0, T: S.t, end: S.t + (ok ? (r.eta || 0) + PED.keep : sent ? 20 : 15) }); if (M.length > 12) M.shift(); }
+  const C = S.pedC || (S.pedC = {});
+  if (r.st === 'wait') C[k] = Date.now() + (r.eta || 1) * 1000;
+  else if (!sent) C[k] = Date.now() + (r.st === 'no' ? PED.no : PED.cd[k]) * 1000;
+  const head = sent ? 'Pedido ao general: ' + N : ok ? 'General: ' + N + ' a caminho' : r.st === 'fwd' ? 'Pedido encaminhado: ' + N : r.st === 'wait' ? 'Rádio ocupado' : 'General: ' + N + ' negado';
+  const sub = sent ? 'Aguardando a resposta pelo rádio' : (r.why || '') + (ok && r.eta ? (r.why ? ' · ' : '') + 'chega em ~' + r.eta + ' s' : '');
+  S.banner = { text: head, sub, life: ok || r.st === 'no' ? 4 : 2.5 };
+  if (!sent && r.st !== 'wait') { S.feed.push({ text: 'Rádio: ' + head + (sub ? ' · ' + sub : ''), life: 7, team: S.my ? S.my.team : S.me }); if (S.feed.length > 4) S.feed.shift(); }
+}
+/* the player's own request: decided here where the battle is simulated, sent to the host by a guest */
+function pedAsk(k, x, z) {
+  const P = S && S.my; if (!P || P.dead || !PED.s[k]) return null;
+  if (S.net && !S.host) {
+    if (!Net.ped) { S.banner = { text: 'Sem pedidos ao general', sub: 'O servidor desta sala é antigo', life: 2.5 }; return null; }
+    Net.send('gped', { k: PEDK.indexOf(k), p: [Math.round(P.x), Math.round(P.z)], q: [Math.round(x), Math.round(z)] });
+    const r = { st: 'sent', x: k === 'help' ? P.x : x, z: k === 'help' ? P.z : z }; pedShow(r, k); return r;
+  }
+  const r = pedDecide(P, k, x, z); pedShow(r, k); return r;
+}
+/* online (welcome ped: 1): gped { k, p, q } a guest's request to the host; gpr { to, k, s: PED.st's index, why, eta, q } the host's answer to him */
+Net.rx.welcome = (g => m => { Net.ped = m.ped === 1; g(m); })(Net.rx.welcome);
+Net.rx.gped = m => {
+  const g = Net.ghosts.get(m.from);
+  if (!S || !S.net || !S.host || !g || g.dead || !PEDK[m.k] || !Array.isArray(m.q) || !Number.isFinite(m.q[0]) || !Number.isFinite(m.q[1])) return;
+  const r = pedDecide(g, PEDK[m.k], m.q[0], m.q[1]);
+  Net.send('gpr', { to: m.from, k: m.k, s: PED.st.indexOf(r.st), why: String(r.why || '').slice(0, 160), eta: Math.round(r.eta || 0), q: [Math.round(r.x), Math.round(r.z)] });
+};
+Net.rx.gpr = m => {
+  if (!S || !S.net || S.host || !PEDK[m.k] || !PED.st[m.s] || !Array.isArray(m.q)) return;
+  pedShow({ st: PED.st[m.s], why: m.why, eta: m.eta, x: m.q[0], z: m.q[1] }, PEDK[m.k]);
+};
 /* ---------- procedures (drills): the trained reactions of a unit, part of its mind ----------
    A drill is a standing procedure a unit follows when its own perception sets it off, as soldiers are drilled to: a tank in sight and no
    anti-tank weapon, shells falling round it, an ambush. DRILLS is the one table, for every class (drCls: inf a squad, tank, lav, car, truck,
@@ -43584,7 +43759,7 @@ function buildHangar() {
     rad: k === 'inf' ? ['O', 'Pousar o rádio onde você está, ou recolher a menos de 4 m dele. Com ele nas costas você mesmo é o ponto de entrada da infantaria do seu lado; pousado, ele continua valendo enquanto você estiver a menos de ' + RAD.range + ' m e nenhum inimigo chegar a ' + RAD.near + ' m dele'] : ['O', 'Parado: levantar a antena (' + RAD.deploy + ' s) e virar ponto de entrada da infantaria, com ' + RAD.cap[2] + ' entradas e reabastecimento para quem está ao lado. Com a antena no alto o veículo não anda; O de novo recolhe'],
     req: ['U', 'A pé dentro de um depósito (a base principal, uma base de suprimento pronta ou um ponto seu com base de suprimento): requisitar um veículo ali mesmo. Custa tíquetes, menos do que perdê-lo, tem estoque por depósito e um intervalo de ' + RQ.cool + ' s; aeronaves só na base principal'],
     esc: ['Esc', 'Soltar o mouse' + (pvp ? '' : ' e pausar') + '. Clique no jogo para voltar'],
-    map: ['M', 'Mapa da batalha: o terreno, as estradas, os pontos e quem os tem, as bases, os rádios, as marcas do comandante e do general, o seu lado e o inimigo só como o seu lado o conhece. Roda ou + − aproxima, arrastar move, duplo clique centra em você, M ou Esc fecha. O jogo não pausa, as teclas continuam guiando e o clique no mapa não dispara'],
+    map: ['M', 'Mapa da batalha: o terreno, as estradas, os pontos e quem os tem, as bases, os rádios, as marcas do comandante e do general, o seu lado e o inimigo só como o seu lado o conhece. Roda ou + − aproxima, arrastar move, duplo clique centra em você, M ou Esc fecha. O jogo não pausa, as teclas continuam guiando e o clique no mapa não dispara. Clique direito num ponto: pedir ao general artilharia, fumaça, ataque aéreo, infantaria, blindado, ajuda na sua posição, cobertura antiaérea ou suprimento; ele decide pelo que tem e pelo que o lado sabe e responde no rádio'],
     gen: ['Tab', 'Visão de General: o mapa do comandante, suas ordens e o que ele pensa. O jogo continua enquanto o mapa está aberto'],
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab ou M abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
@@ -50204,6 +50379,78 @@ addEventListener('pointerup', () => { BM.drag = null; });
 cv.addEventListener('wheel', e => { if (!bmLive() || !e.deltaY) return; e.preventDefault(); const p = bmXY(e); bmZoom(e.deltaY < 0 ? 1.25 : 1 / 1.25, p.x, p.y); }, { passive: false });
 cv.addEventListener('dblclick', e => { if (!bmLive()) return; e.preventDefault(); const P = S.my; BM.z = Math.max(BM.z, 4); BM.cx = P.x; BM.cz = P.z; bmClamp(); });
 /* ===== end of the battle map ===== */
+/* ---------- requests to the general on the battle map (cf-pedidos-mapa; the decision is pedDecide's, in the simulation's part) ----------
+   A right click on the map (M) opens a menu at that point: each request with its key (1-8), greyed with the seconds left while the radio
+   keeps it from being asked again. The answers are marked where they fall, on the map and the minimap (pedMarks): a ring with the
+   request's name and the seconds to its ETA, green on its way, red refused, yellow waiting for the answer or passed to a person */
+const PEDUI = { col: { ok: '#7fe08a', no: '#ff6a5a', fwd: '#ffd84a', sent: '#ffd84a', wait: '#ffd84a' } };
+const pedMenu = { el: null, x: 0, z: 0 };
+function pedClose() { if (pedMenu.el) { pedMenu.el.remove(); pedMenu.el = null; } }
+function pedOpen(cx, cy, x, z) {
+  pedClose();
+  const P = S.my; if (!P) return;
+  const el = document.createElement('div'), acc = S.modern ? '#63d2e6' : '#e6b53a', C = S.pedC || {};
+  el.id = 'pedMenu';
+  el.style.cssText = 'position:fixed;z-index:60;min-width:230px;max-width:calc(100vw - 32px);background:rgba(8,12,13,.94);border:1px solid ' + acc + ';border-radius:4px;padding:6px 0;font:13px/1.25 system-ui,sans-serif;color:#ece6d6;box-shadow:0 6px 18px rgba(0,0,0,.5);user-select:none';
+  const h = document.createElement('div'); h.style.cssText = 'padding:2px 12px 6px;color:' + acc + ';font-weight:600;letter-spacing:.04em;border-bottom:1px solid rgba(255,255,255,.12);margin-bottom:4px';
+  h.textContent = 'PEDIR AO GENERAL · ' + Math.round(Math.hypot(x - P.x, z - P.z)) + ' m de você'; el.append(h);
+  PEDK.forEach((k, i) => {
+    const b = document.createElement('button'), left = Math.ceil(((C[k] || 0) - Date.now()) / 1000);
+    b.type = 'button'; b.dataset.k = k;
+    b.style.cssText = 'display:flex;justify-content:space-between;gap:12px;width:100%;padding:5px 12px;background:none;border:0;color:inherit;font:inherit;text-align:left;cursor:pointer';
+    b.onmouseenter = () => { b.style.background = 'rgba(255,255,255,.08)'; }; b.onmouseleave = () => { b.style.background = 'none'; };
+    const a = document.createElement('span'), c = document.createElement('span');
+    a.textContent = (i + 1) + '  ' + PED.s[k][0].toUpperCase() + PED.s[k].slice(1) + (k === 'help' ? '' : ' aqui');
+    c.textContent = left > 0 ? left + ' s' : ''; c.style.opacity = '.6';
+    if (left > 0) b.style.opacity = '.5';
+    b.append(a, c); b.onclick = e => { e.stopPropagation(); pedPick(k); };
+    el.append(b);
+  });
+  const f = document.createElement('div'); f.style.cssText = 'padding:6px 12px 2px;opacity:.6;font-size:11px;border-top:1px solid rgba(255,255,255,.12);margin-top:4px';
+  f.textContent = 'O general decide pelo que tem e pelo que o lado sabe · Esc fecha'; el.append(f);
+  el.addEventListener('pointerdown', e => e.stopPropagation()); el.addEventListener('contextmenu', e => e.preventDefault());
+  document.body.append(el);
+  const r = el.getBoundingClientRect();
+  el.style.left = Math.max(16, Math.min(cx, innerWidth - r.width - 16)) + 'px'; el.style.top = Math.max(16, Math.min(cy, innerHeight - r.height - 16)) + 'px';
+  pedMenu.el = el; pedMenu.x = x; pedMenu.z = z;
+}
+function pedPick(k) { const x = pedMenu.x, z = pedMenu.z; pedClose(); if (bmLive()) pedAsk(k, x, z); }
+cv.addEventListener('contextmenu', e => {
+  if (!bmLive()) return;
+  e.preventDefault();
+  const p = bmXY(e), s = bmS(); pedOpen(e.clientX, e.clientY, BM.cx + (p.x - cw / 2) / s, BM.cz + (p.y - ch / 2) / s);
+});
+cv.addEventListener('pointerdown', () => pedClose());
+addEventListener('keydown', e => {
+  if (!pedMenu.el) return;
+  if (!bmLive()) { pedClose(); return; }
+  const i = /^Digit[1-8]$/.test(e.code) ? +e.code[5] - 1 : -1;
+  if (e.code === 'Escape' || i >= 0) { e.preventDefault(); e.stopImmediatePropagation(); if (i >= 0) pedPick(PEDK[i]); else pedClose(); }
+}, true);
+/* on a map: each request's answer where it falls */
+function pedMarks(X, Y, u, big) {
+  const M = S && S.pedM; if (!M || !M.length) return;
+  for (const m of M) {
+    if (S.t > m.end) continue;
+    const x = X(m.x), y = Y(m.z), c = PEDUI.col[m.st] || '#ffffff', r = big ? 11 : 6;
+    hx.lineWidth = big ? 3.5 : 2.5; hx.strokeStyle = 'rgba(8,12,13,.85)'; hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.stroke();
+    hx.lineWidth = big ? 1.8 : 1.2; hx.strokeStyle = c; hx.beginPath(); hx.arc(x, y, r, 0, TAU);
+    hx.moveTo(x - r * 1.5, y); hx.lineTo(x - r * .5, y); hx.moveTo(x + r * .5, y); hx.lineTo(x + r * 1.5, y); hx.moveTo(x, y - r * 1.5); hx.lineTo(x, y - r * .5); hx.moveTo(x, y + r * .5); hx.lineTo(x, y + r * 1.5); hx.stroke();
+    if (!big) continue;
+    const left = Math.ceil(m.T + m.eta - S.t);
+    const s = PED.ab[m.k] + (m.st === 'ok' ? (left > 0 ? ' · ' + left + ' s' : ' · CHEGOU') : m.st === 'no' ? ' · NEGADO' : m.st === 'fwd' ? ' · COM O GENERAL' : m.st === 'sent' ? ' · PEDIDO' : '');
+    tagTxt(s, x + r + 6, y - 6, 10 * u, c, 'left', 2);
+  }
+}
+cueMarks = (g => (X, Y, me, u, big) => { g(X, Y, me, u, big); pedMarks(X, Y, u, big); })(cueMarks);
+bmDraw = (g => () => {   // under the map's title box, the line that says how
+  g(); if (pedMenu.el && !bmLive()) pedClose();
+  if (!bmLive() || sw.on) return;
+  const u = hudU(), W = Math.min(cw - 28, 440 * u), y = 8 + 74 * u;
+  hx.fillStyle = 'rgba(8,12,13,.72)'; hx.fillRect(14, y, W, 18 * u);
+  txt('Clique direito: pedir ao general (fogo, avião, reforços, ajuda)', 22, y + 3 * u, 11 * u, S.modern ? '#63d2e6' : '#e6b53a');
+})(bmDraw);
+/* ===== end of the requests to the general ===== */
 /* ---------- CEREBRO: defesa on the general's view (DFP; NÃO TESTADO, see docs/nao-testado/cf-defesa-posicoes.md) ----------
    The layer dfp (Posições de defesa) draws each plan of the side (V.dfp, the host's dfpView): every post as a wedge over its sector, a
    dotted line to its kill zone (an x on the road), the watch (V), the reserve (R), the tanks' places (a square, filled when a tank holds it,

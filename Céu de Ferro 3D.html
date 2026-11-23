@@ -10481,9 +10481,13 @@ function aiMan(m, dt) {
   c.fire = c.ads = false; c.sp = IAI.sp + (t && t.lost ? SIGHT.sp : 0);
   if (!t) { c.aim = d > 1.5 ? { x: dx / d, y: 0, z: dz / d } : null; A.wT = 0; if (d <= 1.5) cmdArea(m, A, c); if (!c.aim && !pin) c.aim = scanDir(m, 'man'); return; }   // at rest, it looks round
   const e = manEye(m), r = dist(t, m), tt = w.spd ? r / w.spd : 0, tv = vel(t), g = w.k === 'heat' ? .125 : w.k ? 0 : .5, B = w.lmg ? IAI.burstL : IAI.burst;
-  const dir = vnorm({ x: t.x + tv.x * tt - e.x, y: bodyY(t) + tv.y * tt + g * GR * tt * tt - e.y, z: t.z + tv.z * tt - e.z }), on = dot(m.f, dir) > .9995;
+  const hel = w.k === 'heat' && !!A.tgt && !!A.tgt.heli;   // a rocket at a helicopter (HELAT): the lead misjudged, more the faster it goes
+  let dir = vnorm({ x: t.x + tv.x * tt - e.x, y: bodyY(t) + tv.y * tt + g * GR * tt * tt - e.y, z: t.z + tv.z * tt - e.z });
+  if (hel) dir = helErr(m, A, A.tgt, dir);
+  const on = dot(m.f, dir) > .9995;
   c.aim = dir; c.sp += aimErr(m, A.tgt, r);
   if (w.lockT) c.fire = !t.lost && A.los;
+  else if (hel) c.fire = on && A.los && r < w.rng * HELAT.rng && !t.lost && !m.run;
   else if (w.k) { if (r > w.rng) A.wT = 0; else if (!A.wT) A.wT = S.t + IAI.at.wait; c.fire = on && A.los && r < w.rng && !t.lost && !m.run && (A.flank || S.t > A.wT); }
   else c.fire = on && A.los && !m.run && r < (w.lmg ? IAI.lmg : t.man ? IAI.fire : IAI.soft) && (S.t + A.seed) % (B[0] + B[1]) < B[0];   // nothing aimed at what a hill or a wall hides
   if (c.fire && ffHeld(m, t)) c.fire = false;
@@ -38627,6 +38631,47 @@ anaReport = (g => (ev, me) => {
   return R;
 })(anaReport);
 /* ---------- end of GENERAL 2: régua ---------- */
+/* ---------- improvised air defence (cf-antiaereo-improvisado): the rocket soldier fires at a helicopter that fights him ----------
+   The captain: "os insurgentes com bazuca e essas explosivas... veiculos com .50 devem tentar atirar nos helicopteros q vem perto e estão
+   em combate com eles". A vehicle's .50 already did (gunner and aiTank lay it on lowPlane's aircraft first, inside GAI.tank.mg m and mgAlt
+   m up, before any soldier or vehicle). A soldier with an unguided rocket launcher (k heat: RPG, bazooka, Panzerfaust) with rounds left now
+   takes a helicopter in its fight with him over any ground target: within rng times his weapon's range (an RPG-7 400 m) and alt m over the
+   ground, that he knows of, and that is engaging him or his area: over him (within near m), its AI's target within area m of him, firing
+   its gun (shotT) in the last fired s with its nose on him, or it has hit him or his squad in the last hurt s. He stops where he is, kneels
+   and fires at once (no waiting for a flank). The lead he gives it is misjudged (helErr): an angle off of e0 rad at a hover and up to
+   e0 + ev at vm m/s or more, rolled again for each rocket, so a hovering or slow helicopter is hit sometimes and a fast one seldom. The
+   weapon, its damage and the anti-aircraft missiles (k sam) are as they were. Not for a routed squad, one told to hold its fire, or one on
+   the move under its commander's order. */
+const HELAT = { rng: 1.6, alt: 300, near: 150, area: 300, fired: 10, nose: .9, hurt: 20, e0: .075, ev: .15, vm: 40 };
+function helEng(m, p) {
+  const H = HELAT, d = hdist(p, m), T = p.ha && p.ha.tgt;
+  if (d < H.near) return true;
+  if (T && !T.dead && hdist(T, m) < H.area) return true;
+  if (S.t - (p.shotT === undefined ? -99 : p.shotT) < H.fired && p.f && ((m.x - p.x) * p.f.x + (m.z - p.z) * p.f.z) / (d || 1) > H.nose) return true;
+  for (const o of m.sq ? m.sq.men : [m]) if (o.lastBy === p && S.t - o.hitT < H.hurt) return true;
+  return false;
+}
+function heliAt(m) {
+  const A = m.ai, sp = m.arms[1]; if (!A || !sp || sp.d.k !== 'heat' || sp.mag + sp.res <= 0) return null;
+  const R = sp.d.rng * HELAT.rng; let best = null, bd = R;
+  for (const p of S.planes) {
+    if (!p.heli || p.dead || p.gone || p.team === m.team || p.inv > 0 || p.y - hgt(p.x, p.z) > HELAT.alt) continue;
+    const d = dist(p, m); if (d < bd && known(A, m, p) && helEng(m, p)) { bd = d; best = p; }
+  }
+  return best;
+}
+function helErr(m, A, t, dir) {
+  const a = m.arms[1], v = vel(t), E = HELAT.e0 + HELAT.ev * Math.min(1, Math.hypot(v.x, v.y, v.z) / HELAT.vm);
+  if (!A.hle || A.hle.t !== a.t || A.hle.o !== t) A.hle = { t: a.t, o: t, x: rand(-1, 1), y: rand(-1, 1), z: rand(-1, 1) };   // one error a rocket
+  return vnorm({ x: dir.x + A.hle.x * E, y: dir.y + A.hle.y * E, z: dir.z + A.hle.z * E });
+}
+manThink = (g => m => {
+  g(m);
+  const A = m.ai, q = m.sq; if (!A || m.dead || m.down || m.net || m.in || m.sur || A.mv || (q && (q.state === 1 || q.hf))) return;
+  const p = heliAt(m); if (!p) return;
+  A.tgt = p; A.los = los(m, eyeY(m), p, p.y); m.ctl.w = 1;
+  A.gx = m.x; A.gz = m.z; A.run = false; A.st = 1;
+})(manThink);
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

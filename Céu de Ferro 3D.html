@@ -27847,15 +27847,15 @@ function cmdAttack(C, sq) {
   if (C.pref && S.t < C.pref.T) cand.sort((a, b) => (b[0].tw === C.pref.p) - (a[0].tw === C.pref.p));   // map version 4: the point a manoeuvre (cut) chose is looked at first
   for (const [P, sd] of cand) {
     const ri = P.ri, r = R[ri], o = P.x === undefined ? routeAt(r, clamp(P.s, 0, r.len)) : P;
-    if (C.post[ri] === 'def' || C.ops.some(o => slot(o) && o.ri === ri) || go.some(g => g.P.ri === ri)) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: C.post[ri] === 'def' ? 'def' : 'busy' }); continue; }
+    if ((C.post[ri] === 'def' && !gsFast(C, P)) || C.ops.some(o => slot(o) && o.ri === ri) || go.some(g => g.P.ri === ri)) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: C.post[ri] === 'def' ? 'def' : 'busy' }); continue; }   // cf-general-melhorias: the seat's threat and a weakened point are weighed though the road's posture is defence (the enemy is strong there: that is why)
     let pool = ap ? apPool(C, sq, P, sd, o, D.push + 1) : sq.filter(q => atkFit(q, P, sd)).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || Math.abs(a.s - P.s) - Math.abs(b.s - P.s)).slice(0, D.push + 1);   // M2: from any road, and quiet posts lend
     const kn = cmdKnown(C, o.x, o.z, 500), walk = !!S.cq && !kn && !P.tw.w.some((v, o) => o !== t && v > 0);   // N sides: no enemy weight in it.
     if (C.gue && !walk) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: 'gue' }); continue; }   // map version 4: harassing, it only walks into empty points (gue)
     const fast = gsFast(C, P), wR = fast === 'weak' ? CMD.reach : CQ.walk;   // cf-general-melhorias: a weakened point is walked into by the squads within CMD.reach m, up to GSM.weak.n
     if (walk) pool = pool.filter(q => (ap ? (L => !!L && hdist(L, o) < wR)(q.men.find(m => !m.dead)) : Math.abs(P.s - q.s) < wR)).slice(0, fast === 'weak' ? GSM.weak.n : 2);
     const foe = walk ? 3 : Math.max(CMD.guess, kn, gsRecall(C, P)), n0 = pool.reduce((a, q) => a + q.live, 0);   // a point nobody stands in is walked into by whoever is at hand; cf-general-melhorias: what was seen there lately counts (GSM.mem), not only the last 40 s
-    let tnk = 0, tfr = 0; for (const u of S.units) { if (u.kind !== 'tank' || !u.ai || u.dead || u.team !== t) continue; if (u.ri === ri && (P.s - u.s) * sd > 0 && (P.s - u.s) * sd < 2500) tnk++; else if (GSM.on && M5.on && m5Free(u, t) && hdist(u, o) < M5.reach) tfr++; }   // cf-general-melhorias: the free tanks m5Atk may send count too (report 7 i), as many as it sends
-    const own = n0 + (tnk + Math.min(tfr, M5.atk.n[pool.length >= 3 ? 1 : 0])) * CMD.val.tank + (me && me.man && !me.dead && me.team === t && Math.hypot(me.x - o.x, me.z - o.z) < 1200 ? 2 : 0);   // a player on foot by the objective counts
+    let tnk = 0, tfr = 0; for (const u of S.units) { if (u.kind !== 'tank' || !u.ai || u.dead || u.team !== t) continue; if (u.ri === ri && (P.s - u.s) * sd > 0 && (P.s - u.s) * sd < 2500) tnk++; else if (GSM.on && M5.on && m5Free(u, t) && hdist(u, o) < (fast ? GSM.src.tReach : M5.reach)) tfr++; }   // cf-general-melhorias: the free tanks m5Atk may send count too (report 7 i), as many as it sends
+    const own = n0 + (tnk + Math.min(tfr, M5.atk.n[pool.length >= 3 || fast ? 1 : 0])) * CMD.val.tank + (me && me.man && !me.dead && me.team === t && Math.hypot(me.x - o.x, me.z - o.z) < 1200 ? 2 : 0);   // a player on foot by the objective counts
     const sec = camp && go.length > 0 && !walk, need = fast ? Math.min(GSM.need, sec ? D.atk * CAMP.secK : D.atk) : sec ? D.atk * CAMP.secK : D.atk, min = walk ? 1 : 2;   // a campaign's secondary front only has to fix the enemy (F4); the seat's threat and a weakened point, 1 to 1 (GSM.need)
     const e = { x: o.x, z: o.z, ri, sd, nm: gName(P), n: pool.length, own, foe, need, walk }; ev.push(e);
     if (pool.length < min || own / foe < need) { e.why = pool.length < min ? 'pool' : 'weak'; continue; }
@@ -47079,11 +47079,12 @@ genVM = (g => (t, all) => { const V = g(t, all), s = V && typeof V === 'object' 
 genState = (g => t => { const o = g(t); if (o) o.sede = sedeView(t); return o; })(genState);
 GENK.push('sede');
 /* ---------- end of the seat ---------- */
-/* ---------- the general's improvements (cf-general-melhorias, from the report cf-general-sede: docs/general-melhorias.md) ----------
+/* ---------- the general's improvements (cf-general-melhorias, from the report cf-general-sede; NÃO TESTADO em partida jogada, see docs/nao-testado/cf-general-melhorias.md) ----------
    GSM.on 0: the general as before (the three bugs fixed with it stay fixed). Each part answers a finding of the report:
    - mem (report 6 C): the strength a side has seen at each point (C.gsM[i].mx: the most it knew within mem.r m, fading with mem.tau s), so an
      assault no longer counts 10 (CMD.guess) on a point where it saw 60 a minute ago; cmdAttack's foe is the larger of the two.
-   - src (6 A, idea 2): the enemy point that threatens the side's seat (or main base): the one by the enemy fire pieces it knows (artillery,
+   - src (6 A, idea 2), with the posture of its road set aside (C.post 'def': the enemy is strong there, the very reason) and the free tanks
+     within src.tReach m counted and sent (m5Atk), so the general weighs the assault at all: the enemy point that threatens the side's seat (or main base): the one by the enemy fire pieces it knows (artillery,
      rocket trucks, mortars) within src.r m of the seat, else by the raiders at the seat (its incident's known enemy), else, the seat hit and
      nobody seen, the enemy point nearest the seat. For src.keep s after the last sign it is the first target (cqAim) and an assault on it needs
      only need to 1, and while the side cannot assault it a fire mission and the air focus go on it every fire.every s.
@@ -47092,11 +47093,14 @@ GENK.push('sede');
      while fewer than pull.max wait there: over its population budget a side never got a new squad for it (0 reinforcements in 4 matches).
    - form (idea 3, (e) of the brief): an assault forming up asks for fire and the air focus on its objective at once (before H-hour, not only
      at it), and its assembly has a hard deadline: form.k times its own (op.formT, which reaches AP.form = 900 s for a far squad), between
-     form.min and form.max s. At it the assault goes with the squads there, or is called off (two assaults on the Brejo formed up 5.7 and 9 min
-     and never left).
+     form.min and form.max s. At it the assault goes with the squads within form.near m of their places, or is called off; and before it, when
+     every squad is within form.near m and their walk has not shrunk by form.gain m in form.stall s, it goes then. The cause (traced in the
+     baseline matches): a squad stops 170-190 m short of its assembly (crawling under fire, or standing at the end of its way), never within
+     the 60 m INC.op.ready asks, so the assault waited out its whole deadline (680 s there; up to AP.form = 900 s) and was then called off.
    - arm (7, idea 4): tanks with nothing to do (free, still arm.idle s) in a group of arm.min within arm.r m attack the nearest enemy point
      within arm.reach m that is not much stronger than them, from firing places round it (m5Spot), with a free squad as escort; they drive
-     into it when it is quiet. cmdAttack counts the free tanks within M5.reach m of the objective, since m5Atk may send them (M5.atk.n is 2, 4).
+     into it when it is quiet. The seat's threat or a weakened point with no squads for an assault but free tanks that make 1 to 1 gets
+     such a group too (gsArmFast). cmdAttack counts the free tanks within M5.reach m of the objective, since m5Atk may send them (M5.atk.n is 2, 4).
    - weak (9): a point whose known strength fell under weak.k of what the side saw there (weak.min at least), with the side's own eyes within
      weak.eyes m (so it is seen, not guessed), is weakened: first target for weak.keep s, the assault's cooldown skipped once, its walk-in
      taken by up to weak.n squads within CMD.reach m (not 2 within CQ.walk), at 1 to 1, and free tanks sent to it.
@@ -47104,16 +47108,29 @@ GENK.push('sede');
      the nearest supply base of its side within rep.reach m to be mended there (the base mends what stands by it). */
 const GSM = { on: 1, every: 5,
   mem: { r: 500, tau: 180 },
-  src: { r: 6000, near: 1800, keep: 300, max: 90 },
+  src: { r: 6000, near: 1800, keep: 600, max: 90, tReach: 9000, form: 1400, lend: { n: 3, calm: 60 } },
   fire: { every: 90, n: 4, foc: 75 },
   need: 1,
-  pull: { n: 2, cd: 120, q: 900, max: 4, jobs: ['held', 'road', 'wood', 'col', 'line'] },
-  form: { k: 1.5, min: 240, max: 420 },
+  pull: { n: 2, cd: 120, q: 600, r: 4000, max: 4, jobs: ['held', 'road', 'wood', 'col', 'line'] },
+  form: { k: 1.5, min: 240, max: 420, near: 300, stall: 60, gain: 20 },
   prep: { n: 3, foc: 150, r: 450 },
-  arm: { every: 20, idle: 120, still: 15, r: 300, min: 3, reach: 4000, T: 600, odds: 2, esc: 3000, in: 60, quiet: 2 },
+  arm: { cd: 240, every: 20, idle: 120, still: 15, r: 300, min: 3, reach: 4000, T: 600, odds: 2, esc: 3000, in: 60, quiet: 2 },
   weak: { k: .3, min: 8, eyes: 900, keep: 150, n: 3, tanks: 2 },
   rep: { hp: .5, reach: 9000 } };
 M5.atk.n = [2, 4];   // an assault's armour: 2 tanks, 4 with three squads or more (it was 1, 2: report 7 ii)
+/* the assault on the seat's threat or a weakened point takes its tanks from farther (GSM.src.tReach m) and as many as with three squads */
+m5Atk = (g => (C, op) => {
+  if (!GSM.on || !op || !op.O || !gsFast(C, op.O)) return g(C, op);
+  const r = M5.reach, n = M5.atk.n[0]; M5.reach = GSM.src.tReach; M5.atk.n[0] = M5.atk.n[1];
+  try { return g(C, op); } finally { M5.reach = r; M5.atk.n[0] = n; }
+})(m5Atk);
+/* and its squads from farther: the pool's walk (AP.pool, from AP.form) about 4 km, and up to 3 quiet posts lent after 60 s of calm (the US had 1 squad within
+   the usual 2.5 km of the Brejo's assemblies: every "Sem força" was a pool of 1); the deadline of its assembly is still the usual one (GSM.form) */
+apPool = (g => (C, sq, P, sd, o, n) => {
+  if (!GSM.on || !gsFast(C, P)) return g(C, sq, P, sd, o, n);
+  const L = AP.lend, f = AP.form, k = L.n, c = L.calm; AP.form = GSM.src.form; L.n = GSM.src.lend.n; L.calm = GSM.src.lend.calm;
+  try { return g(C, sq, P, sd, o, n); } finally { AP.form = f; L.n = k; L.calm = c; }
+})(apPool);
 const gsOn = C => !!GSM.on && !!S.cq && !!C && !S.cq.ph;
 /* the most of side C's known strength at point P (its target object, or a point) within the memory: 0 off it or with GSM off */
 function gsRecall(C, P) {
@@ -47208,7 +47225,7 @@ function gsPull(C, sq) {
     && (L => !!L && cmdKnown(C, L.x, L.z, G.q) === 0)(lead(q)) && (q.job !== 'line' || sq.some(o => o !== q && o.job === 'line' && o.ri === q.ri && o.live >= 3));
   const go = q => { const e = Math.min(q.s, R[q.ri].len - q.s), net = S.T.mv >= 4; return O.ri === q.ri || (net && (!!swNear(q.ri, q.s, O.ri) || !!tripSq(q, O))) || e < 2000; };
   const took = [];
-  for (const q of sq.filter(ok).sort((a, b) => d(a) - d(b)).slice(0, 6)) {
+  for (const q of sq.filter(q => ok(q) && d(q) < G.r).sort((a, b) => d(a) - d(b)).slice(0, 6)) {   // within a walk of the forming-up place: from farther they never got to it before the assault had to go
     if (took.length >= G.n) break;
     if (!go(q)) continue;
     const n = Array.from({ length: D.push }, (_, k) => k).map(k => [k, sq.filter(o => o.job === 'push' && o.jk === k).length]).sort((a, b) => a[1] - b[1])[0], k = n ? n[0] : 0, Ok = post(t, 'push', k) || O;
@@ -47229,9 +47246,12 @@ function gsForm(C, op) {
       gLog(t, 'fire', 'Preparação antes da hora H sobre ' + gName(O) + ': ' + (r.ok ? 'missão de fogo e foco aéreo' : 'foco aéreo') + ' enquanto as esquadras se reúnem', O, 'gsp' + op.id);
     }
   }
-  const hard = clamp((op.formT || CQ.form) * GSM.form.k, GSM.form.min, GSM.form.max), age = S.t - op.T;
-  if (age <= hard) return;
-  const l = opLive(op), lead = q => q.men.find(m => !m.dead), at = q => { const L = lead(q), p = q.axo === op ? q.fp : q.ord; return !!L && (q.halt || (!!p && p.x !== undefined && Math.hypot(L.x - p.x, L.z - p.z) < INC.op.ready * 2)); }, ready = l.filter(at);
+  const G = GSM.form, hard = clamp((op.formT || CQ.form) * G.k, G.min, G.max), age = S.t - op.T, l = opLive(op), lead = q => q.men.find(m => !m.dead);
+  const dfp = q => { const L = lead(q), p = q.axo === op ? q.fp : q.ord; return !L ? 1e9 : q.halt ? 0 : p && p.x !== undefined ? Math.hypot(L.x - p.x, L.z - p.z) : 1e9; }, at = q => dfp(q) < G.near, ready = l.filter(at);
+  const sum = l.reduce((a, q) => a + Math.min(dfp(q), 5000), 0);   // the walk left: when it stops shrinking, they have stopped (short of the 60 m INC.op.ready asks: 170-190 m in the report's trace)
+  if (op.gsB === undefined || sum < op.gsB - G.gain) { op.gsB = sum; op.gsBT = S.t; }
+  if (age <= hard && !(l.length >= 2 && ready.length === l.length && S.t - op.gsBT > G.stall)) return;
+  if (age <= hard) { op.st = 'prep'; op.H = Math.max(S.t + INC.op.h[1], op.Hu || 0); for (const q of l) q.late = false; gLog(t, 'atk', 'Reunião para ' + gName(O) + ': as esquadras pararam a menos de ' + G.near + ' m dos seus lugares há ' + Math.round(S.t - op.gsBT) + ' s — hora H em ' + Math.round(op.H - S.t) + ' s', O); return; }
   if (!ready.length) { C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Reunião para ' + gName(O) + ': prazo duro de ' + Math.round(hard) + ' s e nenhuma esquadra na reunião — assalto cancelado', O); return opEnd(C, op); }
   op.st = 'prep'; op.H = Math.max(S.t + INC.op.h[1], op.Hu || 0); for (const q of l) q.late = !at(q);
   gLog(t, 'atk', 'Reunião para ' + gName(O) + ': prazo duro de ' + Math.round(hard) + ' s — segue com ' + ready.length + ' de ' + l.length + (l.length > 1 ? ' esquadras' : ' esquadra') + ', hora H em ' + Math.round(op.H - S.t) + ' s', O);
@@ -47242,12 +47262,14 @@ const gsGo = (u, x, z, why) => m5Go(u, x, z, why) || (m5Net() && !!tripTo(u, x, 
 function gsArmOpen(C, p, tanks, why) {
   const t = C.t, R = S.T.routes, b = tanks.reduce((a, u) => ({ x: a.x + u.x / tanks.length, z: a.z + u.z / tanks.length }), { x: 0, z: 0 }), d = Math.hypot(b.x - p.x, b.z - p.z) || 1;
   const op = { k: 'arm', ri: p.ri, sd: dsOf(t, p.ri), O: { s: p.s, x: p.x, z: p.z, tw: p }, st: 'go', T: S.t, T0: S.t, sq: [], m5: [], n0: 0, ax: (b.x - p.x) / d, az: (b.z - p.z) / d, over: false, id: genOid(C), by: 'ai', why };
-  let n = 0;
+  let n = 0, eta = 0;
   for (const u of tanks) {
     const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) break;
     if (!gsGo(u, sp.x, sp.z, 'atk')) continue;
-    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + m5Eta(u, u.trip) + GSM.arm.T, k: 'arm' }; op.m5.push(u); n++;
+    const e = m5Eta(u, u.trip); eta = Math.max(eta, e);
+    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + e + GSM.arm.T, k: 'arm' }; op.m5.push(u); n++;
   }
+  op.TE = S.t + eta + GSM.arm.T;   // the drive there and GSM.arm.T s at it
   if (!n) return null;
   const q = S.squads.filter(q => q.team === t && !q.net && q.live >= 3 && !q.state && !q.op && FREE[q.job] && !q.lift && q.ord && !q.ord.b && !q.ord.tw && !q.ord.T && q.ord.k !== 'supply' && q.ord.k !== 'build')
     .map(q => [q, (L => (L ? hdist(L, p) : 1e9))(q.men.find(m => !m.dead))]).filter(e => e[1] < GSM.arm.esc).sort((a, c) => a[1] - c[1])[0];
@@ -47260,8 +47282,10 @@ OPS.arm = (C, op) => {
   const t = C.t, O = op.O, p = O.tw, live = op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op), age = S.t - op.T0;
   if (p && p.hold === t) { gLog(t, 'atk', gName(O) + ' tomado pelo grupo blindado', O); for (const q of opLive(op)) { q.back = { k: 'hold', ri: O.ri !== undefined ? p.ri : q.ri, s: p.s, x: p.x, z: p.z, tw: p, R: 0 }; q.job = 'held'; q.jk = 0; } return opEnd(C, op); }
   if (!live.length) { gLog(t, 'atk', 'Grupo blindado contra ' + gName(O) + ' desfeito: sem carros', O); return opEnd(C, op); }
-  if (age > GSM.arm.T) { gLog(t, 'atk', 'Grupo blindado contra ' + gName(O) + ': tempo esgotado, volta', O); return opEnd(C, op); }
-  if (!op.inT && age > GSM.arm.in && cmdKnown(C, O.x, O.z, 400) <= GSM.arm.quiet) {   // quiet now: in, to take it
+  if (S.t > (op.TE || op.T0 + GSM.arm.T)) { gLog(t, 'atk', 'Grupo blindado contra ' + gName(O) + ': tempo esgotado, volta', O); return opEnd(C, op); }
+  const set = live.filter(u => hdist(u, u.ai.m5) < 80).length >= Math.ceil(live.length / 2), esc = opLive(op).some(q => (L => !!L && hdist(L, O) < 400)(q.men.find(m => !m.dead)));
+  if (!set) op.setT = 0; else if (!op.setT) op.setT = S.t;
+  if (!op.inT && op.setT && S.t - op.setT > GSM.arm.in && esc && cmdKnown(C, O.x, O.z, 400) <= GSM.arm.quiet && gsRecall(C, O) <= GSM.arm.quiet * 3) {   // quiet now, seen from the firing places a while, and the escort there: in, to take it (a tank that went in on a point it had only lost sight of died there)
     op.inT = S.t; live.forEach((u, i) => { const a = i * 2.1; u.ai.m5.x = O.x + Math.cos(a) * 25; u.ai.m5.z = O.z + Math.sin(a) * 25; if (u.rail) gsGo(u, u.ai.m5.x, u.ai.m5.z, 'atk'); });
     gLog(t, 'atk', 'Grupo blindado entra em ' + gName(O) + ' para tomá-lo', O);
   }
@@ -47284,6 +47308,17 @@ function gsArm(C) {
     const p = opts.find(p => pref.includes(p)) || opts.sort((a, c) => hdist(a, u) - hdist(c, u))[0];
     if (p && gsArmOpen(C, p, grp.slice(0, M5.atk.n[1]), grp.length + ' parados juntos há ' + Math.round(S.t - u.ai.gsI.T) + ' s')) return;
   }
+}
+/* the seat's threat or a weakened point that cmdAttack found no squads for (its pool is one squad or none) but the free tanks within GSM.src.tReach
+   make 1 to 1 against what is known and remembered there: an armoured group with what squad there is as escort, one every arm.cd s */
+function gsArmFast(C) {
+  const t = C.t, P0 = cmdObj(C); if (!P0 || !P0.tw || S.t < (C.gsAsT || 0) || genBy(t, 'atk') !== 'ai' || C.gue || C.ops.some(o => o.k === 'arm' && !o.over)) return;
+  const f = gsFast(C, P0); if (!f) return;
+  const p = P0.tw, l = S.units.filter(u => m5Free(u, t) && hdist(u, p) < GSM.src.tReach).sort((a, b) => hdist(a, p) - hdist(b, p)).slice(0, M5.atk.n[1]);
+  const foe = Math.max(CMD.guess, cmdKnown(C, p.x, p.z, 500), gsRecall(C, P0));
+  C.gsAsT = S.t + GSM.arm.cd;
+  if (l.length < 2 || (l.length * CMD.val.tank + 6) / foe < GSM.need) return;
+  gsArmOpen(C, p, l, f === 'src' ? 'ameaça à sede, sem esquadras para um assalto' : 'ponto enfraquecido, sem esquadras para um assalto');
 }
 /* the weakened point: the free tanks near go too (weak.tanks) */
 function gsArmWeak(C, p) {
@@ -47317,7 +47352,7 @@ cmdAttack = (g => (C, sq) => {
   if (w && !w.used && S.t < C.atkT) { w.used = 1; C.atkT = 0; }   // the weakened point: the cooldown skipped once
   g(C, sq);
   if (w && C.atkT === 0 && !C.ops.some(o => o.k === 'atk' && !o.over && o.O && o.O.tw === w.p)) C.atkT = Math.max(C.atkT, was);
-  if (C.want) gsPull(C, sq);
+  if (C.want) { gsPull(C, sq); gsArmFast(C); }
   gsFire(C);
 })(cmdAttack);
 cmdFires = (g => C => { g(C); if (!C.focus && GSM.on && C.gsF && S.t < C.gsF.T) C.focus = { x: C.gsF.x, z: C.gsF.z, r: C.gsF.r }; })(cmdFires);

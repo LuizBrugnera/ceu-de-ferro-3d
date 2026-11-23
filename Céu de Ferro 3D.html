@@ -43253,7 +43253,7 @@ const mouseAim = () => ctrl === 'mouse' && !coarse;
 const klass = () => (coarse ? 'plane' : cls);
 const netStatus = (s, retry) => { $('#netStatus').textContent = s; $('#btnRetry').hidden = !retry; };
 function lockPtr() {
-  if (!S.aim || document.pointerLockElement === cv || !cv.requestPointerLock) return;
+  if (!S.aim || document.pointerLockElement === cv || !cv.requestPointerLock || GV.on || BM.on || GOR.want || RTS.want) return;   // the view (or the hangar's General or RTS on its way into it) keeps the mouse: a lock landing after genOpen gave the clicks to the soldier's trigger (cf-rts-fix)
   try { const r = cv.requestPointerLock(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
 }
 
@@ -43875,7 +43875,7 @@ function swapKey(e) {
 /* each frame: the picker comes up on a loss, follows a death under it, counts the return down, and goes when the match is over */
 function tickSwap() {
   const P = S.my, live = playMode === 'play' && !!P && !S.over;
-  if (!sw.on) { if (live && P.dead && sw.of !== P && S.respawn > 0 && !(S.net && !Net.can)) openSwap(); return; }
+  if (!sw.on) { if (live && P.dead && sw.of !== P && S.respawn > 0 && !(S.net && !Net.can) && !GV.on) openSwap(); return; }   // GV.on: the commander keeps the view; the body comes back on its own (S.respawn), and the picker opens if the view closes first
   if (!live) return closeSwap();
   if (sw.rq && (P.dead || !P.man)) { sw.rq = false; if (!P.dead) return closeSwap(); }
   if (sw.rq && S.rqT > 0 && S.t > S.rqT) { S.rqT = 0; sw.msg = RQ.why.host; return drawSwap(); }
@@ -44239,18 +44239,21 @@ addEventListener('blur', () => { if (S) S.input = {}; });
 document.addEventListener('visibilitychange', () => { if (document.hidden) setPause(true); });
 /* mouse aim: movement only counts while the pointer is locked to the canvas; the sim reads it from S.input */
 cv.addEventListener('mousedown', e => {
-  if (playMode !== 'play' || !S.aim || sw.on || BM.on) return;   // the battle map open: the mouse is the map's, never the trigger
+  if (playMode !== 'play' || !S.aim || sw.on || BM.on || GV.on) return;   // the battle map open: the mouse is the map's, never the trigger
   if (document.pointerLockElement !== cv) { if (paused) setPause(false); else lockPtr(); return; }
   if (e.button === 0) S.input.fire = true; else if (e.button === 2) S.input.ordA = true;
 });
 addEventListener('mouseup', e => { if (!S || !S.aim) return; if (e.button === 0) S.input.fire = false; else if (e.button === 2) S.input.ordA = false; });
 cv.addEventListener('contextmenu', e => { if (S && S.aim) e.preventDefault(); });
 document.addEventListener('mousemove', e => {
-  if (document.pointerLockElement !== cv || !S.aim || paused) return;
+  if (document.pointerLockElement !== cv || !S.aim || paused || GV.on) return;
   S.input.mx = (S.input.mx || 0) + e.movementX * camSt.sens; S.input.my = (S.input.my || 0) + e.movementY * camSt.sens;
 });
 addEventListener('wheel', e => { if (playMode !== 'play' || GV.on || BM.on || paused || !e.deltaY || e.timeStamp - camSt.zt < 160) return; camSt.zt = e.timeStamp; zoomBy(e.deltaY < 0 ? 1 : -1); }, { passive: true });
-document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement !== cv && playMode === 'play' && S.aim && !sw.on && !GV.on && !BM.on) { S.input = {}; setPause(true); } });
+document.addEventListener('pointerlockchange', () => {
+  if (document.pointerLockElement === cv && (GV.on || BM.on)) { S.input = {}; document.exitPointerLock(); return; }   // a lock asked before a view opened lands late (requestPointerLock is async): it goes back
+  if (document.pointerLockElement !== cv && playMode === 'play' && S.aim && !sw.on && !GV.on && !BM.on) { S.input = {}; setPause(true); }
+});
 for (const b of touchEl.querySelectorAll('button')) {
   if (b.dataset.a) { b.addEventListener('pointerdown', e => { e.preventDefault(); TACT[b.dataset.a](); }); continue; }
   const set = v => e => { e.preventDefault(); if (S) S.input[b.dataset.k] = v; b.classList.toggle('on', v); };
@@ -45897,13 +45900,12 @@ function joinGen() {
 }
 Net.ui.welcome = (f => () => {
   const kit = GOR.want; if (!kit) return f();
-  GOR.want = '';
-  if (!Net.gen) { Net.close(); const b = $('#btnGen'); b.disabled = true; b.title = 'Precisa do servidor novo'; return netStatus('O servidor é antigo: ainda não tem o comando do general. Atualize o servidor ou entre como piloto.'); }
+  if (!Net.gen) { GOR.want = ''; Net.close(); const b = $('#btnGen'); b.disabled = true; b.title = 'Precisa do servidor novo'; return netStatus('O servidor é antigo: ainda não tem o comando do general. Atualize o servidor ou entre como piloto.'); }
   const c0 = cls, k0 = sel[era].inf; cls = 'inf'; sel[era].inf = kit;
-  try { f(); } finally { cls = c0; sel[era].inf = k0; }
+  try { f(); } finally { cls = c0; sel[era].inf = k0; GOR.want = ''; }   // cleared after f: launch() must not lock the mouse to the soldier (lockPtr)
   if (!S || !S.net) return;
   const s0 = S; S.ent = 1; S.spawnAt = 0; genClaim(1); genOpen(true, true);   // S.ent: the "Onde entrar" picker is skipped (the main base; a redeploy comes later), so it does not close the general's view
-  setTimeout(() => { const h = Net.gn && Net.gn[S.me]; if (S === s0 && !gorSeat() && h && h !== Net.id) gorToast('O comando já é de ' + ((Net.players.get(h) || {}).name || 'outro jogador') + ': você entra como soldado', true); }, 1800);
+  setTimeout(() => { const h = Net.gn && Net.gn[S.me]; if (S === s0 && !gorSeat() && h && h !== Net.id) gorToast('O comando já é de ' + ((Net.players.get(h) || {}).name || 'outro jogador') + (GV.on ? ': ' + (GV.rts ? 'a câmera' : 'o mapa') + ' só assiste, sem ordens · Tab fecha e você joga como soldado' : ': você entra como soldado'), true); }, 1800);   // the view stays open to watch (cf-rts-fix: it said "soldado" over the commander's camera)
 })(Net.ui.welcome);
 Net.ui.refused = (f => code => { GOR.want = ''; f(code); })(Net.ui.refused);
 Net.ui.lost = (f => joined => { GOR.want = ''; f(joined); })(Net.ui.lost);
@@ -49497,7 +49499,7 @@ function rtsHid(o) {
 }
 /* the camera: first look from the player (on side GV.t) or the side's main base, toward the enemy's */
 function rtsInit() {
-  RTS.S = S; const t = GV.t, P = S.my && !S.my.dead && S.my.team === t ? S.my : null, b = S.base[t] || { x: S.W / 2, z: 0 };
+  RTS.S = S; RTS.t = GV.t; const t = GV.t, P = S.my && !S.my.dead && S.my.team === t ? S.my : null, b = S.base[t] || { x: S.W / 2, z: 0 };
   const o = P || b, e = (typeof eBase === 'function' ? eBase(t, o.x, o.z) : null) || S.base[1 - t] || { x: S.W / 2, z: 0 };
   RTS.x = o.x; RTS.z = o.z; RTS.fy = hgt(o.x, o.z); RTS.yaw = Math.atan2(e.z - o.z, e.x - o.x) || 0; RTS.d = P ? 260 : 900; RTS.pit = .95; RTS.to = null; RTS.k = {}; RTS.drag = null;
   RTS.gcx = GV.cx; RTS.gcz = GV.cz;
@@ -49552,16 +49554,29 @@ const rtsGY = (x, z) => hgt(x, z);
 /* the side's own squads by id (the host's and solo's; a guest has only the view model's leader) */
 function rtsSqs(t) { const m = new Map(); for (const q of S.squads || []) if (q.team === t && q.live > 0 && q.id) m.set(q.id, q); return m; }
 const rtsLid = q => (typeof flLid === 'function' ? flLid(q) : q.men.find(m => !m.dead && !m.down) || null);
-/* the man or the leader of an own squad nearest the pixel, within r px */
+/* where rtsDraw puts a squad's marker: over its leader (the view model's point on a guest), higher when far; s the foot of the glyph, gy the
+   glyph's centre, k its scale, cd the camera's distance. rtsPick reads the same, so a click on the glyph is the glyph's squad */
+function rtsMark(e, q) {
+  const L = q ? rtsLid(q) : null, lx = L ? L.x : e.x, lz = L ? L.z : e.z, ly = L && L.y !== undefined ? L.y : rtsGY(lx, lz), cd = rtsCd(lx, ly, lz), k = rtsK(lx, ly, lz);
+  const s = rtsXY(lx, ly + (cd < 300 ? 3.2 : 6), lz);
+  return { L, lx, ly, lz, cd, k, s, gy: s ? s.y - 10 * k : 0 };
+}
+/* the own squad under the pixel: its marker's glyph first (within 12 px by its scale), else the man or the leader nearest, within r px */
 function rtsPick(px, py, r) {
   const V = GV.V; if (!V) return null;
-  const Q = rtsSqs(V.t); let b = null, bd = r || 16;
+  const Q = rtsSqs(V.t), sel = GOR.sel; let b = null, bd = r || 16, mb = null, md = 1e9;
   for (const e of gorSq(V)) {
-    const q = Q.get(e.id), L = q ? q.men.filter(m => !m.dead && !m.in) : [{ x: e.x, y: rtsGY(e.x, e.z), z: e.z }];
+    const q = Q.get(e.id), M = rtsMark(e, q);
+    if (M.s && M.cd <= 7000 && (M.cd >= 120 || sel.has(e.id))) { const d = Math.hypot(M.s.x - px, M.gy - py); if (d < Math.max(9, 12 * M.k) && d < md) { md = d; mb = e; } }
+    const L = q ? q.men.filter(m => !m.dead && !m.in) : [{ x: e.x, y: rtsGY(e.x, e.z), z: e.z }];
     for (const m of L) { const s = rtsXY(m.x, (m.y !== undefined ? m.y : rtsGY(m.x, m.z)) + 1, m.z, 0); if (!s) continue; const d = Math.hypot(s.x - px, s.y - py); if (d < bd) { bd = d; b = e; } }
-    const s = rtsXY(e.x, rtsGY(e.x, e.z) + 6, e.z, 0); if (s) { const d = Math.hypot(s.x - px, s.y - py - 10); if (d < bd) { bd = d; b = e; } }   // the marker over the leader
   }
-  return b;
+  return mb || b;
+}
+/* a pixel of the view the commander sees the ground at: not under a panel, a bar or the minimap (what a double click may select) */
+function rtsFree(px, py) {
+  if (rtsMM(px, py)) return false;
+  const r = GV.cv.getBoundingClientRect(); return document.elementFromPoint(r.left + px, r.top + py) === GV.cv;
 }
 function rtsPt(px, py) {
   const V = GV.V; if (!V) return null;
@@ -49688,7 +49703,7 @@ gorDbl = (g => e => {
   if (!gorOn() || GOR.mode) return;
   const p = gorP(e), s = gorPick(p.px, p.py); if (!s) return;
   if (!e.shiftKey) GOR.sel.clear();
-  for (const o of gorSquads()) if (o.g === s.g && rtsXY(o.x, rtsGY(o.x, o.z) + 1, o.z, 0)) GOR.sel.add(o.id);
+  for (const o of gorSquads()) { if (o.g !== s.g) continue; const q = rtsXY(o.x, rtsGY(o.x, o.z) + 1, o.z, 0); if (q && rtsFree(q.x, q.y)) GOR.sel.add(o.id); }   // not under the panels or the bars
   gorBar();
 })(gorDbl);
 gorBuild = (g => (w, px, py) => {
@@ -49718,7 +49733,7 @@ genOpen = (g => (v, user) => {
 })(genOpen);
 genBar = (g => () => { g(); rtsDom(); })(genBar);
 genFit = (g => () => { g(); RTS.gcx = GV.cx; RTS.gcz = GV.cz; })(genFit);
-genFrame = (g => now => { if (rtsOn()) GV.drawT = 0; g(now); })(genFrame);
+genFrame = (g => now => { if (rtsOn()) { GV.drawT = 0; if (RTS.S === S && RTS.t !== GV.t) rtsInit(); } g(now); })(genFrame);   // the spectator's 1 2 3: the camera goes to that side's base
 genDraw = (g => (V, now) => (rtsOn() ? rtsDraw(V, now) : g(V, now)))(genDraw);
 genKey = (g => e => {
   const typing = /INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '');
@@ -49729,9 +49744,11 @@ genKey = (g => e => {
 gorBar = (g => () => {
   g();
   if (!rtsOn()) return;
-  const keys = document.querySelector('.gen-keys'), kt = gorSeat() ? 'Clique/arraste: selecionar · Duplo clique: mesmo tipo · Clique direito: ordem (Shift+direito: fila de pontos) · WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · F: foco · 1-9: grupos (Shift ou Ctrl+número grava) · M ou \': mapa · Tab: fechar'
-    : 'Arraste ou WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · [ ]: girar · PageUp/PageDown: inclinar · Home: visão geral · M ou \': mapa · Tab: fechar';
-  if (keys && keys.textContent !== kt) { keys.textContent = kt; keys.title = kt; }
+  const seat = !!gorSeat(), keys = document.querySelector('.gen-keys'), kt = seat ? 'Clique/caixa: selecionar · Duplo: mesmo tipo · Direito: ordem (Shift: fila) · WASD/bordas: mover · Roda: zoom · Meio/Alt: girar · F: foco · 1-9: grupos · \': mapa · Tab: fechar'
+    : 'Arraste ou WASD/bordas: mover · Roda: zoom · Meio/Alt: girar · [ ]: girar · PgUp/PgDn: inclinar · Home: visão geral · \': mapa · Tab: fechar',
+    tt = seat ? 'Clique/arraste: selecionar · Duplo clique: mesmo tipo · Clique direito: ordem (Shift+direito: fila de pontos) · WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · F: foco · 1-9: grupos (Shift ou Ctrl+número grava) · M ou \': mapa · Tab: fechar'
+    : 'Arraste ou WASD/bordas: mover · Roda: zoom · Meio ou Alt+arrastar: girar · [ ]: girar · PageUp/PageDown: inclinar · Home: visão geral · 1 2: lado · V: névoa · M ou \': mapa · Tab: fechar';
+  if (keys && keys.textContent !== kt) { keys.textContent = kt; keys.title = tt; }   // one line at 1280 px (cf-rts-fix: the long one ended in "Tab:…"); the whole list in its title
 })(gorBar);
 /* the scene: who is not seen is not drawn (the vehicles' models here, the soldiers in poseMan and the far specks in syncScene); no body of mine
    drawn round the eye, no weapon in hand, no weapon camera while the commander looks */
@@ -49746,6 +49763,23 @@ syncScene = (g => dt => {
   }
 })(syncScene);
 poseMan = (f => (m, put) => { if (RTS.side >= 0 && rtsHid(m)) return; f(m, put); })(poseMan);
+/* the works under the same fog: an enemy supply base or economy site only while the side has spotted it (as the map table draws it), an enemy
+   trench, wall or post only if it was dug before the match (genVM's rule: the map table never shows the others) */
+const rtsHidB = b => RTS.side >= 0 && b.team !== RTS.side && isSide(b.team) && !spotted(b, RTS.side);
+function rtsFogB(l) {
+  for (const b of l) {
+    const m = b.m; if (!m) continue;
+    if (rtsHidB(b)) { if (m.visible) { m.visible = false; m.userData.rtsH = 1; } }
+    else if (m.userData.rtsH) { m.visible = true; m.userData.rtsH = 0; }
+  }
+}
+syncScene = (g => dt => { g(dt); rtsFogB(S.sup); if (S.eco) rtsFogB(S.eco.l); })(syncScene);
+const rtsForts = g => (...a) => {
+  const t = RTS.side; if (t < 0 || !S || !S.forts) return g(...a);
+  const all = S.forts; S.forts = all.filter(f => f.pre || f.team === t || !isSide(f.team));
+  try { return g(...a); } finally { S.forts = all; }
+};
+fortBoxes = rtsForts(fortBoxes); holeScene = rtsForts(holeScene);
 vmRender = (g => () => { if (rtsOn()) { for (const V of VM.M.values()) V.root.visible = false; VM.on = false; return; } g(); })(vmRender);
 if (typeof WCAM !== 'undefined' && WCAM && typeof WCAM.render === 'function') WCAM.render = (g => () => { if (rtsOn()) return; g(); })(WCAM.render);
 updateCamera = (g => dt => { if (rtsCam(dt)) return; g(dt); })(updateCamera);
@@ -49841,14 +49875,14 @@ function rtsDraw(V, now) {
   }
   const sel = new Set(GOR.sel), one = sel.size === 1 ? [...sel][0] : null;
   for (const e of gorSq(V)) {
-    const q = Q.get(e.id), L = q ? rtsLid(q) : null, lx = L ? L.x : e.x, lz = L ? L.z : e.z, ly = L && L.y !== undefined ? L.y : rtsGY(lx, lz), cd = rtsCd(lx, ly, lz), on = sel.has(e.id), hv = hov === e;
+    const q = Q.get(e.id), M = rtsMark(e, q), { L, lx, ly, lz, cd, k } = M, on = sel.has(e.id), hv = hov === e;
     if (cd > 7000) continue;
-    const k = rtsK(lx, ly, lz), c = on ? acc : own;
+    const c = on ? acc : own;
     if (e.dx !== undefined && (on || cd < 900)) { g.globalAlpha = on ? .95 : .4; rtsLine(g, lx, lz, e.dx, e.dz, c, on ? 2 : 1.2, [7, 5]); g.globalAlpha = 1; }
     if (on && q && cd < 450) { for (const m of q.men) { if (!m.dead && !m.in) rtsRing(g, m.x, m.z, .9, acc, 1.6); } }
     else if (on) rtsRing(g, lx, lz, 14, acc, 2);
-    const s = rtsXY(lx, ly + (cd < 300 ? 3.2 : 6), lz); if (!s) continue;
-    if (cd >= 120 || on || hv) gGlyph(g, s.x, s.y - 10 * k, e.g, true, e.rout ? .5 : 1, k, c, 0, 0, now);
+    const s = M.s; if (!s) continue;
+    if (cd >= 120 || on || hv) gGlyph(g, s.x, M.gy, e.g, true, e.rout ? .5 : 1, k, c, 0, 0, now);
     if (L && cd < 600) { gStar(g, s.x, s.y - (cd >= 120 || on || hv ? 24 : 4) * k, 5 * k, '#f4d36a'); }   // the leader
     if (lab && (cd < 1500 || on)) gTxt(g, (e.tag || '') + (e.n ? ' ' + e.n : ''), s.x, s.y + 6 * k, 10 * k, c, 'center');
     if (e.rout) gTxt(g, '!', s.x + 12 * k, s.y - 10 * k, 12 * k, '#ffb347', 'center');
@@ -49895,7 +49929,12 @@ function rtsDraw(V, now) {
    the right button orders there */
 function rtsMini(g, V) {
   const gd = $('#gen'), wide = GV.w >= 981, top = (parseFloat(gd.style.getPropertyValue('--gt')) || 56) + 10, right = wide && !RTS.nop ? GV.w - 16 - 340 - 12 : GV.w - 16;
-  const W = S.W, H = 2 * S.HW, sc = RTS.mm / Math.max(W, H), b = (RTS.mmB = { x: right - W * sc, y: top, w: W * sc, h: H * sc, sc });
+  const W = S.W, H = 2 * S.HW, sc0 = RTS.mm / Math.max(W, H), x0 = right - W * sc0, cr = GV.cv.getBoundingClientRect();
+  let bot = GV.h;   // above the order bar and the panel stacked under it on a narrow screen (cf-rts-fix: at 900 px the bar covered it)
+  for (const el of [$('#genOrd'), document.querySelector('.gen-r')]) { if (!el || el.hidden) continue; const r = el.getBoundingClientRect(); if (r.height && r.left - cr.left < right && r.right - cr.left > x0) bot = Math.min(bot, r.top - cr.top - 24); }   // 24: room for the fog's caption under it
+  const sc = Math.max(Math.min(sc0, (bot - top) / H), 60 / H), b = (RTS.mmB = { x: right - W * sc, y: top, w: W * sc, h: H * sc, sc });
+  const tl = wide && !RTS.nop ? 16 + 300 + 12 : 16, tw = Math.max(200, b.x - 12 - tl), tx = Math.round(tl + tw / 2) + 'px';   // the toast: centred in the ground left of the minimap
+  if (gd.style.getPropertyValue('--rts-tx') !== tx) { gd.style.setProperty('--rts-tx', tx); gd.style.setProperty('--rts-tw', Math.round(tw) + 'px'); }
   const X = x => b.x + x * sc, Y = z => b.y + (z + S.HW) * sc;
   g.fillStyle = 'rgba(11,17,18,.85)'; g.fillRect(b.x - 3, b.y - 3, b.w + 6, b.h + 6);
   try { if (!GV.img) genImg(); g.drawImage(GV.img, b.x, b.y, b.w, b.h); } catch (e) {}
@@ -49915,7 +49954,8 @@ function rtsMini(g, V) {
   const st = document.createElement('style');
   st.textContent = '.gen[data-rts]{background:transparent}.gen[data-rts] #genMap{cursor:default}.gen[data-rts][data-seat] #genMap{cursor:crosshair}#stage[data-rts] #hud{visibility:hidden}'
     + '.gen[data-rts][data-nop] .gen-l,.gen[data-rts][data-nop] .gen-r{display:none}.gen[data-rts][data-nop] .gen-ord{left:var(--gut-l);right:var(--gut-r)}'
-    + '.gen[data-rts] .gen-panel{background:rgba(14,20,22,.78)}';
+    + '.gen[data-rts] .gen-panel{background:rgba(14,20,22,.78)}.gen[data-rts] .gen-toast{left:var(--rts-tx,50%);max-width:var(--rts-tw,calc(100% - 32px))}'
+    + '@media (max-width:980px){.gen[data-rts] .gen-r{height:32%}.gen[data-rts] .gen-ord{bottom:calc(32% + 46px)}.gen[data-rts][data-nop] .gen-ord{bottom:12px}}';   // narrow: a lower panel, the bar down to the foot when it is hidden (cf-rts-fix)
   document.head.appendChild(st);
   const mk = (id, t, title, after) => { const b = document.createElement('button'); b.className = 'chip'; b.id = id; b.type = 'button'; b.textContent = t; b.title = title; after.after(b); return b; };
   const tm = $('#genTm');

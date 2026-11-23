@@ -119,6 +119,26 @@ console.log('-- the ambulance --');
   ok(runUntil(300, () => res(0, 'amb') === 1), 'and the ambulance is back in the reserve');
 }
 
+console.log('-- a guest\'s ambulance, on the host --');
+{
+  /* cf-anfitriao-bug: a player's ambulance loads the wounded it stands by and hands them in at a node (svMine), but that ran for the host's
+     own player only: a guest's ambulance treated and never evacuated anyone. The host now runs it for the guest's ghost and tells him (amb) */
+  load(); watch('ww2');
+  const ri = 0, s = $('lineS')(0, ri) + 100, p = at(ri, s, 30), q = C.fieldSquad(0, 'line', 0, { k: 'hold', ri, s }, p.x, p.z), Net = $('Net');
+  C.run(2); const hurt = q.men.slice(0, 2);
+  for (const m of hurt) { $('Math').random = () => 0; C.manDown(m, REC.grave + 1, null); m.stab = S.t; m.down = S.t + REC.hold; }
+  C.seed(7); q.men.forEach(m => { if (!hurt.includes(m)) m.gone = true; }); S.men = S.men.filter(m => !m.gone);
+  const L = hurt[0], g = $('addVehicle')('trn', 'kfz31', 0, L.x + 4, L.z, 0); const put = (x, z) => { g.x = x; g.z = z; g.snap = { x, y: g.y, z, h: 0, ty: 0, tp: 0, age: 0 }; }; Object.assign(g, { net: true, pid: 5, v: { x: 0, y: 0, z: 0 } }); put(g.x, g.z); Net.ghosts.set(5, g);
+  const sent = [], send0 = Net.send; Net.send = (t, m) => { sent.push(Object.assign({ t }, m)); }; S.net = true; S.host = true;
+  const saved0 = S.rec.saved || 0, amb = k => sent.filter(m => m.t === 'amb' && m.to === 5 && m.k === k);
+  ok(runUntil(60, () => amb(0).length > 0) && hurt.every(m => m.evac && m.gone) && amb(0).reduce((n, m) => n + m.n, 0) === 2, 'the guest\'s ambulance, standing by two of its side\'s badly wounded, takes them aboard on the host, and the guest is told (amb k 0: ' + JSON.stringify(amb(0)) + ')');
+  const b = S.base[0]; put(b.x + 20, b.z + 20);
+  ok(runUntil(30, () => amb(1).length > 0) && amb(1)[0].n === 2 && S.rec.saved === saved0 + 2, 'driven to the main base, it hands them in (rec.saved +2) and the guest is told (amb k 1)');
+  S.host = false; S.my = g; const f0 = S.floats.length;
+  Net.rx.amb({ k: 0, n: 2, c: 2 }); ok(S.floats.length === f0 + 1 && /2 .*a bordo \(2\//.test(S.floats[f0].text), 'the guest at the wheel reads it over his ambulance (' + S.floats[f0].text + ')');
+  Net.send = send0; S.net = false; S.host = false; S.my = null; Net.ghosts.clear();
+}
+
 console.log('-- today: the helicopter --');
 {
   load(); watch('modern');

@@ -71,6 +71,7 @@ node tests/vcol.js          # colisão entre veículos (cf-colisao-veiculos): do
 node tests/soak.js          # 10 min solo por época e classe (helicóptero com mouse e clássico), e batalha só de IA com o placar de quem matou quem (SECS=600; ERA=<época> roda só uma)
 node tests/relay.js         # servidor: cada mensagem nova ou alterada, incluídas as da conquista (cq), da requisição (req, reqa) e dos rádios (rad, rsp, rbe)
 node tests/resume-relay.js  resume-online.js   # partidas suspensas: o servidor guarda a última palavra do anfitrião, sala vazia suspende, quem volta retoma (Continuar) ou começa outra (Nova partida), GET /partidas, SUSPEND
+node tests/host-idle.js     # anfitrião parado (cf-anfitriao-bug): uma aba antiga em segundo plano seguia anfitriã sem simular nada, e o convidado ouvia "O anfitrião não respondeu."; depois de HOSTIDLE ms de silêncio, com outro jogador na sala, o servidor passa a sala ao seguinte (host) e fecha a aba parada com 4001; anfitrião que fala ou sozinho na sala fica
 node tests/online.js        # anfitrião e dois convidados pelo servidor de verdade, numa porta própria (8093)
 node tests/world-online.js   # objetos do mundo pelo servidor de verdade: dano do convidado, quem entra depois, troca de anfitrião; com SERVER=<servidor antigo>, nada é danificado
 node tests/bases-online.js  # bases pelo servidor de verdade: pedido do convidado, estágios em todos, quem entra depois, entrada na base, carga do convidado, troca de anfitrião no meio da obra; BW=1 só mede o que o anfitrião envia numa batalha cheia

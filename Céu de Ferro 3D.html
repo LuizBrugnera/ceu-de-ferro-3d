@@ -21797,7 +21797,7 @@ const Net = {
       if (m && m.t === 'welcome') Net.trn = m.trn === 1;
       if (m && Object.prototype.hasOwnProperty.call(Net.rx, m.t)) Net.rx[m.t](m);
     };
-    ws.onclose = () => { if (ws !== Net.ws) return; const joined = !!Net.id; Net.close(); Net.ui.lost(joined); };
+    ws.onclose = e => { if (ws !== Net.ws) return; const joined = !!Net.id; Net.close(); Net.ui.lost(joined, !!e && e.code === 4001); };   // 4001: the server let this page go as a host gone quiet (HOSTIDLE)
   },
   close() {
     const ws = Net.ws; Net.ws = null; Net.id = Net.host = Net.seq = Net.mseq = 0; Net.can = Net.inf = Net.wo = Net.sb = Net.eco = Net.gen = false; Net.kept = null; Net.oq = []; Net.oh.clear(); Net.msl.clear();
@@ -24116,7 +24116,10 @@ function pedRun(P, k, x, z) {
   const no = w => ({ st: 'no', why: w }), bad = r => no(PED.w[r.why] || GEN.no[r.why] || r.why || GEN.no.bug), cmd = c => genCmd(t, c, 'sys');
   if (S.cq && S.cq.ph) return no(GEN.no.over);
   if (!gMapOk(x, z)) return no(GEN.no.map);
-  if (seat !== 'ai' && (seat === 'me' ? P === S.my : seat === P.pid)) return no('você é o general: dê a ordem na Visão de General (Tab)');
+  /* is P the one in the general's seat? Online the host stores any person there as 'me' (enetCtl), so the room's seat (Net.gn, a player id)
+     says who: by 'me' alone a guest general was sent to his own log, and the host was told he is the general while a guest was (cf-anfitriao-bug) */
+  const gen = S.net ? !!Net.gn && Net.gn[t] > 0 && Net.gn[t] === (P === S.my ? Net.id : P.pid) : seat === 'me' && P === S.my;
+  if (seat !== 'ai' && gen) return no('você é o general: dê a ordem na Visão de General (Tab)');
   if (genBy(t, PED.d[k]) !== 'ai') {   // a person holds that part of the command: it is his to decide
     gLog(t, 'help', 'Pedido de ' + who + ' ao general: ' + PED.s[k] + ' ' + gNear(x, z), { x, z }, null, { x, z });
     return { st: 'fwd', why: 'quem decide é o general do seu lado (uma pessoa): o pedido está no diário dele' };
@@ -33244,17 +33247,21 @@ function svNode(u) {
   const b = S.sup.find(b => !b.dead && b.prog >= 1 && b.team === u.team && hdist(b, u) < BLD.r);
   return b || (hdist(u, S.base[u.team]) < SV.amb.base ? 0 : null);
 }
-/* the player's ambulance where REC runs: it loads the wounded it stands by and hands them over at a node */
-function svMine(P, k) {
-  const M = P.svm || (P.svm = { n: 0, T: 0 });
+/* the player's ambulance where REC runs: it loads the wounded it stands by and hands them over at a node. A guest's runs on the host, for
+   its ghost, and say (k 1 handed over, 0 taken aboard; n of them, c aboard now) goes to that guest as amb (cf-anfitriao-bug: a guest's
+   ambulance treated but never evacuated anyone, as this ran for the host's own player only) */
+const svSay = (P, k, n, c) => S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text: k ? recN(n) + ' entregue' + (n > 1 ? 's' : '') : recN(n) + ' a bordo (' + c + '/' + REC.amb.n + '): leve a uma base', life: 3 });
+function svMine(P, k, say) {
+  const M = P.svm || (P.svm = { n: 0, T: 0 }), tell = say || ((k, n, c) => svSay(P, k, n, c));
   const o = svNode(P);
-  if (o !== null && M.n) { recHand(P.team, M.n, o || null); S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text: recN(M.n) + ' entregue' + (M.n > 1 ? 's' : ''), life: 3 }); M.n = 0; M.T = 0; return; }
+  if (o !== null && M.n) { recHand(P.team, M.n, o || null); tell(1, M.n, 0); M.n = 0; M.T = 0; return; }
   if (M.n >= REC.amb.n || !S.men.some(m => recHurt(m, P.team) && hdist(m, P) < REC.amb.pick && (!recTaken(m) || m.evq === P))) { M.T = 0; return; }
   if ((M.T += k) < REC.amb.load) return;
   const R = { n: M.n }; recLoad(P, R, REC.amb.pick, REC.amb.n);
-  if (R.n > M.n) S.floats.push({ x: P.x, y: P.y + 6, z: P.z, text: recN(R.n - M.n) + ' a bordo (' + R.n + '/' + REC.amb.n + '): leve a uma base', life: 3 });
+  if (R.n > M.n) tell(0, R.n - M.n, R.n);
   M.n = R.n; M.T = 0;
 }
+Net.rx.amb = m => { const P = S && S.net && !S.host && S.my; if (P && !P.dead && P.def && P.def.svc === 'amb' && (m.k === 0 || m.k === 1) && m.n > 0) svSay(P, m.k, m.n, m.c | 0); };
 function svStep(dt) {
   if (!S || !S.units || (S.svT = (S.svT || 0) - dt) > 0) return;
   S.svT = SV.dt;
@@ -33268,6 +33275,10 @@ function svStep(dt) {
   S.svAmb = amb;
   const P = S.my;
   if (P && !P.dead && P.def && P.def.svc === 'amb' && !P.net && S.rec && recSim()) { if (svStill(P)) svMine(P, SV.dt); else if (P.svm) P.svm.T = 0; }
+  if (S.net && S.host && S.rec && recSim()) for (const g of Net.ghosts.values()) {   // the guests' ambulances
+    if (g.dead || g.gone || !g.pid || !g.def || g.def.svc !== 'amb') continue;
+    if (svStill(g)) svMine(g, SV.dt, (k, n, c) => Net.send('amb', { to: g.pid, k, n, c })); else if (g.svm) g.svm.T = 0;
+  }
 }
 step = (g => dt => { g(dt); svStep(dt); })(step);
 /* ---- the rules of engagement: an enemy ambulance is no AI's target ---- */
@@ -53546,8 +53557,8 @@ Net.ui = {
     netStatus(s); if (playMode === 'play' && S.net) { const g = $('#tag'); g.textContent = 'PvP · ' + ERAS[S.era].label + ' · ' + S.my.def.name + ' · ' + (n === 1 ? 'só você na sala' : n + ' jogadores na sala'); g.title = s; }   // short: the bar's chips leave it some 400 px at 1280
   },
   refused(code) { netStatus(REFUSED[code] || 'O servidor recusou a entrada.'); },
-  lost(joined) {
-    const why = joined ? 'Conexão perdida com o servidor.' : 'O jogo precisa do servidor e não foi possível conectar a ' + Net.url() + '. Abra um terminal na pasta do jogo, rode node server.js e abra http://localhost:8080 no navegador.';
+  lost(joined, idle) {
+    const why = idle ? 'Esta aba ficou parada (em segundo plano ou minimizada) sendo a anfitriã da sala, e a partida passou para outro jogador. Entre de novo para continuar.' : joined ? 'Conexão perdida com o servidor.' : 'O jogo precisa do servidor e não foi possível conectar a ' + Net.url() + '. Abra um terminal na pasta do jogo, rode node server.js e abra http://localhost:8080 no navegador.';
     if ((playMode !== 'play' && !S.spec) || !S.net) return netStatus(why, true);
     const s = S; S.banner = { text: 'Conexão perdida', sub: 'Voltando ao hangar', life: 3 };
     setTimeout(() => { if (S === s) toHangar(why, true); }, 2500);
@@ -54634,8 +54645,8 @@ Net.ui.refused = (f => code => {
   if (code === 'map' || code === 'full' || code === 'sides') return f(code);   // the room has players and refuses this page: say why
   specLocal('O servidor não aceita espectadores: IA × IA neste computador');
 })(Net.ui.refused);
-Net.ui.lost = (f => joined => {
-  if (!Net.wantSpec) return f(joined);
+Net.ui.lost = (f => (joined, idle) => {
+  if (!Net.wantSpec) return f(joined, idle);
   Net.wantSpec = false; specLocal(joined ? 'Conexão perdida: IA × IA neste computador' : 'Sem servidor: IA × IA neste computador');
 })(Net.ui.lost);
 Net.ui.rematch = (f => () => { if (S && S.spec && playMode === 'watch') return startSpec(true); f(); })(Net.ui.rematch);
@@ -55535,7 +55546,7 @@ Net.ui.welcome = (f => () => {
   setTimeout(() => { const h = Net.gn && Net.gn[S.me]; if (S === s0 && !gorSeat() && h && h !== Net.id) gorToast('O comando já é de ' + ((Net.players.get(h) || {}).name || 'outro jogador') + (GV.on ? ': ' + (GV.rts ? 'a câmera' : 'o mapa') + ' só assiste, sem ordens · Tab fecha e você joga como soldado' : ': você entra como soldado'), true); }, 1800);   // the view stays open to watch (cf-rts-fix: it said "soldado" over the commander's camera)
 })(Net.ui.welcome);
 Net.ui.refused = (f => code => { GOR.want = ''; f(code); })(Net.ui.refused);
-Net.ui.lost = (f => joined => { GOR.want = ''; f(joined); })(Net.ui.lost);
+Net.ui.lost = (f => (joined, idle) => { GOR.want = ''; f(joined, idle); })(Net.ui.lost);
 $('#btnGen').addEventListener('click', joinGen);
 if (coarse) { $('#btnGen').disabled = true; $('#btnGen').title = 'General: precisa de mouse e teclado'; }
 
@@ -59667,7 +59678,7 @@ function rtsMini(g, V) {
   }
 })();
 Net.ui.refused = (f => code => { RTS.want = 0; f(code); })(Net.ui.refused);
-Net.ui.lost = (f => joined => { RTS.want = 0; f(joined); })(Net.ui.lost);
+Net.ui.lost = (f => (joined, idle) => { RTS.want = 0; f(joined, idle); })(Net.ui.lost);
 /* ===== end of the commander's camera ===== */
 /* ---------- the Insurgents and the civilians on the page (ICV, cf-insurgente-civis; NOT TESTED: docs/nao-testado/cf-insurgente-civis.md) ----------
    Defesa tab, only on the Insurgents' side: Recrutar and Saquear (a click on a town: GC.rcr, GC.saq) and each town's sympathy for us, why,

@@ -370,6 +370,8 @@ No hangar, escolha "PvP online", um nome, a época, a classe e o veículo, e ent
 
 Quando o último jogador sai (um F5, por exemplo), a partida fica suspensa, com o relógio parado, por 15 minutos (`SUSPEND=900`, em segundos; `SUSPEND=0` encerra a partida como antes). O hangar mostra então "Continuar", que retoma a partida de onde parou, e "Nova partida", que a descarta. A partida suspensa fica só na memória do servidor: reiniciá-lo a perde.
 
+A batalha roda na página do anfitrião. Uma aba em segundo plano ou minimizada para de simular, mas o navegador ainda responde ao servidor; por isso, um anfitrião que passa 20 s sem mandar nada, com outro jogador na sala, é desligado da sala (`HOSTIDLE=20000`, em ms; `HOSTIDLE=0` desliga essa checagem). O jogador seguinte vira anfitrião e continua a mesma batalha, e a aba parada, quando volta, diz o que houve. Sem isso, uma aba antiga esquecida aberta seguia como anfitriã, e quem jogava recebia "O anfitrião não respondeu." ao pedir veículo e "O anfitrião recusou a obra" ao construir.
+
 - Na rede local: o servidor imprime os endereços `http://IP:8080` ao iniciar.
 - Pela internet: exponha a porta 8080 ou use um túnel, como `cloudflared` ou `ngrok`.
 

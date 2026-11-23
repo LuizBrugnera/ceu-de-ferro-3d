@@ -8,8 +8,9 @@ function start() {
   return new Promise((res, rej) => {
     /* BEAT: a page's first newState holds this one process for seconds (tens on a loaded machine), longer than the relay's 10 s heartbeat, which
        then drops every page already in the room (1006) and empties it before the test begins; the test server's heartbeat is 2 min (an old
-       server.js ignores it) */
-    child = spawn(process.execPath, [SERVER], { env: Object.assign({ HOST: '127.0.0.1', BEAT: '120000' }, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
+       server.js ignores it). HOSTIDLE 0 for the same reason: the pages of a test share this process, and a host page held there by another's
+       newState would be let go as one gone quiet (tests/host-idle.js sets its own) */
+    child = spawn(process.execPath, [SERVER], { env: Object.assign({ HOST: '127.0.0.1', BEAT: '120000', HOSTIDLE: '0' }, process.env, { PORT: String(PORT) }), stdio: ['ignore', 'pipe', 'inherit'] });
     child.stdout.on('data', d => { if (String(d).includes('no ar')) res(); }); child.on('error', rej); setTimeout(() => rej(new Error('server did not start')), 5000);
   });
 }

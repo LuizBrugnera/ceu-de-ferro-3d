@@ -46,7 +46,7 @@ console.log('-- starved (side 1 loses its factories and income; ' + STARVE + ' s
 {
   const C = H.load({ seed: 41, eco: true }), $ = C.$, ECO = $('ECO'), S = C.newState('ww2', $('ERAS').ww2.sides[0].fighter, { cls: 'plane' }), P = probe(C);
   C.run(1);
-  ECO.hq.en = ECO.hq.mt = 0;
+  ECO.hq.en = ECO.hq.mt = ECO.pt.en = ECO.pt.mt = 0;   // no income at all: the HQ's and the points' (ECO.pt)
   const d1 = S.eco.d[1]; d1.en = d1.mt = 0; d1.res = {};
   for (const e of S.eco.l.filter(e => e.team === 1 && !e.dead)) C.ecoDown(e, -1, true);
   C.run(1);

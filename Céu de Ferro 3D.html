@@ -21274,7 +21274,7 @@ const lsBy = (t, by) => { const s = by && by.team; if (lsSide(s) && lsFoe(t, s))
    ecoView(t) shows what side t knows (plain JSON); the mechanical AI (ecoAI) reads the view and acts only by returning commands. The
    controller of a side is S.eco.ctl[t]: ai, me or mcp. ECO.on 0: no S.eco, every hook passes through and draws no random number. No DOM;
    draws no random number except the debris of a site going up. gate 0: units still enter as before and their cost is only recorded (bill) */
-const NECO = 24;   // world-object ids after NDYN: the economy's sites
+const NECO = 40;   // world-object ids after NDYN: the economy's sites (24 before the points' deposits)
 const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start: { en: 400, mt: 400 },
   res0: { squad: 2, truck: 2, tank: 1, aa: 1, fighter: 1, cas: 1 },
   hq: { en: .6, mt: .4, inf: 1, air: 1, def: 1, strat: 1 },
@@ -21289,7 +21289,13 @@ const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start:
     // the strategic strike (STK; NOT TESTED): built one at a time at the HQ's own strategic slot (hq.strat), never in the plan's field; a side has only its own (stkKinds)
     strat: [450, 350, 240, 'strat'], svbied: [180, 260, 150, 'strat', 'modern'], shahed: [240, 160, 150, 'strat', 'modern'] },
   // deposits of side 0's half as map fractions [x / W, z / HW, rich]; side 1's are (W - x, -z)
-  deps: [[.07, -.15, 0], [.20, -.80, 0], [.28, .40, 0], [.42, -.62, 1]], deps2: [[.74, -.68, 0], [.58, -.93, 0], [.82, -.40, 0], [.52, -.50, 1]] /* side 2's, map version 9 with three sides (fractions of the map, not mirrored) */, rich: 1.5, dep: 60, nudge: [40, 400],
+  deps: [[.07, -.15, 0], [.20, -.80, 0], [.28, .40, 0], [.42, -.62, 1]],
+  /* the expansion (cf-economia-expansao): every conquest point but the bases has a deposit of its own, pt.r m from it (pt.nudge as for the
+     others), rich in a town; a mine there only while its side holds the point, beyond ECO.site.mine.max, and with no rule of the front (the
+     point is the anchor). It yields only while its side holds the point, and passes to the side that takes the point (one still being built
+     is lost), and yields pt.out a second (both resources: metal alone piled up at the cap while energy held production back). Each point
+     held (not a base) yields pt.en and pt.mt a second, times 1 + pt.g for every other point held, up to pt.top of them */
+  pt: { r: 230, nudge: [30, 300], out: { en: .25, mt: .35 }, en: .1, mt: .04, g: .08, top: 8 }, deps2: [[.74, -.68, 0], [.58, -.93, 0], [.82, -.40, 0], [.52, -.50, 1]] /* side 2's, map version 9 with three sides (fractions of the map, not mirrored) */, rich: 1.5, dep: 60, nudge: [40, 400],
   hurt: .5, soft: 2, help: .5, reach: 2500, apart: 300, front: 300, foe: 400, road: 500, q: 12, res: 6, refund: .5, scrap: .3, miss: 5,
   boom: [14, 45], ruin: 60, col: { retry: 15 },
   see: { gnd: 1200, man: 500, air: 1800, dr: 600, cov: .5 }, gd: { r: 250, ring: 40, off: 45 },
@@ -21316,7 +21322,7 @@ const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start:
       heli: 'Helicóptero de ataque', lift: 'Helicóptero de transporte', drone: 'Lote de drones',
       strat: 'Bombardeiro estratégico', svbied: 'Caminhão-bomba pesado', shahed: 'Salva de drones kamikaze' },
     why: { map: 'fora do mapa', water: 'na água', steep: 'terreno inclinado', road: 'em cima da estrada', obj: 'obstruído',
-      near: 'perto demais de outra instalação', lot: 'num lote da cidade-sede', far: 'fora do território', front: 'à frente da linha', dep: 'mina só sobre jazida livre',
+      near: 'perto demais de outra instalação', pt: 'jazida de um ponto que não é nosso', lot: 'num lote da cidade-sede', far: 'fora do território', front: 'à frente da linha', dep: 'mina só sobre jazida livre',
       fabroad: 'fábrica precisa de estrada a menos de 500 m', foe: 'inimigo por perto', cap: 'limite deste tipo de instalação',
       q: 'fila cheia', era: 'não existe nesta época', kind: 'tipo desconhecido', id: 'não encontrado',
       unknown: 'instalação inimiga não localizada', ctl: 'este lado não é comandado por este controle', over: 'partida encerrada',
@@ -21375,7 +21381,28 @@ function ecoDeps() {
     }
     out.push({ i: 2 * ECO.deps.length + n, x, z, rich, half: 2 });
   });
+  if (S.cq) for (const p of S.cq.p) {   // the points' deposits (ECO.pt): the first flat dry spot round the point, from a turn of its own
+    if (p.base >= 0) continue;
+    const P = ECO.pt, a0 = p.i * 2.39996; let at = null;
+    for (let r = P.r; !at && r <= P.r + P.nudge[1]; r += P.nudge[0]) for (let k = 0; k < 12 && !at; k++) {
+      const a = a0 + k * TAU / 12, x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+      if (ecoFlat(x, z, 7) && !out.some(q => Math.hypot(q.x - x, q.z - z) < ECO.dep * 2)) at = { x, z };
+    }
+    if (at) out.push({ i: out.length, x: at.x, z: at.z, rich: p.tw ? 1 : 0, half: -1, pt: p.i });
+  }
+  for (const q of out) if (q.pt === undefined) q.pt = -1;
   return out;
+}
+/* the deposit a mine at x z stands on (free of other mines with free), or null */
+const ecoDepAt = (x, z, free) => S.eco.dep.find(q => Math.hypot(q.x - x, q.z - z) <= ECO.dep && (!free || !S.eco.l.some(e => !e.dead && e.k === 'mine' && Math.hypot(e.x - q.x, e.z - q.z) <= ECO.dep))) || null;
+/* the point of a site's deposit (a mine on a point's deposit), or null */
+const ecoPt = e => (e.k === 'mine' && e.dep >= 0 && S.cq && S.eco.dep[e.dep] && S.eco.dep[e.dep].pt >= 0 ? S.cq.p[S.eco.dep[e.dep].pt] : null);
+/* what the points side t holds yield a second (ECO.pt): n points, each worth 1 + g (n - 1), n up to top */
+function ecoPtInc(t) {
+  if (!S.cq) return { en: 0, mt: 0, n: 0 };
+  let n = 0; for (const p of S.cq.p) if (p.base < 0 && p.hold === t) n++;
+  const P = ECO.pt, m = Math.min(n, P.top), k = m * (1 + P.g * Math.max(0, m - 1));
+  return { en: P.en * k, mt: P.mt * k, n };
 }
 /* a site's record and its object, under the id its slot gives it: like addSup. Slot: the first j below NECO with no live record */
 function addEco(id, team, k, x, z, a, prog) {
@@ -21404,7 +21431,7 @@ function ecoSlot() {
 const ecoLive = (t, k) => S.eco.l.filter(e => e.team === t && !e.dead && (!k || e.k === k));
 /* a site's output a second now: halved while damaged, more on a rich deposit, none while it is built */
 function ecoOut(e) {
-  const o = ECO.site[e.k].out, m = e.dead || e.prog < 1 ? 0 : (S.os[e.id] === 1 ? ECO.hurt : 1) * (e.k === 'mine' && e.dep >= 0 && S.eco.dep[e.dep].rich ? ECO.rich : 1);
+  const pt = ecoPt(e), o = pt ? ECO.pt.out : ECO.site[e.k].out, m = e.dead || e.prog < 1 || (pt && pt.hold !== e.team) ? 0 : (S.os[e.id] === 1 ? ECO.hurt : 1) * (e.k === 'mine' && e.dep >= 0 && S.eco.dep[e.dep].rich ? ECO.rich : 1);   // a point's mine: none while its side does not hold the point
   return { en: (o.en || 0) * m, mt: (o.mt || 0) * m };
 }
 /* why side t may not set a site of kind k at x z turned by a: '' or a key of ECO.tx.why, the rules in this order */
@@ -21419,17 +21446,18 @@ function ecoWhy(t, k, x, z, a) {
   const rd = routeDist(S.T, x, z);
   if (onRoadW(x, z, BLD.road + R)) return 'road';
   for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
-  const own = ecoLive(t), lot = ecoLot(t, k, x, z) >= 0;
+  const own = ecoLive(t), lot = ecoLot(t, k, x, z) >= 0, pq = k === 'mine' ? ecoDepAt(x, z, true) : null, pp = pq && pq.pt >= 0 && S.cq ? S.cq.p[pq.pt] : null;   // a point's deposit (ECO.pt)
   if (own.some(e => hdist(e, at) < (lot && e.lot >= 0 ? ECO.lot.apart : ECO.apart))) return 'near';
-  const anchor = lot || hdist(S.base[t], at) < ECO.reach || own.some(e => e.prog >= 1 && hdist(e, at) < ECO.reach) || S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, at) < ECO.reach)
+  if (pp && pp.hold !== t) return 'pt';
+  const anchor = pp || lot || hdist(S.base[t], at) < ECO.reach || own.some(e => e.prog >= 1 && hdist(e, at) < ECO.reach) || S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, at) < ECO.reach)
     || (S.cq && S.cq.p.some(p => p.hold === t && hdist(p, at) < ECO.reach));
   if (!anchor) return 'far';
-  if (ecoDepth(t, x, z) < ECO.front) return 'front';
-  if (k === 'mine' && !S.eco.dep.some(q => Math.hypot(q.x - x, q.z - z) <= ECO.dep && !S.eco.l.some(e => !e.dead && e.k === 'mine' && Math.hypot(e.x - q.x, e.z - q.z) <= ECO.dep))) return 'dep';
+  if (!pp && ecoDepth(t, x, z) < ECO.front) return 'front';
+  if (k === 'mine' && !pq) return 'dep';
   if (k === 'fab' && rd > ECO.road) return 'fabroad';
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < ECO.foe) return 'foe';
   for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < ECO.foe) return 'foe';
-  return own.filter(e => e.k === k).length >= B.max ? 'cap' : '';
+  return !pp && own.filter(e => e.k === k && !ecoPt(e)).length >= B.max ? 'cap' : '';   // the points' mines beyond the cap
 }
 /* the candidates for a site of kind k, the best first: { x, z, a, sc, why }. Deterministic; the scorer the AI uses and ecoAsk hands out */
 function ecoSpot(t, k) {
@@ -21510,7 +21538,7 @@ function ecoStep(dt) {
   for (const s of E.l) if (s.dead && S.t - s.deadT > ECO.ruin) s.gone = true;
   if (E.l.some(s => s.gone)) E.l = E.l.filter(s => !s.gone);
   for (const t of lsN()) {
-    const d = E.d[t], inc = { en: ECO.hq.en * 60, mt: ECO.hq.mt * 60 }, pay = { en: 0, mt: 0 };
+    const d = E.d[t], pi = ecoPtInc(t), inc = { en: (ECO.hq.en + pi.en) * 60, mt: (ECO.hq.mt + pi.mt) * 60 }, pay = { en: 0, mt: 0 };   // the HQ and the points held (ECO.pt)
     for (const s of E.l) if (s.team === t && !s.dead && s.prog >= 1) { const o = ecoOut(s); inc.en += o.en * 60; inc.mt += o.mt * 60; }
     d.inc = inc;
     d.en = Math.min(ECO.cap.en, d.en + inc.en / 60 * e); d.mt = Math.min(ECO.cap.mt, d.mt + inc.mt / 60 * e);
@@ -21575,6 +21603,22 @@ function ecoDown(e, by, quiet) {
   for (let i = 0; i < 4 && S.debris.length < 24; i++) S.debris.push({ k: 'chunk', sz: rand(.6, 1.6), x: e.x + rand(-3, 3), y: e.y + rand(1, 3), z: e.z + rand(-3, 3), vx: rand(-9, 9), vy: rand(6, 14), vz: rand(-9, 9), q: yawQ(rand(0, TAU)), w: { x: rand(-4, 4), y: rand(-2, 2), z: rand(-4, 4) }, drag: .2, h: .5, life: 6 });
   if (!S.demo) { if (t === S.me) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' perdida', life: 3 }); else if (lsSide(S.me) && lsFoe(t, S.me)) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: nm + ' inimiga destruída', life: 3 }); }
 }
+/* a point changes hands (cqFlip, where the economy is simulated): the mines on its deposit pass to the side that took it, one still being built
+   is lost; a point gone neutral keeps its mine, which yields nothing until its side holds the point again (ecoOut) */
+function ecoPtFlip(p) {
+  const E = S.eco; if (!E || !ecoSim() || p.hold < 0) return;
+  const t = p.hold;
+  for (const e of E.l.slice()) {
+    const q = ecoPt(e) === p; if (!q || e.dead || e.team === t) continue;
+    if (e.prog < 1) { ecoDown(e, null, true); continue; }
+    const was = e.team, nm = e.name.toLowerCase(), at = ecoNear(e.x, e.z);
+    ecoClear(e); E.d[was].kn[e.id] = { k: e.k, x: e.x, z: e.z, T: S.t, dead: false, t };
+    e.team = t; e.gd = { inf: 0, aa: 0 }; e.idf = 0; delete E.d[t].kn[e.id];
+    gLog(was, 'eco', 'Perdemos a ' + nm + ' ' + at + ' com o ponto ' + p.L, e); gLog(t, 'eco', 'Tomamos a ' + nm + ' inimiga ' + at + ' com o ponto ' + p.L, e);
+    if (!S.demo && t === S.me) S.floats.push({ x: e.x, y: e.y + 8, z: e.z, text: e.name + ' tomada', life: 3 });
+  }
+}
+cqFlip = (f => (p, was) => { f(p, was); if (S.eco) ecoPtFlip(p); })(cqFlip);
 /* the player's respawn through the reserve (ECO.me): true when it must wait for production. Free by default */
 function ecoMe() {
   if (!ECO.me || !ecoGate()) return false;
@@ -21721,7 +21765,7 @@ function ecoView(t) {
       return { id: e.id, k: e.k, x: ecoR(e.x), z: ecoR(e.z), a: Math.round(e.a * 100) / 100 + 0, prog: Math.round(e.prog * 100) / 100, hp: ecoR(Math.max(0, S.oh[e.id])), max: ECO.site[e.k].hp, out: { en: r1(o.en * 60), mt: r1(o.mt * 60) },
         dep: e.dep, gd: { inf: e.gd.inf, aa: e.gd.aa }, thr: r1(thr(e.x, e.z)), guard: S.men.filter(m => !m.dead && m.team === t && Math.hypot(m.x - e.x, m.z - e.z) < ECO.gd.r).length, aa: aa.filter(u => hdist(u, e) < ECO.gd.r).length }; }),
     foe: Object.keys(d.kn).map(id => { const k = d.kn[id]; return { id: +id, k: k.k, x: ecoR(k.x), z: ecoR(k.z), age: ecoR(S.t - k.T), dead: !!k.dead }; }),
-    dep: E.dep.map(q => ({ i: q.i, x: ecoR(q.x), z: ecoR(q.z), rich: q.rich, own: E.l.some(e => e.team === t && !e.dead && e.k === 'mine' && e.dep === q.i), foe: Object.keys(d.kn).some(id => d.kn[id].k === 'mine' && !d.kn[id].dead && Math.hypot(d.kn[id].x - q.x, d.kn[id].z - q.z) <= ECO.dep) })),
+    dep: E.dep.map(q => ({ i: q.i, x: ecoR(q.x), z: ecoR(q.z), rich: q.rich, pt: q.pt, open: q.pt < 0 || !S.cq || S.cq.p[q.pt].hold === t, own: E.l.some(e => e.team === t && !e.dead && e.k === 'mine' && e.dep === q.i), foe: Object.keys(d.kn).some(id => d.kn[id].k === 'mine' && !d.kn[id].dead && Math.hypot(d.kn[id].x - q.x, d.kn[id].z - q.z) <= ECO.dep) })),
     q: d.q.map(q => ({ id: q.id, k: q.k, at: q.at, p: Math.round(q.p * 100) / 100, why: q.why })), res, keep: Object.assign({}, d.keep), miss: cnt(d.miss), lost: cnt(d.lost),
     sl: d.dead.filter(q => S.t - q[2] < 300).map(q => ({ k: q[3], ago: ecoR(S.t - q[2]) })),
     air: C && C.airT !== undefined ? ecoR(S.t - C.airT) : -1, arm: known.filter(o => !o.man && (tk(o) === 'tank' || tk(o) === 'lav')).length,
@@ -21731,7 +21775,8 @@ function ecoView(t) {
 }
 /* the mechanical general's economy: from the view, ecoAsk and the tables alone, at most two commands, each with its reason. Writes nothing */
 function ecoAI(t, V) {
-  const A = ECO.ai, out = [], ph = V.T < A.at[0] ? 0 : V.T < A.at[1] ? 1 : 2, S0 = V.sites, have = k => S0.filter(s => s.k === k).length, building = k => S0.some(s => (!k || s.k === k) && s.prog < 1);
+  const A = ECO.ai, out = [], ph = V.T < A.at[0] ? 0 : V.T < A.at[1] ? 1 : 2, S0 = V.sites, ptm = s => s.k === 'mine' && s.dep >= 0 && !!V.dep[s.dep] && V.dep[s.dep].pt >= 0;
+  const have = k => S0.filter(s => s.k === k && !ptm(s)).length, building = k => S0.some(s => (!k || s.k === k) && s.prog < 1);   // have: the points' mines apart (ECO.pt)
   const pay = (k, m) => V.stock.en >= A.keep.en + V.costs[k][0] * m && V.stock.mt >= A.keep.mt + V.costs[k][1] * m;
   const build = (k, why) => { const s = ecoAsk(t, { q: 'spots', k })[0]; if (!s) return false; out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: why || s.why }); return true; };
   const rebuilt = k => V.sl.some(s => s.k === k);
@@ -21739,6 +21784,10 @@ function ecoAI(t, V) {
   if (!have('fab') && !V.q.some(q => q.k === 'fab')) did = build('fab', 'sem fábrica, reconstruir é a prioridade');
   if (!did && V.inc.en < ECO.hq.en * 60 + 30 && !building('pow')) did = build('pow', 'energia em falta');
   if (!did && V.inc.mt < ECO.hq.mt * 60 + 30 && !building('mine')) did = build('mine', 'metal em falta');
+  if (!did && !S0.some(s => ptm(s) && s.prog < 1) && V.stock.en >= V.costs.mine[0] && V.stock.mt >= V.costs.mine[1]) {   // the expansion: a mine on the deposit of a point we hold, the one nearest the HQ first
+    const hq = V.hq, free = V.dep.filter(q => q.pt >= 0 && q.open && !q.own && !q.foe).sort((a, b) => Math.hypot(a.x - hq.x, a.z - hq.z) - Math.hypot(b.x - hq.x, b.z - hq.z));
+    for (const q of free) if (!ecoAsk(t, { q: 'why', k: 'mine', x: q.x, z: q.z })) { out.push({ c: 'build', k: 'mine', x: q.x, z: q.z, a: ecoFace(q.x, q.z), why: 'jazida do ponto conquistado ' + ecoNear(q.x, q.z) }); did = true; break; }
+  }
   if (!did && !building()) for (const k of ['fab', 'mine', 'pow']) {
     if (have(k) >= A.want[k][ph] || !pay(k, A.pay)) continue;
     const s = ecoAsk(t, { q: 'spots', k })[0]; if (!s) continue;
@@ -21787,7 +21836,7 @@ function ecoVM(t, all) {
   if (!all) for (const k of V.foe) { const s = E.d[t].kn[k.id]; if (s) sites.push({ x: s.x, z: s.z, t: lsSide(s.t) ? s.t : lsFoes(t)[0], k: s.k, hp: 1, out: 0, prog: 1, dead: !!s.dead, age: k.age }); }
   for (const q of E.dep) {
     const own = E.l.find(e => !e.dead && e.k === 'mine' && e.dep === q.i && (all || e.team === t)), kn = !own && V.dep[q.i].foe ? (E.l.find(e => !e.dead && e.k === 'mine' && e.dep === q.i && e.team !== t) || { team: lsFoes(t)[0] }).team : -1;
-    dep.push({ x: q.x, z: q.z, rich: q.rich, by: own ? own.team : kn });
+    dep.push({ x: q.x, z: q.z, rich: q.rich, by: own ? own.team : kn, pt: q.pt, open: V.dep[q.i].open });   // pt: the point whose deposit it is (-1 none), open: side t may mine it now
   }
   const rows = [], r = ECO.tx.r, n = (k, c) => c + ' ' + (c === 1 ? tx.nm[k].toLowerCase() : tx.pl[k]);
   rows.push({ label: r.en, value: V.stock.en + ' / ' + V.cap.en + ' · +' + V.inc.en + '/min · −' + V.use.en + '/min' });
@@ -22103,7 +22152,7 @@ Net.gq = new Map(); Net.gseq = 0; Net.gn = [0, 0]; Net.gk = [0, 0];
 function ecoRows() {
   const r = [];
   for (const e of S.eco.l) {
-    const k = ESK.indexOf(e.k); if (k < 0 || r.length >= 40) continue;
+    const k = ESK.indexOf(e.k); if (k < 0 || r.length >= 48) continue;   // the relay takes 48 rows
     r.push([e.id, e.team, k, enetR1(e.x), enetR1(e.z), Math.round(e.a * 100) / 100, Math.round(e.prog * 100), Math.ceil(Math.max(0, S.oh[e.id])), e.dead ? 2 : S.os[e.id]]);
     if (e.lot >= 0) r[r.length - 1].push(NSD() > 2 ? e.idf & 255 : e.idf ? 1 : 0);   // a site on a lot: whether the other side has identified it (3 sides: which sides, one bit each)
   }
@@ -44596,9 +44645,12 @@ function gRes(g, V, P) {
   }
   for (const d of E.dep) {
     if (!gOn(P, d.x, d.z, 30)) continue;
-    const x = P.X(d.x), y = P.Y(d.z), s = 5 * k, c = d.by >= 0 ? gCol(V, d.by) : '#8d9693';
+    const x = P.X(d.x), y = P.Y(d.z), s = 5 * k, pt = d.pt >= 0, lock = pt && !d.open && d.by < 0, c = d.by >= 0 ? gCol(V, d.by) : pt && !lock ? gCol(V, V.t) : '#8d9693';
+    if (lock) g.setLineDash([2, 2]);   // a point's deposit (ECO.pt): dashed grey while the point is not ours, in our colour once it is open
     dia(x, y, s); if (d.by >= 0) { g.fillStyle = c; g.fill(); } g.strokeStyle = c; g.lineWidth = 1.3; g.stroke();
     if (d.rich) { dia(x, y, s * 1.6); g.stroke(); }
+    g.setLineDash([]);
+    if (pt && d.by < 0 && !lock) gTxt(g, '+', x, y - s * 1.6, 10 * k, c, 'center');   // a free deposit the expansion opened: a mine can go there now
   }
   for (const e of E.sites) {
     if (!gOn(P, e.x, e.z, 30)) continue;
@@ -45431,7 +45483,7 @@ const gorEco = () => { if (!S.eco) return null; try { return ecoView(S.me); } ca
    logistics, recovery and evacuation */
 function gorProd(V) {
   const E = gorEco(), tac = gorTac(), host = !S.net || S.host, P = host ? (E ? gpView(S.me) : null) : gorQ('plan'), L = S.lg || !host ? (host ? lgView(S.me) : gorQ('logi')) : null, R = S.rec || !host ? (host ? recView(S.me) : gorQ('rec')) : null;
-  const sg = JSON.stringify([!!E, E && [E.q.map(q => [q.id, q.k, q.why, Math.floor(q.p * 10)]), E.res, E.keep, Math.floor(E.stock.en / 10), Math.floor(E.stock.mt / 10), E.sites.map(s => [s.id, s.k, s.gd, Math.floor(s.prog * 10)]), E.dep.map(d => [d.i, d.own, d.foe])],
+  const sg = JSON.stringify([!!E, E && [E.q.map(q => [q.id, q.k, q.why, Math.floor(q.p * 10)]), E.res, E.keep, Math.floor(E.stock.en / 10), Math.floor(E.stock.mt / 10), E.sites.map(s => [s.id, s.k, s.gd, Math.floor(s.prog * 10)]), E.dep.map(d => [d.i, d.own, d.foe, d.open])],
     P && P.kinds && P.kinds.map(k => [k.k, k.field, k.have, k.res, k.q, k.set]), L && L.nodes && L.nodes.map(n => [n.key, n.crates, n.pri, n.inbound, n.tied]), L && L.convoys && L.convoys.length,
     R && R.hulks && R.hulks.map(h => [h.id, h.towed, h.coming]), R && R.wounded && R.wounded.map(w => [w.x, w.n]), R && R.damaged && R.damaged.map(g => [g.x, g.n, g.hp]), R && R.reserve, GOR.bk, GOR.mode, GOR.scrap, tac, S.era]);
   if (GOR.sig.prod === sg) return; GOR.sig.prod = sg;
@@ -45454,8 +45506,9 @@ function gorProd(V) {
       [btn('Inf −', { a: 'def', id: s.id, inf: Math.max(0, s.gd.inf - 1), aa: s.gd.aa }, 'Uma esquadra a menos de guarda'), btn('Inf +', { a: 'def', id: s.id, inf: Math.min(2, s.gd.inf + 1), aa: s.gd.aa }, 'Uma esquadra a mais de guarda (até 2)'),
         btn('AA', { a: 'def', id: s.id, inf: s.gd.inf, aa: s.gd.aa ? 0 : 1 }, 'Antiaérea fixa de guarda: liga ou desliga', !!s.gd.aa),
         btn(GOR.scrap === s.id ? 'Confirmar' : 'Desmontar', { a: 'scrap', id: s.id }, 'Desmontar: devolve parte do custo; irreversível (clique duas vezes)', GOR.scrap === s.id, s.prog < 1)])) : gorNone('Nenhuma instalação'));
-    fill('#gcDepL', E.dep.map(d => gorLi('Jazida ' + d.i + (d.rich ? ' rica' : '') + ' · ' + ecoNear(d.x, d.z) + (d.own ? ' · nossa' : d.foe ? ' · mina inimiga' : ''),
-      d.own || d.foe ? [] : [btn('Reivindicar', { a: 'expand', id: d.i }, 'Uma mina sobre a jazida e uma esquadra de guarda')])));
+    const pn = d => (d.pt >= 0 && S.cq && S.cq.p[d.pt] ? ' · ponto ' + S.cq.p[d.pt].L + (d.open ? ' (nosso)' : ' (fechada: tome o ponto)') : '');   // a point's deposit (ECO.pt): open only while the point is ours
+    fill('#gcDepL', E.dep.map(d => gorLi('Jazida ' + d.i + (d.rich ? ' rica' : '') + ' · ' + ecoNear(d.x, d.z) + pn(d) + (d.own ? ' · nossa' : d.foe ? ' · mina inimiga' : ''),
+      d.own || d.foe ? [] : [btn('Reivindicar', { a: 'expand', id: d.i }, d.open === false ? 'Jazida de um ponto que não é nosso: tome o ponto para minerar' : 'Uma mina sobre a jazida e uma esquadra de guarda', false, d.open === false)])));
   }
   if (P && P.kinds) {
     $('#gcPlanN').textContent = 'Postura: ' + (P.stance || '') + ' · população ' + P.use.men + '/' + P.pop.men + ' homens, ' + P.use.veh + '/' + P.pop.veh + ' veículos, ' + P.use.air + '/' + P.pop.air + ' aeronaves';

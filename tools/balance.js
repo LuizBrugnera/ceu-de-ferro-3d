@@ -40,7 +40,14 @@
    a string), kept in the header's tour.set: the A×B of a package with its own switch is two tournaments on the same seeds, one with each
    value, each with --json, and the second with --ref the first's (cf-g2-g7-urbano: --set URB.on=0 and --set URB.on=1).
    The town (URBANO, G7 of cf-ia-opensource): every review with the meters of CEREBRO: urbano-medicao (the cb events st urb) adds a section
-   Urbano, the measures beside their targets (the page's own urbSum and urbRows), with --ref the same from an earlier --json. */
+   Urbano, the measures beside their targets (the page's own urbSum and urbRows), with --ref the same from an earlier --json.
+   The General 2's yardstick (G0, cf-g2-g0-regua): every review with the page's GENERAL 2: régua (the g2 events) adds a section "General 2:
+   régua dos exemplos", the captain's examples in numbers beside the target of the package that answers each (the page's g2Sum and g2Rows,
+   and the manoeuvre's flank, entropy and repetition), with --ref the same from an earlier --json (tools/ref/general2-base.json is today's
+   general, the reference every package of the General 2 compares against). --g2 0|1 plays the tournament with G2R.on set so (0: the
+   match as it was before the yardstick, to compare); --combates <file> writes every combat the matches recorded (the g2c events, one JSON a
+   line, with its match), the logs G2 calibrates its simulation with.
+     node tools/balance.js --torneio 12 --era all --len 0 --eco --lg --rec --nobudget --mapv 6 --seed 1 --json file [--ref tools/ref/general2-base.json] */
 const fs = require('fs'), path = require('path'), zlib = require('zlib'), crypto = require('crypto'), { fork } = require('child_process'), os = require('os');
 const H = require(path.join(__dirname, '..', 'tests', 'harness.js'));
 const ROOT = path.join(__dirname, '..'), DIR = process.env.ANA_DIR ? path.resolve(process.env.ANA_DIR) : path.join(ROOT, 'data', 'matches');
@@ -64,6 +71,8 @@ function args(a) {
     else if (k === '--nobudget') o.nobudget = true;
     else if (k === '--ref') o.ref = path.resolve(v());
     else if (k === '--brain' || k === '--cerebro') o.brain = String(v());
+    else if (k === '--g2') o.g2 = String(v());
+    else if (k === '--combates' || k === '--combats') o.combats = path.resolve(v());
     else if (k === '--mapv') o.mapv = +v();
     else if (k === '--seed') o.seed = +v();
     else if (k === '--jobs') o.jobs = +v();
@@ -76,6 +85,7 @@ function args(a) {
   }
   if (!(o.sides === 2 || o.sides === 3)) o.sides = 2;
   if (o.brain !== undefined && !['0', '1', 'ab'].includes(o.brain)) throw new Error('--brain 0, 1 ou ab');
+  if (o.g2 !== undefined && !['0', '1'].includes(o.g2)) throw new Error('--g2 0 ou 1');
   if (o.difL) { const d = o.difL; o.dif = Array.from({ length: o.sides }, (_, i) => d[i] || d[d.length - 1] || 'normal'); delete o.difL; }
   return o;
 }
@@ -110,6 +120,7 @@ function playOne(m) {
   if (m.nobudget) C.$('AIB').now = () => 0;
   if (m.brain === 0 || m.brain === 1) C.$('BRAIN').on = m.brain;
   if (m.set) for (const [k, v] of Object.entries(m.set)) C.$(k + ' = ' + JSON.stringify(v));   // --set: a page's switch, before the match
+  if (m.g2 === 0 || m.g2 === 1) C.$('G2R').on = m.g2;
   const S = C.watch(m.era, { doc: m.doc, per: m.per, dif: m.dif, len: m.len || 0, min: m.min, n: m.n > 2 ? m.n : undefined });
   if (m.n > 2 && S.N !== m.n) throw new Error('a página não montou ' + m.n + ' lados (S.N = ' + S.N + '): falta a fundação de N lados ou a era não aceita');
   const lim = S.cq.T0 + 120, t0 = Date.now(), AIB = C.$('AIB'), K = { n: 0, gen: 0, genWorst: 0, avg: 0, worst: 0 };
@@ -119,7 +130,7 @@ function playOne(m) {
     return !S.over;
   });
   const ANA = C.$('ANA'), ev = ANA.ev.slice(), h = ev.find(e => e.k === 'hdr'), r2 = v => Math.round(v * 100) / 100;
-  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain }, m.set && { set: m.set },
+  if (h) h.tour = Object.assign({ id: m.tour, seed: m.seed, min: m.min || null, n: m.n || 2 }, m.nobudget && { nobudget: 1 }, (m.brain === 0 || m.brain === 1) && { brain: m.brain }, (m.g2 === 0 || m.g2 === 1) && { g2: m.g2 }, m.set && { set: m.set },
     K.n && { aib: { gen: r2(K.gen / K.n), genWorst: r2(K.genWorst), avg: r2(K.avg / K.n), worst: r2(K.worst), n: K.n } });
   return { file: save(m.save, m.era, ev, 'tourney'), over: S.over, t: Math.round(S.t), wall: Math.round((Date.now() - t0) / 1000) };
 }
@@ -142,6 +153,7 @@ function plan(o) {
   const tour = crypto.randomBytes(4).toString('hex'), out = [];
   for (let i = 0; i < o.n; i++) out.push({ tour, n, era: eras[Math.floor(i / pairs.length) % eras.length], doc: o.pers ? null : pairs[i % pairs.length], per: o.pers ? pairs[i % pairs.length] : null, dif: o.dif || null, seed: (o.seed || 1) + i, min: o.min, len: o.len || 0, eco: o.eco, lg: o.lg, rec: o.rec, nobudget: o.nobudget, mapv: o.mapv, save: o.save || DIR, set: o.set || null });
   if (o.brain === '0' || o.brain === '1') for (const m of out) m.brain = +o.brain;
+  if (o.g2 === '0' || o.g2 === '1') for (const m of out) m.g2 = +o.g2;
   if (o.brain === 'ab') return [...out.map(m => Object.assign({}, m, { brain: 0 })), ...out.map(m => Object.assign({}, m, { brain: 1 }))];   // the same matches, off then on
   return out;
 }
@@ -322,6 +334,36 @@ function abPrint(C, A, B, ra, rb) {
   }
   return L.join('\n');
 }
+/* the General 2's yardstick over many reviews (R.g2): each side's additive record added up (the page's g2Sums), then the page's g2Sum; null without any */
+function g2(C, reps) {
+  const R = reps.filter(r => r.g2 && Array.isArray(r.g2.side) && r.g2.side.some(Boolean)); if (!R.length) return null;
+  const F = {};
+  for (const r of R) for (const x of r.g2.side) if (x && x.f) C.$('g2Sums')(F, x.f);
+  return { n: R.length, v: [...new Set(R.map(r => r.g2.v))], cb: R.reduce((a, r) => a + (r.g2.cb || 0), 0), f: F, sum: C.$('g2Sum')(F, R.length) };
+}
+/* the yardstick's section: the page's rows, then the manoeuvre's (flank, entropy, repetition: M0's, the targets of G4), each beside its
+   target; with ref (an earlier --json: its g2 worked out again from its record, and its mano) a last column */
+function g2Print(C, G, mano, ref) {
+  const rg = ref && ref.g2 ? C.$('g2Sum')(ref.g2.f, ref.g2.n) : null, R = rg ? C.$('g2Rows')(rg) : null;
+  const L = ['', '## General 2: régua dos exemplos', '', G.n + ' partidas com a régua do General 2 (os dois lados somados; uma contagem é por partida, uma porcentagem junta todas' + (ref && ref.g2 ? '; referência: ' + ref.g2.n + ' partidas' : '') + '). ' + G.cb + ' combates registrados para a calibração do G2.'];
+  L.push('', '| Medida | Valor | Meta (pacote) |' + (R ? ' Referência |' : ''), '| --- | --- | --- |' + (R ? ' --- |' : ''));
+  C.$('g2Rows')(G.sum).forEach((r, i) => L.push('| ' + r.join(' | ') + ' |' + (R ? ' ' + R[i][1] + ' |' : '')));
+  const mr = M => (M ? [['Taxa de flanco: amostras de chegada a 70° ou mais do eixo (só assaltos)', pc(M.flank) + ' (' + pc(M.flankAtk) + ')', '≥ ' + pc(MANO.goal.flank) + ' (G4)'],
+    ['Entropia das chegadas (bits)', f1(M.ent), '+' + MANO.goal.ent + ' bit sobre a referência'], ['Repetição: mesmo objetivo, eixo e lado de chegada do assalto anterior', pc(M.rep), 'metade da referência']] : null);
+  const a = mr(mano), b = ref ? mr(ref.mano) : null;
+  if (a) a.forEach((r, i) => L.push('| ' + r.join(' | ') + ' |' + (R ? ' ' + (b ? b[i][1] : '—') + ' |' : '')));
+  return L.join('\n');
+}
+/* every combat of the matches read (the g2c events), with its match: one JSON a line */
+function combats(list) {
+  const out = [];
+  for (const f of list) {
+    let ev; try { ev = readMatch(f); } catch (e) { continue; }
+    const h = ev.find(e => e.k === 'hdr') || {}, id = path.basename(f).replace(/\.ndjson\.gz$/, ''), tour = h.tour || {};
+    for (const e of ev) if (e.k === 'g2c') out.push(JSON.stringify(Object.assign({ match: id, era: h.era || '', doc: h.doc || null, seed: tour.seed === undefined ? null : tour.seed }, e)));
+  }
+  return out;
+}
 async function main() {
   const o = args(process.argv.slice(2));
   if (o.one) { const r = playOne(o.one); if (process.send) process.send(r); else console.log(JSON.stringify(r)); return; }
@@ -337,6 +379,8 @@ async function main() {
   if (ref && ref.ab) ref = ref.a;   // an A×B's --json: its half with the brain off is the reference
   A.brain = brain(C, real); if (AL) AL.brain = brain(C, loc);
   A.urb = urb(C, real); if (AL) AL.urb = urb(C, loc);
+  A.g2 = g2(C, real); if (AL) AL.g2 = g2(C, loc);
+  if (o.combats) { const l = combats(real.map(r => r.file)); fs.writeFileSync(o.combats, l.join('\n') + (l.length ? '\n' : '')); console.log('Combates: ' + l.length + ' em ' + o.combats); }
   if (o.brain === 'ab') {   // the A×B: the two halves of the tournament by the brain each match was played with
     const arm = v => real.filter(r => (r.tour && r.tour.brain !== undefined ? r.tour.brain : r.brain ? r.brain.on : null) === v), ra = arm(0), rb = arm(1);
     const X = Object.assign(aggregate(ra), { brain: brain(C, ra) }), Y = Object.assign(aggregate(rb), { brain: brain(C, rb) });
@@ -344,10 +388,10 @@ async function main() {
     if (o.json) fs.writeFileSync(o.json, JSON.stringify({ ab: 1, tour: { n: o.n, era: o.era || 'all', min: o.min || null, nobudget: !!o.nobudget, mapv: o.mapv || 4, seed: o.seed || 1 }, a: Object.assign({ files: ra.map(r => r.file) }, X), b: Object.assign({ files: rb.map(r => r.file) }, Y) }, null, 1));
     return;
   }
-  console.log(print(A, title, ref) + (A.brain ? brainPrint(C, A.brain, ref && ref.brain) : '') + (A.urb ? urbPrint(C, A.urb, ref && ref.urb) : ''));
-  if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)', ref) + (AL.brain ? brainPrint(C, AL.brain, ref && ref.brain) : '') + (AL.urb ? urbPrint(C, AL.urb, ref && ref.urb) : ''));
-  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: mapvOf(o.mapv, o.sides), seed: o.seed || 1, set: o.set || null } : null;
+  console.log(print(A, title, ref) + (A.brain ? brainPrint(C, A.brain, ref && ref.brain) : '') + (A.g2 ? g2Print(C, A.g2, A.mano, ref) : '') + (A.urb ? urbPrint(C, A.urb, ref && ref.urb) : ''));
+  if (AL) console.log('\n' + print(AL, title + ' (partidas locais: solo ou espectador, fora do total acima)', ref) + (AL.brain ? brainPrint(C, AL.brain, ref && ref.brain) : '') + (AL.g2 ? g2Print(C, AL.g2, AL.mano, ref) : '') + (AL.urb ? urbPrint(C, AL.urb, ref && ref.urb) : ''));
+  const tour = o.n > 0 ? { brain: o.brain === undefined ? null : +o.brain, g2: o.g2 === undefined ? null : +o.g2, n: o.n, sides: o.sides || 2, era: o.sides === 3 ? 'modern' : o.era || 'all', docs: o.docs || null, pers: o.pers || null, dif: o.dif || null, min: o.min || null, len: o.len || 0, eco: !!o.eco, lg: !!o.lg, rec: !!o.rec, nobudget: !!o.nobudget, mapv: mapvOf(o.mapv, o.sides), seed: o.seed || 1, set: o.set || null } : null;
   if (o.json) fs.writeFileSync(o.json, JSON.stringify(Object.assign({ files: real.map(r => r.file), local: AL && Object.assign({ files: loc.map(r => r.file) }, AL) }, tour && { tour }, A), null, 1));
 }
 if (require.main === module) main().catch(e => { console.error(e.stack); process.exit(1); });
-module.exports = { srcOf, aggregate, readMatch, files, save, plan, tuples, playOne, print, mano, manoPrint, brain, brainRef, brainPrint, urb, urbPrint, abPrint, ALERT, MANO };
+module.exports = { srcOf, aggregate, readMatch, files, save, plan, tuples, playOne, print, mano, manoPrint, brain, brainRef, brainPrint, urb, urbPrint, abPrint, g2, g2Print, combats, ALERT, MANO };

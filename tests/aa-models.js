@@ -2,7 +2,9 @@
 /* the anti-aircraft vehicles' models (AAB, cf-pol-modelos) against their hit boxes (AAGEO): every AA vehicle has a model of its own, its
    pieces filed under the damage parts damageLook darkens (hull, wheels, engine, weapon, sensor, and the modern ones' apu), nothing of the
    hull under the ground or outside the vehicle's box (env), and the guns, the launchers and the radars where their hit boxes are (gunL,
-   gunR, radarS, sightW), so a shot that hits the guns is seen hitting the guns. Run against a kit that records each piece (tests/vk-kit.js) */
+   gunR, radarS, sightW), so a shot that hits the guns is seen hitting the guns. The search radars that turn (RADAR: the Pantsir's and the
+   NASAMS's) are on a node of their own (K.radar) on the turret, the radar's pieces about its axis, and none of the rest on it. Run against
+   a kit that records each piece (tests/vk-kit.js) */
 const H = require('./harness'), { ok, done } = H, { blocks, kit, node, at } = require('./vk-kit');
 console.log('page: ' + H.PAGE);
 const AAB = blocks('AAB');
@@ -29,5 +31,9 @@ for (const id of Object.keys(AAS)) {
     ok(hit.length > 0, 'the ' + pid + ' drawn where the hit box ' + k + ' is (' + B.slice(0, 3).join(', ') + ')');
   }
   ok(Math.max(...P.filter(p => p.pid === 'weapon').map(p => W(p)[0] + p.hx)) > tur.position.x + 1.5, 'the guns point ahead of the turret');
+  if (mod && (id === 'pantsir' || id === 'nasams')) {   // the search radar that turns: its own node on the turret, its pieces about the axis, all of them sensor
+    const on = K.rd ? P.filter(p => p.to === K.rd) : [];
+    ok(K.rd && K.rd.on === tur && on.length >= 2 && on.every(p => p.pid === 'sensor' && Math.abs(p.x) + Math.abs(p.z) < .3), '  its search radar turns: ' + on.length + ' pieces on its own node on the turret, about its axis');
+  } else ok(!K.rd, '  no turning radar');
 }
 done();

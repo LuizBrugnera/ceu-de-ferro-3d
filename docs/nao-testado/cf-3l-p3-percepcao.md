@@ -4,5 +4,5 @@ Testado (cf-pol-testes-a, `tests/sides3.js`, partida de 3 lados): um veículo do
 
 ## O que falta
 
-- A equivalência com 2 lados pelas suítes de hoje: `perception.js`, `seat.js`, `forts.js`, `sappers.js`, `comms.js`, `general.js`, `gen-cmd.js` (não rodaram: a máquina estava dividida, um processo pesado por vez).
+- A equivalência com 2 lados pelas suítes de hoje (rodadas 2 e 3): `seat.js` e `sappers.js` passam depois de consertar os testes (o `seat` comparava as casas do mapa 4 em JSON exato e um arredondamento de 10⁻¹² m as mudava; o `sappers` esperava os kits de sapador por último nas linhas da IA, e depois deles entraram os dos Insurgentes e os médicos, sem mudar os números antigos); `forts.js` falha igual no `main` (esquadras fora das trincheiras dos postos: 8 falhas no `main`, 5 aqui); `comms.js` passou o que coube em 420 s. Faltam `perception.js`, `general.js` e `gen-cmd.js`.
 - Leitores de `seenT`/`sx`/`sz` sem o lado (por exemplo `MSL.seen`, o HUD de quem assiste) com 3 lados: ninguém procurou vazamento numa partida longa.

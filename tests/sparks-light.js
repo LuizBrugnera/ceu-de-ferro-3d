@@ -28,7 +28,9 @@ console.log('-- the fragment shader: what glows stays, the rest is lit and hazed
 {
   const fsrc = html.slice(fa, fb);
   const has = s => fsrc.includes(s);
-  ok(has('float lit = step(vc.r, 0.98);') && has('vec3 c = mix(vc.rgb, vc.rgb * amb, lit);') && has('c = mix(c, fC, smoothstep(fN, fF, vd) * lit);'), 'the colour: lit by amb and hazed unless red is full');
+  ok(has('float lit = step(vc.r, 0.98);') && has('vec3 c = mix(vc.rgb, vc.rgb * amb * sh, lit);') && has('c = mix(c, fC, smoothstep(fN, fF, vd) * lit);'), 'the colour: lit by amb (and the sun, sh) and hazed unless red is full');
+  /* cf-pol-graficos 3: the lit ones are shaded as balls by the sun, sunK of it; with no sun (night, rain) sh is 1, the light as before */
+  ok(/float sh = mix\(1\.0, [^;]*vSun[^;]*, sunK\);/.test(fsrc), 'the sun shades them as balls, none of it at sunK 0');
   /* the same lines in JS */
   const sstep = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
   const shade = (rgb, amb, d, fN, fF, fC) => { const lit = rgb[0] <= .98 ? 1 : 0, c = rgb.map(v => v + (v * amb - v) * lit), f = sstep(fN, fF, d) * lit; return c.map((v, i) => v + (fC[i] - v) * f); };
@@ -40,7 +42,7 @@ console.log('-- the fragment shader: what glows stays, the rest is lit and hazed
   /* every colour the page gives the sparks: the glowing kinds full red, the rest not */
   const s0 = html.indexOf('let k = 0; const pp = sparks.geometry'), s1 = html.indexOf('tracers.geometry.setDrawRange', s0), src = html.slice(s0, s1);
   const sets = [...src.matchAll(/pc\.set\((?:[^[]*\?\s*)?\[([^\]]*)\]/g)].map(m => +m[1].split(',')[0]);
-  const glow = /'fire'\) \{ pc\.set\(\[1,|'flash'\) \{ pc\.set\(\[1,/.test(src) && /pc\.set\(\[1, \.55, \.18, \.8, 1, \.93, \.7, 1\]/.test(src), smoke = /'smoke'\) \{ pc\.set\(\[\.2,/.test(src);
+  const glow = /'fire'\) \{ pc\.set\(\[1,|'flash'\) \{ pc\.set\(\[1,/.test(src) && /pc\.set\(\[1, \.55, \.18, \.8, 1, \.93, \.7, 1\]/.test(src), smoke = /'smoke'\) \{[^]*?pc\.set\(\[\.2, \.2, \.19,/.test(src);
   ok(sets.length > 8 && glow && smoke, 'fire, flash and flame full red, smoke grey (' + sets.length + ' colours read)');
 }
 done();

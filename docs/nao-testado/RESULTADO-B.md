@@ -4,6 +4,27 @@ Tarefa `cf-pol-testes-b` (2026-11-20/21). A metade B vai de `cf-m0-medicao.md` a
 documento rodei o que ele dizia que faltava: no navegador, em exercício sem tela ou com `tests/`. Anotei se passou ou falhou, consertei o que
 falhou fora das seções do general e do cérebro (outra frente as reescreve), e encurtei o documento.
 
+## Resumo
+
+- **60 documentos** da metade B, em 5 lotes e 5 PRs (#176, #179, #182, #189 e o do lote 5). 15 `cf-pol-*` entraram no meio, quando o main
+  os trouxe. **Ficaram de fora** 18 documentos que outras frentes de polimento escreveram enquanto o lote 5 rodava (entraram no main às
+  06:15 de 2026-11-21): `cf-pol-armas-*` (7), `cf-pol-cenario-chao`, `cf-pol-fluxos`, `cf-pol-graficos-2` e `cf-pol-modelos-` aerodromos,
+  apoio, asas, bandeiras, obras, pedras, radares e rodas-redondas. Nenhum documento foi apagado: em todos sobrou algo que não deu para testar (online com dois navegadores, partidas longas,
+  torneios A/B). Cada um ganhou no alto uma seção "Testado em …" com o que passou, o que falhou e o que continua sem teste.
+- **Consertos com teste focado** (todos fora das seções do general e do cérebro):
+  - mapa de tiro: rótulos de inimigos agrupados ("CC ×3 · CM") e sem aviões não vistos (`tests/map-tags.js`);
+  - "parado primeiro" da analytics, só teste (`tests/ana-parado.js`);
+  - cabine do jato e distâncias de aviões no HUD; nomes de vila em dobro no mapa do General: achados aqui, consertados em paralelo pelo
+    cf-pol-hud, com os testes daqui (`tests/hud-labels.js`, `tests/town-names.js`);
+  - `approaches`/`procedures` ajustados ao pelotão (P8): a hora H roda com `PEL.on = 0`;
+  - arma em 1ª pessoa: o pente solto do Kar98 e a luneta flutuando (`tests/pack-cut.js`);
+  - capim no fundo das trincheiras (`tests/trench-grass.js`);
+  - a mensagem da Visão de General acima do limite do servidor, e a visão do convidado parando (`tests/gen-cap.js`).
+- **Achados para a frente do general e do cérebro** (não mexi, estão nos lotes abaixo): a reunião do assalto não substitui a esquadra
+  perdida nem segue com 2 de 2 (`approaches`); `man-c` cai com TypeError; o médico de outra esquadra não vem ao ouvir "Médico!"
+  (`brain-medico`, `brain-drills`); `CEREBRO: defesa` lê `S.units` fora da percepção (`brain-honesty`); o serviço de posição (P2) custa
+  2,5 ms por consulta no navegador.
+
 ## Condições da máquina
 
 - A conta inteira tem 12 núcleos (`cpu.max` do `user-1002.slice`) e 24 GB. Outras frentes rodavam torneios ao mesmo tempo, e o kernel
@@ -99,3 +120,53 @@ falhou fora das seções do general e do cérebro (outra frente as reescreve), e
 | cf-pontes-construir | parte: um pontão num trecho do rio, pronto, tracejado no mapa e na cena. |
 | cf-pontes-qualquer-lugar | ok (parte): a ponte nova pronta, contínua no mapa, com lajes, pilares e parapeitos na cena. |
 | cf-popk-medidor | ok (parte): em sobrecarga, o teto desce 10% a cada 10 s com os números no diário. |
+
+### Lote 4, depois do PR #189
+- `brain`: parado por mim aos 62 min (rc 143) na última parte, depois de anotar o resultado (7 ok, 1 falha de custo).
+
+## Lote 5 (cf-proc-veiculos … cf-zoom-veiculos, e os 6 `cf-pol-modelos-*` que o main trouxe)
+
+| Documento | Resultado |
+| --- | --- |
+| cf-proc-veiculos | ok (parte): em 3 min de partida, 13 procedimentos disparam pelo que cada unidade percebe (comboio, radar-silencio, passe, cidade, aereo-v…). |
+| cf-radio-general | **conserto**: `radio-general` passa. O `radio` mostrou a mensagem da Visão de General a 8.867 bytes (limite do servidor 8.192), que o servidor descarta calado e a visão do convidado para; a maior parte eram as posições de defesa (`dfp`). `genMsg` corta as camadas opcionais maiores primeiro (`tests/gen-cap.js`). `gen-relay` passa. |
+| cf-radio-rede | ok (parte): a IA ergueu uma antena sozinha; o mastro na cena e no mapa. |
+| cf-recursos-vermelho | ok (parte): a faixa da economia dos Aliados no Assistir; jogando, a faixa do inimigo some (névoa). |
+| cf-reparo-ambulancia | ok (parte): a ambulância levanta um caído e sara um ferido; o caminhão de reparo conserta um NASAMS (20 → 39 de 50 em 10 s); a Kfz. 31 no hangar e numa partida. |
+| cf-respawn-aviao | ok (parte): `respawn-air` passa inteiro sobre o main de hoje. |
+| cf-sede-ataque-defesa | parte: a sede inimiga localizada e o reconhecimento no diário. |
+| cf-slots-arma | ok (parte): as teclas 3/4/5 passam pelos itens do Plantador de IED e do Homem-bomba (colete armado com a dica no HUD). |
+| cf-tanque-casa | ok (parte): o Tiger atravessa uma casa (estágio 1) e segue. |
+| cf-tecla-mapa | ok (parte): M abre e fecha o mapa da batalha numa partida de verdade, em 1920 px. |
+| cf-trincheiras-tuneis | **conserto**: capim nascia no fundo da trincheira cavada (56 tufos numa, 0 depois). `tests/trench-grass.js`. |
+| cf-vbied | ok (parte): 5 antes de armar avisa; depois detona com cratera. |
+| cf-w11-guest-trust | ok: `logistics-online` passa inteiro, com as recusas do W11. |
+| cf-zoom-veiculos | ok (parte): R passa de fora para ×2, ×4 e volta, suave; na ZPU-4 os canos não tampam a mira. |
+| cf-pol-modelos-maos, -medico, -lod, -sombras | ok (parte): mãos no fuzil, braçadeira, troca de LOD com histerese (400/450 m), mancha deitada na encosta. |
+| cf-pol-modelos-shilka | parte: a partida começa na Shilka; no hangar, achado o carrossel espremido (abaixo). |
+| cf-pol-modelos-cabines | não testado aqui. |
+
+**Conserto no hangar** (cf-pol-hud): a 1280×713 com uma partida suspensa, o carrossel encolhia a 132 px e o veículo escolhido ficava
+embaixo do próprio nome. A nota e "Nova partida" agora dividem uma linha em tela baixa (`tests/hangar-short.js`; carrossel de 132 para 180 px).
+
+Suítes deste lote: `respawn-air`, `radio-general`, `logistics-online`, `gen-cap`, `gen-relay` passam. `radio`: 55 ok e 3 falhas (2 de custo
+com a máquina cheia, e a da mensagem acima, consertada). `comms`: as seções medidas passam, com a mensagem a 8.175 bytes (perto do limite:
+mais um motivo para o `genMsg`). `gen-online`: 1 falha ("its map has squads with their job tags": o mapa do convidado sem esquadras), **igual na página de antes**
+(c397126): não é do `genMsg`; a maior mensagem foi 4.781 bytes e nada foi cortado. Fica para quem cuida do online.
+Não rodaram por falta de tempo: `sede`, `rec`, `veh-drills`, `ram`, `transport`. `logistics`: parado por mim depois de 1 h, na partida
+inteira do fim; antes dela 45 ok e 1 falha já conhecida no main (as caixas do caminhão parado tomadas por um soldado inimigo).
+
+## Lote 6 (os 18 `cf-pol-*` que chegaram às 06:15), parado pelo prazo
+
+Comecei às 06:30 e parei às 09:00Z, no prazo da tarefa. Feito nos 9 primeiros (`cf-pol-armas-*`, `cf-pol-cenario-chao`, `cf-pol-fluxos`):
+
+| Suíte | Resultado |
+| --- | --- |
+| `arma-1p`, `hurt`, `tracers`, `hitmarker`, `som`, `ground-mesh`, `fluxos` | passam (22, 14, 8, 19, 52, 29, 30 ok) |
+| `state-gc` | 1 falha: a preparação não encheu o cache `HONU`, então a checagem do vazamento não mede nada (anotado em `cf-pol-fluxos.md`) |
+
+No navegador: a arma em 1ª pessoa em movimento (clarão por quadro, cápsulas no ar, a do ferrolho atrasada) e de noite; 58 traçantes no ar
+numa partida noturna. O que é "de ouvido" (motores, volumes, tique do acerto) não dá para julgar sem som e fica como estava.
+
+**Não testados** (nem começados): `cf-pol-graficos-2` e `cf-pol-modelos-` aerodromos, apoio, asas, bandeiras, obras, pedras, radares e
+rodas-redondas.

@@ -123,6 +123,28 @@ console.log('-- P4, P6a, P7: the faction --');
   const old = S.E.sides[2].aaOld, aa2 = S.units.filter(u => u.team === 2 && old.includes(u.id));
   ok(aa2.length >= 1 && !S.units.some(u => u.team === 2 && u.kind === 'aa'), 'the Insurgents\' anti-air is their old guns on technicals (cf-insurg-antiaerea): ' + aa2.map(u => u.id).join(', '));
   ok(!H.nan(S), 'no NaN after ' + Math.round(S.t) + ' s of three sides');
+  /* with the conquest's front on a road a side has no end of (the front S.cq.fr is one road for the match), what a side places goes on its own
+     roads: the commander's anti-air requisition (cmdReq: the Insurgents' came on road 0, at the USA's base), the posts of dispersed teams
+     (postDisp), the next supply base (aiSite), a helicopter's holding point (heliHold) */
+  const fr0 = S.cq.fr; S.cq.fr = 4;   // R_RI: Russia's and the Insurgents', not the USA's
+  const okRd = (t, ri) => $('myRoutes')(t).includes(ri);
+  const C2 = S.cmd[2], res = () => { S.eco.d[2].res.aa = ['hq', 'hq']; S.cq.rq[-3] = 0; C2.airT = S.t; C2.rqT = 0; }; res(); const n0 = S.units.length; $('cmdReq')(C2);   // two in its reserve, as if made
+  const aa = S.units.slice(n0).filter(u => u.team === 2 && u.rqa);
+  ok(aa.length > 0 && aa.every(u => okRd(2, u.ri)), 'the Insurgents\' anti-air requisition comes on one of their roads (' + aa.map(u => u.id + ' road ' + u.ri).join(', ') + ')');
+  S.cq.fr = 0; res(); const n1 = S.units.length; $('cmdReq')(C2);
+  const aaB = S.units.slice(n1).filter(u => u.team === 2 && u.rqa);
+  ok(aaB.length > 0 && aaB.every(u => okRd(2, u.ri)), 'and with the front on road 0 too (' + (aaB.map(u => u.id + ' road ' + u.ri).join(', ') || 'none drawn') + ')');
+  S.cq.fr = 3;   // R_EI: the USA's and the Insurgents', not Russia's
+  const posts = [0, 1, 2, 3].map(k => $('postDisp')(1, 'rec', k));
+  ok(posts.every(o => okRd(1, o.ri)), 'Russia\'s dispersed teams take its own roads (' + posts.map(o => o.ri) + ')');
+  S.cq.fr = 4;
+  const site = $('aiSite')(2);
+  ok(!site || okRd(2, site.ri), 'side 2\'s next supply base site: ' + (site ? 'road ' + site.ri : 'none needed'));
+  const hp = { team: 0, seed: 1 }, hh = $('heliHold')(hp), hr = $('railOf')(hh.x, hh.z);
+  ok(Math.hypot(hh.x - S.base[0].x, hh.z - S.base[0].z) < Math.hypot(hh.x - S.base[2].x, hh.z - S.base[2].z), 'a USA helicopter holds behind its own line, nearer its base than the Insurgents\' (road ' + hr.ri + ')');
+  S.cq.fr = fr0;
+  const big = [0, 1, 2].map(t => JSON.stringify($('genAnswer')(t, { q: 'state' }).r).length);
+  ok(big.every(n => n <= 16384), 'the state each side\'s MCP general asks for fits the relay\'s 16 KB for gres (' + big.join(', ') + ' bytes; the Insurgents\' passed 23 KB and never arrived)');
   /* the general's view of side 2 (the Insurgents' player opens it with Tab): every side's points, and its ticket trend drew the clock column */
   const V2 = C.genVM(2, true);
   ok(V2.held.length === 3 && V2.f.length === 3, 'the general\'s view of side 2: the points (' + V2.held + ') and a tally of the three sides');
@@ -147,6 +169,17 @@ console.log('-- P6b, P6c: the general\'s helpers --');
   ok(n2 > 0 && inMap === n2, 'side 2\'s search points (' + n2 + ') all inside the map');
   const p = $('lsRail')(2, B[2].x + 200, B[2].z + 200);
   ok([3, 4].includes(p.ri), 'side 2 measures depth on its own roads (lsRail gives road ' + p.ri + ')');
+}
+
+{
+  /* P6c: the convoy lost and the load taken credit the side that did it, with three sides (lgLost by lastBy, lgGrab by the taker's side) */
+  const B = S.base, L = S.glog.l, n0 = L.map(l => l.length), since = t => L[t].slice(n0[t]).map(e => e.s);
+  $('lgLost')({ team: 0, lgc: 40, x: B[0].x + 3000, z: B[0].z, hitT: S.t, lastBy: { team: 1 } });
+  ok(since(0).some(m => /Comboio perdido/.test(m)) && since(1).some(m => /Comboio inimigo destruído/.test(m)) && !since(2).some(m => /Comboio/.test(m)), 'a USA convoy destroyed by Russia: lost in the USA\'s log, destroyed in Russia\'s, nothing in the Insurgents\'');
+  const n1 = L.map(l => l.length), since1 = t => L[t].slice(n1[t]).map(e => e.s);
+  const u = S.units.find(o => o.team === 0 && !o.dead && o.kind === 'truck') || C.addUnit('truck', 0, B[0].x + 500, B[0].z, null, false, 0, 600);
+  u.lgc = 40; $('lgGrab')(u, 0, { team: 2, lgg: 1 });
+  ok(since1(2).some(m => /Tomamos 40 caixas/.test(m)) && since1(0).some(m => /tomada pelo inimigo/.test(m)) && !since1(1).some(m => /caixas/.test(m)), 'a USA truck\'s load taken by an Insurgent: theirs (' + (since1(2).find(m => /Tomamos/.test(m)) || 'nothing') + '), nothing in Russia\'s log');
 }
 
 console.log('-- P8: a town\'s militia --');

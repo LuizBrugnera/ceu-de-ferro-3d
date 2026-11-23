@@ -63925,6 +63925,155 @@ function rockGeo(k) {
   g.translate(0, -ROCKS.bot, 0); g.computeVertexNormals(); P.needsUpdate = true;
   return g;
 }
+/* what stands beside each class of road (cf-estradas-classe), scenery only (no world object: nothing hits it, nothing drives round it). A main road:
+   in the modern era white delineator posts both sides, a steel guardrail where the ground falls away beside it or on a tight bend, concrete
+   power poles with their wires; in 1944 telegraph poles of wood with two crossarms and white guard stones where a modern road has its rail. A
+   secondary road: wooden poles and a ditch both sides (in 1944 a main road has the ditches too). Both: a km stone every km. A track or a dirt
+   road: a ranch fence along some stretches. Nothing in a town, on a bridge's approach, on an airfield, in the water or on another road. Every
+   box of a tile of RDS.tile m is one instance of one instanced mesh (its colour the instance's), its wires one line mesh, and the tile a LOD
+   that drops it past RDS.far[level] m: a few draw calls near the eye, none far. The ditches are one mesh for the map, a strip that darkens
+   (multiplies) the ground it lies on toward its middle. Its own hash, never Math.random (the battle's) */
+const RDS = { tile: 2400, far: [1300, 2000, 2600], ditch: [.2, 1.05, 1.9], dk: .5, list: [],
+  pole: { m: [45, 0x9d9a91, .3, 9], s: [55, 0x6a5137, .24, 8], w: [50, 0x5d4630, .22, 7.5] }, km: 1000, deli: 50, rail: 4, drop: .5, bend: .1, app: 210, fence: [3.5, 120, .4], stone: 8 };
+function rdsHash(a, b) { let h = (a * 374761393 + b * 668265263) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; }
+function roadDress(T) {
+  for (const o of RDS.list) { if (o.dispose) o.dispose(); if (o.material) o.material.dispose(); }   // the last world's instance buffers
+  RDS.list = [];
+  if (!T.net) return;
+  const lv = GFX.lv, mod = S.modern, B = brOf(T), bases = S.base || [], tiles = new Map(), Tl = RDS.tile;
+  const tile = (x, z) => { const i = Math.floor(x / Tl), j = Math.floor(z / Tl), k = i * 4096 + j; let t = tiles.get(k); if (!t) tiles.set(k, (t = { b: [], w: [] })); return t; };
+  const box = (x, y, z, sx, sy, sz, a, hex, tilt) => tile(x, z).b.push(x, y, z, sx, sy, sz, a, hex, tilt || 0);
+  const wire = (x0, y0, z0, x1, y1, z1, sag) => { const L = tile((x0 + x1) / 2, (z0 + z1) / 2).w; for (let k = 0; k < 4; k++) { const a = k / 4, b = a + .25; L.push(x0 + (x1 - x0) * a, y0 + (y1 - y0) * a - sag * 4 * a * (1 - a), z0 + (z1 - z0) * a, x0 + (x1 - x0) * b, y0 + (y1 - y0) * b - sag * 4 * b * (1 - b), z0 + (z1 - z0) * b); } };
+  /* a place beside road c, off m from its middle, free of towns, bridges, airfields, water and of any other road nearer than its own */
+  const free = (x, z, off, br) => hgtT(T, x, z) > T.WL + .8 && roadDist(T, x, z) > off - 1.2 && (br || B.every(b => (b.x - x) ** 2 + (b.z - z) ** 2 > 160 * 160)) && bases.every(b => (b.x - x) ** 2 + (b.z - z) ** 2 > 850 * 850) &&
+    !near(x, z, 30).some(o => (o.k === 'bld' || o.k === 'hangar' || o.k === 'ctl') && (o.x - x) ** 2 + (o.z - z) ** 2 < 30 * 30);
+  const dpos = [], dcol = [], didx = [];
+  for (const E of roadsOf(T)) {
+    const c = E.c, hw = RN.w[c], r = E.p, len = r.len, eg = hw * 1.15, at = s => routeAt(r, s), dk = RDS.dk;
+    const side = (q, o) => ({ x: q.x - q.dz * o, z: q.z + q.dx * o });
+    const yaw = q => Math.atan2(-q.dz, q.dx);
+    /* the poles and their wires: one side (the left of the way the edge runs), crossarms across the road */
+    const P = c === 0 ? (mod ? RDS.pole.m : RDS.pole.w) : c === 1 ? (mod ? RDS.pole.s : RDS.pole.w) : null;
+    if (P) {
+      const step = P[0] * (lv ? 1 : 1.5), off = eg + (c === 0 ? 5 : 3.5), arms = c === 0 && !mod ? [[1.5, 0], [1.1, -.55]] : [[c === 0 ? 2.2 : 1.6, 0]];
+      let last = null;
+      for (let s = step * .5; s < len; s += step) {
+        const q = at(s), p = side(q, off);
+        if (!free(p.x, p.z, off)) { last = null; continue; }
+        const y = roadG(T, p.x, p.z), a = yaw(q), h = P[3], tops = [];
+        box(p.x, y + h / 2, p.z, P[2], h, P[2], a, P[1]);
+        for (const [w, dy] of arms) {
+          box(p.x, y + h - .35 + dy, p.z, .12, .12, w, a, mod && c === 0 ? 0x8a877f : 0x4e3b28);
+          for (const f of c === 1 ? [-.42, .42] : [-.45, 0, .45]) tops.push([p.x - q.dz * w * f, y + h - .25 + dy, p.z + q.dx * w * f]);
+        }
+        if (last && lv) for (let k = 0; k < Math.min(tops.length, last.length); k++) wire(last[k][0], last[k][1], last[k][2], tops[k][0], tops[k][1], tops[k][2], c === 0 ? .9 : .7);
+        last = tops;
+      }
+    }
+    /* a km stone every RDS.km m, on the right */
+    if (c < 2) for (let s = RDS.km; s < len - 20; s += RDS.km) {
+      const q = at(s), off = eg + 1.1, p = side(q, -off); if (!free(p.x, p.z, off)) continue;
+      const y = roadG(T, p.x, p.z), a = yaw(q);
+      if (mod) { box(p.x, y + .45, p.z, .16, .9, .36, a, 0xe9e7e0); box(p.x, y + .82, p.z, .18, .2, .38, a, c === 0 ? 0xd9a21b : 0x2f7a4a); }
+      else { box(p.x, y + .36, p.z, .26, .72, .44, a, 0xe4ded0); box(p.x, y + .76, p.z, .28, .14, .46, a, 0xa23a2c); }
+    }
+    /* a main road: where it needs a rail (the ground falls away RDS.drop m within 10 m of its edge, the outer side of a bend that turns RDS.bend
+       over 50 m, or a bridge's approach, RDS.app m either way of it), rail or guard stones; elsewhere delineators (modern). The map's ground is
+       gentle (map 11: that drop is the steepest 5 % of a main road's sides, that bend the tightest 2 %) */
+    if (c === 0) {
+      const rs = mod ? RDS.rail : RDS.stone, off = eg + .45, bs = B.filter(b => b.e === E.i).map(b => b.s), gw = Math.max(0, ...B.filter(b => b.e === E.i).map(b => b.gw));   // the rail stops short of the bridge's own parapets
+      const need = (s, d) => {
+        const q = at(s), p = side(q, d * (eg + 10)), m = roadG(T, q.x, q.z);
+        if (m - roadG(T, p.x, p.z) > RDS.drop || bs.some(b => Math.abs(b - s) < RDS.app)) return true;
+        const q0 = at(s - 25), q1 = at(s + 25), turn = q0.dx * q1.dz - q0.dz * q1.dx;
+        return Math.abs(turn) > RDS.bend && Math.sign(turn) === -d;   // the outer side
+      };
+      for (const d of [-1, 1]) {
+        let prev = null;
+        for (let s = rs; s < len - rs; s += rs) {
+          const q = at(s), p = side(q, d * off), ok = free(p.x, p.z, off, 1) && (!T.rx || bs.length === 0 || Math.abs(p.x - T.rx(p.z)) > gw + 20) && (need(s, d) || need(s - 12, d) || need(s + 12, d)), y = roadG(T, p.x, p.z) + ROADH * .5;
+          if (!ok) { prev = null; continue; }
+          if (mod) {
+            box(p.x, y + .38, p.z, .1, .76, .1, yaw(q), 0x6b6f72);
+            if (prev) { const mx = (prev[0] + p.x) / 2, mz = (prev[2] + p.z) / 2, my = (prev[1] + y) / 2, L = Math.hypot(p.x - prev[0], p.z - prev[2]); box(mx, my + .62, mz, L + .05, .3, .07, Math.atan2(-(p.z - prev[2]), p.x - prev[0]), 0xa7adb0, Math.atan2(y - prev[1], L)); }
+          } else box(p.x, y + .3, p.z, .34, .6, .34, yaw(q) + .4, 0xe8e3d6);
+          prev = [p.x, y, p.z];
+        }
+        if (mod && lv) for (let s = RDS.deli * (d > 0 ? .5 : 1); s < len; s += RDS.deli) {
+          const q = at(s), p = side(q, d * (eg + .9));
+          if (need(s, d) || !free(p.x, p.z, eg + .9)) continue;
+          const y = roadG(T, p.x, p.z), a = yaw(q);
+          box(p.x, y + .5, p.z, .12, 1, .12, a, 0xeeeeea); box(p.x, y + .86, p.z, .13, .16, .13, a, 0x1d1d1d); box(p.x - q.dz * d * -.07, y + .86, p.z + q.dx * d * -.07, .1, .08, .02, a, d > 0 ? 0xd8d8d8 : 0xe0a020);
+        }
+      }
+    }
+    /* a track or a dirt road: a fence along some stretches of RDS.fence[1] m, on one side */
+    if (c >= 2 && lv) {
+      const [fs, fl, fp] = RDS.fence;
+      for (let s0 = 0; s0 < len; s0 += fl) {
+        if (rdsHash(E.i * 31 + 7, s0 | 0) > fp) continue;
+        const d = rdsHash(E.i, s0 | 0) > .5 ? 1 : -1, off = eg + 1.6;
+        let last = null;
+        for (let s = s0; s < Math.min(len, s0 + fl); s += fs) {
+          const q = at(s), p = side(q, d * off); if (!free(p.x, p.z, off)) { last = null; continue; }
+          const y = roadG(T, p.x, p.z);
+          box(p.x, y + .6, p.z, .11, 1.2, .11, yaw(q) + rdsHash(s | 0, E.i) * .5, 0x6f5a3e, (rdsHash(E.i, s | 0) - .5) * .12);
+          if (last) { wire(last[0], last[1] + 1.0, last[2], p.x, y + 1.0, p.z, .05); wire(last[0], last[1] + .55, last[2], p.x, y + .55, p.z, .04); }
+          last = [p.x, y, p.z];
+        }
+      }
+    }
+    /* the ditches: a modern secondary road, and both 1944 classes of paved road */
+    if (c === 1 || (c === 0 && !mod)) {
+      const n = Math.max(1, Math.round(len / 12)), st = len / n, D = RDS.ditch;
+      for (const d of [-1, 1]) {
+        let prev = -1;
+        for (let i = 0; i <= n; i++) {
+          const q = at(i * st), m = side(q, d * (eg + D[1]));
+          if (!free(m.x, m.z, eg + D[1])) { prev = -1; continue; }
+          const b = dpos.length / 3;
+          for (let k = 0; k < 3; k++) { const p = side(q, d * (eg + D[k])); dpos.push(p.x, roadG(T, p.x, p.z) + .22, p.z); const v = k === 1 ? dk + rdsHash(i, E.i) * .08 : 1; dcol.push(v, v, v * .98); }
+          if (prev >= 0) for (let k = 0; k < 2; k++) didx.push(prev + k, prev + k + 1, b + k, prev + k + 1, b + k + 1, b + k);
+          prev = b;
+        }
+      }
+    }
+  }
+  /* the tiles: one LOD each, its instanced boxes and wires (positions from the tile's middle) */
+  const geo = new THREE.BoxGeometry(1, 1, 1), M = new THREE.Matrix4(), Q = new THREE.Quaternion(), Eu = new THREE.Euler(), V = new THREE.Vector3(), Z = new THREE.Vector3(), C = new THREE.Color();
+  const bm = mat(0xffffff), wm = new THREE.LineBasicMaterial({ color: 0x2a2a28 }), far = RDS.far[lv];
+  RDS.list.push({ material: bm }, { material: wm }); let nb = 0, nw = 0;
+  for (const [k, t] of tiles) {
+    const n = t.b.length / 9; if (!n && !t.w.length) continue;
+    const lod = new THREE.LOD(), g = new THREE.Group();
+    let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9, y0 = 0;
+    for (let i = 0; i < n; i++) { const x = t.b[i * 9], z = t.b[i * 9 + 2]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); y0 += t.b[i * 9 + 1] / n; }
+    for (let i = 0; i < t.w.length; i += 3) { x0 = Math.min(x0, t.w[i]); x1 = Math.max(x1, t.w[i]); z0 = Math.min(z0, t.w[i + 2]); z1 = Math.max(z1, t.w[i + 2]); }
+    const ox = (x0 + x1) / 2, oz = (z0 + z1) / 2, rad = Math.hypot(x1 - x0, z1 - z0) / 2 + 20;
+    if (n) {
+      const gg = geo.clone(); gg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, y0, 0), rad + 200);   // the tile's, so the frustum culls the tile as a whole
+      const im = new THREE.InstancedMesh(gg, bm, n); im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3);
+      for (let i = 0; i < n; i++) {
+        const o = i * 9; Q.setFromEuler(Eu.set(0, t.b[o + 6], t.b[o + 8], 'YXZ'));   // the tilt lifts the box's length (its x), along the road
+        im.setMatrixAt(i, M.compose(V.set(t.b[o] - ox, t.b[o + 1], t.b[o + 2] - oz), Q, Z.set(t.b[o + 3], t.b[o + 4], t.b[o + 5]))); im.setColorAt(i, C.setHex(t.b[o + 7]));
+      }
+      im.instanceMatrix.needsUpdate = true; g.add(im); RDS.list.push(im); nb += n;
+    }
+    if (t.w.length) {
+      const wg = new THREE.BufferGeometry(), a = new Float32Array(t.w.length);
+      for (let i = 0; i < t.w.length; i += 3) { a[i] = t.w[i] - ox; a[i + 1] = t.w[i + 1]; a[i + 2] = t.w[i + 2] - oz; }
+      wg.setAttribute('position', new THREE.BufferAttribute(a, 3)); wg.computeBoundingSphere(); g.add(new THREE.LineSegments(wg, wm)); nw += t.w.length / 6;
+    }
+    lod.position.set(ox, 0, oz); lod.addLevel(g, 0); lod.addLevel(new THREE.Object3D(), far + rad); scene.add(lod);
+  }
+  if (didx.length) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(dpos), 3)); g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(dcol), 3)); g.setIndex(didx);
+    const m = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, blending: THREE.MultiplyBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <fog_fragment>', THREE.ShaderChunk.fog_fragment.replace('mix( gl_FragColor.rgb, fogCol, fogFactor )', 'mix( gl_FragColor.rgb, vec3( 1.0 ), fogFactor )')); };
+    const me = new THREE.Mesh(g, m); me.renderOrder = -9; me.userData.ditch = 1; scene.add(me); RDS.list.push({ material: m });
+  }
+  RDS.n = { tiles: tiles.size, boxes: nb, wires: nw, ditch: didx.length / 3 };
+}
 function buildWorld() {
   if (scene) scene.traverse(c => { if (c.geometry) c.geometry.dispose(); });
   const E = S.E, W = S.W, HW = S.HW, T = S.T, N = T.N, P = PAL[S.era], c = new THREE.Color();
@@ -63960,6 +64109,7 @@ function buildWorld() {
     const me = new THREE.Mesh(g, rm); me.userData.road = c; scene.add(me);
   }
   if (T.net) console.log('road meshes: ' + rtri + ' triangles');
+  roadDress(T);   // what stands beside each class of road (cf-estradas-classe)
   /* airfields, turned toward the middle of the map */
   wo = { seen: 0, at: {}, base: {}, cv: {}, falls: [], trees: null, houses: null, roofs: null, holes: null, rocks: null, bushes: null };
   S.base.forEach((b, t) => scene.add(baseScene(b, t)));
@@ -64048,7 +64198,8 @@ function buildWorld() {
    real shadows (GFXQ[].shadow, Alta) the near trees cast those instead, their cards cut out as drawn. The trees and the grass take the
    ground's sober tone (ENVL.sat and tone: the grass all of it, the trees treeSat of it), and the haze of the sky reads the eye.
    grass: clumps of blades within grass m of the eye, all of them near it and fewer toward the edge, coloured as the ground under them;
-   none on water, sand, roads, in streets and houses; a field grows its crop (crop: taller), a wood an undergrowth (wood: its share);
+   none on water, sand, roads (from road m off the drawn edge of each class of road, its shoulder: a main road's deck is 16 m wide, a track's 7),
+   in streets and houses; a field grows its crop (crop: taller), a wood an undergrowth (wood: its share);
    chunk: m of a square of grass made at once, at most `make` a frame, nearest first. The grass sinks into the ground as the eye climbs
    from .3 to .45 of grass m above it, and is not drawn higher; below 1.5 of it the chunks are still made, hidden, so that none is
    missing when it grows back. Nothing grows in in view: the first frame of a world (the camera on the player, before anything of the
@@ -64059,7 +64210,7 @@ function buildWorld() {
    tall: its height, conifer: the share of conifers on a map without its own broadleaves, tip: the grass's tips, wind: its share of the
    wind). URL: ?veg=off draws the old cones, ?vq= a level (low, mid, high), ?vs= a style */
 const VEG = {
-  on: true, q: 'mid', style: 'mista', trench: .35,
+  on: true, q: 'mid', style: 'mista', trench: .35, road: .4,
   Q: {
     low: { near: 0, mid: 380, fade: 50, shadow: 0, grass: 0, dens: 0 },
     mid: { near: 170, mid: 700, fade: 60, shadow: 1, grass: 60, dens: .75 },
@@ -64172,6 +64323,40 @@ function vegTreeGeo(kind, lod, cards) {
 /* the shader of every piece: a Lambert material whose two faces are lit alike, the wind, the dither between the bands (band: [in from,
    in to, out from, out to] m, by the instance's distance), and cut-out cards that do not thin away with the distance */
 const VU = { uTime: { value: 0 }, uWind: { value: .5 }, uEye: { value: null }, uCut: typeof THREE !== 'undefined' ? { value: new THREE.Vector4() } : null };   // uEye: the eye, which three.js does not give a Lambert material; uCut: camClip's pivot and radius
+/* the painted grass (GRP): a stylized, living look for the grass, the same on the blades near the eye (vegGrassInit) and on the ground under
+   them seen from anywhere (envTerrainHook), so that the two always match. gpPaint: the greens given back some of the saturation the sober tone
+   took (sat), and large soft patches like brush strokes over the fields, warmer (warm) or cooler and lusher (cool), by the place (patch: how
+   much); only where the colour is a plant's (green over red and blue), so sand, soil, rock and the dry ground keep theirs. gpGust: the gusts
+   of the wind, bands that roll across the field along dir (k: their frequency per m, v: how fast, per s of the wind's clock), broken by a slow
+   noise across them; on the ground they pass as a sheen (amp), and the blades bend along them. Blades: a ramp from a cool shade at the root
+   (root) through their colour to a warm light tip (tip), the tips glowing against the sun (glow), each blade bowing with the gust and
+   brightening as it bends. Nothing here changes what is where: only colours and the blades' sway */
+const GRP = { sat: .38, patch: .55, warm: [1.1, 1.03, .76], cool: [.8, 1.0, .94], dir: [.83, .56], k: .017, v: .21, amp: .12,
+  root: [.3, .4, .4], tip: [1.02, 1.05, .88], glow: .4, bow: .75 };
+const GRP_GLSL = () => 'uniform float uGT, uGW; uniform vec4 uGSun;\n' +
+  'float gpVeg(vec3 c) { return smoothstep(-0.03, 0.05, c.g - max(c.b, c.r * 0.9)); }\n' +
+  'vec3 gpPaint(vec3 c, vec2 xz) {\n float l = dot(c, vec3(0.3, 0.59, 0.11)), v = gpVeg(c);\n' +
+  ' float n = sin(xz.x * 0.0061 + sin(xz.y * 0.0047) * 1.7) * sin(xz.y * 0.0053 + sin(xz.x * 0.0039) * 1.9), m = sin(xz.x * 0.021 + xz.y * 0.017 + n * 2.0);\n' +
+  ' float f = sin(xz.x * 0.083 + sin(xz.y * 0.061 + sin(xz.x * 0.031) * 1.3) * 2.1) * sin(xz.y * 0.071 + sin(xz.x * 0.052 + sin(xz.y * 0.027) * 1.4) * 1.8);\n' +
+  ' float w = clamp(0.5 + 0.45 * n + 0.18 * m + 0.16 * f, 0.0, 1.0);\n' +
+  ' vec3 s = mix(vec3(l), c, 1.0 + ' + GRP.sat.toFixed(3) + ' * v);\n' +
+  ' return mix(s, s * mix(vec3(' + GRP.cool.join(', ') + '), vec3(' + GRP.warm.join(', ') + '), w), ' + GRP.patch.toFixed(3) + ' * v);\n}\n' +
+  'float gpGust(vec2 xz) {\n vec2 d = vec2(' + GRP.dir.join(', ') + ');\n float a = dot(xz, d) * ' + GRP.k + ' - uGT * ' + GRP.v + ', c = dot(xz, vec2(-d.y, d.x)) * 0.013;\n' +
+  ' float b = sin(a + sin(c + uGT * 0.07) * 2.4) * (0.3 + 0.7 * (0.5 + 0.5 * sin(c * 3.1 - a * 0.37 + 1.7)));\n' +
+  ' return smoothstep(0.15, 0.95, b) * clamp(uGW * 2.0, 0.0, 1.0);\n}\n' +
+  'float gpSheen(vec2 xz) { return (gpGust(xz) - 0.25) * ' + GRP.amp + '; }\n';
+const GRPU = () => ({ uGT: VU.uTime, uGW: VU.uWind, uGSun: { value: ENVU.sun } });
+/* the painted blade (GRP), after the clump is turned and sized: the flutter of before, gentler, and the bow along the wind's gusts (the broad
+   bands of gpGust and a ripple of about 27 m that runs through the clumps), the blade a little lower as it bows; its colour painted as the
+   ground under it is, along the ramp from the root to the tip, brighter as it bends and glowing at the tip against the sun */
+const GRP_BLADE = ' vec2 gd2 = vec2(' + GRP.dir.join(', ') + '); float g2 = gh * gh * gs;\n' +
+  ' float gu = gpGust(gp.xz), gr = 0.5 + 0.5 * sin(dot(gp.xz, gd2) * 0.23 - uGT * 2.6 + sin(dot(gp.xz, vec2(-gd2.y, gd2.x)) * 0.11) * 1.5);\n' +
+  ' float gb = (gu * 0.8 + gr * 0.3 * clamp(uGW * 2.0, 0.0, 1.0)) * ' + GRP.bow + ';\n' +
+  ' p.xz += gd2 * gb * 0.55 * g2 + vec2(0.32, 0.2) * gw * 0.6 * g2; p.y *= 1.0 - 0.22 * gb * gh;\n' +
+  ' transformed = p + gp.xyz;\n' +
+  ' vec3 gcol = gpPaint(gc.rgb, gp.xz), ramp = mix(mix(vec3(' + GRP.root.join(', ') + '), vec3(0.8), smoothstep(0.0, 0.55, gh)), vec3(' + GRP.tip.join(', ') + ') * 0.86, smoothstep(0.55, 1.0, gh));\n' +
+  ' float sunB = pow(max(dot(normalize(gp.xyz - uEye), uGSun.xyz), 0.0), 3.0) * gh * gh * ' + GRP.glow + ';\n' +
+  ' vGc = gcol * ramp * (1.0 + 0.22 * gb * gh) + vec3(0.11, 0.1, 0.02) * sunB; vFade = 1.0;\n';
 /* a tree in the way of the eye (cf-camera-3p): its fragments within the radius uCut.w of the line from the eye to the pivot uCut.xyz (the
    radius from half of it at the eye to all of it at the pivot; a share over that softened) and those within CUTD.eye radii of the eye itself are
    dithered down to CUTD.keep of them, so the trunk and the crown stand as a lace the soldier or the vehicle is seen through, and the woods
@@ -64188,6 +64373,7 @@ function vegMat(o) {
   m.customProgramCacheKey = () => key + (typeof SKY3 === 'object' && SKY3.u ? '-ill' : '');   // -ill: with the flares' light, a program of its own
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = VU.uTime; sh.uniforms.uWind = VU.uWind; sh.uniforms.uBand = m.userData.band; sh.uniforms.uEye = VU.uEye;
+    if (o.uni) Object.assign(sh.uniforms, o.uni);   // a piece's own uniforms (the painted grass's, GRP)
     const cut = (o.kind === 'near' || o.kind === 'mid') && VU.uCut;   // the trees (not the grass, nor the far impostors) clear the eye's way (VCUT)
     if (cut) sh.uniforms.uCut = VU.uCut;
     let vs = 'uniform float uTime, uWind; uniform vec4 uBand; uniform vec3 uEye; varying float vFade, vAk;\n' + (cut ? 'varying vec3 vCutP;\n' : '') + (o.head || '') + sh.vertexShader;
@@ -64467,13 +64653,12 @@ function vegGrassInit(V) {
     G.tall[k] = kd >= 2 && kd <= 4 ? VEG.crop : kd === 8 ? .5 : kd === 1 ? .8 : 1;
   }
   G.base = vegClump(6);
-  G.mat = vegMat({ kind: 'grass', head: 'attribute vec4 gp; attribute vec4 gc; attribute float gh; varying vec3 vGc;\n',
+  G.mat = vegMat({ kind: 'grass', head: 'attribute vec4 gp; attribute vec4 gc; attribute float gh; varying vec3 vGc;\n' + GRP_GLSL(), uni: GRPU(),
     vert: 'float gd = distance(gp.xz, uEye.xz); float gk = 1.0 - smoothstep(uBand.z * .55, uBand.z, gd) * step(gp.w - floor(gp.w), 2.0);\n' +
       ' gk *= 1.0 - smoothstep(uBand.z * .3, uBand.z * .45, uEye.y - gp.y);\n' +
       ' float gs = gc.w * gk; float ga = gp.w * 6.2832; vec3 p = position; p.xz = mat2(cos(ga), -sin(ga), sin(ga), cos(ga)) * p.xz; p.y *= gs; p.xz *= .5 + .5 * gk;\n' +
       ' float gw = (sin(uTime * 1.9 + gp.x * .31 + gp.z * .23) + .5 * sin(uTime * 3.7 + gp.x * .9 - gp.z * .4)) * uWind;\n' +
-      ' p.x += gw * .32 * gh * gh * gs; p.z += gw * .2 * gh * gh * gs;\n' +
-      ' transformed = p + gp.xyz; vGc = gc.rgb * mix(.42, .86, gh) + vec3(.03, .035, .01) * gh * gh; vFade = 1.0;\n',
+      GRP_BLADE,
     normal: 'objectNormal = vec3(0.0, 1.0, 0.0);\n', color2: 'vColor = vGc;\n' });
   G.mat.userData.band.value.set(-2, -1, Q.grass, Q.grass * 2);
   G.tip = tip; G.dm = Q.dens * V.St.dens; G.tm = V.St.tall;
@@ -64501,7 +64686,7 @@ function vegInTrench(f, x, z) {
    draws only the first of them */
 function vegChunk(V, ci, cj) {
   const G = V.g, T = S.T, CS = VEG.chunk, sp = VEG.grid, n = Math.floor(CS / sp), x0 = ci * CS, z0 = cj * CS, out = [0, 0, 0, 0, 0], pts = [];
-  const mx = x0 + CS / 2, mz = z0 + CS / 2, nearRoad = routeDist(T, mx, mz) < CS * .75 + 14;
+  const mx = x0 + CS / 2, mz = z0 + CS / 2, nearRoad = routeDist(T, mx, mz) < CS * .75 + RN.w[0] * RNE + VEG.road + 2;
   const burg = (T.burgs || []).find(b => Math.hypot(mx - b.x, mz - b.z) < b.ru + 60 + CS), hs = burg ? T.houses.filter(q => Math.abs(q.x - mx) < CS + q.r && Math.abs(q.z - mz) < CS + q.r) : null;
   const st = burg ? (T.streets || []).filter(l => Math.min(l[0], l[2]) < x0 + CS + 10 && Math.max(l[0], l[2]) > x0 - 10 && Math.min(l[1], l[3]) < z0 + CS + 10 && Math.max(l[1], l[3]) > z0 - 10) : null;
   const sd = (l, x, z) => { const ex = l[2] - l[0], ez = l[3] - l[1], t = clamp(((x - l[0]) * ex + (z - l[1]) * ez) / (ex * ex + ez * ez || 1), 0, 1); return Math.hypot(x - l[0] - ex * t, z - l[1] - ez * t); };
@@ -64510,7 +64695,7 @@ function vegChunk(V, ci, cj) {
     const gi = ci * n + a, gj = cj * n + b, x = x0 + (a + hash2(gi, gj, 1)) * sp, z = z0 + (b + hash2(gi, gj, 2)) * sp, keep = hash2(gi, gj, 3);
     vegGround(G, x, z, out); if (keep >= out[3] * G.dm) continue;
     const y = gndY(x, z); if (y < T.WL + 3) continue;   // a clump on the drawn ground
-    if (nearRoad && routeDist(T, x, z) < 5.5) continue;
+    if (nearRoad && roadEdge(T, x, z) < VEG.road) continue;   // off each road's own edge (a fixed 5.5 m from the middle grew grass on a main road's deck)
     if (hs && hs.some(q => footD(q, x, z) < 1.5)) continue;
     if (st && st.some(l => sd(l, x, z) < CITY.plan.street / 2)) continue;
     if (tr.length && tr.some(f => vegInTrench(f, x, z))) continue;
@@ -71549,10 +71734,10 @@ const envCol = h => new THREE.Color(h);
 /* the ground's shader, on top of the Phong one: the kinds of ground blended by noise instead of straight between the grid's points */
 function envTerrainHook(sh) {
   const Q = GFXQ[GFX.lv];
-  Object.assign(sh.uniforms, ENV.tu);
+  Object.assign(sh.uniforms, ENV.tu, GRPU());   // the painted grass (GRP): the wind's clock and gusts
   sh.vertexShader = 'attribute vec2 envS;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvEnvW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvEnvN = normalize( mat3( modelMatrix ) * objectNormal );\n\tvEnvS = envS;');
-  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nuniform float uWet;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n';
+  const head = '#define ENV_Q ' + Q.det + '\nuniform sampler2D tEnv;\nuniform sampler2D tEnvN;\nuniform vec3 uSand;\nuniform vec3 uSnow;\nuniform vec3 uRock;\nuniform vec3 uSoil;\nuniform float uBump;\nuniform float uSat;\nuniform float uTone;\nuniform float uWL;\nuniform float uWet;\nvarying vec3 vEnvW;\nvarying vec3 vEnvN;\nvarying vec2 vEnvS;\n' + GRP_GLSL();
   sh.fragmentShader = head + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	float eD = distance( vEnvW, cameraPosition ), eFine = 1.0 - smoothstep( 400.0, 1800.0, eD );
 	vec2 eG = vec2( 0.0 );
@@ -71561,11 +71746,15 @@ function envTerrainHook(sh) {
 	vec4 d1 = texture2D( tEnv, eUv * ( 1.0 / 23.0 ) );
 #if ENV_Q == 0
 	diffuseColor.rgb = mix( vec3( dot( diffuseColor.rgb, vec3( 0.3, 0.59, 0.11 ) ) ), diffuseColor.rgb, uSat ) * uTone * ( 0.9 + 0.2 * mix( 0.5, d1.r, eFine ) ) * ( 1.0 - 0.28 * eWk );
+	diffuseColor.rgb = gpPaint( diffuseColor.rgb, vEnvW.xz );
+	diffuseColor.rgb *= 1.0 + vec3( 1.0, 0.95, 0.55 ) * gpSheen( vEnvW.xz ) * gpVeg( diffuseColor.rgb ) * ( 1.0 - smoothstep( 1500.0, 4000.0, eD ) );
 #else
 	vec4 d2 = texture2D( tEnv, eUv * ( 1.0 / 181.0 ) + vec2( 0.37, 0.71 ) );
 	vec4 d3 = texture2D( tEnv, eUv * ( 1.0 / 1637.0 ) + vec2( 0.13, 0.29 ) );
 	vec3 eB = diffuseColor.rgb * ( 0.86 + 0.28 * d3.a );
 	eB = mix( vec3( dot( eB, vec3( 0.3, 0.59, 0.11 ) ) ), eB, uSat );
+	eB = gpPaint( eB, vEnvW.xz );
+	float eGv = gpVeg( eB );
 	eB = mix( eB, eB * vec3( 1.1, 1.03, 0.8 ), smoothstep( 0.5, 0.85, d2.a ) * 0.25 );
 	eB = mix( eB, eB * vec3( 0.86, 0.95, 0.88 ), smoothstep( 0.55, 0.9, d3.r ) * 0.4 );
 	float eSoil = smoothstep( 0.56, 0.84, d2.b * 0.6 + d3.b * 0.4 ) * ( 1.0 - vEnvS.x ) * 0.42;
@@ -71591,6 +71780,7 @@ function envTerrainHook(sh) {
 	float ePud = smoothstep( 0.3, 0.8, uWet ) * smoothstep( 0.64, 0.74, d1.b * 0.6 + d2.b * 0.4 ) * smoothstep( 0.975, 0.995, vEnvN.y ) * ( 1.0 - eSand ) * ( 1.0 - eSnow ) * ( 1.0 - eWet );
 	eB *= ( 1.0 - 0.28 * eWk ) * ( 1.0 - 0.3 * ePud );
 	eRef = eWk * 0.45 + ePud; eWk = min( 1.0, eWk + ePud );
+	eB *= 1.0 + vec3( 1.0, 0.95, 0.55 ) * gpSheen( vEnvW.xz ) * eGv * ( 1.0 - eRock ) * ( 1.0 - eSand ) * ( 1.0 - eSnow ) * ( 1.0 - eWet ) * ( 1.0 - smoothstep( 1500.0, 4000.0, eD ) );
 	diffuseColor.rgb = eB * uTone * ( 0.9 + 0.2 * eDet );
 	eG *= uBump * ( 1.0 - eSnow * 0.7 ) * ( 1.0 - eSand * 0.5 );
 #endif`).replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n#if ENV_Q > 0\n\tnormal = normalize( ( viewMatrix * vec4( normalize( normalize( vEnvN ) - vec3( eG.x, 0.0, eG.y ) ), 0.0 ) ).xyz );\n#endif')
@@ -71608,14 +71798,23 @@ function envWet(r) {
 }
 /* the roads' shader, on top of the Lambert one (lit by the sun and the sky as the ground is, and by the flares, sky3Ill): rd is m across
    the road (its deck's edge at hw) and along it; the surface mottled and patched by the ground's noise and toned as the ground is (uSat,
-   uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern main road (uRd.z) a worn dashed centre line, faded out far
-   off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2) */
-function envRoadHook(sh, u) {
-  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u, uWet: ENV.tu.uWet || { value: 0 } });
+   uTone), its edges worn ragged into dust and gravel (uRd.w: less on a paved road or a town's street, whose asphalt is a shade darker); a dirt road (uRd.y) has two wheel ruts (a vehicle's track, about 1.9 m apart) and a weedy crown; a modern secondary road (uRd.z) a worn dashed centre line, faded out far
+   off where it would shimmer (vRdD, m from the eye: three.js r128 gives a Lambert material no cameraPosition) (cf-pol-graficos 2).
+   Each class its own face (cf-estradas-classe), uRk: x a modern main road (white edge lines, a yellow double centre line, a lighter shoulder
+   and a concrete kerb on the slope down to the ground); y a 1944 main road (granite setts in staggered rows, kerb stones); z a modern secondary
+   road (patched asphalt, a white dashed centre line); w a 1944 secondary road (gravel macadam, a lighter crown); uGr the grass a track or a
+   dirt road keeps on its crown and edges. The lines are box-filtered against their width on the screen (fwidth): far off, or seen from the
+   air, a line thins into a faint stroke instead of shimmering or vanishing; the setts' joints fade out where they would be under a pixel.
+   The grass of a track's crown is painted as the field's grass beside it is (GRP's gpPaint: the same saturation and the same patches by the
+   place), so the two match where they meet */
+function envRoadHook(sh, u, k, gr) {
+  Object.assign(sh.uniforms, { tEnv: ENV.tu.tEnv, uSoil: ENV.tu.uSoil, uSat: ENV.tu.uSat, uTone: ENV.tu.uTone, uRd: u, uWet: ENV.tu.uWet || { value: 0 }, uRk: k || { value: { x: 0, y: 0, z: 0, w: 0 } }, uGr: gr || { value: 0 } }, GRPU());
   if (SKY3.u) sky3Ill(sh);
   sh.vertexShader = 'attribute vec2 rd;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.vertexShader.replace('#include <begin_vertex>',
     '#include <begin_vertex>\n\tvRd = rd;\n\tvRdW = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;\n\tvRdD = length( ( modelViewMatrix * vec4( transformed, 1.0 ) ).xyz );');
-  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nuniform float uWet;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  sh.fragmentShader = 'uniform sampler2D tEnv;\nuniform vec3 uSoil;\nuniform float uSat;\nuniform float uTone;\nuniform vec4 uRd;\nuniform float uWet;\nuniform vec4 uRk;\nuniform float uGr;\nvarying vec2 vRd;\nvarying vec3 vRdW;\nvarying float vRdD;\n' + GRP_GLSL() +
+    'float rdLn( float d, float w, float f ) { return clamp( ( min( d + w * 0.5, f * 0.5 ) - max( d - w * 0.5, - f * 0.5 ) ) / f, 0.0, 1.0 ); }\n' +   // a line w wide, d from its middle, box-filtered over f (a pixel)
+    'float rdHash( vec2 p ) { return fract( sin( dot( p, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ); }\n' + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
 	{
 		vec2 rp = vRdW.xz;
 		vec4 n1 = texture2D( tEnv, rp / 4.1 ), n2 = texture2D( tEnv, rp / 37.0 + vec2( 0.31, 0.17 ) );
@@ -71626,8 +71825,42 @@ function envRoadHook(sh, u) {
 		rc *= 1.0 - 0.25 * rut;
 		rc = mix( rc, rc * vec3( 0.9, 0.98, 0.84 ), uRd.y * smoothstep( 0.5, 0.15, abs( vRd.x ) ) * smoothstep( 0.45, 0.75, n2.b * 0.6 + n1.b * 0.4 ) * 0.7 );
 		rc = mix( rc, uSoil * uTone * ( 0.85 + 0.3 * n1.r ), smoothstep( 0.62, 1.0, u + ( n1.b - 0.5 ) * 0.35 ) * uRd.w );
-		float dash = uRd.z * ( 1.0 - smoothstep( 0.07, 0.11, abs( vRd.x ) ) ) * step( fract( vRd.y / 12.0 ), 0.42 ) * smoothstep( 0.25, 0.55, n1.g ) * ( 1.0 - far );
-		diffuseColor.rgb = mix( rc, vec3( 0.78, 0.77, 0.7 ), dash * 0.6 ) * ( 1.0 - 0.32 * uWet * ( 1.0 - 0.3 * rut ) );   // rain: darker, the ruts holding water darkest
+		float ax = abs( vRd.x ), hw = uRd.x, fx = max( fwidth( vRd.x ), 0.002 ), fy = max( fwidth( vRd.y ), 0.002 ), wear = smoothstep( 0.15, 0.5, n1.g * 0.7 + n2.g * 0.3 );
+		float fine = 1.0 - smoothstep( 0.02, 0.07, max( fx, fy ) );   // fine detail (setts, joints, gravel) only where it is over a pixel
+		vec3 paint = vec3( 0.0 ); float pa = 0.0;
+		if ( uRk.x > 0.0 ) {   // a modern main road
+			float sh = smoothstep( hw - 0.42, hw - 0.3, ax ) * ( 1.0 - step( hw, ax ) );
+			rc = mix( rc, rc * vec3( 1.1, 1.09, 1.05 ) + 0.02, sh * 0.8 );
+			float kb = step( hw, ax );
+			vec3 kc = vec3( 0.66, 0.65, 0.61 ) * uTone * ( 0.9 + 0.2 * n1.r ) * ( 1.0 - 0.35 * fine * ( 1.0 - smoothstep( 0.0, 0.05, abs( fract( vRd.y / 1.2 ) - 0.5 ) * 2.0 - 0.94 ) ) );
+			rc = mix( rc, kc, kb * uRk.x );
+			float el = rdLn( ax - ( hw - 0.55 ), 0.15, fx ) * ( 0.75 + 0.25 * wear ), cl = max( rdLn( ax - 0.11, 0.1, fx ), 0.0 ) * ( 0.7 + 0.3 * wear );
+			paint += vec3( 0.86, 0.86, 0.82 ) * el + vec3( 0.86, 0.66, 0.16 ) * cl; pa += ( el + cl ) * uRk.x;
+		}
+		if ( uRk.y > 0.0 ) {   // a 1944 main road: setts and kerb stones
+			rc = mix( rc, vec3( dot( rc, vec3( 0.33 ) ) ) * vec3( 0.96, 0.95, 0.93 ), 0.55 * uRk.y );
+			vec2 cb = vec2( vRd.x / 0.24 + floor( vRd.y / 0.17 ) * 0.5, vRd.y / 0.17 ), cf = fract( cb ), ci = floor( cb );
+			float e = min( min( cf.x, 1.0 - cf.x ) * 0.24, min( cf.y, 1.0 - cf.y ) * 0.17 ), jt = 1.0 - smoothstep( 0.006, 0.02, e ), hs = rdHash( ci );
+			rc *= mix( 0.93, ( 0.84 + 0.26 * hs ) * ( 1.0 - 0.42 * jt ), fine * uRk.y );
+			float kb = smoothstep( hw - 0.42, hw - 0.36, ax ), kh = rdHash( vec2( floor( vRd.y / 0.9 ), sign( vRd.x ) ) );
+			vec3 kc = vec3( 0.6, 0.59, 0.56 ) * uTone * ( 0.86 + 0.2 * kh ) * ( 1.0 - 0.4 * fine * ( 1.0 - smoothstep( 0.01, 0.04, min( fract( vRd.y / 0.9 ), 1.0 - fract( vRd.y / 0.9 ) ) * 0.9 ) ) );
+			rc = mix( rc, kc, kb * ( 1.0 - smoothstep( hw * 1.06, hw * 1.12, ax ) ) * uRk.y );
+		}
+		if ( uRk.z > 0.0 ) {   // a modern secondary road: patches of newer and older asphalt
+			vec2 pc = floor( vec2( ( vRd.x + ( n1.r - 0.5 ) * 0.8 ) / ( hw * 0.34 ), ( vRd.y + ( n1.b - 0.5 ) * 1.6 ) / 3.2 ) ); float ph = rdHash( pc + 3.1 ), pv = rdHash( floor( pc * vec2( 1.0, 0.25 ) ) + 7.7 );
+			rc *= 1.0 + uRk.z * ( pv > 0.55 ? ( ph > 0.72 ? -0.11 : ph < 0.1 ? 0.06 : 0.0 ) : 0.0 ) * ( 1.0 - step( hw * 0.98, ax ) );   // patches in clusters, ragged by the noise
+		}
+		if ( uRk.w > 0.0 ) {   // a 1944 secondary road: gravel, a lighter crown
+			float gv = texture2D( tEnv, vRdW.xz / 0.6 ).r;
+			rc *= 1.0 + uRk.w * ( 0.1 * ( 1.0 - smoothstep( 0.0, hw * 0.7, ax ) ) + ( gv - 0.5 ) * 0.35 * fine );
+		}
+		if ( uGr > 0.0 ) {   // a track or a dirt road: grass on the crown and creeping in from the edges
+			float g = max( smoothstep( 0.55, 0.12, ax ), smoothstep( hw * 0.72, hw * 1.02, ax + ( n1.b - 0.5 ) * 0.8 ) ) * smoothstep( 0.35, 0.7, n2.b * 0.5 + n1.r * 0.5 );
+			rc = mix( rc, gpPaint( vec3( 0.33, 0.39, 0.2 ), vRdW.xz ) * uTone * ( 0.8 + 0.4 * n1.g ), g * uGr );
+		}
+		float dash = uRd.z * rdLn( ax, 0.12, fx ) * clamp( ( min( fract( vRd.y / 12.0 ) + fy * 0.5, 0.42 ) - max( fract( vRd.y / 12.0 ) - fy * 0.5, 0.0 ) ) / fy, 0.0, 1.0 ) * ( 0.65 + 0.35 * wear );
+		paint += vec3( 0.86, 0.86, 0.82 ) * dash; pa += dash;
+		diffuseColor.rgb = mix( rc, paint / max( pa, 0.001 ) * uTone, clamp( pa, 0.0, 1.0 ) * 0.85 ) * ( 1.0 - 0.32 * uWet * ( 1.0 - 0.3 * rut ) );   // rain: darker, the ruts holding water darkest
 	}`).replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n#ifdef USE_FOG\n\ttotalEmissiveRadiance += fogColor * uWet * ( 0.06 + 0.22 * smoothstep( 15.0, 260.0, vRdD ) );\n#endif');   // and sheen with the sky, more the flatter it is seen (farther)
 }
 /* the sky: the horizon is the haze's colour (so the far ground melts into it), up to the zenith; the sun's glow is the haze's, and its disc */
@@ -71722,9 +71955,11 @@ function envApply() {
   scene.traverse(o => { if (o.isMesh && o.userData.road !== undefined && o.material.isMeshBasicMaterial) ENV.roads.push(o); });
   for (const o of ENV.roads) {
     const c = o.userData.road, b = o.material, st = c < 0, paved = st || (S.modern && c < 2);   // c -1: a town's street (cityScene)
-    const u = { value: new THREE.Vector4(st ? o.userData.hw : RN.w[c], st ? 0 : c >= 2 ? 1 : S.modern ? 0 : .5, S.modern && !c ? 1 : 0, paved ? .2 : .55) };
-    const m = new THREE.MeshLambertMaterial({ color: b.color.clone().multiplyScalar(paved ? .8 : 1), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: b.polygonOffsetFactor, polygonOffsetUnits: b.polygonOffsetUnits });
-    m.onBeforeCompile = sh => envRoadHook(sh, u); m.customProgramCacheKey = () => 'env-road' + (SKY3.u ? '-ill' : '');
+    const u = { value: new THREE.Vector4(st ? o.userData.hw : RN.w[c], st ? 0 : c >= 2 ? 1 : S.modern ? 0 : c ? .5 : 0, S.modern && c === 1 ? 1 : 0, st ? .2 : S.modern ? c === 0 ? 0 : c === 1 ? .4 : .55 : c ? .55 : .1) };
+    const k = { value: new THREE.Vector4(!st && S.modern && c === 0 ? 1 : 0, !st && !S.modern && c === 0 ? 1 : 0, !st && S.modern && c === 1 ? 1 : 0, !st && !S.modern && c === 1 ? 1 : 0) }, gr = { value: !st && c >= 2 ? (c === 2 ? .9 : .65) : 0 };   // each class its face (cf-estradas-classe)
+    const m = new THREE.MeshLambertMaterial({ color: b.color.clone().multiplyScalar(paved ? (!st && S.modern && c === 0 ? .72 : .8) : 1), side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: b.polygonOffsetFactor, polygonOffsetUnits: b.polygonOffsetUnits });
+    m.extensions = { derivatives: true };   // fwidth, for the lines (WebGL 1; built in with WebGL 2)
+    m.onBeforeCompile = sh => envRoadHook(sh, u, k, gr); m.customProgramCacheKey = () => 'env-road' + (SKY3.u ? '-ill' : '');
     o.geometry.computeVertexNormals(); b.dispose(); o.material = m; o.receiveShadow = !!Q.shadow;
   }
   /* the sky dome: the same mesh, its own shader; skyScene() still sets material.color (night, weather), which tints the zenith */

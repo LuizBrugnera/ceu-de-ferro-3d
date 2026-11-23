@@ -63,7 +63,7 @@ module.exports = {
     tk_sherman: { src: '41Tq_Kf0Tui', pca: 1, yaw: 0, paint: [0, 3], split: TANK },
     tk_abrams: { src: '4t0RMXCl_Ud', pca: 1, yaw: -16, len: 9.8, paint: [0], split: TANK },
     tk_leo: { src: '7GG1xDtc8l', yaw: 90, paint: [1, 3], split: [TANK[0], TANK[1], TANK[2], { part: 'turret', lo: [.36, 1], cx: [.12, .88], cz: [.15, .85] }] },
-    tk_t72: { src: 'CAZeAFrhC7', pca: 1, yaw: 0, paint: [0, 3], split: TANK },
+    tk_t72: { src: 'CAZeAFrhC7', pca: 1, yaw: 180, paint: [0, 3], split: [TANK[0], { part: 'gun', lo: [.5, .7], x0: [.8, 1], x1: [.9, 1.01], cz: [.3, .7] }, TANK[1], TANK[2], TANK[3]] },
     /* wheeled: hull and wheels */
     car_jeep: { src: 'AcSdGGrgYP', yaw: 90, paint: [0, 7], split: WHEELS },
     car_hmmwv: { src: 'Ebryot9iKM', yaw: 0, paintLum: [.32, 1], split: WHEELS },

@@ -32,4 +32,13 @@ console.log('-- the player as the victim --');
   ok(P.dead && S.kc && S.kc.k === 'car', 'a rifleman 8 m off the car bomb dies and sees the blast'); }
 { const S = bare(6), x = S.W / 2, P = me(S, $('INF').modern[S.fac[0]][0], x + 30, 0, 0);
   P.hp = 1; $('killMan')(P, null); ok(P.dead && !S.kc, 'a death with no bomb near: no kill cam'); }
+console.log('-- the kill cam zooms out from the fireball to the whole blast radius --');
+{ const Z = $('kcZoom'), B = $('BOMB');
+  for (const k of ['man', 'car', 'truck']) {
+    const r = B[k].r, d = [0, .5, 1, 2, KC.zt, KC.t].map(s => Z(r, s));
+    ok(d.every((q, i) => !i || q.D >= d[i - 1].D && q.h >= d[i - 1].h) && d[0].D < r && d[4].D > 2 * r && d[5].D === d[4].D,
+      k + ' (r ' + r + ' m): ' + d.map(q => q.D.toFixed(0)).join(' → ') + ' m out, ' + d.map(q => q.h.toFixed(0)).join(' → ') + ' m up, then held');
+  }
+  ok(Z(B.truck.r, KC.t).D > Z(B.car.r, KC.t).D && Z(B.car.r, KC.t).D > Z(B.man.r, KC.t).D, 'the truck bomb pulls back farthest, the vest least');
+  ok(KC.zt < KC.t, 'the zoom ends (' + KC.zt + ' s) before the kill cam does (' + KC.t + ' s)'); }
 done();

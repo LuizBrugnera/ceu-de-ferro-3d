@@ -41182,8 +41182,14 @@ bombGo = (g => o => {
 /* ---------- cf-bomba-killcam: whoever sets off a bomb vest, car bomb or truck bomb dies in it, and a player killed by one sees the blast ----------
    bombGo and stkSvbGo note the blast (S.kcB); a vehicle bomb's own seats are thrown dead (u.bKill: thrown with no chance of living, online the
    eject carries a mortal dmg). playerDown within KC.win s of a blast, the player within KC.near radii of it, starts the kill cam (S.kc): for KC.t s
-   the camera circles the blast from outside, the swap screen waits, and the respawn is at least KC.t + KC.after s away */
-const KC = { t: 6.5, after: 1.5, win: 3, near: 1.8, spin: .22 };
+   the camera circles the blast, zooming out from the fireball to frame the whole blast radius (kcZoom), the swap screen waits, and the respawn is at least KC.t + KC.after s away */
+const KC = { t: 6.5, after: 1.5, win: 3, near: 1.8, spin: .22,
+  // the zoom-out: the camera starts close on the fireball (D0 = r·d0 + n0, height e0 of the distance) and pulls back and up over zt s
+  // (ease-out) to frame the whole blast radius (D1 = r·d1 + n1, height e1), then holds there, still circling, to the end
+  d0: .45, n0: 12, e0: .25, d1: 2.6, n1: 30, e1: .7, zt: 3.2 };
+// the kill cam's distance and height (fraction of the distance) s seconds into it, for a blast of radius r
+const kcZoom = (r, s) => { const u = clamp(s / KC.zt, 0, 1), e = 1 - (1 - u) ** 3, D0 = r * KC.d0 + KC.n0, D1 = r * KC.d1 + KC.n1, D = D0 + (D1 - D0) * e;
+  return { D, h: D * (KC.e0 + (KC.e1 - KC.e0) * e) }; };
 const kcNote = (x, y, z, r, k) => { S.kcB = { x, y, z, r, k, t: S.t }; };
 bombGo = (g => o => {
   const B = bombOf(o); if (!B || o.bGone) return g(o);
@@ -59696,10 +59702,10 @@ packManModel = (f => m => (m && !m.civ && m.def && m.def.civ ? ((m.id || 0) % 2 
 openSwap = (g => () => { if (kcOn()) return; g(); })(openSwap);
 updateCamera = (g => dt => {
   if (!kcOn()) { if (S && S.kc && (!S.my || !S.my.dead || S.t >= S.kc.end)) S.kc = null; return g(dt); }
-  const K = S.kc, cp = camera.position, s = S.t - K.t0, D = clamp(K.r * 1.6 + 25, 50, 260), a = K.a + s * KC.spin;
-  const x = K.x + Math.cos(a) * D, z = K.z + Math.sin(a) * D;
-  cp.set(x, Math.max(K.y + D * .4, hgt(x, z) + 4), z);
-  camera.up.set(0, 1, 0); camera.lookAt(K.x, K.y + K.r * .15, K.z); camera.fov = 60; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+  const K = S.kc, cp = camera.position, s = S.t - K.t0, Z = kcZoom(K.r, s), D = Z.D, a = K.a + s * KC.spin;
+  const x = K.x + Math.cos(a) * D, z = K.z + Math.sin(a) * D, u = clamp(s / KC.zt, 0, 1);
+  cp.set(x, Math.max(K.y + Z.h, hgt(x, z) + 4), z);
+  camera.up.set(0, 1, 0); camera.lookAt(K.x, K.y + K.r * .15 * (1 - u), K.z); camera.fov = 60; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp); S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
   sparks.material.uniforms.scale.value = ch * dpr / (2 * Math.tan(camera.fov * Math.PI / 360));
   camSt.init = false;

@@ -40896,7 +40896,7 @@ function ugTiles() {
    then on foot the weapon in hand (vmRender) */
 function render3d() {
   bushTiles(); ugTiles();
-  renderer.render(scene, camera);
+  if (!thRender()) renderer.render(scene, camera);   // a vehicle's thermal sight draws the world its own way (TH)
   if (camSt.body) {
     camera.layers.set(1); camera.near = .06; camera.far = 150; camera.updateProjectionMatrix(); renderer.autoClearColor = false;
     renderer.render(scene, camera);
@@ -46888,7 +46888,7 @@ const skyMix = (out, a, b, k) => out.copy(a).lerp(b, clamp(k, 0, 1));
 function skyScene() {
   if (!S.sky || !scene) return;
   if (SKY3.at !== scene) sky3Init();
-  const K = SKY3, cp = camera.position, W = S.wx, nv = S.sky.nv && S.modern && playMode === 'play' && S.my && !S.my.dead;
+  const K = SKY3, cp = camera.position, W = S.wx, nv = vnvMode() > 0;   // on foot the soldier's goggles, in a vehicle its optics (VNV); the thermal is lit as night vision, then TH greys it
   let L = Math.max(S.sky.L, skyLit({ x: cp.x, y: cp.y, z: cp.z, shotT: -99 }) * .8);
   const N = nv ? LOOK.nv : LOOK.night; if (nv) L = Math.max(L, LOOK.nv.L);
   const Lr = LOOK.moon + (1 - LOOK.moon) * L, wet = Math.max(W.r * .6, W.f * .7);
@@ -47389,22 +47389,89 @@ function skyHud() {
   const u = hudU(), h = skyHour(), W = S.wx, L = S.sky.L, ink = S.modern ? '#c4f1f7' : '#f3ead2';
   const part = L >= 1 ? 'dia' : L <= 0 ? 'noite' : h < 12 ? 'amanhecer' : 'anoitecer', ws = Math.hypot(W.wx, W.wz);
   const wx = [W.r > .5 ? 'chuva forte' : W.r > .05 ? 'chuva' : '', W.f > .5 ? 'neblina densa' : W.f > .05 ? 'neblina' : '', ws >= 1 ? 'vento ' + Math.round(ws) + ' m/s' : ''].filter(Boolean).join(' · ');
-  const s = String(h | 0).padStart(2, '0') + ':' + String((h % 1) * 60 | 0).padStart(2, '0') + ' · ' + part + (wx ? ' · ' + wx : '') + (S.sky.nv && S.modern ? ' · VISÃO NOTURNA' : '');
+  const s = String(h | 0).padStart(2, '0') + ':' + String((h % 1) * 60 | 0).padStart(2, '0') + ' · ' + part + (wx ? ' · ' + wx : '') + (['', ' · VISÃO NOTURNA', ' · TÉRMICA'][vnvMode()]);
   txt(s, cw / 2, 50 * u, 11 * u, ink, 'center');
 }
 drawHud = (g => () => { g(); skyHud(); })(drawHud);
-/* 6: night vision on and off (modern era); 7: a hand flare (on the ground) */
+/* ---------- the view through a vehicle's optics (cf-visao-noturna-veiculos) ----------
+   On foot 6 puts the soldier's goggles on and off (S.sky.nv). In a vehicle, driver's or gunner's seat (S.my is the vehicle; a passenger is still a
+   soldier with his goggles), the vehicle's optics take over: VNV.m, 0 the naked eye, 1 night vision, 2 thermal; 6 goes 0 -> 1 -> 2 -> 0 where the
+   vehicle has a thermal sight (VNV.th), 0 -> 1 -> 0 elsewhere. A vehicle is boarded with the view the soldier had (his goggles on: night vision),
+   and on leaving it the soldier's own state is back. VNV.th: the modern vehicles with a thermal sight of their own, as built: the M1A1 and M1A2
+   (GPS/CITV), T-90M and T-72B3 (Sosna-U), LAV-25A2 and BTR-82A (gunner's thermal sight), Pantsir-S1 and NASAMS (their electro-optical channel),
+   F-22, Su-57 and A-10C (the fighters' and the A-10C's targeting pod), AH-64D and Mi-28N (the nose turret). The rest of the era keeps night
+   vision: the cars, trucks and technicals, the artillery, the captured T-55 and T-62, the Su-25SM, the bombers and the transport helicopters,
+   which fly on goggles. 1944 has neither */
+const VNV = { v: null, m: 0, th: new Set(['abrams', 'leo2', 't90', 't72', 'lav25', 'btr82', 'pantsir', 'nasams', 'f22', 'su57', 'a10', 'ah64', 'mi28']) };
+const vnvTh = P => !!P && !P.man && VNV.th.has(P.id);   // by the model's id: an aircraft's def is not the table's object
+const vnvVeh = () => (S && S.my && !S.my.man ? S.my : null);
+/* what the player sees with now: 0 the naked eye, 1 night vision, 2 thermal */
+function vnvMode() {
+  if (!S || !S.sky || !S.modern || playMode !== 'play' || !S.my || S.my.dead) return 0;
+  const v = vnvVeh(); if (!v) { VNV.v = null; return S.sky.nv ? 1 : 0; }
+  if (VNV.v !== v) { VNV.v = v; VNV.m = S.sky.nv ? 1 : 0; }   // a new vehicle (or the same one boarded again) starts with the soldier's view
+  if (VNV.m === 2 && !vnvTh(v)) VNV.m = 1;
+  return VNV.m;
+}
+/* key 6 in the modern era: on foot the goggles, in a vehicle its optics' next view; the banner that says it */
+function vnvKey() {
+  const v = vnvVeh();
+  if (!v) { S.sky.nv = !S.sky.nv; return { text: 'Visão noturna ' + (S.sky.nv ? 'ligada' : 'desligada'), sub: 'Tecla 6 liga e desliga', life: 2 }; }
+  const th = vnvTh(v); vnvMode(); VNV.m = (VNV.m + 1) % (th ? 3 : 2);
+  return { text: ['Visão normal', 'Visão noturna', 'Visão térmica'][VNV.m], sub: th ? 'Tecla 6: normal, noturna, térmica' : 'Tecla 6 liga e desliga', life: 2 };
+}
+/* the thermal picture (TH): the world drawn into rt as usual, then the hot bodies (the soldiers and civilians, the vehicles, aircraft and drones:
+   gMen, the pack's animated people in PM.slots, gUnits, gPlanes, gDr) again over it on layer 3 in one plain material that writes alpha 0, and rt to the screen white-hot: the world
+   cold, a dark grey by its light (cold), what burns bright (fire: the flames, the explosions and the muzzle flashes), the hot bodies white
+   by how square they face the eye (warm), seen through smoke, with a little noise (grain) and darker corners (vig) */
+const TH = { rt: null, sc: null, oc: null, hot: null, u: null, L: 3, cold: [.06, .36], fire: [.78, .97], warm: [.62, .38], grain: .05, vig: .7, sz: null };
+function thInit() {
+  TH.rt = new THREE.WebGLRenderTarget(1, 1, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true });
+  TH.hot = new THREE.MeshNormalMaterial({ skinning: true, side: THREE.DoubleSide, flatShading: true });   // the pack's animated people are skinned (r128 skins only by the material's flag; a plain mesh ignores it); the pack's models need both faces; flat: the face's own normal, as some models carry none
+  TH.hot.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace(/gl_FragColor = vec4\( packNormalToRGB\( normal \), opacity \);/, 'gl_FragColor = vec4( vec3( ' + TH.warm[0].toFixed(3) + ' + ' + TH.warm[1].toFixed(3) + ' * max( normal.z, 0.0 ) ), 1.0 );'); };
+  TH.hot.customProgramCacheKey = () => 'th-hot';
+  Object.assign(TH.hot, { blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.ZeroFactor, blendSrcAlpha: THREE.ZeroFactor, blendDstAlpha: THREE.ZeroFactor });
+  TH.u = { tMap: { value: TH.rt.texture }, uT: { value: 0 }, uRes: { value: new THREE.Vector2(1, 1) } };
+  const f = n => n.toFixed(3);
+  TH.sc = new THREE.Scene(); TH.oc = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  TH.sc.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({ uniforms: TH.u, depthTest: false, depthWrite: false,
+    vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: 'uniform sampler2D tMap; uniform float uT; uniform vec2 uRes; varying vec2 vUv;\n' +
+      'float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }\n' +
+      'void main() {\n vec4 c = texture2D(tMap, vUv);\n float v = ' + f(TH.cold[0]) + ' + ' + f(TH.cold[1]) + ' * dot(c.rgb, vec3(.299, .587, .114));\n' +
+      ' v = mix(v, .97, smoothstep(' + f(TH.fire[0]) + ', ' + f(TH.fire[1]) + ', c.r) * smoothstep(.12, .35, c.r - c.b));\n' +
+      ' v = mix(v, c.r, step(.5, 1.0 - c.a));\n v += (h(floor(vUv * uRes) + fract(uT * 7.1) * 91.0) - .5) * ' + f(TH.grain) + ';\n' +
+      ' vec2 d = vUv - .5; v *= 1.0 - ' + f(TH.vig) + ' * dot(d, d);\n gl_FragColor = vec4(vec3(v) * vec3(.97, 1.0, .98), 1.0);\n}' })));
+  TH.sz = new THREE.Vector2();
+}
+/* the main view in thermal; false: not now (the usual render draws it) */
+function thRender() {
+  if (vnvMode() !== 2) return false;
+  if (!TH.rt) thInit();
+  renderer.getDrawingBufferSize(TH.sz);
+  if (TH.rt.width !== TH.sz.x || TH.rt.height !== TH.sz.y) { TH.rt.setSize(TH.sz.x, TH.sz.y); TH.u.uRes.value.copy(TH.sz); }
+  const old = renderer.getRenderTarget(); renderer.setRenderTarget(TH.rt); renderer.render(scene, camera);
+  for (const g of [gMen, gUnits, gPlanes, gDr, ...PM.slots.map(s => s.m && s.root)]) if (g) g.traverse(o => { if (o.isMesh && o.layers.mask & 1 && !(o.material && o.material.transparent && o.material.opacity < .9)) o.layers.enable(TH.L); });   // my own model around the eye (layer 1 only) stays out (r128's Layers has no isEnabled), and so do the see-through parts (a rotor's disc, glass)
+  const bg = scene.background, ov = scene.overrideMaterial, ac = renderer.autoClear;
+  scene.background = null; scene.overrideMaterial = TH.hot; renderer.autoClear = false; camera.layers.set(TH.L);
+  renderer.render(scene, camera);
+  camera.layers.set(0); scene.background = bg; scene.overrideMaterial = ov; renderer.autoClear = ac;
+  renderer.setRenderTarget(old); TH.u.uT.value = S.t;
+  renderer.render(TH.sc, TH.oc);
+  return true;
+}
+/* 6: night vision (and in a vehicle with a thermal sight, thermal) on and off (modern era); 7: a hand flare (on the ground) */
 addEventListener('keydown', e => {
   if (e.repeat || playMode !== 'play' || sw.on || GV.on || !S || !S.my || !S.sky || /INPUT|TEXTAREA/.test(e.target.tagName || '')) return;
   if (e.code === 'Digit6') {
     if (!S.modern) { S.banner = { text: 'Sem visão noturna em 1944', sub: 'Use sinalizadores (7), iluminativas e holofotes', life: 2 }; return; }
-    S.sky.nv = !S.sky.nv; S.banner = { text: 'Visão noturna ' + (S.sky.nv ? 'ligada' : 'desligada'), sub: 'Tecla 6 liga e desliga', life: 2 };
+    S.banner = vnvKey();
   } else if (e.code === 'Digit7') {
     const K = S.sky, ok = skyFire();
     S.banner = ok ? { text: 'Sinalizador no ar', sub: (SKY.me.n - K.my) + ' restantes', life: 2 } : { text: 'Sem sinalizador agora', sub: K.my >= SKY.me.n ? 'Acabaram nesta vida' : S.my.def.vmax ? 'Só em solo' : 'Espere ' + Math.ceil(SKY.me.cool - (S.t - K.myT)) + ' s', life: 2 };
   }
 });
-const skyKeys = () => [['6', 'Visão noturna, na época atual: liga e desliga. À noite, a olho nu se vê a 30% do alcance; com visão noturna, a 60%; a mira térmica dos blindados e das aeronaves vê a 80%'],
+const skyKeys = () => [['6', 'Visão noturna, na época atual: liga e desliga, a pé e nos veículos; nos veículos com mira térmica (M1, T-90M, T-72B3, LAV-25, BTR-82A, Pantsir, NASAMS, F-22, Su-57, A-10C, AH-64D, Mi-28N) passa por normal, noturna e térmica: corpos e motores brancos sobre o fundo frio. À noite, a olho nu se vê a 30% do alcance; com visão noturna, a 60%; a mira térmica dos blindados e das aeronaves vê a 80%'],
   ['`', 'Câmera da arma: ao soltar uma bomba ou disparar um míssil ou foguete, uma janela no canto o segue até o impacto; essa tecla a leva à tela cheia e de volta (liga e desliga em Partida)'],
   ['7', 'Sinalizador (a pé ou em veículo de solo): ilumina uns ' + SKY.ill[0][0] + ' m por ' + SKY.ill[0][1] + ' s à sua frente, para os dois lados; ' + SKY.me.n + ' por vida. O clarão do seu tiro também revela você']];
 /* the hangar: the sky and the weather of the match, kept for the next visit */

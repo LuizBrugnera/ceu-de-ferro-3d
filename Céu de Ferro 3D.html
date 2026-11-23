@@ -62649,7 +62649,8 @@ manThink = (g => m => {
    general (paraAI) drops on a point it does not hold where it knows few enemies (a weak point, a gap) and no anti-aircraft, never on its own
    troops, at most once per PARA.cd s; a person (the Visão de General's Campanha) and the MCP give the same command, and a player asks for it
    from the battle map (PED 'para'). The transport (a real AI plane, role 'para': anti-aircraft and fighters shoot it down, its loss is a
-   plane's) takes off over the base and flies paraFly: to a point PARA.app m short of the target on the line from the base, then straight at
+   plane's) takes off over the base and flies paraFly: to a point PARA.app m short of the target on the heading whose way passes farthest from
+   the anti-aircraft the side knows (paraRoute; the AI drops nowhere every way in passes one), then straight at
    it, at alt m over the ground, slowing to the drop speed; the men go out one each PARA.gap s from lead m short of the target (what a jumper
    drifts before his canopy holds him), then it flies home and lands. A transport shot down takes those still aboard with it.
    A jumper (m.para { st: ride | fall | chute, v, h, ... }) is a soldier of S.men in the air: it falls (GR, the horizontal speed dying at
@@ -62663,10 +62664,10 @@ manThink = (g => m => {
    (gpr) names the transport (v, its AI id), and the guest rides that plane's ghost and jumps on his own client (his mstate carries his
    height); a server that does not know paradrops (welcome para) gets no transport rows and no jump */
 const PARA = {
-  alt: { ai: 320, me: 900 }, spd: { ww2: 58, modern: 72 }, app: 2600, gap: .55, live: 1, cd: 300, pop: 1,
+  alt: { ai: 320, me: 900 }, spd: { ww2: 58, modern: 72 }, app: 2600, dh: [0, .6, -.6, 1.1, -1.1], gap: .55, live: 1, cd: 300, pop: 1,
   fall: { k: .5, term: 52, steer: 3 }, open: 1.3, aad: 140,
   chute: { dead: 16, sink: 5.2, brake: 3.2, glide: 6, run: 8.5, slow: 2.2, turn: .9, hard: 8, hurt: .35 },
-  ai: { open: 2, every: 45, first: 420, foes: 2, aaR: 1800, near: 450, mates: 400, base: 900, spot: 26 },
+  ai: { mem: 300, open: 2, every: 45, first: 420, foes: 2, aaR: 1800, near: 450, mates: 400, base: 900, spot: 26 },
   me: { cd: 150, lead: 2.2, wait: 12 }, slope: .07, turn: .22, far: 1800, home: 1500, out: 5, tilt: -1.35,
   nm: { ww2: 'Fallschirmjäger', modern: 'paraquedistas' }
 };
@@ -62685,7 +62686,7 @@ GC.para = { d: 'atk', f(t, c, by) {
   const A = S.pdrT || (S.pdrT = {}); if ((A[t] || -1e9) > S.t) return gBad('pcd');
   const kits = SQUAD[S.era].slice(), P = popOf(t), U = popUse(t);
   if (U.men + kits.length > P.men) return gBad('pop');
-  if (by === 'ai' && pedFoes(t, c.x, c.z, PARA.ai.aaR, false, true)) return gBad('paa');
+  if (by === 'ai' && (pedFoes(t, c.x, c.z, PARA.ai.aaR, false, true) || paraRoute(t, c.x, c.z).n)) return gBad('paa');
   if (!ecoUse(t, 'squad')) return gBad('res');
   const D = paraLaunch(t, id, Math.round(c.x), Math.round(c.z), { kits, by, why: typeof c.why === 'string' ? c.why.slice(0, 120) : '' });
   if (!D) { if (ecoSim()) ecoBack(t, 'squad', 1); return gBad('bug'); }
@@ -62693,10 +62694,26 @@ GC.para = { d: 'atk', f(t, c, by) {
   gLog(t, 'atk', 'Lançamento de paraquedistas: ' + PLANES[id].name + ' com ' + kits.length + ' homens ' + gNear(D.x, D.z) + (by === 'ai' ? '' : ' (ordem do comando)') + (D.why ? ': ' + D.why : ''), { x: D.x, z: D.z }, 'para' + D.id);
   return gYes(D.id);
 } };
+/* the way in: base, the approach point app m short of the target on the run's heading, the target. Of the headings PARA.dh off the straight
+   one, the one whose two legs pass farthest from the anti-aircraft side t knows (seen in the last ai.mem s: a gun moves little; where it saw it): { ax, az, h,
+   n: how many known guns within aaR of the way, d: the nearest } */
+function paraRoute(t, x, z) {
+  const b = S.base[t], h0 = headTo(b.x, b.z, x, z), R = PARA.ai.aaR, aa = [];
+  for (const u of S.units) if (!u.dead && u.kind === 'aa' && foeSide(t, u.team) && S.t - sT(u, t) < PARA.ai.mem) { const ux = sX(u, t), uz = sZ(u, t); aa.push({ x: ux === undefined ? u.x : ux, z: uz === undefined ? u.z : uz }); }
+  const seg = (q, a, c) => { const ex = c.x - a.x, ez = c.z - a.z, L = ex * ex + ez * ez || 1, k = clamp(((q.x - a.x) * ex + (q.z - a.z) * ez) / L, 0, 1); return Math.hypot(q.x - a.x - ex * k, q.z - a.z - ez * k); };
+  let best = null;
+  for (const dh of PARA.dh) {
+    const h = h0 + dh, d = Math.min(PARA.app, Math.hypot(x - b.x, z - b.z) * (dh ? .8 : 1));
+    const A = { x: clamp(x - Math.cos(h) * d, 300, S.W - 300), z: clamp(z + Math.sin(h) * d, -S.HW + 300, S.HW - 300) }, T = { x, z };
+    let n = 0, dm = 1e9; for (const q of aa) { const e = Math.min(seg(q, b, A), seg(q, A, T)); dm = Math.min(dm, e); if (e < R) n++; }
+    const sc = n * 1e5 - Math.min(dm, R * 2) + Math.abs(dh) * 300;
+    if (!best || sc < best.sc) best = { ax: A.x, az: A.z, h: headTo(A.x, A.z, x, z), n, d: dm, sc };
+  }
+  return best;
+}
 /* the transport leaves over the base, high: o { kits (the squad's, none for a player's jump), by, why, me (a rider: the player's man), pid (a guest's) } */
 function paraLaunch(t, id, x, z, o) {
-  const b = S.base[t], h = headTo(b.x, b.z, x, z), d = Math.hypot(x - b.x, z - b.z), alt = o.kits.length ? PARA.alt.ai : PARA.alt.me;
-  const k = Math.max(0, d - PARA.app), ax = clamp(b.x + Math.cos(h) * k, 300, S.W - 300), az = clamp(b.z - Math.sin(h) * k, -S.HW + 300, S.HW - 300);
+  const b = S.base[t], alt = o.kits.length ? PARA.alt.ai : PARA.alt.me, W = paraRoute(t, x, z), h = headTo(b.x, b.z, W.ax, W.az), ax = W.ax, az = W.az;
   const D = { id: (S.pdrN = (S.pdrN || 0) + 1), t, x, z, h, alt, ax, az, st: 'in', n: o.kits.length, kits: o.kits, i: 0, T: 0, by: o.by, why: o.why || '', q: null, p: null, out: 0, end: 0, T0: S.t, res: '', rider: o.me || null, pid: o.pid || 0 };
   const M = { kind: o.kits.length ? 'attack' : 'lift', why: 'paraquedistas: ' + (D.why || gNear(x, z)), area: { x, z, r: 300 } };
   D.M = M;
@@ -62872,7 +62889,8 @@ function paraStep(dt) {
     if (p && p.dead) {
       D.end = S.t; const lost = D.n - D.i; D.i = D.n;
       D.res = 'abatido' + (lost > 0 ? ' com ' + lost + ' paraquedistas a bordo' : '');
-      gLog(D.t, 'atk', 'Transporte abatido ' + ecoNear(p.x, p.z) + (lost > 0 ? ': ' + lost + ' paraquedistas perdidos com ele' : ''), p, 'parl');
+      const by = p.lastBy && (p.lastBy.def ? p.lastBy.def.name : p.lastBy.name);
+      gLog(D.t, 'atk', 'Transporte abatido ' + ecoNear(p.x, p.z) + (by ? ' por ' + by : '') + (lost > 0 ? ': ' + lost + ' paraquedistas perdidos com ele' : ''), p, 'parl');
       if (lost > 0 && S.cq && cqSim()) { const Q = S.cq; Q.tk[D.t] -= lost * (cqLk('inf') || 0); Q.lost[D.t][0] += lost; }
     } else if (!p || p.gone) D.end = S.t;
   }
@@ -62889,7 +62907,7 @@ function paraAI(C) {
   let best = null, bs = -1e9;
   for (const P of gPts()) {
     if (P.hold === t || S.base.some(b => Math.hypot(b.x - P.x, b.z - P.z) < PARA.ai.base)) continue;
-    if (pedFoes(t, P.x, P.z, PARA.ai.aaR, false, true)) continue;   // known anti-aircraft: the transport would not come back
+    if (pedFoes(t, P.x, P.z, PARA.ai.aaR, false, true) || paraRoute(t, P.x, P.z).n) continue;   // known anti-aircraft there or on every way in: the transport would not come back
     const foes = pedFoes(t, P.x, P.z, PARA.ai.near); if (foes > PARA.ai.foes) continue;
     if (pedMates(t, P.x, P.z, PARA.ai.mates)) continue;   // its own are there already
     const own = S.base[t], far = Math.hypot(P.x - own.x, P.z - own.z), sc = (P.hold >= 0 ? 3 : 2) - foes * 1.5 + far / 4000;
@@ -62917,6 +62935,7 @@ pedRun = (g => (P, k, x, z) => {
   if (!gMapOk(x, z)) return no(GEN.no.map);
   if (!id) return no(GEN.no.pnone.toLowerCase());
   if (pedFoes(t, x, z, PARA.ai.aaR, false, true)) return no('antiaérea inimiga conhecida perto da zona de salto');
+  if (k === 'para' && paraRoute(t, x, z).n) return no('antiaérea inimiga conhecida em todos os caminhos até lá');
   if (k === 'para') {
     const gen = S.net ? !!Net.gn && Net.gn[t] > 0 && Net.gn[t] === (P === S.my ? Net.id : P.pid) : genSeat(t) === 'me' && P === S.my;
     if (genSeat(t) !== 'ai' && gen) return no('você é o general: dê a ordem na Visão de General (Tab)');

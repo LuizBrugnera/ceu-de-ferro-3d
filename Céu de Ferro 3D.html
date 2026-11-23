@@ -15232,6 +15232,10 @@ const SIDEPL = { EUA: 1, Aliados: 1, Insurgentes: 1 }, daDe = n => (SIDEPL[n] ? 
 const SIDEMAX = 3, SIDEL = [];
 const SIDES = () => { const n = (S && S.N) || 2; return SIDEL[n] || (SIDEL[n] = Object.freeze([...Array(n).keys()])); };
 const bySide = f => SIDES().map(f);
+/* how many of a by-side count (a work's or a building's f.in / B.in) are of a side other than t: with two sides l[1 - t], with three every
+   enemy's (l[1 - t] read side 2's men as nobody, and side 2 read l[-1]: cf-general-melhorias); inAny: anybody at all */
+const inFoe = (l, t) => { let n = 0; if (l) for (let i = 0; i < l.length; i++) if (i !== t) n += l[i] || 0; return n; };
+const inAny = l => { if (l) for (let i = 0; i < l.length; i++) if (l[i] > 0) return true; return false; };
 const isSide = t => Number.isInteger(t) && t >= 0 && t < ((S && S.N) || 2);
 const ALL = () => (1 << ((S && S.N) || 2)) - 1;
 const relNew = n => Array.from({ length: n }, (_, a) => Array.from({ length: n }, (_, b) => (a === b ? 'ally' : 'foe')));
@@ -19712,8 +19716,8 @@ function bldBays(o, x, z) {
 function ptPts(q, O) {
   const P = O.k === 'hold' && O.tw && O.tw.r && Math.hypot(O.x - O.tw.x, O.z - O.tw.z) < O.tw.r ? O.tw : null; if (!P) return null;
   const D = INC.def, t = q.team, n = Math.max(q.n0, 1), x = O.x, z = O.z, R = O.wd || Math.hypot(O.x - P.x, O.z - P.z) > 40 ? CITY.ai.post : P.r * .4, e = ptThreat(t, P, x, z), el = Math.hypot(e.x - x, e.z - z) || 1, ux = (e.x - x) / el, uz = (e.z - z) / el, front = [], wl = [], fl = [];
-  for (const f of S.forts) if (f.prog >= 1 && !f.in[1 - t] && Math.hypot(f.x - x, f.z - z) < Math.max(R * .5, FORT.ai.post)) { if (f.k === 1 && Math.hypot(f.x - x, f.z - z) < FORT.ai.post) for (const p of fortSlots(f)) front.push(p); else fl.push(fortSlots(f)); }   // a trench dug at the post first
-  const bs = near(x, z, R).filter(o => o.B && S.os[o.id] < 2 && !o.B.K.open && !(o.B.in && o.B.in[1 - t])).map(o => [o, ((o.x - x) * ux + (o.z - z) * uz) / R - Math.hypot(o.x - x, o.z - z) / R * .5]).sort((a, b) => b[1] - a[1]).slice(0, D.bld).map(a => a[0]);
+  for (const f of S.forts) if (f.prog >= 1 && !inFoe(f.in, t) && Math.hypot(f.x - x, f.z - z) < Math.max(R * .5, FORT.ai.post)) { if (f.k === 1 && Math.hypot(f.x - x, f.z - z) < FORT.ai.post) for (const p of fortSlots(f)) front.push(p); else fl.push(fortSlots(f)); }   // a trench dug at the post first
+  const bs = near(x, z, R).filter(o => o.B && S.os[o.id] < 2 && !o.B.K.open && !(o.B.in && inFoe(o.B.in, t))).map(o => [o, ((o.x - x) * ux + (o.z - z) * uz) / R - Math.hypot(o.x - x, o.z - z) / R * .5]).sort((a, b) => b[1] - a[1]).slice(0, D.bld).map(a => a[0]);
   for (const o of bs) wl.push(bldWins(o, o.x - x + ux * 60, o.z - z + uz * 60).slice(0, D.wins));
   for (let k = 0; k < Math.max(D.wins, 6); k++) { for (const w of wl) if (w[k]) front.push(w[k]); for (const f of fl) if (f[k]) front.push(f[k]); }   // a window, then a place in a work
   const nf = n >= 4 ? n - D.res : n;
@@ -19741,8 +19745,8 @@ function sqMore(q, L, O, live) {
   let bg = null;
   if (q.at && O.k === 'hold' && O.x !== undefined && !q.state && q.pts) {
     const P = O.tw && O.tw.r ? O.tw : null, res = live.filter(m => q.pts[m.ai.i % q.pts.length].res);
-    let o = q.rc && S.os[q.rc.id] < 2 && q.rc.B.in && q.rc.B.in[1 - q.team] ? q.rc : null;
-    if (P && res.length && !o && S.t > (q.rcT || 0)) { q.rcT = S.t + 2; o = near(O.x, O.z, P.r * .7).find(b => b.B && S.os[b.id] < 2 && b.B.in && b.B.in[1 - q.team] > 0) || null; }
+    let o = q.rc && S.os[q.rc.id] < 2 && q.rc.B.in && inFoe(q.rc.B.in, q.team) ? q.rc : null;
+    if (P && res.length && !o && S.t > (q.rcT || 0)) { q.rcT = S.t + 2; o = near(O.x, O.z, P.r * .7).find(b => b.B && S.os[b.id] < 2 && b.B.in && inFoe(b.B.in, q.team) > 0) || null; }
     q.rc = o;
     if (o) { bg = []; const bays = bldBays(o, res[0].x, res[0].z); res.forEach((m, k) => { bg[m.ai.i] = bays[k % bays.length]; }); }   // the reserve goes in after them
     if (!q.op && q.fd > D.pat.quiet && live.length >= 3) {
@@ -19773,7 +19777,7 @@ function sqBound(q, L, O, live) {
   if (D.T) {   // is the bound done: the building entered and clear, or the team at its places
     const mv = live.filter(m => (m.ai.i & 1) === D.t), b = D.b && S.os[D.b.id] < 2 ? D.b : null;
     let done;
-    if (D.b) { const foe = b && b.B.in ? b.B.in[1 - t] : 0, inn = b ? mv.filter(m => m.cbo === b && m.cbin).length : 0; D.clr = b && inn && !foe ? D.clr + IAI.think : 0; done = !b || D.clr >= B.clear || (!foe && S.t > D.T + B.max * 2); }
+    if (D.b) { const foe = b && b.B.in ? inFoe(b.B.in, t) : 0, inn = b ? mv.filter(m => m.cbo === b && m.cbin).length : 0; D.clr = b && inn && !foe ? D.clr + IAI.think : 0; done = !b || D.clr >= B.clear || (!foe && S.t > D.T + B.max * 2); }
     else done = !mv.length || mv.every(m => !q.bg || !q.bg[m.ai.i] || hdist(m, q.bg[m.ai.i]) < 4) || S.t > D.T + B.max;
     if (!done) return true;
     D.t ^= 1;
@@ -19829,7 +19833,7 @@ function sqMan(m, A, q, best) {
 }
 /* the building he is to clear: a grenade through the opening before him, a moment for it to go off, then in after the enemy inside */
 function bAtk(m, A, b, best) {
-  if (!b || !b.B.in || !b.B.in[1 - m.team]) return;
+  if (!b || !b.B.in || !inFoe(b.B.in, m.team)) return;
   const I = CITY.ai, c = m.ctl;
   if (!(m.cbo === b && m.cbin)) {
     const d = footD(b, m.x, m.z);
@@ -24796,7 +24800,7 @@ DRILLS.push(
     },
     act(q, d) {
       const l = drMen(q), c = drMid(l), n = l.length, R = DRILL.inf.per.r; d.p = []; q.drPer = { h: d.h, p: d.p };
-      const o = near(c.x, c.z, DRILL.inf.per.bld).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - q.team])).sort((a, b) => hdist(a, c) - hdist(b, c))[0], w = o ? bldWins(o, 0, 0) : [];
+      const o = near(c.x, c.z, DRILL.inf.per.bld).filter(o => drBldOk(o) && !(o.B.in && inFoe(o.B.in, q.team))).sort((a, b) => hdist(a, c) - hdist(b, c))[0], w = o ? bldWins(o, 0, 0) : [];
       if (w.length) { l.forEach((m, k) => { const p = w[(k * 3) % w.length], dx = p.x - o.x, dz = p.z - o.z, dl = Math.hypot(dx, dz) || 1; d.p[m.ai.i] = Object.assign({}, p, { fx: p.x + dx / dl * 40, fz: p.z + dz / dl * 40 }); }); return; }   // a house at the halt: its windows, all round
       l.forEach((m, k) => { const a = k * TAU / n + q.id; d.p[m.ai.i] = Object.assign(clearOf(c.x + Math.cos(a) * R, c.z + Math.sin(a) * R, 1, {}), { fx: c.x + Math.cos(a) * 40, fz: c.z + Math.sin(a) * 40 }); }); },
     man(q, d, m, A) { const p = d.p[A.i]; if (!p) return; drGo(m, A, p, false, hdist(m, p) > 2 ? 0 : 1); drCtl(A, { face: { x: p.fx, y: hgt(p.fx, p.fz) + 1.5, z: p.fz } }); } },
@@ -26103,7 +26107,7 @@ function trenchAt(x, z, pad) {
    shows of it to aim at (m.fy), how well it is hidden, and who is in each trench (f.in, by side; f.tg: what a battery is given) */
 function fortMen(dt) {
   const TR = FORT.trench, BG = FORT.bags, T = S.T;
-  for (let _i = 0, _l = S.forts, f = _l[0]; _i < _l.length; f = _l[++_i]) f.in[0] = f.in[1] = 0;
+  for (let _i = 0, _l = S.forts, f = _l[0]; _i < _l.length; f = _l[++_i]) f.in.fill(0);   // every side's (f.in[2] only grew with three: cf-general-melhorias)
   for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) {
     if (m.dead) continue;
     let f = null, dig = 0;
@@ -26182,7 +26186,7 @@ function fortSlots(f) {
 function fortPts(t, x, z, n, R) {
   const A = FORT.ai, l = [], out = [];
   if (!R && near(x, z, 60).some(o => o.K.sight && !o.K.rock && S.os[o.id] < 2)) return null;
-  for (const f of S.forts) if (f.prog >= 1 && !f.in[1 - t] && Math.abs(f.x - x) < A.post && Math.abs(f.z - z) < A.post) for (const p of fortSlots(f)) l.push(p);
+  for (const f of S.forts) if (f.prog >= 1 && !inFoe(f.in, t) && Math.abs(f.x - x) < A.post && Math.abs(f.z - z) < A.post) for (const p of fortSlots(f)) l.push(p);
   if (!l.length) return null;
   l.sort((a, b) => a.f.k - b.f.k || Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z));
   for (let i = 0; i < n; i++) { const a = i * 2.4, r = R || 6 + 2.5 * (i >> 1); out.push(l[i] || clearOf(x + Math.cos(a) * r, z + Math.sin(a) * r, 1, {})); }
@@ -26196,7 +26200,7 @@ function fortSpot(m, sl, o) {
     const d = hdist(o, m) || 1; return (A.cs = { x: o.x + (m.x - o.x) / d * F.throw * .8, z: o.z + (m.z - o.z) / d * F.throw * .8, s: sl, t: S.t + 2 });
   }
   for (const f of S.forts) {
-    if (f.prog < 1 || f.in[1 - m.team] || Math.abs(f.x - sl.x) > R + 8 || Math.abs(f.z - sl.z) > R + 8) continue;
+    if (f.prog < 1 || inFoe(f.in, m.team) || Math.abs(f.x - sl.x) > R + 8 || Math.abs(f.z - sl.z) > R + 8) continue;
     if (f.k === 2 && (o.x - f.x) * Math.cos(f.a) - (o.z - f.z) * Math.sin(f.a) < 0) continue;
     for (const p of fortSlots(f)) { const d = hdist(p, sl) + hdist(p, m) * .3 - (f.k === 1 ? 8 : 0); if (d < bd && (!p.by || p.by === m || p.by.dead || S.t > p.T)) { bd = d; best = p; } }
   }
@@ -26615,7 +26619,7 @@ function cityObjs(T) {
 function cityInit() {
   const T = S.T;
   S.cbs = new Uint8Array(T.bn); S.cbh = new Uint8Array(T.bn); S.cblog = []; S.cbfall = new Map(); S.cbocc = []; S.cbup = 0;
-  for (const o of T.houses) { const B = o.B; for (let e = 0; e < B.oR; e++) S.cbh[B.off + e] = bldHp(B, e); B.rev = 0; B.in[0] = B.in[1] = 0; B.tg = B.doom = B.ent = null; B.down = false; }
+  for (const o of T.houses) { const B = o.B; for (let e = 0; e < B.oR; e++) S.cbh[B.off + e] = bldHp(B, e); B.rev = 0; B.in.fill(0); B.tg = B.doom = B.ent = null; B.down = false; }
 }
 const bldHp = (B, e) => Math.min(255, Math.round(B.mat.hp * 4 * (e >= B.oS ? CITY.hp.slab : B.kd[e] > 4 ? CITY.hp.part : 1)));
 /* element e of a structure: BP.f its family (0 wx, 1 wz, 2 slab, 3 rubble), its storey, row and bay, and its middle in the building's
@@ -26905,7 +26909,7 @@ const bFloor = (B, L, j, i) => L === 0 || (S.cbs[B.off + B.oS + ((L - 1) * B.nz 
 /* may feet cross wall e of storey L: all of it (2), through its opening (1) or not (0) */
 const bPass = (B, e, L, out) => { const k = B.kd[e], s = S.cbs[B.off + e]; return !k || s === 3 ? 2 : s === 2 || k === 3 || k === 4 || k === 6 || (k === 2 && !L && out) ? 1 : 0; };
 function bldMen(dt) {
-  for (const o of S.cbocc) { o.B.in[0] = o.B.in[1] = 0; if (o.B.tg) for (const g of o.B.tg) g.dead = true; }
+  for (const o of S.cbocc) { o.B.in.fill(0); if (o.B.tg) for (const g of o.B.tg) g.dead = true; }
   S.cbocc.length = 0; S.cbup = 0;
   for (const m of S.men) {
     if (m.dead || m.in) { m.cbo = null; continue; }
@@ -26920,7 +26924,7 @@ function bldMen(dt) {
     if (m.net) bldGhost(m, o, dt); else bldWalk(m, o, dt);
     const B = o.B;
     if (m.cbin) {
-      if (!B.in[0] && !B.in[1]) S.cbocc.push(o);
+      if (!inAny(B.in)) S.cbocc.push(o);   // N sides: a building only side 2 is in is counted (and zeroed) too
       B.in[m.team]++;
       const g = (B.tg || (B.tg = sdsOf().map(team => ({ team, kind: 'bld', bld: o, x: o.x, y: o.y, z: o.z, sx: o.x, sz: o.z, px: o.x, pz: o.z, v: ZERO, moveT: -99, seenT: -1e9, dead: true }))))[m.team];
       g.dead = false; if (m.seenT >= g.seenT) { g.seenT = m.seenT; g.px = g.sx = m.x; g.pz = g.sz = m.z; g.y = o.y + (m.cbl | 0) * B.sh; }
@@ -27011,9 +27015,9 @@ function bldWins(o, ex, ez) {
 function bldPts(t, x, z, n, R, k) {
   const I = CITY.ai; if ((R && R > I.ring) || k === 'build' || k === 'supply') return null;
   const burg = S.T.burgs.some(b => b.k !== 'hamlet' && Math.hypot(b.x - x, b.z - z) < b.ru + 40), r = R ? R + I.near : burg ? I.post : I.near;
-  const e = eBase(t, x, z), hs = near(x, z, r).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - t])).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 2), l = [], out = [];
+  const e = eBase(t, x, z), hs = near(x, z, r).filter(o => drBldOk(o) && !(o.B.in && inFoe(o.B.in, t))).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z)).slice(0, 2), l = [], out = [];
   for (const o of hs) l.push(bldWins(o, e.x - o.x, e.z - o.z).slice(0, I.men));
-  for (const f of S.forts) if (f.k === 1 && f.prog >= 1 && !f.in[1 - t] && Math.abs(f.x - x) < FORT.ai.post && Math.abs(f.z - z) < FORT.ai.post) for (const p of fortSlots(f)) out.push(p);   // a trench dug at the post comes first
+  for (const f of S.forts) if (f.k === 1 && f.prog >= 1 && !inFoe(f.in, t) && Math.abs(f.x - x) < FORT.ai.post && Math.abs(f.z - z) < FORT.ai.post) for (const p of fortSlots(f)) out.push(p);   // a trench dug at the post comes first
   for (let k = 0; k < I.men; k++) for (const w of l) if (w[k]) out.push(w[k]);
   if (!out.length) return null;
   const pts = []; for (let i = 0; i < n; i++) pts.push(out[i % out.length]);
@@ -27847,10 +27851,12 @@ function cmdAttack(C, sq) {
     let pool = ap ? apPool(C, sq, P, sd, o, D.push + 1) : sq.filter(q => atkFit(q, P, sd)).sort((a, b) => (a.job === 'push' ? 0 : 1) - (b.job === 'push' ? 0 : 1) || Math.abs(a.s - P.s) - Math.abs(b.s - P.s)).slice(0, D.push + 1);   // M2: from any road, and quiet posts lend
     const kn = cmdKnown(C, o.x, o.z, 500), walk = !!S.cq && !kn && !P.tw.w.some((v, o) => o !== t && v > 0);   // N sides: no enemy weight in it.
     if (C.gue && !walk) { ev.push({ x: o.x, z: o.z, ri, sd, nm: gName(P), why: 'gue' }); continue; }   // map version 4: harassing, it only walks into empty points (gue)
-    if (walk) pool = pool.filter(q => (ap ? (L => !!L && hdist(L, o) < CQ.walk)(q.men.find(m => !m.dead)) : Math.abs(P.s - q.s) < CQ.walk)).slice(0, 2);
-    const foe = walk ? 3 : Math.max(CMD.guess, kn), n0 = pool.reduce((a, q) => a + q.live, 0);   // a point nobody stands in is walked into by whoever is at hand
-    const own = n0 + S.units.reduce((a, u) => a + (u.kind === 'tank' && u.ai && !u.dead && u.team === t && u.ri === ri && (P.s - u.s) * sd > 0 && (P.s - u.s) * sd < 2500 ? CMD.val.tank : 0), 0) + (me && me.man && !me.dead && me.team === t && Math.hypot(me.x - o.x, me.z - o.z) < 1200 ? 2 : 0);   // a player on foot by the objective counts
-    const sec = camp && go.length > 0 && !walk, need = sec ? D.atk * CAMP.secK : D.atk, min = walk ? 1 : 2;   // a campaign's secondary front only has to fix the enemy (F4)
+    const fast = gsFast(C, P), wR = fast === 'weak' ? CMD.reach : CQ.walk;   // cf-general-melhorias: a weakened point is walked into by the squads within CMD.reach m, up to GSM.weak.n
+    if (walk) pool = pool.filter(q => (ap ? (L => !!L && hdist(L, o) < wR)(q.men.find(m => !m.dead)) : Math.abs(P.s - q.s) < wR)).slice(0, fast === 'weak' ? GSM.weak.n : 2);
+    const foe = walk ? 3 : Math.max(CMD.guess, kn, gsRecall(C, P)), n0 = pool.reduce((a, q) => a + q.live, 0);   // a point nobody stands in is walked into by whoever is at hand; cf-general-melhorias: what was seen there lately counts (GSM.mem), not only the last 40 s
+    let tnk = 0, tfr = 0; for (const u of S.units) { if (u.kind !== 'tank' || !u.ai || u.dead || u.team !== t) continue; if (u.ri === ri && (P.s - u.s) * sd > 0 && (P.s - u.s) * sd < 2500) tnk++; else if (GSM.on && M5.on && m5Free(u, t) && hdist(u, o) < M5.reach) tfr++; }   // cf-general-melhorias: the free tanks m5Atk may send count too (report 7 i), as many as it sends
+    const own = n0 + (tnk + Math.min(tfr, M5.atk.n[pool.length >= 3 ? 1 : 0])) * CMD.val.tank + (me && me.man && !me.dead && me.team === t && Math.hypot(me.x - o.x, me.z - o.z) < 1200 ? 2 : 0);   // a player on foot by the objective counts
+    const sec = camp && go.length > 0 && !walk, need = fast ? Math.min(GSM.need, sec ? D.atk * CAMP.secK : D.atk) : sec ? D.atk * CAMP.secK : D.atk, min = walk ? 1 : 2;   // a campaign's secondary front only has to fix the enemy (F4); the seat's threat and a weakened point, 1 to 1 (GSM.need)
     const e = { x: o.x, z: o.z, ri, sd, nm: gName(P), n: pool.length, own, foe, need, walk }; ev.push(e);
     if (pool.length < min || own / foe < need) { e.why = pool.length < min ? 'pool' : 'weak'; continue; }
     e.why = 'go';
@@ -39680,6 +39686,7 @@ function afpWant(C, A) {
   const t = C.t, e = mnBase(t), P = afpPlaces(t), out = [], arm = aidArmour(C);   // N sides: the enemy base nearest ours; each road's way by mnDs
   const tier = Math.min(2, (!ecoSim() ? 1 : (n => (n < AFP.tier[0] ? 0 : n < AFP.tier[1] ? 1 : 2))(aidSites(t).length)) + (C.stgAfp || 0));   // M8: a strongpoint, area denial or defence in depth plans one tier up
   for (const p of P) {   // the AA umbrella
+    if (!afpAAF(t)) break;   // a faction with no fixed AA of its own (the Insurgents: theirs is a technical or a towed gun, cf-insurg-antiaerea) plans none: it waited for one forever
     if (p.noaa && !(tier >= 2 && p.aa)) continue;   // a held point or a supply base (BMR): only the first, at tier 2
     const d = Math.hypot(e.x - p.x, e.z - p.z) || 1, c = clearOf(p.x + (e.x - p.x) / d * 40, p.z + (e.z - p.z) / d * 40, 3, {});
     out.push({ key: 'aa' + p.id, k: 'aapos', x: c.x, z: c.z, cx: p.x, cz: p.z, a: headTo(c.x, c.z, e.x, e.z), nm: 'sobre ' + p.nm, why: 'guarda-chuva antiaéreo sobre ' + p.nm, spot: () => c });
@@ -39745,8 +39752,12 @@ function afpSay(C, A, it, ok, s) {
   A.fl.push({ t: Math.round(S.t), key: it.key, k: it.k, ok: ok ? 1 : 0, why: s }); if (A.fl.length > AFP.log) A.fl.shift();
   gLog(C.t, 'eng', 'Plano de fortificação: ' + W21.fort[it.k] + ' ' + it.nm + ': ' + s, { x: it.x, z: it.z }, 'afp' + it.key + (ok ? 1 : 0) + s.slice(0, 12));
 }
+/* does side t's faction field a fixed AA gun (its side's aa model): the Insurgents do not, so an AA position of theirs would wait for one forever
+   and tell the economy it is short of one every time (cf-general-melhorias) */
+const afpAAF = t => !!(S.E && S.fac && S.E.sides[S.fac[t]] && S.E.sides[S.fac[t]].aa);
 /* one item: true when its order went */
 function afpTry(C, A, it) {
+  if (it.k === 'aapos' && !afpAAF(C.t)) { A.fn[it.key] = S.t + 1e6; return false; }   // none of that kind to wait for (cf-general-melhorias)
   if (!it.big && A.save && A.save.big && !A.save.go && afdFull(C.t) && W21.dig[it.k] && FORT.K[W21.dig[it.k]].cost) { A.fn[it.key] = S.t + AFP.every; return false; }   // the dome's money is ready: the plan's other paid works wait, and leave it the builders (cf-cupula-general)
   const t = C.t, K = W21.dig[it.k], F = K ? FORT.K[K] : null, no = s => { A.fn[it.key] = S.t + AFP.again; afpSay(C, A, it, 0, s); return false; };
   if (it.k === 'aapos' && ecoSim() && ECO.gate && !((S.eco.d[t].res || {}).aaf || []).length) {   // none in the reserve: the economy is told it is short of one
@@ -46953,30 +46964,32 @@ function sedeFoeSites(t, f) {
 const sedePref = C => { const k = docK(C); return Object.hasOwn(SEDE.pref, k) ? SEDE.pref[k] : 1; };
 const sedeAhead = t => { const h = cqHeld(t); return foes(t).every(f => cqOut(f) || cqHeld(f) < h); };
 /* side C's assault on a known enemy seat, if one makes sense now: true when it opened one (or waits for its approaches) */
+/* why each enemy's seat is not assaulted yet, by enemy: C.sedeW[f] { why, k, T } (an object, a record a side; an old single record is dropped) */
+const sedeWOf = C => (C.sedeW && !('f' in C.sedeW) ? C.sedeW : (C.sedeW = {}));
 function sedeGo(C, sq) {
   const t = C.t, D = C.doc, R = S.T.routes, ap = apOn(), slot = o => o.k === 'atk' && !(o.walk && S.t - o.T0 > CMD.walkSlot);
   if (!SEDE.on || !S.cq || S.cq.ph || C.gue || genBy(t, 'atk') !== 'ai' || S.t < C.atkT || S.t < (C.sedeT || 0)) return false;
   if (C.ops.some(o => o.k === 'atk' && !o.over && o.sede !== undefined)) return false;
   const on = C.ops.filter(slot).length; if (on >= campRoom(C, sq)) return false;
-  const held = S.cq.p.filter(p => p.hold === t), tg = cqTargets(t), why = (f, w, s) => { const W = C.sedeW; if (!W || W.f !== f || W.why !== s || S.t - W.T > SEDE.again) { C.sedeW = { f, why: s, T: S.t }; gLog(t, 'atk', 'Assalto à ' + sedeName(f).slice(2) + ' ainda não: ' + s, w); } };   // said again when the reason changes, or every SEDE.again s
+  const held = S.cq.p.filter(p => p.hold === t), tg = cqTargets(t), why = (f, w, s, k) => { const M = sedeWOf(C), W = M[f]; if (!W || W.k !== k || S.t - W.T > SEDE.again) gLog(t, 'atk', 'Assalto à ' + sedeName(f).slice(2) + ' ainda não: ' + s, w); if (!W || W.k !== k || S.t - W.T > SEDE.again) M[f] = { f, why: s, k, T: S.t }; else W.why = s; };   // said again when the kind of reason changes (k: far, pool, weak, fail; the text's numbers change every turn), or every SEDE.again s, for each enemy on its own (C.sedeW[f]: with two enemies one record flooded the log, cf-general-melhorias)
   for (const f of foes(t).filter(f => !cqOut(f) && sedeKn(C, f)).sort((a, b) => hdist(aidSeat(a), S.base[t]) - hdist(aidSeat(b), S.base[t]))) {
     const w = aidSeat(f); if (!w) continue;
     const pt = S.cq.p.find(p => hdist(p, w) < 250) || null;   // HS2: the seat is a point
     if (pt && pt.hold === t) continue;
-    if (pt ? !tg.includes(pt) : !(held.some(p => hdist(p, w) < SEDE.reach) || tg.some(p => p.base === f))) { why(f, w, 'longe da nossa linha (nenhum ponto nosso a ' + gN(SEDE.reach / 1000) + ' km)'); continue; }
+    if (pt ? !tg.includes(pt) : !(held.some(p => hdist(p, w) < SEDE.reach) || tg.some(p => p.base === f))) { why(f, w, 'longe da nossa linha (nenhum ponto nosso a ' + gN(SEDE.reach / 1000) + ' km)', 'far'); continue; }
     const rp = railOf(w.x, w.z), ri = pt ? pt.ri : rp.ri, s = pt ? pt.s : rp.s, near = held.concat(S.cq.p.filter(p => p.base === t)).sort((a, b) => hdist(a, w) - hdist(b, w))[0];
     const sd = near ? (Math.sign(s - sOn(ri, near.x, near.z)) || dsOf(t, ri)) : dsOf(t, ri), P = pt ? Object.assign(cqObj(pt), { sede: f }) : { ri, s, sede: f }, o = pt || routeAt(R[ri], clamp(s, 0, R[ri].len));
     const pool = (ap ? apPool(C, sq, P, sd, o, D.push + 1) : sq.filter(q => atkFit(q, P, sd)).sort((a, b) => hdist(a.men.find(m => !m.dead) || a, o) - hdist(b.men.find(m => !m.dead) || b, o))).slice(0, D.push + 1);
     const foe = Math.max(CMD.guess, cmdKnown(C, o.x, o.z, w.ru + SEDE.near)), n0 = pool.reduce((a, q) => a + q.live, 0);
     const own = n0 + S.units.reduce((a, u) => a + (u.kind === 'tank' && u.ai && !u.dead && u.team === t && hdist(u, o) < 2500 ? CMD.val.tank : 0), 0);
-    if (pool.length < 2) { why(f, w, 'esquadras livres insuficientes ao alcance (' + pool.length + ')'); continue; }
-    if (own / foe < D.atk) { why(f, w, 'força ' + gN(own) + ' contra ' + gN(foe) + ', a doutrina pede ' + gN(D.atk) + ' para 1'); continue; }
+    if (pool.length < 2) { why(f, w, 'esquadras livres insuficientes ao alcance (' + pool.length + ')', 'pool'); continue; }
+    if (own / foe < D.atk) { why(f, w, 'força ' + gN(own) + ' contra ' + gN(foe) + ', a doutrina pede ' + gN(D.atk) + ' para 1', 'weak'); continue; }
     if (ap && !apGet(C, P, sd) && apAsk(C, P, sd)) { C.gate = 'ap'; return true; }   // M2: its approaches are planned in the next pieces, the assault the next turn
     const ids = pool.map(q => q.id), st = sedeFoeSites(t, f), e = st[0] || null;
     const K = (C.camp || []).filter(K => !K.over).length < CAMP.max ? genCmd(t, { c: 'camp', H: Math.round(clamp(CAMP.H[1] / 2, CAMP.H[0], CAMP.H[1])), why: 'assalto à ' + sedeName(f).slice(2) }, 'ai') : { ok: false };
     const a = genCmd(t, Object.assign({ c: 'atk' }, pt ? { pi: gPts().indexOf(pt) } : { ri, s }, { sd, ids }), 'ai', { P, sd, pool, walk: false, own, foe });
     const op = a.ok ? C.ops.find(x => x.id === a.id && x.k === 'atk' && !x.over) : null;
-    if (!op) { C.sedeT = S.t + SEDE.again / 2; why(f, w, 'o assalto não abriu (' + gNo(a.why) + ')'); return false; }
+    if (!op) { C.sedeT = S.t + SEDE.again / 2; why(f, w, 'o assalto não abriu (' + gNo(a.why) + ')', 'fail'); return false; }
     op.sede = f; op.O.sede = f; op.sedeN = st.length;
     if (K.ok) genCmd(t, { c: 'camp', id: K.id, op: op.id, role: 'main' }, 'ai');
     const pre = [];
@@ -46985,7 +46998,7 @@ function sedeGo(C, sq) {
       const why2 = 'antes do assalto à cidade-sede', r = genCmd(t, { c: 'sabot', x: Math.round(e.x), z: Math.round(e.z), why: why2 }, 'ai'), r2 = r.ok ? r : genCmd(t, { c: 'man', k: 'raid', x: Math.round(e.x), z: Math.round(e.z), n: 1, why: why2 }, 'ai');
       pre.push(r2.ok ? (r.ok ? 'sabotagem' : 'incursão') + ' contra ' + e.name.toLowerCase() : 'sem sabotagem nem incursão (' + gNo(r.why) + '; ' + gNo(r2.why) + ')');
     }
-    C.sedeT = S.t + SEDE.again; C.sedeW = { f, why: 'assalto aberto', T: S.t };
+    C.sedeT = S.t + SEDE.again; sedeWOf(C)[f] = { f, why: 'assalto aberto', k: 'open', T: S.t };
     gLog(t, 'atk', 'Assalto à ' + sedeName(f).slice(2) + ' planejado: ' + pool.length + ' esquadras, força ' + gN(own) + ' contra ' + gN(foe) + ' (' + (sedeKn(C, f).how) + '; doutrina ' + docK(C) + ')' + (K.ok ? ', em campanha' : '') + (pre.length ? '; antes da hora H: ' + pre.join(', ') : st.length ? '' : '; nenhuma instalação dela identificada ainda'), w, 'sedego' + f, o);
     return true;
   }
@@ -47057,7 +47070,7 @@ function sedeView(t) {
   const foe = [];
   for (const f of foes(t)) {
     const K = sedeKn(C, f), v = K && aidSeat(f); if (!v) continue;
-    const op = C.ops.find(o => o.k === 'atk' && !o.over && o.sede === f), W = C.sedeW && C.sedeW.f === f ? C.sedeW : null;
+    const op = C.ops.find(o => o.k === 'atk' && !o.over && o.sede === f), W = sedeWOf(C)[f] || null;
     foe.push({ t: f, x: r(v.x), z: r(v.z), r: r(v.ru), how: K.how, age: r(S.t - K.T), sites: sedeFoeSites(t, f).length, op: op ? { id: op.id, st: op.st } : null, why: W ? W.why : '' });
   }
   return { own, foe };
@@ -47066,6 +47079,254 @@ genVM = (g => (t, all) => { const V = g(t, all), s = V && typeof V === 'object' 
 genState = (g => t => { const o = g(t); if (o) o.sede = sedeView(t); return o; })(genState);
 GENK.push('sede');
 /* ---------- end of the seat ---------- */
+/* ---------- the general's improvements (cf-general-melhorias, from the report cf-general-sede: docs/general-melhorias.md) ----------
+   GSM.on 0: the general as before (the three bugs fixed with it stay fixed). Each part answers a finding of the report:
+   - mem (report 6 C): the strength a side has seen at each point (C.gsM[i].mx: the most it knew within mem.r m, fading with mem.tau s), so an
+     assault no longer counts 10 (CMD.guess) on a point where it saw 60 a minute ago; cmdAttack's foe is the larger of the two.
+   - src (6 A, idea 2): the enemy point that threatens the side's seat (or main base): the one by the enemy fire pieces it knows (artillery,
+     rocket trucks, mortars) within src.r m of the seat, else by the raiders at the seat (its incident's known enemy), else, the seat hit and
+     nobody seen, the enemy point nearest the seat. For src.keep s after the last sign it is the first target (cqAim) and an assault on it needs
+     only need to 1, and while the side cannot assault it a fire mission and the air focus go on it every fire.every s.
+   - pull (6 B, idea 1): "no strength to attack" takes up to pull.n squads from quiet posts anywhere (held, road, wood, column, line posts
+     with another on their road; no enemy known within pull.q m, no point held, no base, nothing timed) to the assault post, every pull.cd s,
+     while fewer than pull.max wait there: over its population budget a side never got a new squad for it (0 reinforcements in 4 matches).
+   - form (idea 3, (e) of the brief): an assault forming up asks for fire and the air focus on its objective at once (before H-hour, not only
+     at it), and its assembly has a hard deadline: form.k times its own (op.formT, which reaches AP.form = 900 s for a far squad), between
+     form.min and form.max s. At it the assault goes with the squads there, or is called off (two assaults on the Brejo formed up 5.7 and 9 min
+     and never left).
+   - arm (7, idea 4): tanks with nothing to do (free, still arm.idle s) in a group of arm.min within arm.r m attack the nearest enemy point
+     within arm.reach m that is not much stronger than them, from firing places round it (m5Spot), with a free squad as escort; they drive
+     into it when it is quiet. cmdAttack counts the free tanks within M5.reach m of the objective, since m5Atk may send them (M5.atk.n is 2, 4).
+   - weak (9): a point whose known strength fell under weak.k of what the side saw there (weak.min at least), with the side's own eyes within
+     weak.eyes m (so it is seen, not guessed), is weakened: first target for weak.keep s, the assault's cooldown skipped once, its walk-in
+     taken by up to weak.n squads within CMD.reach m (not 2 within CQ.walk), at 1 to 1, and free tanks sent to it.
+   - rep (idea 5): an AI tank or armoured car under rep.hp of its health with nothing to fight and no base on its road drives by the network to
+     the nearest supply base of its side within rep.reach m to be mended there (the base mends what stands by it). */
+const GSM = { on: 1, every: 5,
+  mem: { r: 500, tau: 180 },
+  src: { r: 6000, near: 1800, keep: 300, max: 90 },
+  fire: { every: 90, n: 4, foc: 75 },
+  need: 1,
+  pull: { n: 2, cd: 120, q: 900, max: 4, jobs: ['held', 'road', 'wood', 'col', 'line'] },
+  form: { k: 1.5, min: 240, max: 420 },
+  prep: { n: 3, foc: 150, r: 450 },
+  arm: { every: 20, idle: 120, still: 15, r: 300, min: 3, reach: 4000, T: 600, odds: 2, esc: 3000, in: 60, quiet: 2 },
+  weak: { k: .3, min: 8, eyes: 900, keep: 150, n: 3, tanks: 2 },
+  rep: { hp: .5, reach: 9000 } };
+M5.atk.n = [2, 4];   // an assault's armour: 2 tanks, 4 with three squads or more (it was 1, 2: report 7 ii)
+const gsOn = C => !!GSM.on && !!S.cq && !!C && !S.cq.ph;
+/* the most of side C's known strength at point P (its target object, or a point) within the memory: 0 off it or with GSM off */
+function gsRecall(C, P) {
+  const p = P && (P.tw || (P.hold !== undefined ? P : null)); if (!GSM.on || !p || !C.gsM || !S.cq) return 0;
+  const i = S.cq.p.indexOf(p); return i >= 0 && C.gsM[i] ? C.gsM[i].mx : 0;
+}
+/* an enemy unit that fires from afar: a battery, a rocket truck or a mortar man */
+const gsGun = o => (o.man ? !!(o.def && o.def.mort) : tk(o) === 'art');
+/* has side t eyes within r m of x z: one of its soldiers, vehicles or aircraft */
+function gsEyes(t, x, z, r) {
+  for (const m of S.men) if (!m.dead && m.team === t && Math.abs(m.x - x) < r && Math.abs(m.z - z) < r && Math.hypot(m.x - x, m.z - z) < r) return true;
+  for (const u of S.units) if (!u.dead && u.team === t && Math.hypot(u.x - x, u.z - z) < r) return true;
+  for (const p of S.planes) if (!p.dead && p.team === t && Math.hypot(p.x - x, p.z - z) < r * 1.5) return true;
+  return false;
+}
+/* the known strength at each point, remembered (mem) */
+function gsMemTick(C) {
+  const P = S.cq.p, M = C.gsM && C.gsM.length === P.length ? C.gsM : (C.gsM = P.map(() => ({ kn: 0, mx: 0, T: -1e9 })));
+  const dt = Math.max(0, S.t - (C.gsMT === undefined ? S.t : C.gsMT)), f = Math.exp(-dt / GSM.mem.tau); C.gsMT = S.t;
+  P.forEach((p, i) => { const m = M[i], kn = p.hold === C.t ? 0 : cmdKnown(C, p.x, p.z, GSM.mem.r); m.kn = kn; if (kn >= m.mx * f) { m.mx = kn; m.T = S.t; } else m.mx *= f; });
+  return M;
+}
+/* the enemy point that threatens the seat (src): { p, why } or null */
+function gsSrcFind(C) {
+  const t = C.t, foeP = S.cq.p.filter(p => p.hold >= 0 && p.hold !== t), homes = [aidSeat(t), S.base[t]].filter(Boolean);
+  if (!foeP.length || !homes.length) return null;
+  const nearP = (x, z, r) => { let b = null, bd = r; for (const p of foeP) { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; b = p; } } return b; };
+  let best = null, bs = 1e9;
+  for (const o of C.known) {
+    if (o.dead || !gsGun(o)) continue;
+    const x = sX(o, t), z = sZ(o, t);
+    for (const h of homes) { const d = Math.hypot(x - h.x, z - h.z); if (d > GSM.src.r || d >= bs) continue; const p = nearP(x, z, GSM.src.near); if (p) { bs = d; best = p; } }
+  }
+  if (best) return { p: best, why: 'peças de fogo conhecidas' };
+  const I = (C.thb || []).find(I => !I.over && I.k === 'seat');
+  if (I && I.foe > 0) { const p = nearP(I.kx, I.kz, GSM.src.r); if (p) return { p, why: 'incursão na cidade-sede' }; }
+  if (I && I.ex) { const h = homes[0], p = nearP(h.x, h.z, GSM.src.r); if (p) return { p, why: 'cidade-sede atingida sem atacante visto' }; }
+  return null;
+}
+const gsSrcOn = C => (C.gsSrc && S.t - C.gsSrc.T < GSM.src.keep && C.gsSrc.p.hold !== C.t && C.gsSrc.p.hold >= 0 ? C.gsSrc : null);
+const gsWkOn = C => (C.gsWk && S.t - C.gsWk.T < GSM.weak.keep && C.gsWk.p.hold !== C.t ? C.gsWk : null);
+/* a point the side should hurry for: the weakened one or the seat's threat (P its target object) */
+function gsFast(C, P) {
+  if (!GSM.on || !P || !P.tw) return null;
+  const w = gsWkOn(C); if (w && w.p === P.tw) return 'weak';
+  const s = gsSrcOn(C); if (s && s.p === P.tw && gsRecall(C, P) < GSM.src.max) return 'src';
+  return null;
+}
+/* the weakened point (weak) */
+function gsWeakFind(C, M) {
+  const t = C.t, tg = cqTargets(t); let best = null, bv = 0;
+  S.cq.p.forEach((p, i) => {
+    const m = M[i]; if (p.hold === t || !tg.includes(p) || m.mx < GSM.weak.min || m.kn > m.mx * GSM.weak.k || m.mx <= bv) return;
+    if (!gsEyes(t, p.x, p.z, GSM.weak.eyes)) return;
+    best = p; bv = m.mx;
+  });
+  return best ? { p: best, mx: bv } : null;
+}
+/* every GSM.every s: the threat to the seat, the weakened point, the tanks' groups and the repairs */
+function gsTick(C) {
+  const t = C.t, M = gsMemTick(C);
+  if (S.t < (C.gsT || 0)) return;
+  C.gsT = S.t + GSM.every;
+  const s = gsSrcFind(C);
+  if (s) { const was = C.gsSrc && C.gsSrc.p === s.p && S.t - C.gsSrc.T < GSM.src.keep; C.gsSrc = { p: s.p, why: s.why, T: S.t }; if (!was) gLog(t, 'atk', 'Ameaça à sede vem de ' + gName(s.p) + ' (' + s.why + '): primeiro alvo, fogo e foco aéreo sobre ele', s.p, 'gss' + S.cq.p.indexOf(s.p)); }
+  const w = gsWeakFind(C, M);
+  if (w && !(C.gsWk && C.gsWk.p === w.p && S.t - C.gsWk.T < GSM.weak.keep)) {
+    C.gsWk = { p: w.p, T: S.t, used: 0 }; const m = M[S.cq.p.indexOf(w.p)];
+    gLog(t, 'atk', gName(w.p) + ' enfraquecido: ' + gN(m.kn) + ' conhecidos, eram ' + gN(w.mx) + ' — reação rápida com a força mais próxima', w.p, 'gsw' + S.cq.p.indexOf(w.p));
+    gsArmWeak(C, w.p);
+  }
+  gsRep(C);
+  if (S.t >= (C.gsAT || 0)) { C.gsAT = S.t + GSM.arm.every; gsArm(C); }
+}
+/* the fire on the seat's threat while it is not assaulted: a fire mission and the air focus, every fire.every s */
+function gsFire(C) {
+  const t = C.t, s = gsSrcOn(C); if (!s || S.t < (C.gsFT || 0) || genBy(t, 'sup') !== 'ai') return;
+  if (C.ops.some(o => o.k === 'atk' && !o.over && o.O && o.O.tw === s.p && (o.st === 'go' || o.st === 'fight' || o.st === 'cons'))) return;
+  C.gsFT = S.t + GSM.fire.every;
+  const p = s.p, n = cmdKnown(C, p.x, p.z, 700), x = n > 0 && KN.n ? KN.x : p.x, z = n > 0 && KN.n ? KN.z : p.z;
+  const r = gFireSrc(t, 'he', x, z) ? genCmd(t, { c: 'fire', k: 'he', x: Math.round(x), z: Math.round(z), n: GSM.fire.n }, 'ai') : { ok: false, why: 'range' };
+  C.gsF = { x, z, r: 450, T: S.t + GSM.fire.foc };
+  gLog(t, 'fire', 'Fogo sobre ' + gName(p) + ' (ameaça à sede): ' + (r.ok ? 'missão de fogo e foco aéreo' : 'foco aéreo (fogo: ' + gNo(r.why) + ')'), { x, z }, 'gsf' + S.cq.p.indexOf(p));
+}
+/* "no strength to attack": squads from quiet posts go to the assault post (pull) */
+function gsPull(C, sq) {
+  const t = C.t, D = C.doc, G = GSM.pull; if (S.t < (C.gsPT || 0) || genBy(t, 'atk') !== 'ai' || C.gue) return;
+  if (sq.filter(q => q.job === 'push' && !q.op && q.live > 0).length >= G.max) return;   // enough wait at the forming-up place already
+  const O = post(t, 'push', 0); if (!O) return;
+  const R = S.T.routes, p = O.x !== undefined ? O : routeAt(R[O.ri], clamp(O.s, 0, R[O.ri].len)), lead = q => q.men.find(m => !m.dead), d = q => { const L = lead(q); return L ? hdist(L, p) : 1e9; };
+  const ok = q => G.jobs.includes(q.job) && !q.op && !q.lift && !q.state && !q.net && q.live >= 3 && q.ord && (q.ord.k === 'hold' || q.ord.k === 'observe' || q.ord.k === 'patrol') && !q.ord.b && !q.ord.es && !q.ord.T && !q.ord.tw && !q.ord.res
+    && (L => !!L && cmdKnown(C, L.x, L.z, G.q) === 0)(lead(q)) && (q.job !== 'line' || sq.some(o => o !== q && o.job === 'line' && o.ri === q.ri && o.live >= 3));
+  const go = q => { const e = Math.min(q.s, R[q.ri].len - q.s), net = S.T.mv >= 4; return O.ri === q.ri || (net && (!!swNear(q.ri, q.s, O.ri) || !!tripSq(q, O))) || e < 2000; };
+  const took = [];
+  for (const q of sq.filter(ok).sort((a, b) => d(a) - d(b)).slice(0, 6)) {
+    if (took.length >= G.n) break;
+    if (!go(q)) continue;
+    const n = Array.from({ length: D.push }, (_, k) => k).map(k => [k, sq.filter(o => o.job === 'push' && o.jk === k).length]).sort((a, b) => a[1] - b[1])[0], k = n ? n[0] : 0, Ok = post(t, 'push', k) || O;
+    took.push(GEN.job[q.job] || q.job); q.job = 'push'; q.jk = k; q.col = false; setOrd(q, Ok);
+  }
+  C.gsPT = S.t + (took.length ? G.cd : G.cd / 4);
+  if (took.length) gLog(t, 'rf', 'Pedido de força para ' + gName(cmdObj(C)) + ': ' + (took.length > 1 ? took.length + ' esquadras saem' : 'uma esquadra sai') + ' de postos quietos (' + took.join(', ').toLowerCase() + ')', p);
+}
+/* an assault forming up: the fire and the air focus on its objective now, and the hard deadline of its assembly (form, prep) */
+function gsForm(C, op) {
+  const t = C.t, O = op.O;
+  if (!op.gsP) {
+    op.gsP = 1;
+    if (genBy(t, 'sup') === 'ai') {
+      const n = cmdKnown(C, O.x, O.z, GSM.prep.r), x = n > 0 && KN.n ? KN.x : O.x, z = n > 0 && KN.n ? KN.z : O.z;
+      const r = gFireSrc(t, 'he', x, z) ? genCmd(t, { c: 'fire', k: 'he', x: Math.round(x), z: Math.round(z), n: GSM.prep.n }, 'ai') : { ok: false };
+      C.gsF = { x: O.x, z: O.z, r: GSM.prep.r, T: S.t + GSM.prep.foc };
+      gLog(t, 'fire', 'Preparação antes da hora H sobre ' + gName(O) + ': ' + (r.ok ? 'missão de fogo e foco aéreo' : 'foco aéreo') + ' enquanto as esquadras se reúnem', O, 'gsp' + op.id);
+    }
+  }
+  const hard = clamp((op.formT || CQ.form) * GSM.form.k, GSM.form.min, GSM.form.max), age = S.t - op.T;
+  if (age <= hard) return;
+  const l = opLive(op), lead = q => q.men.find(m => !m.dead), at = q => { const L = lead(q), p = q.axo === op ? q.fp : q.ord; return !!L && (q.halt || (!!p && p.x !== undefined && Math.hypot(L.x - p.x, L.z - p.z) < INC.op.ready * 2)); }, ready = l.filter(at);
+  if (!ready.length) { C.atkT = S.t + CMD.again; gLog(t, 'atk', 'Reunião para ' + gName(O) + ': prazo duro de ' + Math.round(hard) + ' s e nenhuma esquadra na reunião — assalto cancelado', O); return opEnd(C, op); }
+  op.st = 'prep'; op.H = Math.max(S.t + INC.op.h[1], op.Hu || 0); for (const q of l) q.late = !at(q);
+  gLog(t, 'atk', 'Reunião para ' + gName(O) + ': prazo duro de ' + Math.round(hard) + ' s — segue com ' + ready.length + ' de ' + l.length + (l.length > 1 ? ' esquadras' : ' esquadra') + ', hora H em ' + Math.round(op.H - S.t) + ' s', O);
+}
+/* a vehicle sent to x z by the tactical trip (m5Go), else by the plain one (before the side's tactical map is drawn, m5Go finds no way) */
+const gsGo = (u, x, z, why) => m5Go(u, x, z, why) || (m5Net() && !!tripTo(u, x, z, { why }));
+/* an armoured group's operation: the tanks (op.m5) at firing places round the point, an escort squad (op.sq) */
+function gsArmOpen(C, p, tanks, why) {
+  const t = C.t, R = S.T.routes, b = tanks.reduce((a, u) => ({ x: a.x + u.x / tanks.length, z: a.z + u.z / tanks.length }), { x: 0, z: 0 }), d = Math.hypot(b.x - p.x, b.z - p.z) || 1;
+  const op = { k: 'arm', ri: p.ri, sd: dsOf(t, p.ri), O: { s: p.s, x: p.x, z: p.z, tw: p }, st: 'go', T: S.t, T0: S.t, sq: [], m5: [], n0: 0, ax: (b.x - p.x) / d, az: (b.z - p.z) / d, over: false, id: genOid(C), by: 'ai', why };
+  let n = 0;
+  for (const u of tanks) {
+    const sp = m5Spot(C, op, op.m5.filter(o => o.ai && o.ai.m5).map(o => o.ai.m5)); if (!sp) break;
+    if (!gsGo(u, sp.x, sp.z, 'atk')) continue;
+    u.ai.m5 = { x: sp.x, z: sp.z, op, T: S.t + m5Eta(u, u.trip) + GSM.arm.T, k: 'arm' }; op.m5.push(u); n++;
+  }
+  if (!n) return null;
+  const q = S.squads.filter(q => q.team === t && !q.net && q.live >= 3 && !q.state && !q.op && FREE[q.job] && !q.lift && q.ord && !q.ord.b && !q.ord.tw && !q.ord.T && q.ord.k !== 'supply' && q.ord.k !== 'build')
+    .map(q => [q, (L => (L ? hdist(L, p) : 1e9))(q.men.find(m => !m.dead))]).filter(e => e[1] < GSM.arm.esc).sort((a, c) => a[1] - c[1])[0];
+  if (q) { op.n0 = q[0].live; opTake(op, q[0], { k: 'assault', ri: p.ri, s: p.s, x: p.x, z: p.z, tw: p, R: 0, ax: p.x, az: p.z }); }
+  C.ops.push(op);
+  gLog(t, 'atk', 'Grupo blindado: ' + n + (n > 1 ? ' carros de combate atacam ' : ' carro de combate ataca ') + gName(p) + ' (' + why + ')' + (q ? ' com uma esquadra de escolta' : ', sem escolta'), p, 0, p);
+  return op;
+}
+OPS.arm = (C, op) => {
+  const t = C.t, O = op.O, p = O.tw, live = op.m5.filter(u => !u.dead && u.ai && u.ai.m5 && u.ai.m5.op === op), age = S.t - op.T0;
+  if (p && p.hold === t) { gLog(t, 'atk', gName(O) + ' tomado pelo grupo blindado', O); for (const q of opLive(op)) { q.back = { k: 'hold', ri: O.ri !== undefined ? p.ri : q.ri, s: p.s, x: p.x, z: p.z, tw: p, R: 0 }; q.job = 'held'; q.jk = 0; } return opEnd(C, op); }
+  if (!live.length) { gLog(t, 'atk', 'Grupo blindado contra ' + gName(O) + ' desfeito: sem carros', O); return opEnd(C, op); }
+  if (age > GSM.arm.T) { gLog(t, 'atk', 'Grupo blindado contra ' + gName(O) + ': tempo esgotado, volta', O); return opEnd(C, op); }
+  if (!op.inT && age > GSM.arm.in && cmdKnown(C, O.x, O.z, 400) <= GSM.arm.quiet) {   // quiet now: in, to take it
+    op.inT = S.t; live.forEach((u, i) => { const a = i * 2.1; u.ai.m5.x = O.x + Math.cos(a) * 25; u.ai.m5.z = O.z + Math.sin(a) * 25; if (u.rail) gsGo(u, u.ai.m5.x, u.ai.m5.z, 'atk'); });
+    gLog(t, 'atk', 'Grupo blindado entra em ' + gName(O) + ' para tomá-lo', O);
+  }
+};
+/* tanks idle together go for the nearest enemy point (arm) */
+function gsArm(C) {
+  const t = C.t, G = GSM.arm; if (genBy(t, 'atk') !== 'ai' || C.ops.some(o => o.k === 'arm' && !o.over)) return;
+  const idle = [];
+  for (const u of S.units) {
+    if (u.team !== t || u.kind !== 'tank' || u.dead) continue;
+    const A = u.ai; if (!A) continue;
+    const I = A.gsI; if (!I || Math.hypot(u.x - I.x, u.z - I.z) > G.still) A.gsI = { x: u.x, z: u.z, T: S.t };
+    else if (S.t - I.T >= G.idle && m5Free(u, t)) idle.push(u);
+  }
+  if (idle.length < G.min) return;
+  const tg = cqTargets(t), pref = [gsWkOn(C), gsSrcOn(C)].filter(Boolean).map(s => s.p);
+  for (const u of idle) {
+    const grp = idle.filter(o => hdist(o, u) < G.r); if (grp.length < G.min) continue;
+    const opts = tg.filter(p => hdist(p, u) < G.reach && Math.max(cmdKnown(C, p.x, p.z, 500), gsRecall(C, p)) <= grp.length * CMD.val.tank * G.odds);
+    const p = opts.find(p => pref.includes(p)) || opts.sort((a, c) => hdist(a, u) - hdist(c, u))[0];
+    if (p && gsArmOpen(C, p, grp.slice(0, M5.atk.n[1]), grp.length + ' parados juntos há ' + Math.round(S.t - u.ai.gsI.T) + ' s')) return;
+  }
+}
+/* the weakened point: the free tanks near go too (weak.tanks) */
+function gsArmWeak(C, p) {
+  if (genBy(C.t, 'atk') !== 'ai' || C.ops.some(o => o.k === 'arm' && !o.over)) return;
+  const l = S.units.filter(u => m5Free(u, C.t) && hdist(u, p) < M5.reach).sort((a, b) => hdist(a, p) - hdist(b, p)).slice(0, GSM.weak.tanks);
+  if (l.length) gsArmOpen(C, p, l, 'ponto enfraquecido');
+}
+/* hurt vehicles go to be mended at a supply base (rep) */
+function gsRep(C) {
+  const t = C.t; if (genBy(t, 'sup') !== 'ai' || !m5Net()) return;
+  for (const u of S.units) {
+    if (u.team !== t || u.dead || u.net || u.fixed || u.fld || (u.kind !== 'tank' && u.kind !== 'lav')) continue;
+    const A = u.ai; if (A && A.gsR && (u.hp >= u.max * .95 || A.gsR.b.dead || S.t - A.gsR.T > 600)) A.gsR = null;   // mended, its base gone, or too long: free again
+    if (!A || A.gsR || A.reloc !== null || u.trip || A.m5 || A.amb || !u.rail || u.hp >= u.max * GSM.rep.hp || (A.tgt && !A.tgt.dead) || S.t - u.hitT < 5) continue;
+    if (S.sup.some(b => !b.dead && b.prog >= 1 && b.team === t && b.ri === u.ri && Math.abs(b.s - u.s) < BLD.ai.fall)) continue;   // the old way back, on its road, takes it
+    const b = S.sup.filter(b => !b.dead && b.prog >= 1 && b.team === t && hdist(b, u) < GSM.rep.reach).sort((a, c) => hdist(a, u) - hdist(c, u))[0]; if (!b) continue;
+    const q = b.ri !== undefined ? routeAt(S.T.routes[b.ri], clamp(b.s, 0, S.T.routes[b.ri].len)) : b;
+    if (gsGo(u, q.x, q.z, 'rep')) { A.gsR = { b, T: S.t }; gLog(t, 'sup', (GEN.kind[u.kind] || u.kind) + ' com ' + Math.round(u.hp / u.max * 100) + '% recua para reparar na base de suprimento ' + gNear(b.x, b.z), u, 'gsr' + (u.id || '')); }
+  }
+}
+/* the hooks */
+cmdSense = (g => (C, sq) => { g(C, sq); if (gsOn(C) && C === (S.cmd && S.cmd[C.t])) gsTick(C); })(cmdSense);
+cqAim = (g => C => {
+  const L = g(C); if (!gsOn(C) || L.length < 2) return L;
+  const pri = [gsWkOn(C), gsSrcOn(C)].filter(Boolean).map(s => s.p).filter(p => L.includes(p) && (p !== (C.gsSrc && C.gsSrc.p) || gsRecall(C, p) < GSM.src.max));
+  return pri.length ? pri.concat(L.filter(p => !pri.includes(p))) : L;
+})(cqAim);
+cmdAttack = (g => (C, sq) => {
+  if (!gsOn(C)) return g(C, sq);
+  const w = gsWkOn(C), was = C.atkT;
+  if (w && !w.used && S.t < C.atkT) { w.used = 1; C.atkT = 0; }   // the weakened point: the cooldown skipped once
+  g(C, sq);
+  if (w && C.atkT === 0 && !C.ops.some(o => o.k === 'atk' && !o.over && o.O && o.O.tw === w.p)) C.atkT = Math.max(C.atkT, was);
+  if (C.want) gsPull(C, sq);
+  gsFire(C);
+})(cmdAttack);
+cmdFires = (g => C => { g(C); if (!C.focus && GSM.on && C.gsF && S.t < C.gsF.T) C.focus = { x: C.gsF.x, z: C.gsF.z, r: C.gsF.r }; })(cmdFires);
+OPS.atk = (g => (C, op) => {
+  if (GSM.on && !op.over && op.st === 'form' && !op.walk && (!op.by || op.by === 'ai')) gsForm(C, op);
+  if (op.over) return;
+  g(C, op);
+})(OPS.atk);
+/* ---------- end of the general's improvements ---------- */
 /* ---------- the medic (cf-medico; NÃO TESTADO, see docs/nao-testado/cf-medico.md): the kits and the squads here; the brain's part below (CEREBRO: medico), then the player's treatment, the net and the unit card ----------
    The medic (padioleiro, enfermeiro de combate): a kit of every side of every era (med: 1), and what the soldiers' brain does with him. Only
    by hooks on what was there: the wounded (WND: manDown, downAI, sqRescue, rescue), their evacuation (REC, W18), the calls (P5), the position
@@ -47461,7 +47722,7 @@ dfpTeam = (g => (t, p, n, used) => {
   const U = URB.gar, K = { x: p.kx, z: p.kz }, gp = DFP.post.gap, out = [];
   const free = (x, z) => { for (const u of used) if (Math.abs(u.x - x) < gp && Math.abs(u.z - z) < gp && Math.hypot(u.x - x, u.z - z) < gp) return false; return true; };
   const take = w => { if (out.length < n && free(w.x, w.z)) { out.push(Object.create(w)); used.push({ x: w.x, z: w.z }); } };
-  const bs = near(p.x, p.z, p.k === 'reserva' ? U.res : U.bld).filter(o => drBldOk(o) && !(o.B.in && o.B.in[1 - t]) && Math.hypot(o.x - P.x, o.z - P.z) < P.r).sort((a, b) => hdist(a, p) - hdist(b, p));
+  const bs = near(p.x, p.z, p.k === 'reserva' ? U.res : U.bld).filter(o => drBldOk(o) && !(o.B.in && inFoe(o.B.in, t)) && Math.hypot(o.x - P.x, o.z - P.z) < P.r).sort((a, b) => hdist(a, p) - hdist(b, p));
   if (p.k === 'reserva') { if (bs[0]) for (const w of bldBays(bs[0], p.x, p.z)) take(w); }   // the reserve: the bays of the town's building nearest its place (the plan found none within 40 m)
   else for (const o of bs.slice(0, U.n)) for (const w of bldWins(o, K.x - o.x, K.z - o.z).slice(0, U.wins)) take(w);
   if (out.length < n) for (const o of g(t, p, n - out.length, used)) out.push(o);

@@ -258,16 +258,20 @@ Na ficha do hangar cada avião tem cargas prontas (Padrão, Bombardeio, Ataque a
 
 ## Drones (só hoje)
 
-O operador de drone leva o fuzil e quatro tipos. Y escolhe e L lança e põe os óculos; L de novo tira.
+O operador de drone leva o fuzil e oito tipos, 20 drones por vida. Y escolhe e L lança e põe os óculos; L de novo tira. Numa base o estoque volta inteiro; no campo chega da retaguarda um drone de um tipo que falta a cada 45 s (não os do trilho). Ao mesmo tempo, no máximo um quadricóptero e um de asa no ar.
 
 | Drone | O que faz | Sem sinal |
 | --- | --- | --- |
-| FPV de ataque (3) | Carga oca que detona ao bater, armada a 12 m do operador. Fraca na frente de um tanque, mortal no teto, na traseira, em veículos leves e em trincheira | cai |
-| FPV bombardeiro (2) | Solta duas granadas de 60 mm e volta | volta sozinho |
-| Reconhecimento (2) | Zoom, e o que ele vê aparece para a artilharia, os morteiros e o comando do lado | volta sozinho |
+| FPV de ataque (4) | Carga oca que detona ao bater, armada a 12 m do operador. Fraca na frente de um tanque, mortal no teto, na traseira, em veículos leves e em trincheira | cai |
+| FPV de fragmentação (4) | Carga de esferas de aço com espoleta de proximidade: explode sozinho a 4 m de um soldado inimigo, no ar sobre a esquadra. Num tanque só arranha | cai |
+| FPV bombardeiro (3) | Solta duas granadas de 60 mm e volta | volta sozinho |
+| Lança-granadas (3) | Mavic quase silencioso, com câmera de zoom: solta quatro granadas VOG-17 de cima, uma por Espaço | volta sozinho |
+| Reconhecimento (2) | Zoom, e o que ele vê aparece para a artilharia, os morteiros e o comando do lado. Espaço marca o que está sob a mira: o alvo fica à vista do lado, onde está, por 90 s, com um colchete vermelho na tela dos aliados, entra no registro do general e os operadores de drone da IA vão nele primeiro | volta sozinho |
+| Munição vagante portátil (2) | Switchblade 600 / Lancet-3. L abre o mapa e Espaço lança do tubo ao seu lado (não usa o trilho); voa até a área, orbita, e com os óculos Espaço mergulha no que está sob a mira: ogiva anticarro em tandem pelo teto | segue sozinha |
 | Munição vagante (1) | L abre o mapa e Espaço lança do trilho junto da base; orbita e mergulha num alvo parado, ou você guia o mergulho | segue sozinha |
+| Drone armado (1) | Bayraktar TB2 / Orion. Sai do trilho, orbita a ~650 m com câmera de zoom e quatro mísseis guiados a laser (MAM-L / Kh-BPLA): Espaço dispara no que está sob a mira (veículo, base ou soldado), e o laser é do próprio drone, que precisa seguir vendo o alvo; X faz uma órbita nova onde a mira toca o chão. Sem combustível volta sozinho ao trilho e é recolhido. Grande e de assinatura de avião: os mísseis antiaéreos o travam | segue sozinho |
 
-Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos. No modo assistido o drone voa para onde a mira olha (W avança, Shift e Z sobem e descem); X passa ao modo acro. O sinal cai com a distância, atrás de morros e casas e perto de um bloqueador (HMMWV e Tigr). Fuzil, metralhadora, antiaérea e estilhaço derrubam drones.
+Voando, o soldado fica parado e indefeso, e um tiro recebido arranca os óculos. No modo assistido o drone voa para onde a mira olha (W avança, Shift e Z sobem e descem); X passa ao modo acro. O sinal cai com a distância, atrás de morros e casas e perto de um bloqueador (HMMWV e Tigr). Fuzil, metralhadora, antiaérea e estilhaço derrubam drones. Online, o míssil do drone armado e a marca do reconhecimento ficam no cliente de quem os usou: o dano vai para todos como qualquer acerto, mas os outros não veem o míssil voando e a marca só vale para a IA quando quem marca é o anfitrião.
 
 ## Insurgentes (conteúdo pronto, ainda fora das partidas)
 
@@ -277,7 +281,7 @@ A terceira facção da frente atual já tem todo o conteúdo, mas nenhuma partid
 | --- | --- |
 | Infantaria | Combatente (AKM), Metralhador de PKM, Granadeiro de RPG-7, Atirador de SVD, Equipe de Malyutka, Equipe de Kornet (lote antigo), Operador de Strela, Morteiro de 82 mm, Plantador de IED (sapador), Rádio, Operador de drone comercial, Homem-bomba |
 | Veículos | Técnica com DShK, com SPG-9 e com ZU-23-2; moto com garupa armado; Land Cruiser e sedã civis; carro-bomba; caminhão ZIL-131; BTR-70 capturado; T-55A e T-62M capturados; técnica com foguetes de 107 mm |
-| Drones | Reconhecimento (Mavic comercial), bombardeiro agrícola com granadas, FPV caseiro com ogiva de RPG |
+| Drones | Reconhecimento (Mavic comercial), bombardeiro agrícola com granadas, FPV caseiro com ogiva de RPG, FPV caseiro com granada de fragmentação, Mavic comercial com garra de granadas |
 
 Economia: tudo é mais barato e mais fraco. Um pelotão custa 15 de energia e 8 de metal (os outros pagam 25 e 15), uma técnica 5 e 5, um T-55 14 e 28 (um tanque comum custa 20 e 40). Em troca, a blindagem é pouca: o T-55 tem 95 de vida contra 150 de um Abrams, recarrega em 6,5 s e a munição explode mais fácil; as técnicas morrem com uma rajada. A tabela está em `FACTIONS.modern.insurgentes.eco`.
 
@@ -383,4 +387,4 @@ node tests/heli.js              # uma suíte só
 SUITES="relay online" sh tests/all.sh
 ```
 
-Há suítes de simulação (`infantry`, `squads`, `field`, `bases`, `world`, `forts`, `city`, `transport`, `crew`, `damage`, `missiles`, `heli`, `heli-arms`, `heli-ai`, `loadout`, `drone`, `pad`), do servidor (`relay` e as `*-relay`), de ponta a ponta pelo servidor de verdade (`online` e as `*-online`) e contra um servidor antigo (`*-oldserver`, com `SERVER=<server.js antigo>`). `soak.js` e `transport-battle.js` são longas.
+Há suítes de simulação (`infantry`, `squads`, `field`, `bases`, `world`, `forts`, `city`, `transport`, `crew`, `damage`, `missiles`, `heli`, `heli-arms`, `heli-ai`, `loadout`, `drone`, `drone-tipos`, `pad`), do servidor (`relay` e as `*-relay`), de ponta a ponta pelo servidor de verdade (`online` e as `*-online`) e contra um servidor antigo (`*-oldserver`, com `SERVER=<server.js antigo>`). `soak.js` e `transport-battle.js` são longas.

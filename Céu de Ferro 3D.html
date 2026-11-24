@@ -31064,6 +31064,7 @@ function gpPlan(t) {
   if (C && C.airT !== undefined && S.t - C.airT < ECO.ai.airMem) for (const k of ['aa', 'fighter']) if (k in f) { f[k] += GP.foe[k]; why[k] = W.air; }
   if (arm && 'tank' in f) { f.tank += Math.min(GP.foe.armMax, Math.ceil(arm * GP.foe.arm)) * GP.scale; why.tank = arm + W.arm; }
   if (art && 'cas' in f) { f.cas += GP.foe.art; why.cas = W.art; }
+  gsGrow(t, f, why);   // stock sitting idle a while: a bigger field, still within the budget (cf-general-gasto)
   for (const k in o) if (k in f) { f[k] = o[k]; why[k] = W.set; set[k] = 1; }
   const fit = (ks, cap) => {   // over the budget: one fewer of the kind that has the most, never one a command fixed, until it fits
     for (let n = ks.reduce((a, k) => a + (f[k] || 0), 0); n > cap; n--) {
@@ -45618,23 +45619,98 @@ function ecoAI(t, V) {
     for (const f of fresh) { if (f.age >= BLD.keep) continue; const sc = { fab: 3, mine: 2, pow: 1 }[f.k] - Math.max(0, -ecoDepth(t, f.x, f.z)) / 2000; if (sc > bs) { bs = sc; best = f; } }
     if (best) out.push({ c: 'strike', id: best.id, why: 'vista há ' + best.age + ' s' });
   }
-  if (out.length < 2 && V.q.filter(q => q.why !== 'none').length < A.q && ((V.stock.en > A.floor && V.stock.mt > A.floor) || !V.q.length)) {   // one unit order a look: the kind most short of its reserve
+  if (V.q.filter(q => q.why !== 'none').length < A.q && ((V.stock.en > A.floor && V.stock.mt > A.floor) || !V.q.length)) {   // one unit order a look: the kind most short of its reserve. It does not count in the two (ecoN2): a look that built, guarded or scouted left the factory idle (cf-general-gasto)
     const fab = S0.some(s => s.k === 'fab' && s.prog >= 1), queued = k => V.q.filter(q => q.k === k).length;
     let best = null, bs = -1, why = '';
     for (const k of Object.keys(V.costs)) {
       const c = V.costs[k]; if (ECO.site[k]) continue;
       if (c[3] === 'veh' ? !fab : !V.hq.slots[c[3] === 'inf' ? 'inf' : c[3]]) continue;
+      if (gsFull(V, c[3])) continue;   // its producers have their work and one waiting: another kind keeps the others busy (cf-general-gasto)
       const miss = V.miss[k] || 0, lost = V.lost[k] || 0, air = (k === 'aa' || k === 'aaf') && V.air >= 0 && V.air < A.airMem, arm = k === 'tank' && V.arm > 0;
       const gap = V.pp && V.pp.f[k] !== undefined ? Math.max(0, V.pp.f[k] - (V.pp.h[k] || 0)) : 0;   // the plan's field over what is out (F2)
       const want = (V.keep[k] || 0) + gap + Math.min(2, miss) + (k === 'aaf' ? (V.hq.aa ? 0 : 1) + S0.filter(s => s.gd.aa && !s.aa).length : 0);
       if ((V.res[k] || 0) + queued(k) >= want) continue;
-      const sc = (A.w[k] || 1) + A.wm * miss + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap);
+      const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap);
       if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : gap ? 'plano de produção: ' + (V.pp.why[k] || 'mais em campo') : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
     }
     if (best) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
   }
-  return out.slice(0, 2);
+  return out;
 }
+/* the commands of a look that count in its two: all but the unit orders (make) */
+const ecoN2 = out => out.reduce((a, o) => a + (o.c === 'make' ? 0 : 1), 0);
+/* ---------- the stock that sits idle (cf-general-gasto): the AI general invests what it does not use ----------
+   Measured before (tools/generais.js and a stock log, map 11, 2 and 3 sides): the general sat on 700–1000 of energy (the cap) for a third to
+   a half of the match while its factory stood idle. Three causes: ecoAI asked one unit a look, always the kind with most "misses", and the
+   air dispatch misses every half second, so aircraft orders piled up waiting for the HQ's one air slot (busy) and filled the queue; the
+   plan's field (GP.mix) stayed far under the population budget, so nothing more was wanted; and a side short of metal (under keep) never
+   built the mine that would cure it, because pay() asks the reserve on top of the cost.
+   Now: a kind whose producers already have their work and one waiting is passed over (gsFull), and the misses weigh at most GASTO.miss.
+   A resource is idle over GASTO.over of the cap and over the strategic reserve (gsKeep: the economy's keep and a work the fort plan saves
+   for). While a side has idle stock its general asks at most GASTO.n orders more a look (gsInvest): a mine or a power plant for the
+   resource that runs short while the other piles up, a second factory when both pile up, and a unit for each producer with nothing to do,
+   the kind the plan lacks most and that leans on the idle resource, never past the plan's gap and one in reserve. Idle stock over time
+   (GASTO.every s a level, back down as fast without it) grows the plan's field by GASTO.grow a level up to GASTO.top (gsGrow), always fitted
+   to the population budget after: the money goes to troops in the field, not to a reserve that waits. */
+const GASTO = { on: 1, over: .5, n: 2, miss: 2, every: 60, grow: .25, top: 3, poor: .3 };
+/* the strategic reserve this spending never touches: the economy's keep and the fund a work of the fort plan saves for (the dome's fund is put aside by
+   ecoStep itself, see AFD) */
+function gsKeep(t) {
+  const k = { en: ECO.ai.keep.en, mt: ECO.ai.keep.mt }, C = S.cmd && S.cmd[t], w = C && C.afp && C.afp.save;
+  if (w && !w.big && S.t <= w.T) { k.en = Math.max(k.en, w.en); k.mt = Math.max(k.mt, w.mt); }   // a big work's fund (the dome) is already out of the stock the economy's step sees
+  return k;
+}
+/* the idle part of a stock st ({ en, mt }) of side t: what is over the reserve and over GASTO.over of the cap */
+function gsIdle(t, st) {
+  const k = gsKeep(t), o = {};
+  for (const r of ['en', 'mt']) o[r] = GASTO.on ? Math.max(0, st[r] - Math.max(k[r], ECO.cap[r] * GASTO.over)) : 0;
+  return o;
+}
+/* the producers of a category as the view shows them, and whether they all have their work and one waiting */
+const gsSlots = (V, cat) => (cat === 'veh' ? V.sites.filter(s => s.k === 'fab' && s.prog >= 1).length : V.hq.slots[cat] || 0);
+const gsCatQ = (V, cat) => V.q.filter(q => V.costs[q.k] && V.costs[q.k][3] === cat).length;
+const gsFull = (V, cat) => GASTO.on && gsCatQ(V, cat) > gsSlots(V, cat);
+/* side t's level of idle stock (0 to GASTO.top): idle time piles up, time without it takes it back */
+function gsLevel(t) {
+  const d = S.eco.d[t], g = d.gs || (d.gs = { a: 0, T: S.t }), I = gsIdle(t, d), dt = Math.max(0, S.t - g.T);
+  g.T = S.t; g.a = clamp(g.a + (I.en > 0 || I.mt > 0 ? dt : -dt), 0, GASTO.every * GASTO.top);
+  return Math.floor(g.a / GASTO.every);
+}
+/* the plan's field grows with the level of idle stock (gpPlan, before it is fitted to the budget) */
+function gsGrow(t, f, why) {
+  const L = GASTO.on ? gsLevel(t) : 0; if (!L) return;
+  for (const k in f) if (f[k] > 0) { f[k] = Math.ceil(f[k] * (1 + GASTO.grow * L)); why[k] = 'estoque parado: mais em campo'; }
+}
+/* the orders the idle stock pays for, after ecoAI's own (at most GASTO.n more) */
+function gsInvest(t, V, out) {
+  if (!GASTO.on) return;
+  const I = gsIdle(t, V.stock); if (!(I.en > 0 || I.mt > 0)) return;
+  const K = gsKeep(t), st = { en: V.stock.en, mt: V.stock.mt }, A = ECO.ai, tx = ECO.tx.r;
+  const can = c => st.en - c[0] >= K.en && st.mt - c[1] >= K.mt, pay = c => { st.en -= c[0]; st.mt -= c[1]; };
+  const idleTx = (I.en > 0 ? tx.en : '') + (I.en > 0 && I.mt > 0 ? ' e ' : '') + (I.mt > 0 ? tx.mt : '');
+  let n = 0;
+  if (!V.sites.some(s => s.prog < 1) && !out.some(o => o.c === 'build')) {   // a site: what runs short while the other piles up, else a factory more
+    const k = I.en > 0 && !(I.mt > 0) && V.stock.mt < ECO.cap.mt * GASTO.poor ? 'mine' : I.mt > 0 && !(I.en > 0) && V.stock.en < ECO.cap.en * GASTO.poor ? 'pow' : I.en > 0 && I.mt > 0 ? 'fab' : null;
+    const s = k && can(V.costs[k]) && ecoAsk(t, { q: 'spots', k })[0];
+    if (s) { out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: 'estoque parado (' + idleTx.toLowerCase() + '): ' + (k === 'fab' ? 'mais uma fábrica' : 'falta ' + (k === 'mine' ? 'metal' : 'energia')) + ', ' + s.why }); pay(V.costs[k]); n++; }
+  }
+  const qd = k => V.q.filter(q => q.k === k).length + out.filter(o => o.c === 'make' && o.k === k).reduce((a, o) => a + (o.n || 1), 0);
+  for (const cat of ['veh', 'inf', 'air', 'def']) {   // a unit for each producer with nothing to do
+    if (n >= GASTO.n) break;
+    if (!gsSlots(V, cat) || gsCatQ(V, cat) + out.filter(o => o.c === 'make' && V.costs[o.k] && V.costs[o.k][3] === cat).length >= gsSlots(V, cat)) continue;
+    let best = null, bs = -1e9;
+    for (const k in V.costs) {
+      const c = V.costs[k]; if (c[3] !== cat || ECO.site[k] || STK.k[k] || !can(c)) continue;
+      const f = V.pp && V.pp.f[k] !== undefined ? V.pp.f[k] : 0, gap = Math.max(0, f - (V.pp && V.pp.h[k] || 0)), has = (V.res[k] || 0) + qd(k);
+      if (has >= gap + Math.max(1, V.keep[k] || 0)) continue;   // never past the plan's gap and one in reserve: what is made goes out
+      const lean = ((I.en > 0 ? c[0] : 0) + (I.mt > 0 ? c[1] : 0)) / Math.max(1, c[0] + c[1]);
+      const sc = 2 * Math.min(3, gap - has) + (A.w[k] || 1) + 2 * lean;
+      if (sc > bs) { bs = sc; best = k; }
+    }
+    if (best) { out.push({ c: 'make', k: best, n: 1, why: 'estoque parado (' + idleTx.toLowerCase() + '): investir', key: 'gs' + best }); pay(V.costs[best]); n++; }
+  }
+}
+ecoAI = (g => (t, V) => { const out = g(t, V); gsInvest(t, V, out); return out; })(ecoAI);
 /* the economy as the general's map and panels show it (genVM): sites, deposits as the side knows them, the queue and the rows of the Logística panel */
 function ecoVM(t, all) {
   if (!S.eco) return { sites: [], rows: [] };
@@ -49537,7 +49613,7 @@ function aidGrad(C, A) {
 ecoAI = (g => (t, V) => {
   const out = g(t, V);
   for (const s of V.sites) {
-    if (out.length >= 2) break;
+    if (ecoN2(out) >= 2) break;
     const e = S.eco.l.find(e => e.id === s.id); if (!e || e.prog < 1 || (s.gd.inf >= 1 && s.gd.aa >= 1) || out.some(o => o.id === s.id)) continue;
     const seat = e.lot >= 0, fwd = e.k === 'mine' && ecoDepth(t, e.x, e.z) < AID.eco.fwd;
     if (seat || fwd) out.push({ c: 'def', id: s.id, inf: Math.max(1, s.gd.inf), aa: 1, why: seat ? 'proteger a produção na cidade-sede' : 'proteger a mina avançada' });
@@ -61556,7 +61632,7 @@ prisTell = (g => E => {
 /* while an enemy seat is unknown or none of its sites identified, the economy's AI sends its scout there, once every SEDE.look s a seat, in
    place of its own looking about; what it finds is still the scout's eyes */
 function sedeScout(t, V, out) {
-  const C = S.cmd && S.cmd[t], i = out.findIndex(o => o.c === 'scout'); if (!SEDE.on || !C || (i < 0 && out.length >= 2) || (V.sc && V.sc.left > 0)) return;
+  const C = S.cmd && S.cmd[t], i = out.findIndex(o => o.c === 'scout'); if (!SEDE.on || !C || (i < 0 && ecoN2(out) >= 2) || (V.sc && V.sc.left > 0)) return;
   const L = C.sedeLk || (C.sedeLk = {}), f = foes(t).filter(f => !cqOut(f) && aidSeat(f) && (!sedeKn(C, f) || !sedeFoeSites(t, f).length) && !(S.t < (L[f] || 0))).sort((a, b) => hdist(aidSeat(a), S.base[t]) - hdist(aidSeat(b), S.base[t]))[0];
   if (f === undefined) return;
   const w = aidSeat(f); L[f] = S.t + SEDE.look;

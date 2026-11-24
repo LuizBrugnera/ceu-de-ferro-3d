@@ -20,7 +20,8 @@
    the General 2's world (gask mundo: the regions, edges and the asker's side's belief; with x z, the different routes there from region id)
    and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
    at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10),
-   and hsc (the engineers' walls, cf-engenharia-pontos: the works of kinds 11 to 13, HESCO tall and low and the T-wall, in fort and fbuild).
+   and hsc (the engineers' walls, cf-engenharia-pontos: the works of kinds 11 to 13, HESCO tall and low and the T-wall, in fort and fbuild),
+   and fnd (a soldier takes a work of its side down, cf-pol2-obras P17: fundo to the host).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas).
    ns (3 sides, cf-3-lados P5; NOT TESTED, see docs/nao-testado/cf-3l-p5-servidor.md): the number of sides of the room, 2 or 3 (3 only in modern:
    0 the USA, 1 Russia, 2 the Insurgents). The first player's join says it (ns, as mv), welcome tells it, and a page of another count is refused
@@ -174,7 +175,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1, fnd: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -310,6 +311,13 @@ const RX = {
     const h = c.room.host, now = Date.now();
     if (h === c || c.player.cls !== 'inf' || !(Number.isInteger(m.k) && m.k >= 1 && m.k <= FKINDS) || !vec(m.p, 2) || !num(m.a) || now - (c.ft || 0) < 700) return;
     c.ft = now; send(h.ws, { t: 'fbuild', from: c.player.id, k: m.k, p: m.p, a: m.a });
+  },
+  /* fundo (cf-pol2-obras, P17): a soldier asks the host to take down a work of its side (id; b 1 a supply base's site), 700 ms apart at
+     least; the host checks it stands by it and pays part of its cost back */
+  fundo(c, m) {
+    const h = c.room.host, now = Date.now();
+    if (h === c || c.player.cls !== 'inf' || !(Number.isInteger(m.id) && m.id >= 0 && m.id < 65536) || (m.b !== 0 && m.b !== 1) || now - (c.fu || 0) < 700) return;
+    c.fu = now; send(h.ws, { t: 'fundo', from: c.player.id, id: m.id, b: m.b });
   },
   /* transport. board: a soldier asks the owner of vehicle v for a seat (s 0) or says it is out (s -1): the player whose vehicle it is, or
      the host for an AI entity's. seats: who is aboard, a row a vehicle, [vehicle, boxed AI soldiers or -1, then a player or 0 per seat]:

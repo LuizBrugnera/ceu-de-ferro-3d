@@ -8,3 +8,11 @@ Itens P13, P15, P16, P17 e P18 do quadro de polimento (fase 3a, obras). A parte 
 - **A 7 em vez do sinalizador e a 6 em vez da visão noturna:** com o modo obras aberto, as teclas 1 a 7 são da barra. Fora dele, continuam como antes. Não testei com a visão noturna ligada.
 - **Desenho da barra:** as abas são desenhadas uma vez num canvas próprio e redesenhadas só quando o texto muda. Não testei com `devicePixelRatio` 2.
 - **Celular:** a barra não tem toque (D5 = C, não mexer no celular).
+
+## P15 e P16 · girar a obra e o contorno no chão
+
+- **Teclas `[` `]` e roda do mouse:** ouvintes em captura, só com o modo obras aberto e a pé. Antes do zoom da roda, que fica parado enquanto o modo está aberto. Conferido no navegador: `]` duas vezes girou a base em +30°, e o giro passou para a trincheira depois do N. A roda não foi testada no navegador sem janela, só as teclas.
+- **O contorno no chão (`footSet`):** malha de 8 × 8 que segue o relevo, faixa baixa na borda e quatro postes finos (no máximo 2,5 m). Conferido a 1280 e 1920, com base, trincheira girada, sacos, posto AT e pontão junto de uma ponte. O pontão ficou deitado ao longo da ponte, não mais numa caixa de 80 m na mira.
+- **Canto na água em vermelho:** não vi no navegador, porque não pus um canto na água.
+- **Pontão num trecho estreito do rio, longe das pontes:** coberto só pelo teste (`obrSpan` igual ao lugar onde `fortAdd` deita o pontão). No navegador, só junto de uma ponte.
+- **Convidado online:** o ângulo girado vai no `fbuild`/`build` que já existia (`a`). Não testado numa partida com convidado.

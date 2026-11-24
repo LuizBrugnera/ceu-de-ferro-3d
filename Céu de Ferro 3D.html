@@ -34638,7 +34638,7 @@ function build(P, I, key, trig) {
   if (key) S.bm = S.bm ? null : {};
   const B = S.bm; if (!B) return;
   const D = clamp(BLD.put[0] + (a.p + .5) * (BLD.put[1] - BLD.put[0]) / .5, BLD.put[0], BLD.put[1]), ch = Math.cos(a.h), sh = Math.sin(a.h);
-  B.x = P.x + ch * D; B.z = P.z - sh * D; B.a = a.h;
+  B.x = P.x + ch * D; B.z = P.z - sh * D; B.a = a.h + (S.brot || 0);   // [ ] and the wheel turn it (P15, OBR)
   const l = supLot(P.team, B.x, B.z); if (l) { B.x = l.x; B.z = l.z; B.a = l.a; }   // inside the seat town's depot lot: on the lot
   B.y = hgt(B.x, B.z);
   B.why = S.net && !Net.sb ? 'server' : S.bw ? 'wait' : siteWhy(P.team, B.x, B.z, B.a) || (P.kit > 0 ? '' : 'kit');
@@ -40971,7 +40971,7 @@ function fortBuild(P, I, key, trig) {
   const B = S.fm; if (!B) return false;
   const F = FORT.K[B.k], D = clamp(F.put[0] + (a.p + .5) * (F.put[1] - F.put[0]) / .5, F.put[0], F.put[1]);
   if (S.bh) { if (I.fire) P.ctl.fire = false; else S.bh = false; }
-  B.x = P.x + Math.cos(a.h) * D; B.z = P.z - Math.sin(a.h) * D; B.a = a.h; B.y = hgt(B.x, B.z);
+  B.x = P.x + Math.cos(a.h) * D; B.z = P.z - Math.sin(a.h) * D; B.a = a.h + (S.brot || 0); B.y = hgt(B.x, B.z);   // [ ] and the wheel turn it (P15, OBR)
   if (B.k === 1 && TRN.on) { const p = trSnap(P.team, B.x, B.z, B.a); if (p && !fortWhy(1, P.team, p.x, p.z, p.a)) { B.x = p.x; B.z = p.z; B.a = p.a; B.y = hgt(p.x, p.z); } }   // beside a trench of ours: it lengthens the corridor (TRN)
   B.why = S.net && !Net.ft ? 'server' : S.fw ? 'wait' : fortWhy(B.k, P.team, B.x, B.z, B.a);
   P.ctl.fire = P.ctl.ads = false;
@@ -64012,7 +64012,21 @@ build = (g => (P, I, key, trig) => {
     key = false;
   }
   g(P, I, key, trig);
+  if (!obrOpen()) S.brot = 0;   // the turn lasts while the mode is open, from one work to the next (P15)
 })(build);
+/* P15: [ ] and the wheel turn the work in hand by OBR.turn rad either way, added to the line of the aim (the general turns his works so,
+   GOR.ba); S.brot, within ±π, read where build() and fortBuild() set B.a. P16: where a work that spans the river would really lie for
+   the outline: along the fallen bridge at hand (k 7, 9), or across the narrow stretch whose bank end is at hand (k 7, 10), as fortAdd lays
+   them; null away from both. { x, z, a the turn of its length (the scene's rotation.y), L, W } */
+OBR.turn = Math.PI / 12;
+function obrTurn(d) { const r = (S.brot || 0) + d * OBR.turn; S.brot = Math.abs(r) < 1e-9 ? 0 : Math.atan2(Math.sin(r), Math.cos(r)); return S.brot; }
+function obrSpan(k, x, z) {
+  const h = k === 10 ? null : brPontAt(x, z, BR.put + 1);
+  if (h) return { x: h.b.x, z: h.b.z, a: Math.atan2(-h.b.dz, h.b.dx), L: h.b.len, W: 2 * BR.pw };
+  if (k === 9 || !S.T.net) return null;
+  const s = brSite(z), e = s.ends && brEndOf(s, x, z);
+  return e && hdist(e, { x, z }) < BR.put + 1 ? { x: s.x, z: s.z, a: 0, L: s.len, W: 2 * BR.pw } : null;
+}
 Object.assign(FORT.trench, { sn: 'Trincheira' }); Object.assign(FORT.bags, { sn: 'Sacos' }); Object.assign(POSTS.atp, { sn: 'Posto AT' }); Object.assign(POSTS.mgn, { sn: 'Ninho MG' });
 Object.assign(POSTS.twr, { sn: 'Torre' }); Object.assign(POSTS.dome, { sn: 'Cúpula' }); Object.assign(FORT.pont, { sn: 'Pontão' }); Object.assign(FORT.rel, { sn: 'Antena' });
 Object.assign(FORT.rebuild, { sn: 'Refazer ponte' }); Object.assign(FORT.nbr, { sn: 'Ponte nova' });
@@ -64034,7 +64048,85 @@ function obrInfo(P, it) {
 /* the help's line for N, from the same list (d a kit; every work of the era for it) */
 function obrHelp(d) {
   const l = typeof S !== 'undefined' && S && S.era ? obrList({ def: d, team: S.me | 0 }).map(it => obrName({ def: d, team: S.me | 0 }, it)) : ['Base', 'Trincheira', 'Sacos'];
-  return 'N abre o modo obras e a barra numerada do que você pode construir: ' + l.join(', ') + '. As teclas 1 a ' + OBR.keys + ' escolhem na barra' + (l.length > OBR.keys ? ' (' + OBR.keys + ': mais…, a página seguinte)' : '') + ', N passa para a próxima e Shift+N volta';
+  return 'N abre o modo obras e a barra numerada do que você pode construir: ' + l.join(', ') + '. As teclas 1 a ' + OBR.keys + ' escolhem na barra' + (l.length > OBR.keys ? ' (' + OBR.keys + ': mais…, a página seguinte)' : '') + ', N passa para a próxima e Shift+N volta; [ ] ou a roda giram a obra 15°. Segure V junto de uma obra do seu lado para desmontá-la (volta ' + Math.round(OBR.back * 100) + '% do custo)';
+}
+/* P17: a work stopped with no word (a builder must stand still within BLD.reach m of it, not hit for BLD.hurt s nor pinned down), decayed
+   BLD.decay[0] s after the last builder left and went with nothing back, could not be taken down, and was CAVANDO or EMPILHANDO whatever
+   it was. obrStall: the unfinished work of P's side (a work, or a supply base's site) nearest P within OBR.near m of its footprint, what
+   holds it (why: far, move, fire with wait s, '' while P builds it), its builders n, the s left at that pace, and since when nobody builds it
+   (idle s; decay once it shrinks). Holding V by a work of its side (any but one across the river or dug before the match, or a base's site)
+   for OBR.undo s takes it down: OBR.back of what it cost comes back to the side, a site's kit back to the soldier. V is the mortar's shell
+   and the sapper's lift by a mine it knows; neither takes a work down. Online a guest asks the host (fundo, where the server knows it: fnd) */
+Object.assign(OBR, { near: 40, undo: 3, back: ECO.refund });
+const obrName0 = w => (w.F ? w.F.name : 'Base de suprimento');
+function obrStall(P) {
+  if (!P || P.dead || P.in) return null;
+  let w = null, bd = OBR.near;
+  for (const l of [S.forts, S.sup]) for (const f of l) if (f.team === P.team && f.prog < 1 && !f.gone && !f.dead && f.o) { const d = footD(f.o, P.x, P.z); if (d < bd) { bd = d; w = f; } }
+  if (!w) return null;
+  const on = builds(P, w), n = on ? Math.max(1, w.n | 0) : w.n | 0, T = w.F ? w.F.time : BLD.time, hurt = Math.max(BLD.hurt - (S.t - P.hitT), (P.sup || 0) - S.t);
+  const why = on ? '' : bd > BLD.reach ? 'far' : P.v.x * P.v.x + P.v.z * P.v.z >= BLD.still * BLD.still ? 'move' : hurt > 0 ? 'fire' : 'other', idle = n || w.workT === undefined ? 0 : S.t - w.workT;
+  return { w, base: !w.F, on, n, d: bd, why, wait: Math.ceil(hurt), left: n ? Math.ceil((1 - w.prog) * T / (1 + BLD.help * (n - 1))) : 0, idle, decay: idle > BLD.decay[0] };
+}
+/* the work of P's side P may take down where it stands, and what comes back for it */
+function obrMine(P) {
+  let w = null, bd = BLD.reach;
+  for (const f of S.forts) if (f.team === P.team && !f.gone && !f.pre && !f.F.span) { const d = footD(f.o, P.x, P.z); if (d < bd) { bd = d; w = f; } }
+  for (const b of S.sup) if (b.team === P.team && b.prog < 1 && !b.dead && b.o) { const d = footD(b.o, P.x, P.z); if (d < bd) { bd = d; w = b; } }
+  return w;
+}
+const obrBack = w => { const c = w.F ? w.F.cost : BLD.cost; return c ? [Math.round(c[0] * OBR.back), Math.round(c[1] * OBR.back)] : null; };
+/* on the host (or solo): work w of side t comes down; by: the soldier who gets a site's kit back */
+function obrUndoAt(t, w, by) {
+  const c = obrBack(w), d = S.eco && S.eco.d[t];
+  if (c && d && ecoSim()) { d.en = Math.min(ECO.cap.en, d.en + c[0]); d.mt = Math.min(ECO.cap.mt, d.mt + c[1]); }
+  if (w.F) fortDrop(w); else { w.dead = w.gone = true; dropObj(w.o); Net.bq = true; if (by && by.man) by.kit = (by.kit | 0) + 1; }
+  return c;
+}
+Net.fnd = false;
+Net.rx.welcome = (old => m => { Net.fnd = m.fnd === 1; old(m); })(Net.rx.welcome);
+Net.rx.fundo = m => {
+  const G = Net.ghosts.get(m.from);
+  if (!S.net || !S.host || !G || G.dead || !G.man || !Number.isInteger(m.id)) return;
+  const w = m.b ? S.sup.find(b => b.id === m.id && b.prog < 1 && !b.dead) : S.forts.find(f => f.id === m.id && !f.gone && !f.pre && !f.F.span);
+  if (w && w.team === G.team && w.o && footD(w.o, G.x, G.z) < BLD.reach + 2) obrUndoAt(G.team, w, null);
+};
+/* V is another thing's for P: the mortar's shell, a sapper's lift by a mine it knows */
+const obrBlockV = P => !!P.def.mort || (!!P.def.sap && mines().some(o => !o.gone && mineKnown(o, P.team) && hdist(o, P) < SAP.near));
+/* the hold of V, each step of the player's hands: S.undo { w, T when it comes down } while V is held by the same work, done until V is let go */
+function obrHold(P, I) {
+  const U = S.undo;
+  if (U && U.done) { if (!I.ordB) S.undo = null; return; }
+  const w = I.ordB && !obrOpen() && P.man && !P.dead && !P.in && !obrBlockV(P) ? obrMine(P) : null;
+  if (!w) { S.undo = null; return; }
+  if (!U || U.w !== w) { S.undo = { w, T: S.t + OBR.undo }; return; }
+  if (S.t < U.T) return;
+  const say = text => S.floats.push({ x: w.x, y: hgt(w.x, w.z) + 3, z: w.z, text, life: 2.5 }), c = obrBack(w), pay = c && S.eco && S.eco.d[P.team] ? ': +' + c[0] + ' energia, +' + c[1] + ' metal' : '';
+  S.undo = { done: true };
+  if (S.net && !S.host) {
+    if (!Net.fnd) { say('O servidor desta sala é antigo: não desmonta obras'); return; }
+    Net.send('fundo', { id: w.id, b: w.F ? 0 : 1 }); if (!w.F) S.uw = { id: w.id, T: S.t + 2.5 };
+  } else obrUndoAt(P.team, w, P);
+  say((w.F ? obrName0(w) : 'Base') + ' desmontada' + pay);
+}
+build = (g => (P, I, key, trig) => {
+  g(P, I, key, trig);
+  obrHold(P, I);
+  if (S.uw) { if (!S.sup.some(b => b.id === S.uw.id && !b.dead)) { P.kit = (P.kit | 0) + 1; S.uw = null; } else if (S.t > S.uw.T) S.uw = null; }   // a guest's site taken down by the host: its kit back
+})(build);
+/* P18: the general's Fortificar showed only a cross and said why not after the click, where Construir has an outline turned with [ ] and
+   its reason live. obrGenFort: where the work of kind k (a key of W21.fort) ordered at x z by side t would lie and why not, as GC.fort and
+   fortPlan lay it: facing a (or the enemy's base, lsFoeBase, as they face it), a work dug OBR.dig m ahead along that facing (fortPlan's
+   first try), a supply base on the click (on the seat town's lot inside it, as GC.sup). { x, z, a, L, W, rot the turn of its length (the
+   scene's rotation.y), why }; null for what has no footprint of its own (the minefields, the AA position, the engineers' rings) */
+OBR.dig = 5;
+function obrGenFort(t, k, x, z, a) {
+  if (k === 'sup') { const l = supLot(t, x, z); if (l) { x = l.x; z = l.z; a = l.a; } }
+  if (!Number.isFinite(a)) { const e = lsFoeBase(t, x, z); a = headTo(x, z, e.x, e.z); }
+  if (k === 'sup') return { x, z, a, L: BLD.size[0], W: BLD.size[1], rot: a, why: siteWhy(t, x, z, a) };
+  const K = W21.dig[k], F = K ? FORT.K[K] : null; if (!F || F.span) return null;
+  const wx = x + Math.cos(a) * OBR.dig, wz = z - Math.sin(a) * OBR.dig;
+  return { x: wx, z: wz, a, L: F.size[0], W: F.size[1], rot: a + Math.PI / 2, why: (F.era && F.era !== S.era) ? 'era' : fortWhy(K, t, wx, wz, a) };
 }
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
@@ -66662,8 +66754,9 @@ function hudFort(P, u, ink, acc, disp) {
     txt(B.k === 1 ? 'CAVAR TRINCHEIRA' : 'EMPILHAR SACOS DE AREIA', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
     txt(B.why ? FWHY[B.why] : 'Clique: começar aqui  ·  botão direito: sair', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
   } else if (!S.bm && !S.sup.concat(ecoFoe(P.team)).some(b => (b.prog < 1 && builds(P, b)) || (!b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach))) {
-    const f = S.forts.find(f => f.prog < 1 && builds(P, f));
-    if (f) { txt((f.k === 1 ? 'CAVANDO ' : 'EMPILHANDO ') + Math.round(f.prog * 100) + '%' + (f.n > 1 ? '  ·  ' + f.n + ' soldados' : ''), cw / 2, ch * .6, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, f.prog, acc); }
+    const f = S.forts.find(f => f.prog < 1 && builds(P, f) && !(S.undo && S.undo.w === f));   // one being taken down says DESMONTANDO (obrStallHud)
+    if (f) { const n = Math.max(1, f.n | 0), left = Math.ceil((1 - f.prog) * f.F.time / (1 + BLD.help * (n - 1)));   // the work's own name and the time left at this pace (P17, OBR)
+      txt((f.k === 1 ? 'CAVANDO A TRINCHEIRA ' : f.k === 2 ? 'EMPILHANDO OS SACOS ' : 'CONSTRUINDO ' + f.F.name.toUpperCase() + ' ') + Math.round(f.prog * 100) + '%  ·  faltam ' + left + ' s' + (n > 1 ? '  ·  ' + n + ' soldados' : ''), cw / 2, ch * .6, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, f.prog, acc); }
   }
   if (P.fc && (P.fc.k === 2 || P.dg > .5)) { hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - 92 * u, ch - 62 * u, 184 * u, 19 * u); txt('ABRIGADO  ·  ' + (P.fc.k === 1 ? 'TRINCHEIRA' : 'SACOS DE AREIA'), cw / 2, ch - 59 * u, 12 * u, '#8fe39a', 'center'); }
 }
@@ -67844,7 +67937,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     }
     const amb = cueAmb(P);
     if (amb) txt(amb === 3 ? 'EMBOSCADA: AGUARDE' : 'EMBOSCADA: FOGO!', cw / 2, ch * .32, 15 * u, amb === 3 ? acc : FOE, 'center', disp);
-    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
+    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b) && !(S.undo && S.undo.w === b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
     if (B || S.fm || S.mm) { const bw = Math.min(cw - 32, 620 * u); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, ch * .6 - 30 * u, bw, 86 * u); }   // a band under the build mode's lines: they sit on the bright ghost of the work (cf-pol-hud)
     if (B) {   // build mode: what the outline says
       txt('CONSTRUIR BASE DE SUPRIMENTO', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
@@ -71609,6 +71702,7 @@ function gSel(g, V, P, now) {
     if (P2.q && P2.q.ok) gTxt(g, 'OBJ ' + P2.q.nm + ' · ' + gN(P2.q.own) + ' × ' + gN(P2.q.foe), x, y - r - 10, 11 * k, acc, 'center');
   }
   if (GOR.mode === 'build' && GOR.cur && !GOR.dn) gorGhost(g, P, now);
+  if (GOR.mode === 'fort' && GOR.cur && !GOR.dn) gorFortGhost(g, P, now);   // P18 (OBR)
   if (GOR.mode === 'build') GOR.spots.forEach((s, i) => { const x = X(s.x), y = Y(s.z); gRing(g, x, y, 8 * k, '#8fe39a', 2); gTxt(g, String(i + 1), x, y + 4 * k, 11 * k, '#8fe39a', 'center'); });
   if (GOR.box) { const b = GOR.box; g.setLineDash([5, 4]); g.fillStyle = 'rgba(111,195,178,.12)'; g.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); g.strokeStyle = col; g.lineWidth = 1.4; g.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); g.setLineDash([]); }
   else if (GOR.mode && GOR.cur && !GOR.dn && GOR.mode !== 'build') { const x = GOR.cur.px, y = GOR.cur.py; gLine(g, x - 10, y, x - 4, y, acc, 1.4); gLine(g, x + 4, y, x + 10, y, acc, 1.4); gLine(g, x, y - 10, x, y - 4, acc, 1.4); gLine(g, x, y + 4, x, y + 10, acc, 1.4); }
@@ -71647,7 +71741,7 @@ const gorWho2 = () => (gorIds().length ? gorIds().length + (gorIds().length > 1 
 Object.defineProperties(GORT, {
   rt: { enumerable: true, get: () => 'Rota: clique para o ponto ' + (GOR.rt.length + 1) + ' de até ' + W21.wp + ' · Backspace apaga o último · Enter ou U termina' },
   ord: { enumerable: true, get: () => 'Ordem ampla: ' + W21.v[GOR.ov] + ' · ' + (GOR.mk2 ? 'criar ' + (GOR.on || 1) + ' × ' + ECO.tx.u[GOR.mk2].toLowerCase() + ' da reserva' : GOR.ov === 'fire' ? 'os morteiros e baterias que alcançam' : gorWho2()) + ' · clique no ' + (GOR.ov === 'esc' ? 'veículo' : 'alvo') + ' · J troca o verbo' },
-  fort: { enumerable: true, get: () => 'Fortificar: ' + W21.fort[GOR.fk] + ' · ' + (gorIds().length ? 'as selecionadas constroem' : 'o general escolhe quem constrói') + ' · clique no lugar · O troca o tipo' },
+  fort: { enumerable: true, get: () => 'Fortificar: ' + W21.fort[GOR.fk] + ' · ' + (gorIds().length ? 'as selecionadas constroem' : 'o general escolhe quem constrói') + ' · clique no lugar · [ ] gira · O troca o tipo' },
   rq: { enumerable: true, get: () => 'Pedido de ' + (W21.rq[GOR.rk] || '') + ': clique no mapa' + (GORRQ[GOR.rk] ? ' · ' + gorWho2() : ' · o general escolhe quem atende') } });
 gorMode = (g => (m, keep) => {
   if (typeof m !== 'string' || !(GORX[m] || m.startsWith('rq:'))) return g(m, keep);
@@ -75981,7 +76075,7 @@ function rtsKey(e) {
     return true;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  if ((c === 'BracketLeft' || c === 'BracketRight') && GOR.mode === 'build') return false;   // the build mode turns the work with them
+  if ((c === 'BracketLeft' || c === 'BracketRight') && (GOR.mode === 'build' || GOR.mode === 'fort')) return false;   // the build mode and Fortificar turn the work with them
   if (RTSK[c]) { RTS.k[c] = 1; return true; }
   if (c === 'Equal' || c === 'NumpadAdd') { rtsZoom(1.25); return true; }
   if (c === 'Minus' || c === 'NumpadSubtract') { rtsZoom(1 / 1.25); return true; }
@@ -77242,7 +77336,8 @@ function obrHud(P, u, ink, acc) {
     });
   }
   hx.drawImage(V.cv, x0 - 1, y0 - 1, W + 2, h + 2);
-  txt((b - a > 1 ? '1–' + (b - a) : '1') + ': escolher' + (more ? '  ·  ' + OBR.keys + ': mais' : '') + '  ·  N: próxima  ·  Shift+N: volta', cw / 2, ch * .6 + 42 * u, 10 * u, dim, 'center');
+  const rot = S.fm || S.bm ? '  ·  [ ] ou roda: girar' + (S.brot ? ' (girada ' + (S.brot < 0 ? '+' : '') + Math.round(-S.brot * 180 / Math.PI) + '°)' : '') : '';
+  txt((b - a > 1 ? '1–' + (b - a) : '1') + ': escolher' + (more ? '  ·  ' + OBR.keys + ': mais' : '') + '  ·  N: próxima  ·  Shift+N: volta' + rot, cw / 2, ch * .6 + 42 * u, 10 * u, dim, 'center');
 }
 hudFort = (g => (P, u, ink, acc, disp) => { g(P, u, ink, acc, disp); if (P.man && !P.dead && obrOpen()) obrHud(P, u, ink, acc); })(hudFort);
 addEventListener('keydown', e => {
@@ -77252,6 +77347,106 @@ addEventListener('keydown', e => {
   e.preventDefault(); e.stopImmediatePropagation();   // before the compartments' keys (SLOT), the night vision (6) and the flare (7)
   if (!e.repeat) S.my.bq = back ? { d: -1 } : { n };
 }, true);
+/* P15 and P16 on the screen. The outline of a work was a tall see-through box with a wire edge: it hid the aim and the ground behind it,
+   and said nothing of the slope; a pontoon's was drawn where the aim was, not on the bank. Now a footprint lies on the ground and follows
+   it (OBRG.n × OBRG.n cells, each corner at the ground's height, never under the water), with a low band round its edge (wall m), a line
+   on the band, and a thin post at each corner as tall as the work (red where that corner is in the water, or the whole of it red with the
+   reason); a work across the river lies where it will be (obrSpan). Turned with [ ] and the wheel (obrTurn), its turn on the keys' line */
+const OBRG = { n: 8, lift: .12, wall: .35, op: .26, post: .12, hmax: 2.5, ok: 0x6fd67a, bad: 0xe2604f, sz: 6 };
+let gFoot = null;
+function footMake() {
+  const n = OBRG.n, P = 4 * n, buf = k => new THREE.BufferAttribute(new Float32Array(k * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  const mat = op => new THREE.MeshBasicMaterial({ color: OBRG.ok, transparent: true, opacity: op, depthWrite: false, side: THREE.DoubleSide });
+  const fg = new THREE.BufferGeometry(), fi = [], rg = new THREE.BufferGeometry(), ri = [], lg = new THREE.BufferGeometry();
+  fg.setAttribute('position', buf((n + 1) * (n + 1)));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const a = i * (n + 1) + j, c = a + n + 1; fi.push(a, c, a + 1, a + 1, c, c + 1); }
+  fg.setIndex(fi); rg.setAttribute('position', buf(2 * P));
+  for (let i = 0; i < P; i++) { const b = (i + 1) % P; ri.push(i, b, P + i, b, P + b, P + i); }
+  rg.setIndex(ri); lg.setAttribute('position', buf(P));
+  const fill = new THREE.Mesh(fg, mat(OBRG.op)), band = new THREE.Mesh(rg, mat(.5)), line = new THREE.LineLoop(lg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: .85 }));
+  const posts = [0, 1, 2, 3].map(() => new THREE.Mesh(new THREE.BoxGeometry(OBRG.post, 1, OBRG.post), new THREE.MeshBasicMaterial({ color: OBRG.ok })));
+  const G = new THREE.Group(); G.add(fill, band, line, ...posts);
+  for (const o of G.children) { o.frustumCulled = false; o.renderOrder = 2; }
+  G.userData = { fill, band, line, posts }; return G;
+}
+/* the footprint L × W m at x z, its length turned by a (rotation.y), posts h m tall, red when bad */
+function footSet(x, z, a, L, W, h, bad) {
+  if (!gFoot || gFoot.parent !== scene) { gFoot = footMake(); scene.add(gFoot); }
+  const U = gFoot.userData, n = OBRG.n, P = 4 * n, c = Math.cos(a), s = Math.sin(a), WL = S.T.WL, col = bad ? OBRG.bad : OBRG.ok;
+  const at = (u, v, A, i, dy) => { const lx = (u - .5) * L, lz = (v - .5) * W, wx = x + lx * c + lz * s, wz = z - lx * s + lz * c, g = hgt(wx, wz); A[i * 3] = wx; A[i * 3 + 1] = Math.max(g, WL) + OBRG.lift + dy; A[i * 3 + 2] = wz; return g; };
+  const F = U.fill.geometry.attributes.position, B = U.band.geometry.attributes.position, Ln = U.line.geometry.attributes.position;
+  for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) at(j / n, i / n, F.array, i * (n + 1) + j, 0);
+  for (let k = 0; k < P; k++) {
+    const sd = k / n | 0, t = (k % n) / n, u = sd === 0 ? t : sd === 1 ? 1 : sd === 2 ? 1 - t : 0, v = sd === 0 ? 0 : sd === 1 ? t : sd === 2 ? 1 : 1 - t;
+    at(u, v, B.array, k, 0); at(u, v, B.array, P + k, OBRG.wall); at(u, v, Ln.array, k, OBRG.wall);
+  }
+  F.needsUpdate = B.needsUpdate = Ln.needsUpdate = true;
+  U.fill.material.color.setHex(col); U.band.material.color.setHex(col);
+  const q = [0, 0, 0];
+  [[0, 0], [1, 0], [1, 1], [0, 1]].forEach(([u, v], i) => { const g = at(u, v, q, 0, 0), o = U.posts[i]; o.scale.y = h; o.position.set(q[0], q[1] + h / 2, q[2]); o.material.color.setHex(bad || g < WL + .6 ? OBRG.bad : OBRG.ok); });
+  gFoot.visible = true;
+}
+fortScene = (g => () => {
+  g();
+  const P = S.my, B = P && !P.dead ? (S.fm && S.fm.x !== undefined ? S.fm : S.bm && S.bm.x !== undefined ? S.bm : null) : null;
+  if (!B) { if (gFoot) gFoot.visible = false; return; }
+  if (B === S.bm) { gGhost.visible = false; footSet(B.x, B.z, B.a, BLD.size[0], BLD.size[1], Math.min(BLD.size[2], OBRG.hmax), !!B.why); return; }
+  const F = FORT.K[B.k], sp = F.span ? obrSpan(B.k, B.x, B.z) : null;
+  gFortGhost.visible = false;
+  if (sp) footSet(sp.x, sp.z, sp.a, sp.L, sp.W, 1.2, !!B.why);
+  else if (F.span) footSet(B.x, B.z, B.a + Math.PI / 2, OBRG.sz, OBRG.sz, 1.2, true);   // no river end at hand: a small red mark where the aim is
+  else footSet(B.x, B.z, B.a + Math.PI / 2, F.size[0], F.size[1], B.k === 1 ? .4 : Math.min(F.size[2] || 1, OBRG.hmax), !!B.why);
+})(fortScene);
+addEventListener('keydown', e => {
+  if ((e.code !== 'BracketLeft' && e.code !== 'BracketRight') || playMode !== 'play' || paused || sw.on || GV.on || !S || !S.my || !S.my.man || S.my.dead || S.my.in || !(S.fm || S.bm) || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+  e.preventDefault(); e.stopImmediatePropagation(); obrTurn(e.code === 'BracketRight' ? -1 : 1);   // ] clockwise seen from above (the bearing grows), [ the other way
+}, true);
+addEventListener('wheel', e => {   // before the zoom's wheel: in the build mode it turns the work
+  if (playMode !== 'play' || paused || sw.on || GV.on || BM.on || !S || !S.my || !S.my.man || S.my.dead || S.my.in || !(S.fm || S.bm) || !e.deltaY) return;
+  e.stopImmediatePropagation(); if (e.timeStamp - (OBRV.wt || 0) < 90) return; OBRV.wt = e.timeStamp; obrTurn(e.deltaY < 0 ? -1 : 1);   // up as ]
+}, { capture: true, passive: true });
+/* P17 on the screen: a work that P was building or stands by, that nobody builds, says why it stopped and when it starts to come apart
+   (OBRA PARADA), and how to take it down; while V is held, the bar of DESMONTANDO. OBRV.mine: the last work P built */
+const OBRW = { far: 'chegue a até ' + BLD.reach + ' m dela', move: 'fique parado junto dela', other: 'ninguém a constrói' };
+function obrStallHud(P, u, ink, acc) {
+  const U = S.undo;
+  const band = () => { const bw = Math.min(cw - 32, 560 * u); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, ch * .6 - 6 * u, bw, 40 * u); };
+  if (U && U.w && !U.done) { band(); txt('DESMONTANDO ' + obrName0(U.w).toUpperCase() + '  ·  solte V para parar', cw / 2, ch * .6, 13 * u, acc, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, 1 - (U.T - S.t) / OBR.undo, acc); return; }
+  if (obrOpen() || P.dead || P.in) return;
+  const st = obrStall(P); if (!st) return;
+  if (st.on) { OBRV.mine = st.w; return; }
+  if (st.n || (st.w !== OBRV.mine && st.d > BLD.reach)) return;
+  const why = st.why === 'fire' ? 'sob fogo: espere ' + Math.max(1, st.wait) + ' s' : OBRW[st.why], c = st.d <= BLD.reach ? obrBack(st.w) : null;
+  band(); txt('OBRA PARADA  ·  ' + obrName0(st.w).toUpperCase() + ' ' + Math.round(st.w.prog * 100) + '%', cw / 2, ch * .6, 13 * u, st.decay ? FOE : acc, 'center');
+  txt(why + (st.decay ? '  ·  SE DESFAZENDO' : st.idle > 0 ? '  ·  começa a se desfazer em ' + Math.ceil(BLD.decay[0] - st.idle) + ' s' : '') + (st.d <= BLD.reach && !obrBlockV(P) ? '  ·  segure V: desmontar' + (c && S.eco ? ' (+' + c[0] + '/' + c[1] + ')' : '') : ''), cw / 2, ch * .6 + 18 * u, 11 * u, st.decay ? FOE : ink, 'center');
+}
+hudFort = (g => (P, u, ink, acc, disp) => { g(P, u, ink, acc, disp); if (P.man) obrStallHud(P, u, ink, acc); })(hudFort);
+/* P18 on the general's view: under the cursor in Fortificar, the work's footprint where the squad will dig it, its facing, green or red
+   with the reason (obrGenFort at most ten times a second), [ ] turn it 15° (GOR.fa, for the kind GOR.faK; sent as the command's a) */
+const OBRGW = Object.assign({ era: 'Só na frente atual', cost: 'Seu lado não tem a energia e o metal desta obra' }, BWHY);
+function gorFortGhost(g, P, now) {
+  const w = gorW(GOR.cur.px, GOR.cur.py), k = P.k, fa = GOR.faK === GOR.fk ? GOR.fa : null, key = GOR.fk + '|' + Math.round(w.x) + '|' + Math.round(w.z) + '|' + fa;
+  if (key !== GOR.fwP && now - (GOR.fwT || 0) > 100) { GOR.fwT = now; GOR.fwP = key; try { GOR.fw = obrGenFort(S.me, GOR.fk, w.x, w.z, fa === null ? NaN : fa); } catch (e) { GOR.fw = null; } }
+  const G = GOR.fw; if (!G) return;
+  const ok = !G.why, c = ok ? '#8fe39a' : FOE, cs = Math.cos(G.rot), sn = Math.sin(G.rot);
+  g.beginPath();
+  [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([i, j], n) => { const lx = i * G.L / 2, lz = j * G.W / 2, px = P.X(G.x + lx * cs + lz * sn), py = P.Y(G.z - lx * sn + lz * cs); if (n) g.lineTo(px, py); else g.moveTo(px, py); });
+  g.closePath(); g.globalAlpha = .22; g.fillStyle = c; g.fill(); g.globalAlpha = 1; g.strokeStyle = c; g.lineWidth = 2; g.stroke();
+  const cx = P.X(G.x), cy = P.Y(G.z), L = Math.max(G.L, G.W) * .6;
+  gLine(g, cx, cy, P.X(G.x + Math.cos(G.a) * L), P.Y(G.z - Math.sin(G.a) * L), c, 1.6);   // the way it faces
+  const why = (typeof FWHY !== 'undefined' && FWHY && FWHY[G.why]) || PWHY[G.why] || OBRGW[G.why] || G.why;
+  gTxt(g, W21.fort[GOR.fk] + ' · ' + (ok ? 'pode construir aqui' : why) + ' · [ ] gira', cx + 14 * k, cy - 12 * k, 11 * k, c, 'left');
+}
+gorKey = (g => e => {
+  const c = e.code;
+  if ((c === 'BracketLeft' || c === 'BracketRight') && typeof gorOn === 'function' && gorOn() && GOR.mode === 'fort') {
+    let a = GOR.faK === GOR.fk ? GOR.fa : null;
+    if (a === null) { const w = GOR.cur ? gorW(GOR.cur.px, GOR.cur.py) : null, G = w ? obrGenFort(S.me, GOR.fk, w.x, w.z, NaN) : null; a = G ? G.a : 0; }
+    GOR.fa = a + (c === 'BracketRight' ? 1 : -1) * Math.PI / 12; GOR.faK = GOR.fk; return true;
+  }
+  return g(e);
+})(gorKey);
+gorSend = (g => c => { if (c && c.c === 'fort' && GOR.faK === c.k && GOR.fa !== null && GOR.fa !== undefined && !Number.isFinite(c.a)) c.a = +GOR.fa.toFixed(3); return g(c); })(gorSend);
 /* ---------- end of the build bar on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>

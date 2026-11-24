@@ -2,7 +2,7 @@
 /* a room of three sides through the real relay server (PAGE, SERVER, PORT_T): the "online" items of docs/nao-testado/cf-3l-p2/p4/p5.
    A host of the USA (Abrams) asks for three sides (Net.ns0 3, as the hangar's "Três" does), a Russian guest (T-90) and an Insurgent guest (T-55)
    join: the welcome says ns 3, every page builds the match of three sides on the side of its model; a page that asks for two is refused (sides).
-   The conquest goes out as cq v2: the guests have the host's points and three tickets; side 2 out of tickets is out for the guests too (they
+   The conquest goes out as cq v2: the guests have the host's points and three point-times; side 2 out (its main base taken) is out for the guests too (they
    deduce it, with the banner for the Insurgent player), and when side 1's main base falls the match ends with the same placing everywhere and
    "Derrota · 2º lugar" for the second. Then, with the room empty, an Insurgent model in a room of two sides is refused (side) */
 process.env.SUSPEND = '0';   // an emptied room ends its match (no suspended match in the way of the last check)
@@ -36,11 +36,11 @@ async function run(secs, each) {
   const two = await client('Duda', 'tank', 'abrams', 2);
   ok(two.refused === 'sides', 'a page that asks for two sides is refused: ' + two.refused);
   await run(4);
-  const Q = h.S.cq, same = c => c.S.cq.p.every((p, k) => p.hold === Q.p[k].hold) && c.S.cq.tk.length === 3;
-  ok(same(r) && same(i), 'cq v2: the guests have the host\'s points and three tickets (' + r.S.cq.tk.map(Math.round) + ')');
-  Q.tk[2] = 0; await run(1.5);
-  ok(Q.out[2] === 1 && !Q.ph, 'the host puts side 2 out (no tickets) and the match goes on');
-  ok(r.S.cq.out[2] === 1 && i.S.cq.out[2] === 1, 'the guests deduce it (out[2] ' + r.S.cq.out[2] + ', ' + i.S.cq.out[2] + ')');
+  const Q = h.S.cq, same = c => c.S.cq.p.every((p, k) => p.hold === Q.p[k].hold) && c.S.cq.ps.length === 3 && c.S.cq.tk === undefined;
+  ok(same(r) && same(i), 'cq v2: the guests have the host\'s points and three point-times (' + r.S.cq.ps.map(Math.round) + ')');
+  const b2 = Q.p.find(p => p.base === 2); b2.hold = 0; b2.c = 1; await run(1.5);
+  ok(Q.out[2] === 3 && !Q.ph, 'the host puts side 2 out (its main base taken) and the match goes on');
+  ok(r.S.cq.out[2] === 3 && i.S.cq.out[2] === 3, 'the guests deduce it (out[2] ' + r.S.cq.out[2] + ', ' + i.S.cq.out[2] + ')');
   ok(i.S.banner && /Seu lado foi eliminado/.test(i.S.banner.text), 'the Insurgent player is told: ' + (i.S.banner && i.S.banner.text));
   const b1 = Q.p.find(p => p.base === 1); b1.hold = 0; b1.c = 1; await run(1.5);
   ok(Q.ph === 1 && Q.res[0] === 0 && Q.place.join() === '0,1,2', 'side 1\'s base taken: the host ends it, side 0 wins, placing ' + Q.place);

@@ -11,8 +11,8 @@ if (process.env.BATTLE) {
   const era = process.env.BATTLE, SECS = +process.env.SECS || 300, C = H.load({ seed: 101, mapv: 4, eco: true }), $ = C.$, S = C.newState(era, $('ERAS')[era].sides[0].fighter, { cls: 'plane' });
   let err = null, trips = 0, sq = 0; const seen = new Set(), seenQ = new Set(), t0 = Date.now();
   try { C.run(SECS, () => { for (const u of S.units) if (u.trip && !seen.has(u)) { seen.add(u); trips++; } for (const q of S.squads) if (q.tp && !seenQ.has(q)) { seenQ.add(q); sq++; } }, 1 / 30); } catch (e) { err = e; }
-  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.tk[0]) || !Number.isFinite(S.cq.tk[1]);
-  ok(!err && !H.nan(S) && !bad, era + ' ' + SECS + ' s at map 4, economy ' + ($('ECO').on ? 'on' : 'OFF') + ': no exception, no NaN (' + (Date.now() - t0) + ' ms; ' + S.squads.length + ' squads, ' + S.units.length + ' vehicles, ' + sq + ' squads and ' + trips + ' vehicles made trips; tickets ' + S.cq.tk.map(Math.round) + ')' + (err ? ' ' + err.stack : ''));
+  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.ps[0]) || !Number.isFinite(S.cq.ps[1]);
+  ok(!err && !H.nan(S) && !bad, era + ' ' + SECS + ' s at map 4, economy ' + ($('ECO').on ? 'on' : 'OFF') + ': no exception, no NaN (' + (Date.now() - t0) + ' ms; ' + S.squads.length + ' squads, ' + S.units.length + ' vehicles, ' + sq + ' squads and ' + trips + ' vehicles made trips; points ' + [0, 1].map(t => S.cq.p.filter(p => p.hold === t).length) + ')' + (err ? ' ' + err.stack : ''));
   done(); return;
 }
 (async () => {

@@ -15,7 +15,7 @@ A IA mantém a guerra de todos os lados; o jogador é uma unidade dentro dela ou
 Um modo RTS, com câmera de comandante, cabe como mais um jeito opcional de jogar, nunca como o principal.
 Toda unidade da IA entra em campo por uma ordem de despacho do general, com uma missão, e paga pela economia.
 A economia e a logística física ficam sempre ligadas, em todo modo: o que chega à frente foi produzido e levado até lá.
-Os tíquetes são o moral do lado, e perder uma unidade custa à economia, não ao placar.
+Não há tíquetes: perder uma unidade custa à economia, não ao placar, e o placar são os pontos de captura, que também dão a renda.
 Um modo que tira a economia, os despachos ou a logística para "simplificar" vai contra o jogo.
 Campanhas com história, missões e eventos roteirizados são bem-vindas, desde que aconteçam dentro dessa batalha simulada e não no lugar dela.
 

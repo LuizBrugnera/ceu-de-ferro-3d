@@ -12,7 +12,7 @@ if (process.env.BATTLE) {
   let err = null; const seen = new Set(), n = { flk: 0, inf: 0, raid: 0 }, cand = { flk: 0, inf: 0, raid: 0 }, t0 = Date.now();
   for (const k of MINE) { const g = $('MANG')[k]; $('MANG')[k] = (Cm, X) => { const r = g(Cm, X); cand[k] += r.length; return r; }; }
   try { C.run(SECS, () => { for (const Cm of S.cmd || []) for (const op of Cm.ops) if (op.man && MINE.includes(op.k) && !seen.has(op)) { seen.add(op); n[op.k]++; } }, 1 / 30); } catch (e) { err = e; }
-  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.tk[0]) || !Number.isFinite(S.cq.tk[1]);
+  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.ps[0]) || !Number.isFinite(S.cq.ps[1]);
   ok(!err && !H.nan(S) && !bad, era + ' ' + SECS + ' s at map 4, economy ' + ($('ECO').on ? 'on' : 'OFF') + ': no exception, no NaN (' + (Date.now() - t0) + ' ms)' + (err ? ' ' + err.stack : ''));
   console.log('  info opened: flk ' + n.flk + ', inf ' + n.inf + ', raid ' + n.raid + ' (candidates generated: ' + MINE.map(k => k + ' ' + cand[k]).join(', ') + ')');
   done(); return;

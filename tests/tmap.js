@@ -127,12 +127,12 @@ if (SECS > 0) {
     const C = H.load({ seed: 21, eco: 1, mapv: 6 }); C.$('globalThis').performance = performance; C.$('TM').on = on; C.$('AP').on = 0; C.$('M4').on = 0;   // the approaches (M2) and M4 (tests/ambush.js) read the map: off, the map alone must change nothing
     const S = C.watch(era, { len: 0 }), TMB = C.$('TMB'), AIB = C.$('AIB'); let maxPer = 0, gen = 0, n = 0;
     C.run(SECS, () => { maxPer = Math.max(maxPer, S.tmJ ? S.tmJ.filter(Boolean).length : 0); const g = AIB.gn[(AIB.i + AIB.win - 1) % AIB.win]; gen += g; n++; });
-    const st = S.units.filter(u => !u.dead).map(u => [u.kind, Math.round(u.x), Math.round(u.z)].join()).sort().join(';') + '|' + S.men.filter(m => !m.dead).length + '|' + S.cq.tk.join() + '|' + S.cmd.map(c => c.ops.map(o => o.k).join()).join('/');
+    const st = S.units.filter(u => !u.dead).map(u => [u.kind, Math.round(u.x), Math.round(u.z)].join()).sort().join(';') + '|' + S.men.filter(m => !m.dead).length + '|' + S.cq.ps.join() + '|' + S.cmd.map(c => c.ops.map(o => o.k).join()).join('/');
     return { S, st, TMB: TMB.stat(), gen: gen / n, maxPer };
   };
   for (const era of ['ww2', 'modern']) {
     const a = run(1, era), b = run(0, era);
-    ok(a.st === b.st, era + ': the same match with and without the map (units, men, tickets, operations after ' + SECS + ' s): the map alone changes nothing (the approaches and M4, which read it, off)');
+    ok(a.st === b.st, era + ': the same match with and without the map (units, men, point-time, operations after ' + SECS + ' s): the map alone changes nothing (the approaches and M4, which read it, off)');
     ok(a.TMB.refreshes.every(n => n >= Math.floor(SECS / 4) - 1) && a.S.cmd.every(C => C.tm && C.tm.n >= Math.floor(SECS / 4) - 1), '  refreshed every 4 s on each side (' + a.TMB.refreshes.join(', ') + ' times)');
     ok(a.maxPer <= 2 && b.TMB.frames === 0 && !b.S.cmd.some(C => C.tm), '  at most one job a side at a time; TM.on 0 runs none');
     console.log('  cost ' + era + ': map ' + a.TMB.avg.toFixed(3) + ' ms a frame (worst ' + a.TMB.worst.toFixed(2) + ' ms), a refresh ' + a.TMB.refresh.join(' / ') + ' ms in all; the commanders\' share (AIB.gen) ' + b.gen.toFixed(3) + ' → ' + a.gen.toFixed(3) + ' ms a frame');

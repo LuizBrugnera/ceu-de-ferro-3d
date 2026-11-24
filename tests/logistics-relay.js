@@ -13,7 +13,7 @@ const N = require('./net'), { ok, done } = require('./harness');
   ok(b1 && b1.e.length === 2 && b1.e[0][8] === 87 && b1.e[1].length === 8, 'a base row with the crates as a ninth number passes, and one without them still does');
   for (const e of [brow.concat([-1]), brow.concat([1000]), brow.concat([1.5]), brow.concat([1, 2])]) h.send({ t: 'base', e: [e] });
   ok(await none(a, 'base'), 'crates out of 0-999, not whole, or a tenth number: dropped');
-  const cq = o => Object.assign({ t: 'cq', n: 0, ph: 0, T: 2700, k: [600, 590], k0: 600, len: 1, p: [0, -100, 10, 0, -1, 0, 0, 0], l: [0, 0, 0, 0, 0, 0] }, o);
+  const cq = o => Object.assign({ t: 'cq', n: 0, ph: 0, T: 2700, ps: [600, 590], len: 1, p: [0, -100, 10, 0, -1, 0, 0, 0], l: [0, 0, 0, 0, 0, 0] }, o);
   h.send(cq({ sk: [30, -1] })); const c1 = await a.wait('cq'); ok(c1 && c1.sk && c1.sk.join() === '30,-1', 'cq carries sk, the crates of each point (-1 none)');
   h.send(cq({ sk: [30] })); const c2 = await a.wait('cq'); ok(c2 && c2.sk === undefined && c2.p.length === 8, 'an sk of the wrong length is left out, the rest of cq passes');
   h.send(cq({ sk: [30, 1000] })); const c3 = await a.wait('cq'); ok(c3 && c3.sk === undefined, 'and one out of range');

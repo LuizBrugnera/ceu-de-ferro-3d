@@ -17,3 +17,13 @@ Falta:
 - Sensação com o mouse de verdade (pointer lock real): a troca de câmera ao apertar e soltar rápido, várias vezes seguidas.
 - Controle físico: o gatilho de mirar do perfil passa pela mesma `ctl.ads`, sem teste com controle aqui.
 - Online: a câmera é só local; não testado numa partida em rede.
+
+## P6 — granada com arco, cozinhar e gesto
+
+Testado: `tests/granada.js` (toque de F lança com o pavio inteiro; F segurado cozinha, mostra a granada na mão e o pavio que resta, e lança ao soltar com o pavio menos o tempo segurado; o arco desenhado cai a menos de 1 m de onde a granada toca o chão; no fim do pavio, menos `MAN.nade.safe`, ela sai sozinha uma vez; G segura e lança a fumaça; o braço direito do boneco vai pela IK a `NTH.hand`) e no navegador (Chromium sem janela, GPU real): F segurado mostra o arco, o anel onde cai e "GRANADA COZINHANDO · 2,1 s · SOLTE F PARA LANÇAR"; o braço direito sobe por trás do ombro; soltar lança.
+
+Falta:
+- O movimento do braço ao soltar (0,4 s, do alto para a frente) só foi visto parado em quadros; a sensação do gesto não foi avaliada.
+- Online: o gesto do jogador remoto não foi testado. `m.nk` (segurando) é só local, então os outros não veem o braço erguido enquanto ele segura; o cozinhar vai no lançamento (`P.nCook`, como o da IA já ia).
+- Controle físico: o botão de granada do perfil segurado; sem controle aqui.
+- O arco ignora prédios e árvores (para no chão), como a granada antes de quicar.

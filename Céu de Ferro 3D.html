@@ -38485,7 +38485,7 @@ function pedEtaAir(t, x, z, p) {
 function pedEtaRoad(t, x, z, o) {
   if (o) return pedR5(10 + Math.hypot(o.x - x, o.z - z) / 3);   // a squad already in the field, on foot
   const p = lsRail(t, x, z), s0 = entryS(t, p.ri);
-  return pedR5(15 + Math.abs(p.s - s0) / GAI.march + Math.hypot(p.x - x, p.z - z) / 3);
+  return pedR5(15 + Math.abs(p.s - s0) / GAI.march + (p.d || 0) / 3);   // lsRail gives the distance off the road (d), not a point: hypot of its x z was NaN, and so every new column's ETA
 }
 /* player P (the host's own, or a guest's ghost) asks for k at x z: { st: ok | no | fwd | wait, why, eta, x, z } */
 function pedDecide(P, k, x, z) {
@@ -38548,23 +38548,26 @@ function pedRun(P, k, x, z) {
         for (const g of S.men.concat(S.units)) if (!g.dead && !g.civ && g.team !== t && pedSeen(g, t) && pedNear(g, t, x, z, PED.foe.help)) { const d = Math.hypot(g.x - x, g.z - z); if (d < fd) { fd = d; f = g; } }
         if (f && !P.def.vmax && helpCall(P, P.kind ? (P.hp < P.max * .7 ? 'repair' : 'clear') : 'fire', sX(f, t) === undefined ? f.x : sX(f, t), sZ(f, t) === undefined ? f.z : sZ(f, t))) call = 'os que estão perto foram chamados; ';
       }
-      const res = gResv(t), far = res && pedEtaRoad(t, x, z, helpAt(res)) > PED.far, mv = () => { if (far) return gBad('far'); const r = cmd({ c: 'res', x, z }); return r.ok ? { st: 'ok', why: call + 'a esquadra da reserva vai até lá', eta: pedEtaRoad(t, x, z, res && helpAt(res)) } : r; };
-      const dsp = () => { const r = cmd({ c: 'disp', k: 'squad', n: 1, mk: 'defend', x, z, r: 150, why }); return r.ok ? { st: 'ok', why: call + 'uma esquadra nova sai da base', eta: pedEtaRoad(t, x, z) } : r; };
+      const ex = chmPed(t, k, x, z, why); if (ex) { ex.why = call + ex.why; return ex; }   // a squad already near first (cf-general-chamados)
+      const res = gResv(t), far = res && pedEtaRoad(t, x, z, helpAt(res)) > PED.far, mv = () => { if (far) return gBad('far'); const r = cmd({ c: 'res', x, z }); return r.ok ? { st: 'ok', why: call + 'a esquadra da reserva vai até lá', eta: pedEtaRoad(t, x, z, res && helpAt(res)), rs: 1 } : r; };
+      const dsp = () => { const r = cmd({ c: 'disp', k: 'squad', n: 1, mk: 'defend', x, z, r: 150, why }); return r.ok ? { st: 'ok', why: call + 'uma esquadra nova sai da base', eta: pedEtaRoad(t, x, z), mk: 1 } : r; };
       let r = k === 'help' ? mv() : dsp(); if (r.st === 'ok') return r;
       const r2 = k === 'help' ? dsp() : mv(); if (r2.st === 'ok') return r2;
       return call ? { st: 'ok', why: call + 'o general não tem esquadra para mandar (' + (PED.w[r.why] || GEN.no[r.why] || r.why) + ')' } : bad(r);
     }
     case 'arm': {
       if (!pedFoes(t, x, z, PED.foe.arm)) return no('nenhum inimigo conhecido a menos de ' + PED.foe.arm + ' m: os blindados vão aonde há contato');
+      const ex = chmPed(t, k, x, z, why); if (ex) return ex;
       const r = cmd({ c: 'disp', k: 'tank', n: 1, mk: 'defend', x, z, r: 250, why }); if (!r.ok) return bad(r);
-      return { st: 'ok', why: 'um carro de combate sai da base', eta: pedEtaRoad(t, x, z) };
+      return { st: 'ok', why: 'um carro de combate sai da base', eta: pedEtaRoad(t, x, z), mk: 1 };
     }
     case 'aa': {
       if (!pedFoes(t, x, z, PED.foe.aa, true)) return no('nenhuma aeronave inimiga conhecida por perto');
+      const ex = chmPed(t, k, x, z, why); if (ex) return ex;
       const r = side.fighter ? cmd({ c: 'disp', k: 'fighter', n: 1, mk: 'cap', x, z, r: 1500, why }) : gBad('kind');
-      if (r.ok) return { st: 'ok', why: 'um caça patrulha o céu de lá', eta: pedEtaAir(t, x, z) };
+      if (r.ok) return { st: 'ok', why: 'um caça patrulha o céu de lá', eta: pedEtaAir(t, x, z), mk: 1 };
       const r2 = cmd({ c: 'disp', k: 'aa', n: 1, mk: 'defend', x, z, r: 200, why });
-      if (r2.ok) return { st: 'ok', why: 'uma antiaérea sai da base', eta: pedEtaRoad(t, x, z) };
+      if (r2.ok) return { st: 'ok', why: 'uma antiaérea sai da base', eta: pedEtaRoad(t, x, z), mk: 1 };
       return bad(r.why === 'kind' ? r2 : r);
     }
     case 'sup': {
@@ -38574,6 +38577,149 @@ function pedRun(P, k, x, z) {
   }
   return no(GEN.no.kind);
 }
+/* ---------- calls for support that reach the AI general: reallocate before producing (cf-general-chamados) ----------
+   A call that reaches the AI general is first answered with what the side already has in the field, and only then by production:
+   - a player's request from the map (pedRun): inf and help a squad, arm a tank, aa an AA vehicle (or the fighter already in the air);
+   - a unit's call for help that no friend near took and went up to the command (helpPick's 'up'): fire and clear, a squad from farther
+     than the call's own reach (CHM.up.r, any road it can walk to, arriving within CHM.up.eta s; the call then waits for it). The general
+     never produced for these: they waited.
+   What may be taken: the nearest unit, by its ETA, that is free or on a quieter task (CHM.jobs: a post that holds, patrols or observes,
+   the line's, a recon squad's; never a garrison, a site's guard, the engineers, a mortar, a column's) and can get there (by its road, a switch, a walk of the
+   network), arriving within CHM.eta s, and, while the reserve has one of that kind to send, no later than the new one by CHM.slack s.
+   Never one whose taking opens a worse hole: a squad in an operation, on a supply or a build run, the base's reserve, a dropped or lifted
+   one, the only squad holding its point, the last of its road's line, one with an enemy the side knows within CHM.quiet m (its own fight);
+   a tank or AA vehicle hurt, fighting, on another errand, or the last tank of a road held with difficulty. With none, the old way:
+   dispatch from the reserve, which orders one made when the reserve is empty (the miss).
+   A squad so taken holds at the call and goes back to its old order CHM.hold s after it got there with no enemy known within CHM.quiet m
+   of the place, or CHM.life s after the call; a tank waits there firing (its ai.m5, an armoured group's way); an AA vehicle drives to the
+   call along its road (ai.hs). S.chm[t] counts by side: n calls, re answered by a unit reallocated from the field, rs by the base's reserve
+   squad (as before), mk by production, lc only by the friends near the player (help), no refused, up calls up to
+   the command and upRe of them the general answered, arr units that got there and resp the s from the call to it, eta the s promised */
+const CHM = { on: 1, eta: 420, slack: 60, quiet: 600, hold: 90, life: 600, near: 60, r: { squad: 3000, tank: 4000, aa: 3500 },
+  jobs: ['held', 'road', 'wood', 'line', 'rec'], up: { k: ['fire', 'clear'], r: 1500, eta: 300, again: 15 } };
+const chmSt = t => { const A = S.chm || (S.chm = {}); return A[t] || (A[t] = { n: 0, re: 0, rs: 0, mk: 0, lc: 0, no: 0, up: 0, upRe: 0, arr: 0, resp: 0, eta: 0 }); };
+const chmL = () => S.chmL || (S.chmL = []);
+const chmOrd = q => (q.cnP ? q.cnP.O : q.ord);   // the order the squad has, or the one on its way to it by radio (CN)
+/* the squad of side C.t nearest by its ETA to x z that may leave for a call: { o, eta } or null. max: the latest ETA; R: the call it answers */
+function chmSq(C, x, z, max, R) {
+  const t = C.t, p = railOf(x, z), c = [];
+  for (const q of S.squads) {
+    if (q.team !== t || q.net || !(q.live >= 3) || q.state || q.op || q.lift || q.para || q.help || q.tp || q.rd || q.mil || (R && q === R.by) || !CHM.jobs.includes(q.job)) continue;
+    const O = q.ord; if (!O || O.b || O.res || O.T || O.es || O.wd || O.k === 'supply' || O.k === 'build' || O.k === 'withdraw' || O.k === 'assault') continue;
+    const L = q.men.find(m => !m.dead); if (!L || hdist(L, { x, z }) > CHM.r.squad) continue;
+    const eta = pedEtaRoad(t, x, z, L); if (eta > max) continue;
+    c.push([q, eta, L]);
+  }
+  c.sort((a, b) => a[1] - b[1]);
+  for (const [q, eta, L] of c.slice(0, 8)) {
+    const O = q.ord;
+    if (cmdKnown(C, L.x, L.z, CHM.quiet) > 0) continue;   // its own fight
+    if (O.tw && !S.squads.some(o => o !== q && o.team === t && o.live >= 2 && o.ord && o.ord.tw === O.tw)) continue;   // the only holder of its point
+    if (q.job === 'line' && !S.squads.some(o => o !== q && o.team === t && o.job === 'line' && o.ri === q.ri && o.live >= 3)) continue;   // the last of its road's line
+    if (q.ri === p.ri || gOrdOk(q, p.ri) || (S.T.mv >= 4 && tripSq(q, { x, z, ri: p.ri, s: p.s }))) return { o: q, eta };
+  }
+  return null;
+}
+/* a vehicle of kind k (tank, aa) of side t that may leave for a call */
+const chmVehFree = (u, t, k) => u.kind === k && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.dfp && !(u.ai.tgt && !u.ai.tgt.dead)
+  && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && !u.help && !u.rqa && u.ai.reloc === null && !(u.ai.hs !== undefined && u.ai.hs !== null) && u.hp >= u.max * .6 && S.t - u.hitT > 20;
+/* the vehicle of kind k nearest by its ETA: a tank by the tactical trip when the road network has one (anywhere within CHM.r.tank), else on the
+   call's road; an AA vehicle on the call's road. { o, eta, s } or null */
+function chmVeh(C, k, x, z, max) {
+  const t = C.t, p = railOf(x, z), c = [];
+  for (const u of S.units) {
+    if (!chmVehFree(u, t, k) || hdist(u, { x, z }) > CHM.r[k]) continue;
+    const net = k === 'tank' && M5.on && m5Net(), eta = 10 + (net ? hdist(u, { x, z }) * 1.3 : u.ri === p.ri ? Math.abs(u.s - p.s) : 1e9) / Math.max(1, u.def.spd * GSPD);
+    if (eta > max || cmdKnown(C, u.x, u.z, CHM.quiet) > 0) continue;
+    if (k === 'tank' && C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) continue;   // the last tank of a road held with difficulty stays
+    c.push([u, eta, net]);
+  }
+  c.sort((a, b) => a[1] - b[1]);
+  for (const [u, eta, net] of c.slice(0, 4)) {
+    if (!net) return { o: u, eta: pedR5(eta), s: p.s };
+    if (!m5Go(u, x, z, 'chm')) continue;
+    const e = 10 + m5Eta(u, u.trip); if (e <= max) return { o: u, eta: pedR5(e) };
+    u.trip = null;   // the way there is longer than the call can wait
+  }
+  return null;
+}
+/* send what chmSq or chmVeh found to x z: the order, the tracking, the count */
+function chmSend(t, f, x, z, why) {
+  const o = f.o, E = { t, o, T0: S.t, x, z, at: 0, why };
+  if (o.men) {
+    const p = railOf(x, z); E.cb = o.ord; E.ord = { k: 'hold', ri: p.ri, s: p.s, x, z, R: 14, T: S.t + CHM.life, chm: 1 };
+    setOrd(o, E.ord);
+    if (chmOrd(o) !== E.ord) { setOrd(o, E.cb); return null; }   // setOrd could not send it there after all: it stays
+  } else if (f.s === undefined) { E.h = o.ai.m5 = { x, z, op: { k: 'chm', over: false, st: 'go', O: { x, z } }, T: S.t + f.eta + CHM.life, k: 'chm' }; }
+  else { E.s = o.ai.hs = f.s; }
+  chmL().push(E);
+  const st = chmSt(t); st.re++; st.eta += f.eta;
+  gLog(t, 'help', 'O general manda ' + helpWho(o) + ' atender ' + gNear(x, z) + ', em ~' + f.eta + ' s, sem produzir' + (why ? ' (' + why + ')' : ''), helpAt(o), null, { x, z });
+  return E;
+}
+/* the reallocations on their way or at the call: arrival, the hold, the way back (an up call's squad: the call's own end, helpEnd, gives it back) */
+function chmTick() {
+  const L = chmL(); if (!L.length) return;
+  for (let i = L.length; i--;) {
+    const E = L[i], o = E.o, st = chmSt(E.t), C = S.cmd && S.cmd[E.t];
+    if (E.R) {
+      const R = E.R; if (!E.at && R.atT) { E.at = R.atT; st.arr++; st.resp += R.atT - E.T0; }
+      if (R.resp !== o || R.st === 'done' || R.st === 'gone' || !helpLive(o)) L.splice(i, 1);
+      continue;
+    }
+    let gone = !helpLive(o), there = false;
+    if (!gone && o.men) { gone = chmOrd(o) !== E.ord; there = o.ord === E.ord && !!o.at; }
+    else if (!gone && E.h) { gone = o.ai.m5 !== E.h; there = hdist(o, E) < 80; }
+    else if (!gone) { gone = o.ai.hs !== E.s; there = Math.abs(o.s - E.s) < CHM.near; }
+    if (gone) { L.splice(i, 1); continue; }
+    if (there && !E.at) { E.at = S.t; st.arr++; st.resp += S.t - E.T0; }
+    const calm = !C || cmdKnown(C, E.x, E.z, CHM.quiet) === 0;
+    if (S.t - E.T0 > CHM.life || (E.at && calm && S.t - E.at > CHM.hold)) {
+      if (o.men) setOrd(o, E.cb && E.cb.k ? E.cb : { k: 'hold', ri: o.ri, s: o.s });
+      else if (E.h) E.h.T = 0;   // AI.tank lets it go home
+      else o.ai.hs = null;
+      L.splice(i, 1);
+    }
+  }
+}
+/* the calls nobody near took (up): the AI general sends a squad from farther, any road it can walk; never one it would have to make */
+function chmUp() {
+  const H = S.help; if (!H) return;
+  for (const R of H.l) {
+    if (R.st !== 'up' || R.resp || R.pl || !CHM.up.k.includes(R.k) || !helpLive(R.by) || S.t < (R.chmT || 0)) continue;
+    const t = R.team, st = chmSt(t);
+    if (!R.chmU) { R.chmU = 1; st.up++; }
+    R.chmT = S.t + CHM.up.again;
+    if (genBy(t, 'def') !== 'ai' || !S.cmd || !S.cmd[t]) continue;
+    const C = S.cmd[t], f = chmSq(C, R.x, R.z, CHM.up.eta, R); if (!f || hdist(helpAt(f.o), R) > CHM.up.r) continue;
+    const q = f.o, v = helpVeto(R, q); if (v) { R.tried.add(q); continue; }
+    R.resp = q; R.u = 1; R.st = 'on'; R.atT = 0; q.help = R; R.gen = 1; helps().v++;
+    helpStart(R, q);
+    R.T = Math.max(R.T, S.t + f.eta + MIND.ask.life);   // the call waits for the help it was promised
+    st.upRe++; st.eta += f.eta;
+    chmL().push({ t, o: q, T0: R.T0, x: R.x, z: R.z, at: 0, R });
+    gLog(t, 'help', 'O general manda ' + helpWho(q) + ' atender ' + helpWho(R.by) + ' (' + NEEDS[R.k].s + '), em ~' + f.eta + ' s', helpAt(q), null, R);
+  }
+}
+step = (g => dt => { g(dt); if ((S.net && !S.host) || !CHM.on) return; if ((S.chmT = (S.chmT || 0) - dt) <= 0) { S.chmT = 1; chmUp(); chmTick(); } })(step);
+/* what the reserve holds of kind k now (the economy's), or -1 where it does not gate the field */
+const chmRes = (t, k) => (S.eco && ecoSim() && ECO.gate ? ((S.eco.d[t].res[k] || []).length) : -1);
+/* pedRun first looks for one in the field: the reply when it found one, else null (and production goes on as before) */
+function chmPed(t, k, x, z, why) {
+  if (!CHM.on || !S.cmd || !S.cmd[t]) return null;
+  const C = S.cmd[t], kind = k === 'arm' ? 'tank' : k === 'aa' ? 'aa' : 'squad', fresh = pedEtaRoad(t, x, z), max = chmRes(t, kind) > 0 && Number.isFinite(fresh) ? Math.min(CHM.eta, fresh + CHM.slack) : CHM.eta;
+  const f = kind === 'squad' ? chmSq(C, x, z, max) : chmVeh(C, kind, x, z, max); if (!f || !chmSend(t, f, x, z, why)) return null;
+  return { st: 'ok', why: (kind === 'squad' ? helpWho(f.o).replace(/ \(.*\)$/, '') + ', que estava perto,' : kind === 'tank' ? 'um carro de combate que estava perto' : 'uma antiaérea que estava perto') + ' vai até lá', eta: f.eta, re: 1 };
+}
+/* the count of every request pedRun answers for the kinds that may be reallocated */
+pedRun = (g => (P, k, x, z) => {
+  const r = g(P, k, x, z);
+  if (P && (k === 'inf' || k === 'help' || k === 'arm' || k === 'aa') && r && r.st !== 'fwd' && r.st !== 'wait') {
+    const st = chmSt(P.team); st.n++;
+    if (r.st !== 'ok') st.no++; else if (r.rs) { st.rs++; st.eta += r.eta || 0; } else if (r.mk) { st.mk++; st.eta += r.eta || 0; } else if (!r.re) st.lc++;
+  }
+  return r;
+})(pedRun);
 /* the answer on the player's screen and map (S.pedM, drawn by pedMarks): a banner, a radio line in the feed */
 function pedShow(r, k) {
   if (!S) return;
@@ -50096,6 +50242,25 @@ anaReport = (f => (ev, me) => {
     let down = 0, sh = 0, n = 0;
     sn.forEach((e, i) => { const x = e.cn[s]; if (!Array.isArray(x)) return; if (x[7] === 1 && i) down += e.t - sn[i - 1].t; const all = x[8] + x[9] + x[10]; if (all) { sh += (x[9] + x[10]) / all; n++; } });
     return { sent: c[0], del: c[1], late: c[2], lost: c[3], lag: c[1] ? anaR(c[4] / c[1]) : 0, rep: c[5], df: c[6], hqDown: Math.round(down), out: n ? anaR(sh / n * 100) / 100 : 0 };
+  });
+  return R;
+})(anaReport);
+/* the calls for support in the analytics (CHM, cf-general-chamados): each snapshot carries chm, a side [calls, by reallocation, by the base's reserve,
+   by production, by the friends near only, refused, up calls, of them the general answered, units there, s from call to there summed, s promised summed];
+   the review adds calls, a side { n, re, rs, mk, lc, no, up, upRe, arr, resp (mean s), eta (mean s) } */
+anaSnap = (f => () => {
+  f();
+  const e = ANA.ev[ANA.ev.length - 1]; if (!S.chm || !e || e.k !== 'sn') return;
+  e.chm = anaSides(anaN()).map(t => { const c = S.chm[t]; return c ? [c.n, c.re, c.rs, c.mk, c.lc, c.no, c.up, c.upRe, c.arr, Math.round(c.resp), Math.round(c.eta)] : null; });
+})(anaSnap);
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), sn = ev.filter(e => e.k === 'sn' && Array.isArray(e.chm)).sort((a, b) => a.t - b.t);
+  if (!sn.length) { R.calls = null; return R; }
+  const hide = anaHide(me, R.ns, R.over), last = sn[sn.length - 1];
+  R.calls = anaSides(R.ns).map(s => {
+    const c = last.chm[s]; if ((hide && s !== me) || !Array.isArray(c)) return null;
+    const ans = c[1] + c[2] + c[3] + c[7];
+    return { n: c[0], re: c[1], rs: c[2], mk: c[3], lc: c[4], no: c[5], up: c[6], upRe: c[7], arr: c[8], resp: c[8] ? anaR(c[9] / c[8]) : 0, eta: ans ? anaR(c[10] / ans) : 0 };
   });
   return R;
 })(anaReport);

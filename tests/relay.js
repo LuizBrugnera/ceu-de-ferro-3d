@@ -119,11 +119,11 @@ const N = require('./net'), { ok, done } = require('./harness');
     for (const c of [p1, p2, p3, p4, p5, tk]) c.close();
   }
   { /* conquest and requisition */
-    const cq = o => Object.assign({ t: 'cq', n: 0, ph: 0, T: 2700, k: [600, 590], k0: 600, len: 1, p: [0, -100, 10, 0, -1, 0, 0, 0], l: [0, 0, 0, 0, 0, 0] }, o);
+    const cq = o => Object.assign({ t: 'cq', n: 0, ph: 0, T: 2700, ps: [600, 590], len: 1, p: [0, -100, 10, 0, -1, 0, 0, 0], l: [0, 0, 0, 0, 0, 0] }, o);
     ok(h.w.cq === 1 && h.w.cqn === 0, 'welcome says cq: 1 and the match the room is in');
-    h.send(cq()); const c1 = await a.wait('cq'); ok(c1 && c1.k[1] === 590 && c1.p.length === 8 && c1.r === undefined, 'cq from the host is relayed');
+    h.send(cq()); const c1 = await a.wait('cq'); ok(c1 && c1.ps[1] === 590 && c1.k === undefined && c1.p.length === 8 && c1.r === undefined, 'cq from the host is relayed');
     await N.sleep(40); b.got.forEach(m => { m.seen = 1; }); a.send(cq()); ok(await none(b, 'cq'), 'cq from a guest is dropped');
-    for (const o of [{ p: [0, 1, 2] }, { p: [0, 'x', 0, 0] }, { k: [1] }, { ph: 2 }, { len: 7 }, { l: [0] }, { n: -1 }]) h.send(cq(o)); ok(await none(a, 'cq'), 'malformed cq is dropped');
+    for (const o of [{ p: [0, 1, 2] }, { p: [0, 'x', 0, 0] }, { ps: [1] }, { ps: [-1, 0] }, { ph: 2 }, { len: 7 }, { l: [0] }, { n: -1 }]) h.send(cq(o)); ok(await none(a, 'cq'), 'malformed cq is dropped');
     h.send(cq({ ph: 1, r: [1, 2], w: 20 })); const c2 = await a.wait('cq'); ok(c2 && c2.ph === 1 && c2.r[0] === 1 && c2.w === 20, 'the result travels with it');
     a.send({ t: 'down', by: null, det: 0 }); await a.wait('scores'); await N.sleep(40); a.got.forEach(m => { m.seen = 1; });
     h.send(cq({ n: 1, p: [] })); const sc = await a.wait('scores'), c3 = await a.wait('cq'); ok(sc && sc.players.every(p => !p.deaths && !p.kills) && c3 && c3.n === 1, 'a new match number zeroes the room\'s scores');

@@ -72,7 +72,7 @@ const lines = f => zlib.gunzipSync(fs.readFileSync(f)).toString('utf8').split('\
   ok(big.length === 200 && big[0] === J.m[0].id && big[1] === fake(204) && big[199] === fake(6) && !big.includes(fake(5)), 'GET /ana/list: at most 200 entries, the newest by name');
   for (let i = 0; i < 205; i++) { fs.unlinkSync(path.join(DIR, 'ww2', fake(i) + '.ndjson.gz')); fs.unlinkSync(path.join(DIR, 'ww2', fake(i) + '.json')); }
   /* a new match in the room is a new file; the next host carries the same match on */
-  h.send({ t: 'cq', n: 1, ph: 0, T: 100, k: [600, 600], k0: 600, len: 0, p: [], l: [0, 0, 0, 0, 0, 0] }); await N.sleep(100);
+  h.send({ t: 'cq', n: 1, ph: 0, T: 100, ps: [600, 600], len: 0, p: [], l: [0, 0, 0, 0, 0, 0] }); await N.sleep(100);
   h.send({ t: 'ana', n: 1, e: [hdr] }); await N.sleep(150);
   h.close(); await g.wait('host', 800);
   g.send({ t: 'ana', n: 1, e: [sn(30)] }); await N.sleep(200);

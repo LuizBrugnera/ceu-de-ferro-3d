@@ -15,7 +15,7 @@ for (const [era, id] of [['modern', 'f22'], ['ww2', 'stuka']]) {
 }
 {
   const C = H.load({ seed: 2, mapv: 9 }), S = C.newState('modern', 'f22', { cls: 'plane', N: 3 }), V = C.genVM(0);
-  ok(S.cq.tk.length === 3 && V.held && V.held.length === 3 && V.tk.length === 3, 'three sides: the view has the tickets and the points of the three (' + JSON.stringify({ tk: V.tk, held: V.held }) + ')');
+  ok(S.cq.ps.length === 3 && V.held && V.held.length === 3 && V.tk === undefined, 'three sides: the view has the points of the three (' + JSON.stringify({ held: V.held }) + ')');
 }
 {
   const C = H.load({}), da = C.$('daDe'), pela = C.$('pelaDe'), got = [da('EUA'), da('Rússia'), da('Insurgentes'), pela('EUA'), pela('Aliados'), pela('Luftwaffe'), pela('Rússia')];

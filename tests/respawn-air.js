@@ -1,6 +1,6 @@
 'use strict';
 /* the player shot down in the air is back at once, not when the wreck lands (reported bug: "só deixa spawnar quando o avião destruído cai no chão").
-   Solo, for a jet and a helicopter: the death, the ticket and the countdown at the moment of the loss; the next aircraft (the same after its
+   Solo, for a jet and a helicopter: the death, the loss and the countdown at the moment of the loss; the next aircraft (the same after its
    wait, or another picked in the swap panel) enters when the countdown ends while the old wreck is still falling; the wreck falls on by itself,
    holds nobody and still crashes. Online, a host and a guest (two copies of the page joined in process, as the relay does): each one's wreck falls on for the other after its owner
    is back, instead of vanishing in the air; and the AI's pilot still ejects */
@@ -14,9 +14,9 @@ function solo(cls, model, h, pick) {
   S.units = []; S.men = []; S.squads = []; S.planes = S.planes.filter(p => p === S.my); c.director = () => {};
   const P = S.my; P.y = c.hgt(P.x, P.z) + h; P.land = false; P.inv = 0; if (cls === 'heli') { P.v = { x: 30, y: 0, z: 0 }; P.ct = P.ctl.col = .6; }
   c.step(dt);
-  const tk = S.cq.tk[0], d0 = S.cq.st.d;
-  $('damagePlane')(P, 1e4, null); const tk1 = S.cq.tk[0];
-  ok(P.dead && !P.gone && S.my === P && S.cq.tk[0] < tk && S.cq.st.d === d0 + 1 && S.respawn > 0, cls + ': shot down ' + f0(agl(c, P)) + ' m up, the death, the ticket (' + tk + ' → ' + S.cq.tk[0] + ') and the countdown are at once');
+  const tk = S.cq.lost[0][2], d0 = S.cq.st.d;
+  $('damagePlane')(P, 1e4, null); const tk1 = S.cq.lost[0][2];
+  ok(P.dead && !P.gone && S.my === P && tk1 === tk + 1 && S.cq.st.d === d0 + 1 && S.respawn > 0, cls + ': shot down ' + f0(agl(c, P)) + ' m up, the death, the loss (' + tk + ' → ' + tk1 + ') and the countdown are at once');
   if (pick) ok($('swapTo')(cls, pick) === '' && S.model === pick, cls + ': another one picked in the swap panel while dead');
   else S.cd = {};   // the same model, with no wait on it: what is checked is the return, not the countdown
   let back = -1, t = 0, landed = -1;
@@ -28,7 +28,7 @@ function solo(cls, model, h, pick) {
   ok(back >= 0 && back < 3.5, cls + ': the next aircraft enters ' + back.toFixed(1) + ' s after the loss (the countdown, 3 s), not when the wreck lands');
   ok(landed > back, cls + ': the old wreck was still falling then, and struck the ground ' + landed.toFixed(1) + ' s after the loss');
   const Q = S.my;
-  ok(Q && !Q.dead && Q.me === 1 && P.me === 0 && Q.def.name === c.$('DEFS')[cls][pick || model].name && S.cq.tk[0] === tk1 && S.cq.st.d === d0 + 1, cls + ': the new ' + Q.def.name + ' is the player\'s, the wreck nobody\'s; one death, one ticket, none more when it lands');
+  ok(Q && !Q.dead && Q.me === 1 && P.me === 0 && Q.def.name === c.$('DEFS')[cls][pick || model].name && S.cq.lost[0][2] === tk1 && S.cq.st.d === d0 + 1, cls + ': the new ' + Q.def.name + ' is the player\'s, the wreck nobody\'s; one death, one ticket, none more when it lands');
   ok(!S.planes.includes(P), cls + ': the wreck is cleared once down');
   return c;
 }

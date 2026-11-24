@@ -1,7 +1,7 @@
 'use strict';
 /* The General's production (phase F2): with the economy on, nothing of the AI enters but by a Dispatch order the plan opens, the plan follows the
    posture and the enemy the side knows within its population budget, Dispatch goes by event (no clock), the safety floor, the commands pplan, disp
-   and mis and the question plan; tickets as morale (D25 A). With the economy off the classic director and the old tickets are kept. About a minute */
+   and mis and the question plan; no tickets: a loss is only counted, the economy paid for it. With the economy off the classic director is kept. About a minute */
 const H = require('./harness'), ok = H.ok;
 const solo = (C, era) => C.newState(era, C.$('ERAS')[era].sides[0].fighter, { cls: 'plane' });
 const park = S => { const P = S.my; if (P) { P.inv = 9; P.dead = false; P.y = 3000; P.v.y = 0; P.hp = P.def.hp; } S.lives = 9; };
@@ -124,39 +124,19 @@ console.log('-- the commands pplan, disp, mis and the question plan --');
   ok(E.pp.length % 3 === 0 && E.pp.length >= 21 && E.pp.every(Number.isInteger) && E.po.length === 8 && E.po.every(Number.isInteger) && I[E.pp[0]], 'ecs carries the plan as the relay checks it: ' + E.pp.length / 3 + ' kinds, ' + JSON.stringify(E.po));
 }
 
-console.log('-- tickets are morale where the economy pays (D25 A) --');
+console.log('-- no tickets: a loss is counted, the economy paid for it (cf-sem-tickets) --');
 {
   const C = H.load({ seed: 6, eco: 1, mapv: 4 }), $ = C.$, S = solo(C, 'ww2'), Q = S.cq;
   C.run(5, () => park(S));
-  const u = S.units.find(u => u.team === 1 && !u.dead && u.kind === 'tank' || u.team === 1 && !u.dead && u.kind === 'truck'), tk = Q.tk[1], lost = Q.lost[1][1];
+  const u = S.units.find(u => u.team === 1 && !u.dead && u.kind === 'tank' || u.team === 1 && !u.dead && u.kind === 'truck'), lost = Q.lost[1][1], ps = Q.ps.slice();
   C.killUnit(u); C.step(1 / 60);
-  ok(Q.tk[1] === tk && Q.lost[1][1] === lost + 1, 'a ' + u.kind + ' lost: counted as a loss, no ticket (' + tk + ' → ' + Q.tk[1] + ')');
-  const fab = S.eco.l.find(e => e.team === 1 && e.k === 'fab' && !e.dead), t0 = Q.tk[1];
+  ok(Q.lost[1][1] === lost + 1 && Q.tk === undefined && Q.ps.every((v, s) => v >= ps[s]), 'a ' + u.kind + ' lost: counted as a loss; the match keeps no tickets, only the point-time');
+  const fab = S.eco.l.find(e => e.team === 1 && e.k === 'fab' && !e.dead);
   $('ecoDown')(fab, null, true);
-  ok(Q.tk[1] === t0 - 15 && $('ECO').site.fab.tk === 15 && $('ECO').site.pow.tk === 8 && $('ECO').site.mine.tk === 8, 'a factory lost costs 15 (power plant and mine 8): ' + t0 + ' → ' + Q.tk[1]);
-  const b = { team: 1, prog: 1, dead: false, x: 0, y: 0, z: 0, o: { id: -1 }, name: 'x' }, t1 = Q.tk[1];
-  try { $('supDown')(b, null, true); } catch (e) {}
-  ok(Q.tk[1] === t1 - $('CQ').sup, 'a finished supply base lost costs ' + $('CQ').sup);
+  ok(fab.dead && $('ECO').site.fab.val === 15 && $('ECO').site.pow.val === 8 && $('ECO').site.mine.val === 8, 'a factory lost is gone (the threat board still values a site by ECO.site[k].val: 15, power plant and mine 8)');
   const C2 = H.load({ seed: 6, mapv: 4 }), S2 = solo(C2, 'ww2'); C2.run(5, () => park(S2));
-  const v = S2.units.find(u => u.team === 1 && !u.dead && u.kind === 'tank'), k2 = S2.cq.tk[1]; C2.killUnit(v); C2.step(1 / 60);
-  ok(S2.cq.tk[1] === k2 - C2.$('CQ').cost.tank, 'with no economy a loss costs its tickets as before (' + C2.$('CQ').cost.tank + ' for a tank)');
-  const b2 = { team: 1, prog: 1, dead: false, x: 0, y: 0, z: 0, o: { id: -1 }, name: 'x' }, k3 = S2.cq.tk[1];
-  try { C2.$('supDown')(b2, null, true); } catch (e) {}
-  ok(S2.cq.tk[1] === k3, 'with no economy a finished supply base lost costs no tickets (' + k3 + ' → ' + S2.cq.tk[1] + ')');
-}
-{
-  const dome = eco => {
-    const C = H.load({ seed: 6, eco, mapv: 4 }), S = solo(C, 'modern'); C.run(2, () => park(S));
-    if (S.eco) { S.eco.d[1].en = S.eco.d[1].mt = 5000; }   // the AI may have spent on posts already
-    const p = (() => { for (let z = -S.HW + 900; z < S.HW - 900; z += 173) for (let x = 2500; x < S.W - 2500; x += 211) if (C.fortWhy(6, 1, x, z, 0) === '') return { x, z }; })();
-    if (S.eco) { S.eco.d[1].en = S.eco.d[1].mt = 5000; }
-    const f = C.fortStart(6, 1, p.x, p.z, 0); C.fortAt(f, 1); const t0 = S.cq.tk[1];
-    S.os[f.id] = 2; C.$('fortStep')(0);
-    return { f, d: t0 - S.cq.tk[1], dome: C.$('CQ').dome };
-  };
-  const a = dome(1), b = dome(0);
-  ok(a.f.dead && a.d === a.dome, 'with the economy a dome lost costs ' + a.dome + ' tickets (' + a.d + ')');
-  ok(b.f.dead && b.d === 0, 'with no economy a dome lost costs none (' + b.d + ')');
+  const v = S2.units.find(u => u.team === 1 && !u.dead && u.kind === 'tank'), l2 = S2.cq.lost[1][1]; C2.killUnit(v); C2.step(1 / 60);
+  ok(S2.cq.lost[1][1] === l2 + 1, 'with no economy a loss is counted the same');
 }
 
 console.log('-- a solo game is its own host: the frame meter calibrates the budget offline (D6), by the mean over its period, not a lone frame --');

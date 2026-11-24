@@ -9,6 +9,14 @@ Falta:
 - Sensação da câmera descendo e subindo (pointer lock real e quadros por segundo de jogo normal): no navegador de teste o jogo roda a ~20 quadros por segundo.
 - Um toque mais curto que um quadro do jogo se perde (a tecla desce e sobe antes do passo ler a entrada). Já era assim com o Z; a 20 quadros por segundo um toque de 200 ms às vezes se perdeu no teste.
 
+## P4 — mirar a pé em primeira pessoa (D1)
+
+Testado: `tests/mira-1p.js` (a regra `adsCam`: o botão direito leva à 1ª pessoa e soltar volta; a 1ª pessoa do C fica; a luneta igual; morto, a bordo e morteiro não; a troca vem antes de o quadro ler o assento) e no navegador (Chromium sem janela, GPU real): na 3ª pessoa o botão direito mostra a alça da arma em 1ª pessoa, e soltar volta à 3ª pessoa.
+
+Falta:
+- Sensação com o mouse de verdade (pointer lock real): a troca de câmera ao apertar e soltar rápido, várias vezes seguidas.
+- Controle físico: o gatilho de mirar do perfil passa pela mesma `ctl.ads`, sem teste com controle aqui.
+- Online: a câmera é só local; não testado numa partida em rede.
 ## P5 — recuo e dispersão
 
 Testado: `tests/recuo.js` (numa rajada de 10 a dispersão abre de 6,0 para 11,0 mrad e volta em 1,5 s; a mira sobe 2,5° em pé e 1,0° deitado e mirando; a supressão multiplica por 2,4; a cruz e o tiro usam `manSpread`) e no navegador (Chromium sem janela, GPU real): a mira sobe na rajada (3,3° em 0,7 s) e a abertura `a.bl` chega a 0,86.

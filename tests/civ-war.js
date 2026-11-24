@@ -1,7 +1,7 @@
 'use strict';
-/* The laws of war (W14, issue #1): what a civilian killed costs the side whose fire it was (CIV.toll), a town that turns against a side (CIV.rage) and
+/* The laws of war (W14, issue #1): a civilian killed counted to the side whose fire it was, a town that turns against a side (CIV.rage) and
    arms the other's militia, evacuation and the way home (CIV.evac), the AI's rules of engagement (CIV.roe: roeHeld in pickFire and cmdFire, and which
-   civilians a side sees), the general's mil order, and the analytics (cv events, the snapshot's cv, the review's civ). Sandboxes with conquest tickets
+   civilians a side sees), the general's mil order, and the analytics (cv events, the snapshot's cv, the review's civ). Sandboxes with conquest
    and civilians made by hand; then an AI × AI match of each era on the map with the seat towns (SECS s of it, default 240; SECS=0 skips it) */
 const H = require('./harness'), { ok, done, nan } = H;
 let C, $, S, T, CIV;
@@ -20,35 +20,34 @@ const ofTown = g => S.civs.filter(c => c.g === g && !c.dead && !c.gone);
 /* kill civilian c with a small burst of by's */
 const kill = (c, by) => { C.explode(c.x, c.y + .5, c.z, 2, 400, by, by ? by.team : 0, false); return c.dead; };
 
-console.log('-- the toll: a civilian killed costs the side whose fire it was --');
+console.log('-- a civilian killed is counted to the side whose fire it was (no tickets) --');
 load({ seed: 31 }); fresh('modern'); C.run(3);
 {
-  const tk0 = S.cq.tk.slice(), sc = [S.score, S.gndKills];
+  const sc = [S.score, S.gndKills];
   const v = out().find(c => hd(c, S.base[0]) > 200), sh = man(1, v.x - 30, v.z, false);
   for (let i = 0; i < 40 && !v.dead; i++) { S.bullets.push({ x: v.x - 3, y: v.y + 1.1, z: v.z, vx: 900, vy: 0, vz: 0, life: 1.3, team: 1, dmg: 8, ap: 0, sa: 1, by: sh, tr: 0 }); C.run(.1); }
-  ok(v.dead && S.cq.tk[1] === tk0[1] - CIV.toll && S.cq.tk[0] === tk0[0], 'a rifleman of side 1 kills a civilian: side 1 pays ' + CIV.toll + ' tickets, side 0 nothing (' + S.cq.tk + ')');
+  ok(v.dead && S.civD.n[1] === 1 && S.civD.n[0] === 0 && S.cq.tk === undefined, 'a rifleman of side 1 kills a civilian: counted to side 1, side 0 nothing, no tickets (' + S.civD.n + ')');
   const v2 = out().find(c => hd(c, v) > 40); C.explode(v2.x + 2, v2.y, v2.z, 12, 90, null, 0, false);
-  ok(v2.dead && S.cq.tk[0] === tk0[0] && S.cq.tk[1] === tk0[1] - CIV.toll, 'a burst of nobody\'s fire kills one: nobody pays');
+  ok(v2.dead && S.civD.n[0] === 0 && S.civD.n[1] === 1, 'a burst of nobody\'s fire kills one: counted to nobody');
   const v3 = out().find(c => hd(c, v) > 60 && hd(c, v2) > 60), u = C.addVehicle('tank', S.E.sides[S.fac[0]].tanks[0], 0, v3.x - 300, v3.z, 0);
   C.civHurt(v3, 100, u);   // what a hull does, driving over one (ranOver) or bringing a house down on it
-  ok(v3.dead && S.cq.tk[0] === tk0[0] - CIV.toll, 'a tank of side 0 kills one: side 0 pays');
+  ok(v3.dead && S.civD.n[0] === 1, 'a tank of side 0 kills one: counted to side 0');
   C.run(CIV.say + .5);
   const D = S.civD;
-  ok(D.n[0] === 1 && D.n[1] === 1 && D.dead === 3 && D.tk[0] === CIV.toll && D.tk[1] === CIV.toll, 'the record: one by each side, three dead, the tickets each paid (' + JSON.stringify({ n: D.n, dead: D.dead, tk: D.tk }) + ')');
-  ok(S.feed.some(f => f.team === 1 && /um civil morto/.test(f.text) && f.text.includes('−' + CIV.toll)), 'the feed tells it: ' + (S.feed.find(f => /civil/.test(f.text)) || {}).text);
+  ok(D.n[0] === 1 && D.n[1] === 1 && D.dead === 3 && D.tk === undefined, 'the record: one by each side, three dead (' + JSON.stringify({ n: D.n, dead: D.dead }) + ')');
+  ok(S.feed.some(f => f.team === 1 && /um civil morto/.test(f.text) && !/tíquete/.test(f.text)), 'the feed tells it: ' + (S.feed.find(f => /civil/.test(f.text)) || {}).text);
   ok(S.glog.l[1].some(e => e.k === 'rep' && /por fogo nosso/.test(e.s)) && S.glog.l[0].some(e => /por fogo nosso/.test(e.s)), 'and each side\'s general reads it in its log');
   ok(S.score === sc[0] && S.gndKills === sc[1], 'it is never scored');
-  S.cq.ph = 1; const tk1 = S.cq.tk.slice(), f0 = S.feed.length, l0 = S.glog.l[1].length; kill(out().find(c => hd(c, u) > 50), sh);
-  ok(S.cq.tk.every((v, i) => v === tk1[i]), 'once the match is over nothing is charged');
+  S.cq.ph = 1; const f0 = S.feed.length, l0 = S.glog.l[1].length; kill(out().find(c => hd(c, u) > 50), sh);
   C.run(CIV.say + .5);
   const said = S.feed.slice(f0).find(f => f.team === 1 && /um civil morto/.test(f.text)), logged = S.glog.l[1].slice(l0).find(e => /por fogo nosso/.test(e.s));
-  ok(said && !/tíquetes/.test(said.text) && logged && !/tíquetes/.test(logged.s), 'and the feed and the log tell the death with no tickets: ' + (said && said.text)); S.cq.ph = 0;
+  ok(said && logged, 'once the match is over the feed and the log still tell the death: ' + (said && said.text)); S.cq.ph = 0;
 }
 
 console.log('-- a town that turns against a side --');
 load({ seed: 32 }); fresh('modern'); C.run(2);
 {
-  const { g, b, bi, n } = bigTown(), sh = man(1, b.x + b.ru + 300, b.z, false), tk1 = S.cq.tk[1];
+  const { g, b, bi, n } = bigTown(), sh = man(1, b.x + b.ru + 300, b.z, false);
   console.log('   ' + C.civName(b) + ' (' + b.k + '): ' + n + ' people');
   let k = 0;
   for (const c of ofTown(g).filter(c => !c.in)) { if (k >= CIV.rage.n - 1) break; if (kill(c, sh)) k++; }
@@ -56,7 +55,6 @@ load({ seed: 32 }); fresh('modern'); C.run(2);
   for (const c of ofTown(g).filter(c => !c.in && !c.dead)) if (kill(c, sh)) break;
   const D = S.civD;
   ok(C.civHates(bi, 1) && !C.civHates(bi, 0) && D.hits[bi][1] >= CIV.rage.n, 'the ' + CIV.rage.n + 'th: it turns against side 1, not side 0');
-  ok(S.cq.tk[1] <= tk1 - CIV.rage.n * CIV.toll, 'side 1 paid ' + (tk1 - S.cq.tk[1]) + ' tickets');
   const mil = S.men.filter(m => m.mil && !m.dead), q = mil[0] && mil[0].sq;
   ok(mil.length === CIV.mil.n && mil.every(m => m.team === 0 && m.sq === q), 'at once it arms a militia squad of ' + CIV.mil.n + ' for side 0 (' + mil.length + ')');
   ok(q && q.ord.k === 'hold' && q.mis && q.mis.kind === 'defend' && q.mis.d > 0 && /Revolta em/.test(q.mis.why) && mil.every(m => m.mis === q.mis), 'which holds the town, born of a Dispatch order with its mission: defend (' + (q && q.mis && q.mis.why) + ')');
@@ -182,10 +180,10 @@ load({ seed: 37 }); fresh('modern'); C.run(2);
   r = C.genCmd(0, { c: 'fire', k: 'he', x: p.x, z: p.z, n: 8 }, 'me');
   const M = live()[0], warn = S.glog.l[0].slice(n0).find(e => e.k === 'fire' && /civis à vista e alvo não identificado/.test(e.s));
   ok(r.ok && M && M.usr, 'a person\'s order at the same spot: accepted, the mission theirs to answer for (M.usr)');
-  ok(warn && warn.s.includes(CIV.toll + ' tíquetes'), 'with a warning in the log: ' + (warn && warn.s));
-  const D = C.civD(), d0 = D.n[0], t0 = D.tk[0];
+  ok(warn, 'with a warning in the log: ' + (warn && warn.s));
+  const D = C.civD(), d0 = D.n[0];
   C.run(90, () => { seen = S.t; pin(); });
-  ok(D.n[0] > d0 && D.tk[0] - t0 === (D.n[0] - d0) * CIV.toll, 'the battery fires it among them, and side 0 pays ' + CIV.toll + ' tickets a civilian killed (' + (D.n[0] - d0) + ' killed, ' + (D.tk[0] - t0) + ' paid)');
+  ok(D.n[0] > d0, 'the battery fires it among them, and the civilians it kills are counted to side 0 (' + (D.n[0] - d0) + ' killed)');
 }
 
 console.log('-- a fire mission at an identified enemy among civilians, from the coordinates get_state gives (tenths of a metre) --');
@@ -261,7 +259,7 @@ load({ seed: 35 }); fresh('modern'); C.run(2);
   C.run(CIV.mil.wait + 30);
   ok(S.men.some(m => m.mil && m.team === 1) && S.glog.l[1].some(e => /^Milícia de \d formada em [^(]*$/.test(e.s)) && (!S.gj || S.gj.some(j => j.c.c === 'mil' && j.by === 'ai' && j.ok)), 'the AI general raises it itself (' + ((S.glog.l[1].find(e => /Milícia/.test(e.s)) || {}).s) + ')');
   const st = C.genState(1);
-  ok(st.civ && st.civ.toll === CIV.toll && st.civ.towns.length > 0 && st.civ.towns.every(o => o.name && o.home + o.away >= 0 && o.hate === ''), 'genState carries the civilians as the side sees them (' + st.civ.towns.length + ' towns with people)');
+  ok(st.civ && st.civ.toll === undefined && st.civ.towns.length > 0 && st.civ.towns.every(o => o.name && o.home + o.away >= 0 && o.hate === ''), 'genState carries the civilians as the side sees them (' + st.civ.towns.length + ' towns with people)');
   ok(JSON.stringify(JSON.parse(JSON.stringify(st))) === JSON.stringify(st), 'and stays plain JSON');
 }
 
@@ -276,13 +274,12 @@ load({ seed: 36, ana: true }); fresh('modern'); C.run(12);
   C.civEvac(g); C.civHome(g); C.run(11);
   const cv = ANA.ev.filter(e => e.k === 'cv'), has = (k, s) => cv.some(e => e.c === k && (s === undefined || e.s === s));
   ok(has('kill', 1) && has('kill', 0) && has('turn', 1) && has('mil', 0) && has('roe', 0) && has('evac', -1) && has('back', -1), 'cv events: kill, turn, mil, roe, evac, back (' + cv.map(e => e.c).join(' ') + ')');
-  ok(cv.find(e => e.c === 'kill').tk === CIV.toll && cv.find(e => e.c === 'turn').nm === C.civName(b) && cv.find(e => e.c === 'mil').why === 'turn', 'with the tickets, the town\'s name, why the militia rose');
+  ok(cv.find(e => e.c === 'kill').tk === undefined && cv.find(e => e.c === 'turn').nm === C.civName(b) && cv.find(e => e.c === 'mil').why === 'turn', 'with the town\'s name, why the militia rose');
   const sn = ANA.ev.filter(e => e.k === 'sn').pop();
   ok(sn && Array.isArray(sn.cv) && sn.cv.length === 3 && sn.cv[0] === S.civs.filter(c => !c.dead && !c.gone).length, 'the snapshot counts the civilians alive, away and indoors (' + (sn && sn.cv) + ')');
   const R = C.anaReport(ANA.ev);
-  ok(R.civ && R.civ.side[1].killed === 1 && R.civ.side[0].killed === 1 && R.civ.side[1].tk === CIV.toll && R.civ.side[0].mil === 1 && R.civ.side[0].roe === 1, 'the review: by side killed, tickets, militia, holds (' + JSON.stringify(R.civ.side) + ')');
+  ok(R.civ && R.civ.side[1].killed === 1 && R.civ.side[0].killed === 1 && R.civ.side[0].mil === 1 && R.civ.side[0].roe === 1, 'the review: by side killed, militia, holds (' + JSON.stringify(R.civ.side) + ')');
   ok(R.civ.turned.length === 1 && R.civ.turned[0].s === 1 && R.civ.evac === 1 && R.civ.back === 1 && R.civ.dead === 2, 'the towns that turned, evacuated and came home');
-  ok(R.tickets[1].civ === CIV.toll && R.tickets[0].civ === CIV.toll, 'each side\'s tickets show what its civilians cost (civ, out of other)');
   const R0 = C.anaReport(ANA.ev, 0);
   ok(R0.civ.side[0] && R0.civ.side[1] === null, 'a side\'s view of a match on keeps the enemy\'s out');
   const B = C.anaBrief(R); ok(B.civ && JSON.stringify(B).length < 20000, 'the brief (the server\'s summary, the MCP\'s report) carries it');
@@ -293,13 +290,12 @@ if (SECS > 0) for (const era of ['modern', 'ww2']) {
   console.log('-- an AI × AI match on the map with the seat towns, ' + era + ', ' + SECS + ' s --');
   load({ seed: 41, mapv: 5, eco: true, ana: true });
   S = C.watch(era, { len: 0 }); T = S.T;
-  let err = null, tkc = null;
-  try { C.run(SECS, () => { if (S.civD && !S.cq.ph) { const D = S.civD; if (tkc === null && (D.tk[0] !== D.n[0] * CIV.toll || D.tk[1] !== D.n[1] * CIV.toll)) tkc = JSON.stringify(D); } }); } catch (e) { err = e; }
+  let err = null;
+  try { C.run(SECS); } catch (e) { err = e; }
   ok(!err, 'it runs' + (err ? ': ' + err.stack : ''));
-  const D = S.civD || { n: [0, 0], tk: [0, 0], dead: 0, roe: [0, 0], mil: [0, 0], evac: 0, back: 0, foe: {} }, cv = $('ANA').ev.filter(e => e.k === 'cv');
-  console.log('   ' + S.civs.length + ' civilians, ' + D.dead + ' killed (side 0: ' + D.n[0] + ', side 1: ' + D.n[1] + '), tickets paid ' + D.tk + ', holds ' + D.roe + ', militia ' + D.mil + ', evacuations ' + D.evac + ' (home ' + D.back + '), towns turned ' + JSON.stringify(D.foe) + ', cv events ' + cv.length + ', seat towns ' + T.burgs.filter(b => b.seat !== undefined).length);
+  const D = S.civD || { n: [0, 0], dead: 0, roe: [0, 0], mil: [0, 0], evac: 0, back: 0, foe: {} }, cv = $('ANA').ev.filter(e => e.k === 'cv');
+  console.log('   ' + S.civs.length + ' civilians, ' + D.dead + ' killed (side 0: ' + D.n[0] + ', side 1: ' + D.n[1] + '), holds ' + D.roe + ', militia ' + D.mil + ', evacuations ' + D.evac + ' (home ' + D.back + '), towns turned ' + JSON.stringify(D.foe) + ', cv events ' + cv.length + ', seat towns ' + T.burgs.filter(b => b.seat !== undefined).length);
   ok(T.burgs.some(b => b.seat !== undefined) && S.civs.length > 10, 'the seat towns are there, with people');
-  ok(tkc === null, 'every side\'s tickets for civilians are its deaths times ' + CIV.toll + (tkc ? ': ' + tkc : ''));
   ok(Object.keys(D.foe).every(bi => [0, 1].every(t => !(D.foe[bi] & (1 << t)) || D.hits[bi][t] >= CIV.rage.n)), 'a town turned only against a side that killed ' + CIV.rage.n + ' of its people');
   ok(cv.filter(e => e.c === 'kill').length === D.dead && cv.filter(e => e.c === 'roe').length === D.roe[0] + D.roe[1], 'the analytics have every death and every hold');
   ok(S.civs.every(c => [0, 1, 2, 3, 4, 5].includes(c.mode)) && !nan(S) && S.civs.every(c => Number.isFinite(c.x) && Number.isFinite(c.z)), 'every civilian in a known mode, nothing is NaN');

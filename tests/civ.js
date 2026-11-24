@@ -54,7 +54,7 @@ ok(S.civs.filter(c => !c.dead).some(c => c.mode === 3 || c.in), 'a burst 200 m o
 
 console.log('-- harm: a round, a burst, a house, a hull --');
 fresh('modern'); C.run(3);
-const tk = S.cq ? S.cq.tk.slice() : null, sc = [S.score, S.gndKills], fl = S.floats.length;
+const sc = [S.score, S.gndKills], fl = S.floats.length;
 const pick = () => out().find(c => Math.hypot(c.x - S.base[0].x, c.z - S.base[0].z) > 100);
 let v = pick();
 const sh2 = man(1, v.x - 30, v.z, false);
@@ -70,7 +70,7 @@ C.fallen(hs, null); ok(v4.dead, 'one inside a house when it falls dies with it')
 let v5 = pick(), u = C.addVehicle('tank', INF && Object.keys($('TANKS'))[0], 1, v5.x - 12, v5.z, 0); u.v.x = 8; u.v.z = 0; u.ctl.drive = 1;
 for (let i = 0; i < 120 && !v5.dead; i++) { u.x += 8 / 60; u.v.x = 8; C.run(1 / 60); }
 ok(v5.dead, 'a tank driven over one kills it');
-ok((S.cq ? S.cq.tk.every((t, i) => t === tk[i]) : true) && S.score === sc[0] && S.gndKills === sc[1] && S.floats.length === fl, 'none of it gives score, nor tickets in this sandbox without a match (what a death costs: civ-war.js; tickets ' + (S.cq ? S.cq.tk : '-') + ')');
+ok(S.score === sc[0] && S.gndKills === sc[1] && S.floats.length === fl, 'none of it gives score (what a death counts: civ-war.js)');
 const body = S.civs.filter(c => c.dead).length; C.run(MAN.body + 5);
 ok(S.civs.filter(c => c.dead).length < body, 'the bodies are cleared after a while');
 
@@ -124,8 +124,8 @@ fresh('ww2'); C.run(1);
 for (let i = 0; i < 4; i++) man(side, W.x + 20 + i * 3, W.z + 20, true); man(1 - side, W.x - 200, W.z, true);
 C.run(CIV.mil.wait + 30); ok(!S.men.some(m => m.mil), 'with an enemy near the town nothing is raised');
 fresh('ww2'); C.run(1);
-{ const tk = S.cq ? S.cq.tk.slice() : null; const mm = (() => { for (let i = 0; i < 4; i++) man(side, W.x + 20 + i * 3, W.z + 20, true); C.run(CIV.mil.wait + 20); return S.men.find(m => m.mil); })();
-  const st0 = S.score; if (mm) C.killMan(mm, null); ok(S.score === st0 && (!S.cq || S.cq.tk.every((t, i) => t === tk[i])), 'a militiaman lost costs the side ' + CIV.mil.cost + ' tickets (table)'); }
+{ const mm = (() => { for (let i = 0; i < 4; i++) man(side, W.x + 20 + i * 3, W.z + 20, true); C.run(CIV.mil.wait + 20); return S.men.find(m => m.mil); })();
+  const st0 = S.score; if (mm) C.killMan(mm, null); ok(S.score === st0, 'a militiaman lost gives no score'); }
 
 console.log('-- a militia soldier at the trigger, against a regular of its side --');
 fresh('ww2', false); C.civBegin();

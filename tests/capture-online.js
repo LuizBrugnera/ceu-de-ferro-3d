@@ -1,7 +1,7 @@
 'use strict';
 /* capture online, headless, through the real relay server: a host in an HMMWV (side 0), a guest soldier on its side who watches and a
    guest soldier of the other side. The host gets out; the enemy guest holds E beside it and is given the wheel (drive, grant, crew with
-   cap); every client has it on side 1, the tickets are paid once, the guest's record carries cap; he gets out and it stays side 1's;
+   cap); every client has it on side 1, the loss is counted once, the guest's record carries cap; he gets out and it stays side 1's;
    the host's soldier takes it back the same way (the host's own path); someone who joins later sees it right.
    With SERVER=<an older server.js> welcome has no cap and nobody is offered a capture */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
@@ -10,7 +10,7 @@ async function client(name, cls, model) {
   const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: name.length * 97 + name.charCodeAt(0) }), $ = c.$, Net = $('Net');
   c.name = name; c.$ = $; c.Net = Net; c.on = true;
   await new Promise((res, rej) => { Net.ui.welcome = () => { c.newState('modern', model, { net: true, cls, mouse: true, host: Net.host === Net.id }); res(); }; Net.ui.refused = code => rej(new Error(name + ' refused: ' + code)); Net.connect('modern', name, cls, model); });
-  Object.defineProperty(c, 'S', { get: () => $('S') }); c.id = Net.id; c.plan = () => {}; c.director = () => {}; $('RAD').ai.n = 0;   // no AI radio vehicle: it would be a requisition, paid in tickets
+  Object.defineProperty(c, 'S', { get: () => $('S') }); c.id = Net.id; c.plan = () => {}; c.director = () => {}; $('RAD').ai.n = 0;   // no AI radio vehicle: it would be a requisition
   all.push(c); return c;
 }
 async function run(secs, each) {
@@ -46,11 +46,11 @@ const gh = (c, o) => c.Net.ghosts.get(o.id), rec = (c, o) => c.Net.players.get(o
   /* the enemy guest takes it */
   put(c, V.x + 3, V.z + 6); await run(1);
   ok(c.S.capU === Vc && !c.S.near, 'Caio (side 1), beside it, is offered the capture');
-  const tk = h.S.cq.tk.slice();
+  const tk = h.S.cq.lost.map(l => l[1]);
   await hold(c, 'yawR', CAP.hold + .4);
   ok(c.S.my === Vc && c.S.rider && Vc.team === 1 && gh(h, c) === V && V.team === 1 && V.pid === c.id, 'E held: Caio is at its wheel, and on the host it is his, on side 1');
   ok(gh(a, c) === Va && Va.team === 1 && rec(a, c).cap === 1 && rec(h, c).cap === 1 && rec(a, c).model === 'hmmwv' && a.$('pSide')(rec(a, c)) === 1 && h.S.humans[1] === 1 && a.S.humans[1] === 1, 'on the other guest too: the same vehicle, side 1, and his record is an HMMWV under his own flag');
-  ok(h.S.cq.tk[0] === tk[0] - CQ.cost.car && h.S.cq.tk[1] === tk[1], 'side 0 paid for it once (' + (tk[0] - h.S.cq.tk[0]) + ' tickets), side 1 nothing');
+  ok(h.S.cq.lost[0][1] === tk[0] + 1 && h.S.cq.lost[1][1] === tk[1], 'side 0 counts it lost once, side 1 nothing (' + JSON.stringify(h.S.cq.lost) + ')');
   const x0 = Vc.x; c.S.aim.h = Vc.h; c.S.input.up = true; await run(3); c.S.input.up = false; c.S.input.brake = true; await run(2); c.S.input.brake = false; await run(.5);
   ok(Math.abs(Vc.x - x0) + Math.abs(V.x - x0) > 10 && Math.hypot(V.x - Vc.x, V.z - Vc.z) < 8 && Math.hypot(Va.x - Vc.x, Va.z - Vc.z) < 8, 'he drives it, and it moves on every client');
   /* he gets out: it stays his side's */
@@ -64,9 +64,9 @@ const gh = (c, o) => c.Net.ghosts.get(o.id), rec = (c, o) => c.Net.players.get(o
   /* the host's soldier takes it back */
   put(c, V.x + 60, V.z + 60); put(h, V.x + 3, V.z + 6); await run(1);
   ok(h.S.capU === V, 'Hugo, back beside it, is offered the capture');
-  const tk2 = h.S.cq.tk.slice();
+  const tk2 = h.S.cq.lost.map(l => l[1]);
   await hold(h, 'yawR', CAP.hold + .4);
   ok(h.S.my === V && V.team === 0 && !h.$('captured')(V) && gh(a, h) && gh(a, h).kind === 'car' && gh(a, h).team === 0 && gh(c, h).team === 0 && !rec(a, h).cap, 'E held: it is side 0\'s again on every client, and Hugo\'s record has no cap (it is his side\'s model)');
-  ok(h.S.cq.tk[1] === tk2[1] - CQ.cost.car && h.S.cq.tk[0] === tk2[0], 'side 1 paid for losing it, once');
+  ok(h.S.cq.lost[1][1] === tk2[1] + 1 && h.S.cq.lost[0][1] === tk2[0], 'side 1 counts losing it, once');
   for (const x of all) if (x.on) x.Net.close(); N.stop(); done();
 })().catch(e => { console.error(e); N.stop(); process.exit(1); });

@@ -14,7 +14,7 @@ function battle(era, SECS) {
   for (const k of KINDS) { const f = G[k]; G[k] = (Cm, X) => { const r = f(Cm, X); cand[k] += r.length; for (const c of r) best[k] = Math.max(best[k], c.sc); return r; }; }
   let err = null;
   try { C.run(SECS, () => { for (const Cm of S.cmd || []) for (const op of Cm.ops) if (op.man && !made.includes(op)) made.push(op); }, 1 / 30); } catch (e) { err = e; }
-  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.tk[0]) || !Number.isFinite(S.cq.tk[1]), n = k => made.filter(o => o.k === k).length;
+  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.ps[0]) || !Number.isFinite(S.cq.ps[1]), n = k => made.filter(o => o.k === k).length;
   ok(!err && !H.nan(S) && !bad, era + ' ' + SECS + ' s at map 4, economy ' + ($('ECO').on ? 'on' : 'OFF') + ': no exception, no NaN (' + (Date.now() - t0) + ' ms)' + (err ? ' ' + err.stack : ''));
   console.log('  opened in the battle (' + era + '): ' + KINDS.map(k => k + ' ' + n(k)).join(', ') + '; candidates generated ' + KINDS.map(k => k + ' ' + cand[k] + ' (best ' + best[k].toFixed(2) + ')').join(', ') + '; all kinds ' + made.length + ' (' + [...new Set(made.map(o => o.k))].join(',') + ')');
   ok(made.every(op => op.over || S.t - op.T0 <= op.Tmax + 25), 'every manoeuvre of the battle is over within its Tmax');

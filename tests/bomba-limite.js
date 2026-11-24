@@ -15,11 +15,11 @@ console.log('-- the limits --');
 ok(VBM.cap.car >= 3 && VBM.cap.truck >= 2, 'alive at once per side: ' + VBM.cap.car + ' car bombs, ' + VBM.cap.truck + ' truck bombs (was 2 and 1)');
 ok($('stkCap')('svbied', 'live') >= 2 && $('stkCap')('svbied', 'own') > $('stkCap')('svbied', 'live') && $('stkCap')('strat', 'live') === 1 && $('stkCap')('shahed', 'live') === 1,
   'strategic trucks: ' + $('stkCap')('svbied', 'live') + ' out, ' + $('stkCap')('svbied', 'own') + ' owned; the bomber and the drones still 1 out');
-ok($('RQ').cost.vbied === 3 && $('RQ').cost.svbied === 6 && $('BOMB').car.dmg === 1400 && $('BOMB').truck.dmg === 2350 && $('BOMB').truck.r === 155, 'each keeps its price (3 and 6 tickets) and its burst');
+ok($('RQ').cost.vbied === 3 && $('RQ').cost.svbied === 6 && $('BOMB').car.dmg === 1400 && $('BOMB').truck.dmg === 2350 && $('BOMB').truck.r === 155, 'each keeps its price (3 and 6 units of RQ.res) and its burst');
 console.log('-- the requisition: one after another --');
 { const S = bare(3), Q = S.cq, b = S.base[t];
   const m = C.addMan('insRifle', t, b.x + 20, b.z, 0); m.ai = null;
-  const why = model => { Q.rq[0] = 0; Q.tk[t] = 500; for (const k in Q.stock) Q.stock[k].n = 3; return $('rqWhy')(m, 'trn', model, 0); };
+  const why = model => { Q.rq[0] = 0; if (S.eco) { S.eco.d[t].en = S.eco.d[t].mt = 900; } for (const k in Q.stock) Q.stock[k].n = 3; return $('rqWhy')(m, 'trn', model, 0); };
   const add = model => { const u = C.addUnit($('TRNS')[model].kind, t, b.x + 400 + Math.random() * 50, b.z + 400, model, false); u.ai = null; return u; };
   const car = [], truck = [];
   for (let i = 0; i < VBM.cap.car; i++) { car.push(why(i & 1 ? 'vbiedPk' : 'vbied')); add(i & 1 ? 'vbiedPk' : 'vbied'); }

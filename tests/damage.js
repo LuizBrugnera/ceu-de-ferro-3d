@@ -3,7 +3,7 @@
    node tests/damage.js (PAGE=<page>; N=<strikes per armour row>, default 300) */
 const { load, ok, done } = require('./harness.js');
 const C = load({ seed: 7 }), $ = C.$, DMG = $('DMG'), HK = $('HK'), RES = $('RES'), N = +process.env.N || 300;
-const pst = $('pst'), psig = $('psig'), LN = $('LN'), f2 = v => v.toFixed(2);
+const pst = $('pst'), psig = $('psig'), LN = $('LN'), f2 = v => v.toFixed(2), VLIFT = (() => { try { return $('VLIFT'); } catch (e) { return 1.5; } })();   // the vehicle frame over the ground (1.5 before cf-veiculos)
 let S = C.sandbox('modern');
 const B = () => ({ x: 4000, z: 300 }), ix = (o, id) => o.def.parts.ix[id], hp = (o, id) => o.parts[ix(o, id)].hp, st = (o, id) => pst(o, ix(o, id));
 const kill = (o, id) => { o.parts[ix(o, id)].hp = 0; C.refit(o); }, hurtTo = (o, id, k) => { o.parts[ix(o, id)].hp = o.def.parts[ix(o, id)].max * k; C.refit(o); };
@@ -14,7 +14,7 @@ const tick = (o, s) => { for (let t = 0; t < s && !o.dead; t += .1) { S.t += .1;
 /* a point of a part's box in the world: its centre, or for a pair the middle of one half */
 const at = (o, d) => {
   const b = d.box, z = b[6] ? b[2] + (b[5] + b[6]) / 2 : b[2];
-  if (o.kind) { const c = Math.cos(o.h), s = Math.sin(o.h), t = d.tur ? o.def.tx : 0, cy = Math.cos(o.ty), sy = Math.sin(o.ty), x = t + b[0] * cy + z * sy, zz = -b[0] * sy + z * cy; return [o.x + x * c + zz * s, o.y + 1.5 + b[1], o.z - x * s + zz * c]; }
+  if (o.kind) { const c = Math.cos(o.h), s = Math.sin(o.h), t = d.tur ? o.def.tx : 0, cy = Math.cos(o.ty), sy = Math.sin(o.ty), x = t + b[0] * cy + z * sy, zz = -b[0] * sy + z * cy; return [o.x + x * c + zz * s, o.y + VLIFT + b[1], o.z - x * s + zz * c]; }
   return [o.x + o.f.x * b[0] + o.u.x * b[1] + o.r.x * z, o.y + o.f.y * b[0] + o.u.y * b[1] + o.r.y * z, o.z + o.f.z * b[0] + o.u.z * b[1] + o.r.z * z];
 };
 
@@ -31,7 +31,7 @@ for (const [nm, o] of [['Ju 87', plane('stuka')], ['F-22', plane('f22')], ['AH-6
   D.forEach((d, i) => {
     if (!i || !d.box) return;
     const [x, y, z] = at(o, d), got = C.hitPart(o, x, y, z), g = D[got];
-    if (got !== i && !(got > i && C.boxDist(o, g, ...(() => { C.toBody(o, x - o.x, y - o.y - (o.kind ? 1.5 : 0), z - o.z, 0); const H = $('HB'); return [H[0], H[1], H[2]]; })()) === 0)) miss.push(d.id + '->' + g.id);
+    if (got !== i && !(got > i && C.boxDist(o, g, ...(() => { C.toBody(o, x - o.x, y - o.y - (o.kind ? VLIFT : 0), z - o.z, 0); const H = $('HB'); return [H[0], H[1], H[2]]; })()) === 0)) miss.push(d.id + '->' + g.id);
   });
   ok(!miss.length, nm + ': a hit in the middle of each of its ' + D.filter(d => d.box).length + ' volumes lands on it, or on a part set inside it' + (miss.length ? ' (' + miss + ')' : ''));
 }
@@ -39,7 +39,7 @@ for (const [nm, o] of [['Ju 87', plane('stuka')], ['F-22', plane('f22')], ['AH-6
   const u = veh('tank', 'tiger'), d = u.def.parts[ix(u, 'breech')], [x, y, z] = at(u, d);
   const pt = C.hitPart(u, x, y, z - 6, 0, 0, 1, 3.7), via = LN.slice();
   ok(u.def.parts[pt].id === 'trav' && via.includes(ix(u, 'breech')), 'a shell through the side of the turret strikes the turret and goes on to ' + via.map(i => u.def.parts[i].id));
-  const e = C.hitPart(u, u.x - 7, u.y + 1.5 + u.def.parts[ix(u, 'engine')].box[1], u.z, 1, 0, 0, 3.7);
+  const e = C.hitPart(u, u.x - 7, u.y + VLIFT + u.def.parts[ix(u, 'engine')].box[1], u.z, 1, 0, 0, 3.7);
   ok(['engine', 'cool', 'fuel', 'trans'].includes(u.def.parts[e].id), 'from behind, the first thing on the line is in the engine bay (' + u.def.parts[e].id + ')');
 }
 
@@ -48,7 +48,7 @@ console.log('-- armour: calibre, angle, plate --');
   const rate = (sh, tg, dmg, ang, tur, range) => {
     let pen = 0, n = 0;
     for (let i = 0; i < N; i++) {
-      const u = veh('tank', tg, 0), by = { x: u.x + Math.cos(ang) * range, y: u.y, z: u.z - Math.sin(ang) * range }, d = u.def.parts[tur ? ix(u, 'trav') : 0], y = u.y + 1.5 + (tur ? d.box[1] : u.def.parts[0].box[1]);
+      const u = veh('tank', tg, 0), by = { x: u.x + Math.cos(ang) * range, y: u.y, z: u.z - Math.sin(ang) * range }, d = u.def.parts[tur ? ix(u, 'trav') : 0], y = u.y + VLIFT + (tur ? d.box[1] : u.def.parts[0].box[1]);
       const h = C.strike(u, HK.shell, dmg, by, u.x + Math.cos(ang) * 6, y, u.z - Math.sin(ang) * 6, -Math.cos(ang), 0, Math.sin(ang));
       S.units.length = 0; if (!h) continue; n++; if (h.res === 0) pen++;
     }
@@ -72,7 +72,7 @@ console.log('-- armour: calibre, angle, plate --');
   const pen = $('SARMS').rpg.pen, rpg = (kind, id, ang, tur) => {   // the RPG-7's rocket square on the middle of a face, as the rocket's flight hands it to strike
     let p = 0, n = 0;
     for (let i = 0; i < N; i++) {
-      const u = veh(kind, id, 0), d = u.def.parts[tur ? ix(u, 'trav') : 0], y = u.y + 1.5 + (tur ? d.box[1] : u.def.parts[0].box[1]), by = { x: u.x + Math.cos(ang) * 150, y: u.y, z: u.z - Math.sin(ang) * 150 };
+      const u = veh(kind, id, 0), d = u.def.parts[tur ? ix(u, 'trav') : 0], y = u.y + VLIFT + (tur ? d.box[1] : u.def.parts[0].box[1]), by = { x: u.x + Math.cos(ang) * 150, y: u.y, z: u.z - Math.sin(ang) * 150 };
       const h = C.strike(u, HK.heat, 140, by, u.x + Math.cos(ang) * 6, y, u.z - Math.sin(ang) * 6, -Math.cos(ang), 0, Math.sin(ang), pen);
       S.units.length = 0; if (!h || h.res === 3) continue; n++; if (h.res === 0 || h.res === undefined) p++;
     }

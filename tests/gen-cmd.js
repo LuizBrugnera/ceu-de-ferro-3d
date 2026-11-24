@@ -10,7 +10,7 @@ const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 90, ECO =
 const BEFORE = process.env.BEFORE ? path.resolve(process.env.BEFORE) : path.join(H.ROOT, '.work', 'player', 'before.html');
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq ? S.cq.tk.map(v => v.toFixed(4)).join(',') : '-', C.$('Math').random().toFixed(12)].join(' ');
+  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq ? S.cq.ps.map(v => v.toFixed(4)).join(',') : '-', C.$('Math').random().toFixed(12)].join(' ');
 };
 /* the commander's log, as text, and its operations: what a changed order or a reordered draw would show */
 const trail = S => [0, 1].map(t => (S.glog ? S.glog.l[t] : []).map(e => e.k + '|' + e.t.toFixed(3) + '|' + e.s).join('\n')).join('\n##\n') + '\n' + [0, 1].map(t => (S.cmd ? S.cmd[t].ops.map(o => o.k + o.ri).join(',') : '')).join('/');

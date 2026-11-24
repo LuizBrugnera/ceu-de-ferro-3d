@@ -2,7 +2,7 @@
 /* The Insurgents and the civilians (ICV, cf-insurgente-civis; NOT RUN YET: docs/nao-testado/cf-insurgente-civis.md). A short exercise with no
    screen: an AI × AI match of three sides on the current front (SECS s of it, default 600) and what it should show: the Insurgents recruit or
    gain at least MIN civilians, they get resources from it, the sympathy of a town rises after the regular sides kill its people, and nothing
-   of ICV threw. Then a sandbox check of the toll: a regular side pays tickets for a civilian, the Insurgents get resources and pay none.
+   of ICV threw. Then a sandbox check of a civilian's death: counted to whoever killed it, and the Insurgents get resources for theirs.
    Not in tests/all.sh (it is slow: a three-sided match). Run: node tests/icv.js (SECS=300 MIN=3 for a shorter one) */
 const H = require('./harness'), { ok, done } = H;
 const SECS = +(process.env.SECS || 600), MIN = +(process.env.MIN || 4);
@@ -37,10 +37,9 @@ console.log('-- the toll: the regular side pays, the Insurgents gain --');
   const S = c.watch('modern', { n: 3 }); c.run(3);
   const ins = $('icvIns()'), reg = ins === 0 ? 1 : 0, vs = S.civs.filter(o => !o.dead && !o.gone && o.g && o.g.b);
   if (vs.length >= 2 && S.eco && S.eco.d[ins]) {
-    const tk = S.cq.tk.slice(), en = S.eco.d[ins].en;
+    const n0 = $('civD')().n.slice(), en = S.eco.d[ins].en;
     $('civKill')(vs[0], { team: reg }); $('civKill')(vs[1], { team: ins });
-    ok(S.cq.tk[reg] < tk[reg], 'a civilian killed by a regular side costs it tickets (' + tk[reg] + ' → ' + S.cq.tk[reg] + ')');
-    ok(S.cq.tk[ins] === tk[ins], 'one killed by the Insurgents costs them none');
+    ok($('civD')().n[reg] === n0[reg] + 1 && $('civD')().n[ins] === n0[ins] + 1 && S.cq.tk === undefined, 'each death is counted to the side that did it, and there are no tickets');
     ok(S.eco.d[ins].en > en || S.eco.d[ins].en >= $('ECO').cap.en, 'and brings them energy (' + Math.round(en) + ' → ' + Math.round(S.eco.d[ins].en) + ')');
   } else ok(false, 'no civilians or economy to try the toll on');
 }

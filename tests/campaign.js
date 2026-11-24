@@ -168,7 +168,7 @@ console.log('-- the threat board: incidents, triage, the response --');
   const e = S.eco.l.find(e => e.team === t && !e.dead && e.k === 'fab') || S.eco.l.find(e => e.team === t && !e.dead);
   S.ot[e.id] = S.t; look();
   const Is = Cm.thb.find(I => I.key === 's' + e.id);
-  ok(Is && Is.k === 'site' && Is.val === $('ECO').site[e.k].tk && Is.ex && Is.urg >= 1, 'a ' + e.name + ' hit: an incident of value ' + (Is && Is.val) + ' (its tickets), ' + (Is && Is.st) + (Is && Is.why ? ': ' + Is.why : ''));
+  ok(Is && Is.k === 'site' && Is.val === $('ECO').site[e.k].val && Is.ex && Is.urg >= 1, 'a ' + e.name + ' hit: an incident of value ' + (Is && Is.val) + ' (ECO.site[k].val), ' + (Is && Is.st) + (Is && Is.why ? ': ' + Is.why : ''));
   const e2 = S.eco.l.find(o => o.team === t && !o.dead && o !== e) || e, pl = S.planes.find(o => o.team !== t && !o.dead);
   if (pl) {
     e2.gd.aa = 0; pl.x = e2.x + 100; pl.z = e2.z; pl.y = $('hgt')(pl.x, pl.z) + 300;

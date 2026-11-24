@@ -30,16 +30,19 @@ r = gen({ c: 'para', x: tg.x, z: tg.z }); ok(!r.ok && r.why === 'plive', 'a seco
 
 /* the flight: out over the point, the canopies, the squad on the ground */
 let firstOut = null, chutes = 0, maxN = 0;
+const went = new Set(), landed = new Set();   // who was in the air, and who of them came down alive (what the battle does to them after is the battle's)
 fly(400, () => {
   const air = S.men.filter(m => m.para && m.team === t && !m.dead);
+  for (const m of air) went.add(m);
+  for (const m of went) if (!m.para && !m.dead) landed.add(m);
   if (air.length && !firstOut) firstOut = { t: S.t, x: air[0].x, z: air[0].z, y: air[0].y, agl: air[0].y - C.hgt(air[0].x, air[0].z) };
   chutes = Math.max(chutes, air.filter(m => m.para.st === 'chute').length); maxN = Math.max(maxN, air.length);
   return !(D.out >= D.n && !air.length && (p.gone || p.dead));
 });
 ok(!!firstOut, 'the men go out of the door: the first ' + (firstOut ? Math.round(firstOut.agl) + ' m over the ground, ' + Math.round(Math.hypot(firstOut.x - tg.x, firstOut.z - tg.z)) + ' m from the point' : 'never'));
 ok(chutes >= Math.min(3, D.n) && maxN >= 2, 'their canopies open (' + chutes + ' under canopy at once, ' + maxN + ' in the air)');
-const q = D.q, men = q ? q.men.filter(m => !m.dead) : [], foeK = q ? q.men.filter(m => m.dead && m.lastBy && m.lastBy.team === foe).length : 0;   // the battle goes on round them: a barrage on the point may kill some (cf-general-reservas: a Katyusha's)
-ok(q && D.out === D.n && men.length + foeK >= D.n - 1, 'a squad of ' + men.length + ' on the ground (' + D.out + ' jumped' + (foeK ? ', ' + foeK + ' killed there by enemy fire' : '') + ')');
+const q = D.q, men = q ? q.men.filter(m => !m.dead) : [];
+ok(q && D.out === D.n && landed.size >= D.n - 1 && men.length > 0, 'a squad of ' + landed.size + ' landed (' + D.out + ' jumped, ' + men.length + ' alive now)');
 const far = men.map(m => Math.round(Math.hypot(m.x - tg.x, m.z - tg.z)));
 ok(men.length && Math.max(...far) < 420, '  around the point: ' + far.join(', ') + ' m');
 ok(men.every(m => !m.para && Math.abs(m.y - $('manY')(m.x, m.z)) < 1), '  on their feet, on the ground');

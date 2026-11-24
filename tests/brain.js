@@ -7,7 +7,7 @@
 const H = require('./harness'), ok = H.ok, SECS = +process.env.SECS || 40;
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.tk.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
+  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.ps.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
 };
 const go = (on, hooks, era) => {
   const C = H.load({ seed: 41 }); C.$('BRAIN').on = on;

@@ -4,7 +4,7 @@
    breath, head shot, anti-materiel by part, concealment) and its AI, and the AI's use of cars and LAVs. N: trials of the chance tests */
 const H = require('./harness'), N = +process.env.N || 400, C = H.load({ seed: 77 }), $ = C.$, ok = H.ok;
 const TRNS = $('TRNS'), ENT = $('ENT'), HK = $('HK'), SNIPE = $('SNIPE'), MAN = $('MAN'), IAI = $('IAI'), ERAS = $('ERAS'), GS = $('GS'), GR = $('GR'), FIELD = $('FIELD'), SPAWN = $('SPAWN'), BLD = $('BLD'), TCOL = $('TCOL'), KITS = $('KITS'), SARMS = $('SARMS');
-const pct = v => (100 * v).toFixed(0) + '%', f1 = v => v.toFixed(1);
+const pct = v => (100 * v).toFixed(0) + '%', f1 = v => v.toFixed(1), VLIFT = (() => { try { return $('VLIFT'); } catch (e) { return 1.5; } })();   // the vehicle frame over the ground (1.5 before cf-veiculos)
 for (const k of ['headTo', 'endS', 'lineS', 'manEye', 'visR', 'manY', 'paxN', 'roomIn', 'parked', 'canBoard', 'manBrain']) C[k] = $(k);
 let S, I, BX = 0, BZ = 0;   // BX BZ: a place on the flat of the home airfield
 const box = era => { S = C.sandbox(era); I = S.input; C.step(1 / 60); BX = S.base[0].x - 300; BZ = S.base[0].z - 150; return S; };
@@ -194,7 +194,7 @@ console.log('sniper');
   /* anti-materiel: one round on each part of each light vehicle, from the side, and what it does */
   const am = (era, kit, mk, lx, ly, from) => {
     box(era); const m = me(kit, BX, BZ), u = mk(), c = Math.cos(u.h), s = Math.sin(u.h); m.ctl.ads = true; m.sw = { a: 0, x: 0, y: 0 };
-    const tx = u.x + c * lx, tz = u.z - s * lx, ty = u.y + 1.5 + ly, k = from === 2 ? -1 : 1, sx = from ? u.x - c * 200 * k : tx - s * 200, sz = from ? u.z + s * 200 * k : tz - c * 200; m.x = sx; m.z = sz; m.y = C.manY(sx, sz);
+    const tx = u.x + c * lx, tz = u.z - s * lx, ty = u.y + VLIFT + ly, k = from === 2 ? -1 : 1, sx = from ? u.x - c * 200 * k : tx - s * 200, sz = from ? u.z + s * 200 * k : tz - c * 200; m.x = sx; m.z = sz; m.y = C.manY(sx, sz);
     const e = C.manEye(m), tt = 200 / m.arms[0].d.spd; m.f = C.vnorm({ x: tx - e.x, y: ty + .5 * GR * tt * tt - e.y, z: tz - e.z });
     const hp = u.hp, parts = u.parts.map(p => p.hp); let lab = null; const F = S.floats.length;
     C.snipe(m, m.arms[0]); let n = 0; while (S.slugs.length && n++ < 200) C.step(1 / 120);

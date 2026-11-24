@@ -61,8 +61,7 @@ const put = (c, x, z, h) => { const P = c.S.my; P.x = x; P.z = z; P.y = c.$('man
   ok(w.dead && a.S.civs.find(o => o.id === w.id).dead, 'a burst of the host\'s kills one and the guests see it');
   /* the laws of war online */
   await run(CIV.say + 1);
-  ok(h.S.civD && h.S.civD.n[0] === 2 && h.S.civD.tk[0] === 2 * CIV.toll && !h.S.civD.n[1], 'the host charged side 0 ' + 2 * CIV.toll + ' tickets for its two (Ana\'s rounds, its own burst)');
-  ok(a.S.cq.tk[0] === h.S.cq.tk[0] && c.S.cq.tk[0] === h.S.cq.tk[0], 'and the guests\' tickets say the same (' + h.S.cq.tk + ')');
+  ok(h.S.civD && h.S.civD.n[0] === 2 && !h.S.civD.n[1], 'the host counts side 0 its two (Ana\'s rounds, its own burst)');
   ok([a, c].every(x => x.S.feed.some(f => /civil morto|civis mortos/.test(f.text))), 'both guests are told in the feed (' + ((c.S.feed.find(f => /civ/.test(f.text)) || {}).text) + ')');
   /* recruit by a guest */
   const r = h.S.civs.find(o => !o.in && !o.dead && o.mode < 3), ra = a.S.civs.find(o => o.id === r.id); r.think = 1e9; r.mode = 0; r.goal = null; r.wT = 1e9;   // it stands where it is

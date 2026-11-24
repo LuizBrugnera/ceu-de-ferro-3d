@@ -1,7 +1,7 @@
 'use strict';
 /* suspended matches, headless, through the real relay server on its own port (PAGE=<page>, SERVER=<server>, PORT_T=<port>): a player alone
    in the room plays a while and leaves (an F5); the room is suspended with the clock where it stood; the next player to come in is
-   given the match and adopts it (the battle, the clock and tickets, the ruins, the economy) and plays on; "Nova partida" starts again.
+   given the match and adopts it (the battle, the clock and point-time, the ruins, the economy) and plays on; "Nova partida" starts again.
    About a minute */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
 const all = [], dt = 1 / 60;
@@ -39,9 +39,8 @@ const live = c => ({ planes: c.S.planes.filter(p => p.aid && !p.dead && !p.gone)
   await run(20);
   const T = a.S.T, hs = T.houses.filter(o => a.S.os[o.id] === 0).slice(0, 2);
   for (const o of hs) a.explode(o.x, o.y + 2, o.z, 60, 900, a.S.my, a.S.my.team);
-  a.S.cq.tk[1] -= a.$('ECO').site.fab.tk;   // tickets are morale: losing units costs none, so the red side is given the morale of a lost factory to carry over
   await run(4);
-  const Q = a.S.cq, was = { T: Q.T, tk: Q.tk.map(Math.round).join(), st: stages(a), live: live(a), ids: aids(a), en: a.S.eco.d[0].en, n: a.Net.cqn, sites: a.S.eco.l.filter(e => !e.dead).length };
+  const Q = a.S.cq, was = { T: Q.T, ps: Q.ps.map(Math.round), st: stages(a), live: live(a), ids: aids(a), en: a.S.eco.d[0].en, n: a.Net.cqn, sites: a.S.eco.l.filter(e => !e.dead).length };
   console.log('   at the F5: ' + JSON.stringify(Object.assign({}, was, { st: was.st.split(' ').length + ' objects not intact', ids: was.ids.size })));
   ok(was.st.length > 0 && was.live.units + was.live.men > 10, 'there is a battle to keep: AI on the field, objects damaged');
 
@@ -59,7 +58,7 @@ const live = c => ({ planes: c.S.planes.filter(p => p.aid && !p.dead && !p.gone)
   const now = live(b), Qb = b.S.cq;
   ok(!waited && b.S.host && !b.Net.sus && b.Net.host === b.id, 'then it is the host: it adopted the battle');
   ok(b.S.banner && b.S.banner.text === 'Partida retomada', 'and is told so: "' + (b.S.banner && b.S.banner.text) + '"');
-  ok(Qb.T < was.T && was.T - Qb.T < 2.5 && Qb.tk.map(Math.round).join() === was.tk, 'the clock goes on from ' + Math.round(was.T) + ' s (now ' + Math.round(Qb.T) + ' s), the tickets are the same (' + was.tk + ')');
+  ok(Qb.T < was.T && was.T - Qb.T < 2.5 && Qb.ps.every((v, s) => v >= was.ps[s] - 1 && v - was.ps[s] < 3 * Qb.p.length), 'the clock goes on from ' + Math.round(was.T) + ' s (now ' + Math.round(Qb.T) + ' s), and the point-time from where it was (' + was.ps + ' → ' + Qb.ps.map(Math.round) + ')');
   ok(b.Net.cqn === was.n, 'the same match number (' + b.Net.cqn + ')');
   ok(stages(b) === was.st, 'every object is at the stage it was: ' + was.st.split(' ').length + ' not intact');
   const kept = [...was.ids].filter(id => aids(b).has(id)).length;
@@ -75,6 +74,6 @@ const live = c => ({ planes: c.S.planes.filter(p => p.aid && !p.dead && !p.gone)
   const c = await client('Nova', 'tank', 'abrams', true);
   ok(c.S.host && !c.Net.sus && c.Net.cqn === was.n + 1, 'fresh: the player is host of a new match (number ' + c.Net.cqn + ')');
   await run(1);
-  ok(stages(c) === '' && c.S.cq.T > was.T + 10 && c.S.cq.tk.map(Math.round).join() !== was.tk, 'from the start: no ruins, the full clock (' + Math.round(c.S.cq.T) + ' s), fresh tickets');
+  ok(stages(c) === '' && c.S.cq.T > was.T + 10 && c.S.cq.ps.every((v, s) => v < was.ps[s]), 'from the start: no ruins, the full clock (' + Math.round(c.S.cq.T) + ' s), the point-time from 0');
   for (const o of all) o.Net.close(); N.stop(); done();
 })().catch(e => { console.error(e); N.stop(); process.exit(1); });

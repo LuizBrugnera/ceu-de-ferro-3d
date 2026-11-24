@@ -9,7 +9,7 @@
    5. honesty: a Proxy on S counts reads of the four lists while the model runs (its look, its guesses, its routes, its answer, its build):
       none (a positive control first); an enemy the side does not know of changes nothing, a reported one counts where it was reported, not
       where it is; an enemy site is worth taking once identified, not before; the guesses draw no Math.random.
-   6. the switch: the same match with G2W.on 1 and 0 after SECS s (units, men, tickets, operations; the frame meter's clock fixed, as
+   6. the switch: the same match with G2W.on 1 and 0 after SECS s (units, men, point-time, operations; the frame meter's clock fixed, as
       balance.js --nobudget), the belief of each side refreshed on its turn, and how much of the enemy it has placed.
    7. gask mundo: the regions, the edges and the belief; with x z, the routes; the same answer to the player and to the model.
    8. the cost: the ground at the load, the routes of a pair, a look (printed; measured beside the tournament, docs/nao-testado/cf-g2-g1-mundo.md).
@@ -139,12 +139,12 @@ if (SECS > 0) {
           return { tot, put, bel: B.tot, n: B.n }; });
       }
     });
-    const st = S.units.filter(u => !u.dead).map(u => [u.kind, Math.round(u.x), Math.round(u.z)].join()).sort().join(';') + '|' + S.men.filter(m => !m.dead).length + '|' + S.cq.tk.join() + '|' + S.cmd.map(c => c.ops.map(o => o.k).join()).join('/') + '|' + C.$('ANA').ev.length;
+    const st = S.units.filter(u => !u.dead).map(u => [u.kind, Math.round(u.x), Math.round(u.z)].join()).sort().join(';') + '|' + S.men.filter(m => !m.dead).length + '|' + S.cq.ps.join() + '|' + S.cmd.map(c => c.ops.map(o => o.k).join()).join('/') + '|' + C.$('ANA').ev.length;
     return { S, st, acc, C };
   };
   for (const era of ['ww2', 'modern']) {
     const a = run(1, era), b = run(0, era);
-    ok(a.st === b.st, era + ': the same match with the model on and off after ' + SECS + ' s (units, men, tickets, operations, events): nothing reads it yet');
+    ok(a.st === b.st, era + ': the same match with the model on and off after ' + SECS + ' s (units, men, point-time, operations, events): nothing reads it yet');
     ok(a.S.cmd.every(c => c.g2 && c.g2.n >= Math.floor(SECS / 4) - 1) && b.S.cmd.every(c => !c.g2) && !b.S.T.g2w, '  each side looked every 4 s (' + a.S.cmd.map(c => c.g2 && c.g2.n).join(', ') + ' looks); off, none and no ground');
     if (a.acc) console.log('  ' + era + ': of the enemy on the field (CMD.val), each side had placed in its belief ' + a.acc.map(o => o ? pc(o.tot ? o.put / o.tot : 0) + ' (' + o.put + ' of ' + o.tot + '; believed ' + o.bel.toFixed(0) + ')' : '—').join(', ') + ' after ' + SECS + ' s');
   }

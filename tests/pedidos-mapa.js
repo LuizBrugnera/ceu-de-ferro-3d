@@ -51,7 +51,7 @@ ok(r.st === 'no' && /amigas/.test(r.why), 'artillery on friends is refused: ' + 
 later(Math.max(PED.gap, PED.no) + .1); hide(); r = D('arm', tgt.x, tgt.z);
 ok(r.st === 'no' && /contato/.test(r.why), 'armour where no enemy is known is refused: ' + r.why);
 later(Math.max(PED.gap, PED.no) + .1); see(tgt); r = D('arm', tgt.x - 300, tgt.z);
-ok(r.st === 'ok' ? r.eta > 0 : /reserva|população|tíquetes/.test(r.why), 'armour near a seen enemy: ' + r.st + ' (' + r.why + ')');
+ok(r.st === 'ok' ? r.eta > 0 : /reserva|população/.test(r.why), 'armour near a seen enemy: ' + r.st + ' (' + r.why + ')');
 
 later(Math.max(PED.gap, PED.no) + .1); hide();
 const near = foes().find(g => Math.hypot(g.x - P.x, g.z - P.z) > 600) || tgt; near.x = P.x + 250; near.z = P.z; see(near);

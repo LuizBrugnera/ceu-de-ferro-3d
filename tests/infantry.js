@@ -5,6 +5,7 @@ const MAN = $('MAN'), STANCE = $('STANCE'), COVER = $('COVER'), KITS = $('KITS')
 const pct = v => (100 * v).toFixed(0) + '%';
 let S, B, g;
 const fresh = era => { S = C.sandbox(era || 'ww2'); B = S.base[0]; g = C.hgt(B.x, B.z); return S; };
+const VLIFT = (() => { try { return $('VLIFT'); } catch (e) { return 1.5; } })();   // the vehicle frame over the ground (1.5 before cf-veiculos)
 const aimAt = (m, t, up) => { const e = $('manEye')(m), d = $('vnorm')({ x: t.x - e.x, y: $('bodyY')(t) + (up || 0) - e.y, z: t.z - e.z }); m.ctl.aim = d; m.h = Math.atan2(-d.z, d.x); m.ap = Math.asin(d.y); };
 
 console.log('-- stance: share of 600 rounds from 250 m, with the spread of an AI rifleman, that hit a soldier --');
@@ -46,7 +47,8 @@ console.log('-- rifle against each kind of target (60 rounds at 120 m, damage ta
 const rifleOn = (kind, id) => {
   fresh(); const m = C.addMan('rifleman', 1, B.x, B.z, 0), t = kind === 'inf' ? C.addMan('schutze', 0, B.x + 120, B.z, 0) : C.addVehicle(kind, id, 0, B.x + 120, B.z, kind === 'art' ? 0 : Math.PI);
   const hp0 = t.hp, c0 = t.parts ? t.parts.map(p => p.hp).join() : ''; t.hp = t.max = 1e6; m.arms[0].mag = 1e9; m.arms[0].d = Object.assign({}, m.arms[0].d, { rate: .1 });
-  m.ctl.fire = true; C.run(kind === 'art' ? 40 : 7, () => { aimAt(m, t, kind === 'art' ? 1.5 : 0); m.held = false; });
+  m.ctl.fire = true; const up = kind === 'art' ? VLIFT + 2.5 - ($('bodyY')(t) - t.y) : 0;   // into the gun's open housing: 2.5 m over the vehicle's frame
+  C.run(kind === 'art' ? 40 : 7, () => { aimAt(m, t, up); m.held = false; });
   return { dmg: 1e6 - t.hp, parts: t.parts ? t.parts.map(p => p.hp).join() !== c0 : false, crew: t.def.parts && t.def.parts.pos && t.def.parts.pos.length ? t.def.parts.pos.filter(i => t.parts[i].hp > 0).length : null };
 };
 const rI = rifleOn('inf'), rT = rifleOn('truck'), rA = rifleOn('aa', 'wirbel'), rK = rifleOn('tank', 'tiger'), rH = rifleOn('art', 'hummel');

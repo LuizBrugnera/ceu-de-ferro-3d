@@ -18,7 +18,7 @@ const N = require('./net'), { ok, done } = require('./harness');
   const men = n => Array.from({ length: n }, (_, i) => [-100 - i, 2, i % 2, 22, 0, i, 2 * i, 1.5, 9]);
   const ecs = s => ({ t: 'ecs', s, T: 30, v: [s, 2, 3, 4, 5, 6, 7, 8], c: 0, q: [], r: [], kp: [], ms: [], ls: [], sl: [], kn: [], gd: [], sc: [], tg: 0 });
   const gen = s => ({ t: 'gen', s, T: 30, v: { doc: 'd' + s }, q: [] });
-  const cq = (n, T) => ({ t: 'cq', n, ph: 0, T, k: [400, 380], k0: 500, len: 1, p: [0, 100, 10, 0], l: [1, 2, 3, 4, 5, 6] });
+  const cq = (n, T) => ({ t: 'cq', n, ph: 0, T, ps: [400, 380], len: 1, p: [0, 100, 10, 0], l: [1, 2, 3, 4, 5, 6] });
   h.send({ t: 'ai', k: 1, e: [veh] }); h.send({ t: 'ai', k: 0, e: [pl] });
   h.send({ t: 'ai', k: 2, e: men(64) }); h.send({ t: 'ai', k: 2, e: men(70).slice(64) });   // soldiers come a part at a time
   h.send({ t: 'obj', e: [12, 1, 345, 2] }); h.send({ t: 'obj', e: [12, 2, 50, 1] });
@@ -29,7 +29,7 @@ const N = require('./net'), { ok, done } = require('./harness');
   for (const s of [0, 1]) { h.send(ecs(s)); h.send(gen(s)); h.send({ t: 'glog', s, T: 30, e: [[1, 'k', 'old' + s, null, null, null, null]], full: 1 }); h.send({ t: 'glog', s, T: 31, e: [[2, 'k', 'new' + s, null, null, null, null]] }); }
   h.send({ t: 'rad', e: [[1, 0, 0, 10, 20, 3, 0]] }); h.send(cq(0, 754)); h.send({ t: 'keep', e: { v: 1, n: 'econ' } });
   h.send({ t: 'mine', q: 3, i: 0, n: 1, e: [[5, 0, 1, 10, 20, 0], [6, 1, 0, 30, 40, 2]], s: 6 });   // one hidden mine of side 1
-  g.send({ t: 'cq', n: 0, ph: 0, T: 1, k: [1, 1], k0: 1, len: 1, p: [], l: [0, 0, 0, 0, 0, 0] }); g.send({ t: 'obj', e: [99, 2] });   // a guest's word is not the match's
+  g.send({ t: 'cq', n: 0, ph: 0, T: 1, ps: [1, 1], len: 1, p: [], l: [0, 0, 0, 0, 0, 0] }); g.send({ t: 'obj', e: [99, 2] });   // a guest's word is not the match's
   await N.sleep(150);
 
   console.log('-- the room empties: the match is suspended --');
@@ -52,7 +52,7 @@ const N = require('./net'), { ok, done } = require('./harness');
   ok(fo.length === 2 && fo[0].i === 0 && fo[1].i === 1 && fo.every(m => m.n === 2) && (of(r, 'base')[0] || {}).e[0][0] === 40, 'the forts in their parts and the bases');
   const ec = of(r, 'ecs'), ge = of(r, 'gen'), gl = of(r, 'glog');
   ok(ec.length === 1 && ec[0].s === 0 && ge.length === 1 && ge[0].s === 0 && gl.length === 1 && gl[0].s === 0 && gl[0].full === 1 && gl[0].e.map(e => e[2]).join() === 'old0,new0', 'its own side\'s ecs, gen and the whole log (full), nothing of the other side');
-  ok((of(r, 'eco')[0] || {}).e && (of(r, 'rad')[0] || {}).e && of(r, 'cq').length === 1 && of(r, 'cq')[0].T === 754 && of(r, 'cq')[0].k.join() === '400,380', 'the economy\'s sites, the radios and the conquest with its clock where it stood (754 s)');
+  ok((of(r, 'eco')[0] || {}).e && (of(r, 'rad')[0] || {}).e && of(r, 'cq').length === 1 && of(r, 'cq')[0].T === 754 && of(r, 'cq')[0].ps.join() === '400,380', 'the economy\'s sites, the radios and the conquest with its clock where it stood (754 s)');
   const kp = r.got.findIndex(m => m.t === 'keep'), hs = r.got.findIndex(m => m.t === 'host'), last = Math.max(...['ai', 'obj', 'bld', 'cq', 'glog'].map(t => r.got.map(m => m.t).lastIndexOf(t)));
   ok(kp > last && hs > kp && r.got[kp].e.n === 'econ' && r.got[hs].id === r.id, 'then the sealed backup (keep), then host with its own id: the page adopts');
   const mn = r.got.findIndex(m => m.t === 'mine');

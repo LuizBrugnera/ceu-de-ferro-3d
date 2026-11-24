@@ -362,11 +362,12 @@ RX.lift = (c, m) => {
    (place, hull and turret, hp, part states, rounds of two arms, smoke, material) and x, 1 or 2, when that vehicle was lost, with by, who destroyed it (a vehicle its crew got out of counts as an AI
    kill, and the soldier's death, if it comes, is a down like any other); to trn, v,
    the AI entity it took. drive: a soldier asks the host for seat s of the parked AI vehicle v. grant: the host's yes, to that soldier alone */
-/* conquest: the match is the host's. cq: n the match number, ph 0 play 1 over, T s left, k and k0 the tickets, len the preset, p four
+/* conquest: the match is the host's. cq: n the match number, ph 0 play 1 over, T s left, ps the sides' point-time in whole s (the tie-break
+   of the points at the end; there are no tickets), len the preset, p four
    numbers a point (side or -1, progress in hundredths, the weights in tenths), l the losses, r [winner or -1, why] and w s to the next
    match once it is over. A new n is a new match: the room's scores start again. welcome says cq: 1 and cqn, the match the room is in.
    cq v 2 (N sides, the room's ns; the plan's section 4.3): p is 3 + N numbers a point [owner or -1, progress 0-100 in hundredths, the side
-   taking it or -1, then the N weights in tenths], k the N sides' tickets, l 3 N losses, r [winner or -1, why, placing: N integers, sides
+   taking it or -1, then the N weights in tenths], ps the N sides' point-time, l 3 N losses, r [winner or -1, why, placing: N integers, sides
    from first to last] (the placing may be left out). Without v the message is the old one of 2 sides, 4 numbers a point
    req: a soldier asks the host for a vehicle at the depot it stands in; reqa: the host's answer to it alone, why '' for yes */
 const int = (v, lo, hi) => Number.isInteger(v) && v >= lo && v <= hi;
@@ -376,8 +377,8 @@ const cqv2 = (N, p) => { for (let i = 0; i < p.length; i += 3 + N) if (!int(p[i]
 const cqr = (N, r) => Array.isArray(r) && (r.length === 2 || (r.length === 3 && vec(r[2], N) && r[2].every(v => int(v, -1, N)))) && int(r[0], -1, N - 1) && int(r[1], 0, 9);
 RX.cq = (c, m) => {
   const room = c.room, v2 = m.v === 2, N = v2 ? room.ns : 2, st = v2 ? 3 + N : 4;
-  if (!host(c) || (m.v !== undefined && !v2) || !int(m.n, 0, 1e6) || (m.ph !== 0 && m.ph !== 1) || !num(m.T) || !vec(m.k, N) || !num(m.k0) || !int(m.len, 0, 2) || !Array.isArray(m.p) || m.p.length > 24 * st || m.p.length % st || !m.p.every(v => int(v, -1000, 1000)) || (v2 && !cqv2(N, m.p)) || !vec(m.l, 3 * N)) return;
-  const o = Object.assign({ t: 'cq' }, v2 && { v: 2 }, { n: m.n, ph: m.ph, T: m.T, k: m.k, k0: m.k0, len: m.len, p: m.p, l: m.l });
+  if (!host(c) || (m.v !== undefined && !v2) || !int(m.n, 0, 1e6) || (m.ph !== 0 && m.ph !== 1) || !num(m.T) || !vec(m.ps, N) || !m.ps.every(v => num(v) && v >= 0) || !int(m.len, 0, 2) || !Array.isArray(m.p) || m.p.length > 24 * st || m.p.length % st || !m.p.every(v => int(v, -1000, 1000)) || (v2 && !cqv2(N, m.p)) || !vec(m.l, 3 * N)) return;
+  const o = Object.assign({ t: 'cq' }, v2 && { v: 2 }, { n: m.n, ph: m.ph, T: m.T, ps: m.ps, len: m.len, p: m.p, l: m.l });
   if (Array.isArray(m.sk) && m.sk.length === m.p.length / st && m.sk.every(v => int(v, -1, 999))) o.sk = m.sk;   // logistics (lg): the crates of each point, -1 none
   if (m.ph === 1 && (v2 ? cqr(N, m.r) : vec(m.r, 2) && int(m.r[0], -1, 1) && int(m.r[1], 0, 3))) { o.r = m.r; o.w = num(m.w) ? m.w : 0; }
   if (m.n !== (room.cqn || 0)) { room.cqn = m.n; room.keep = room.mines = null; room.snap = snapNew(); for (const q of room.values()) q.player.kills = q.player.deaths = q.player.ai = 0; scores(c); }
@@ -462,8 +463,7 @@ RX.grant = (c, m) => {
   };
 }
 /* civilians in the towns (welcome says civ: 1). civ: the host's word on them, to the room: k 0 rows of [id, x, z, heading, flags, colour], k 1 the militia as
-   triples [aid, colour, owner], k 2 the laws of war as [side (-1 none), civilians it killed, town (-1 none), the sides that town turned against (bits),
-   the tickets those deaths cost it].
+   triples [aid, colour, owner], k 2 the laws of war as [side (-1 none), civilians it killed, town (-1 none), the sides that town turned against (bits)].
    civhit and civrec go to the host alone: a guest's own hits on civilians, pairs of id and damage, and a request to recruit one */
 {
   const row = e => vec(e, 6) && Number.isInteger(e[0]) && e[0] >= 0 && e[0] < 65536 && Number.isInteger(e[4]) && e[4] >= 0 && e[4] < 32 && Number.isInteger(e[5]) && e[5] >= 0 && e[5] < 32;
@@ -471,7 +471,7 @@ RX.grant = (c, m) => {
     if (!host(c) || !Array.isArray(m.e)) return;
     if (m.k === 0 && m.e.length <= 40 && m.e.every(row)) cast(c, { t: 'civ', k: 0, e: m.e });
     else if (m.k === 1 && m.e.length <= 90 && m.e.length % 3 === 0 && m.e.every((v, i) => (i % 3 ? Number.isInteger(v) && v >= 0 && v < 1e6 : aid(v)))) cast(c, { t: 'civ', k: 1, e: m.e });
-    else if (m.k === 2 && vec(m.e, 5) && m.e.every(Number.isInteger) && m.e[0] >= -1 && m.e[0] < c.room.ns && m.e[1] >= 0 && m.e[1] < 1000 && m.e[2] >= -1 && m.e[2] < 1000 && m.e[3] >= 0 && m.e[3] <= ALL(c.room) && m.e[4] >= 0 && m.e[4] < 100000) cast(c, { t: 'civ', k: 2, e: m.e });
+    else if (m.k === 2 && vec(m.e, 4) && m.e.every(Number.isInteger) && m.e[0] >= -1 && m.e[0] < c.room.ns && m.e[1] >= 0 && m.e[1] < 1000 && m.e[2] >= -1 && m.e[2] < 1000 && m.e[3] >= 0 && m.e[3] <= ALL(c.room)) cast(c, { t: 'civ', k: 2, e: m.e });
   };
   RX.civhit = (c, m) => {
     const h = c.room.host;

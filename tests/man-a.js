@@ -25,7 +25,7 @@ if (process.env.BATTLE) {
   const era = process.env.BATTLE, SECS = +process.env.SECS || 300, C = H.load({ seed: 101, mapv: 4, eco: true }), $ = C.$, S = C.newState(era, $('ERAS')[era].sides[0].fighter, { cls: 'plane' });
   const made = []; let err = null; const t0 = Date.now();
   try { C.run(SECS, () => { for (const Cm of S.cmd || []) for (const op of Cm.ops) if (op.man && !made.includes(op)) made.push(op); }, 1 / 30); } catch (e) { err = e; }
-  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.tk[0]) || !Number.isFinite(S.cq.tk[1]);
+  const bad = S.cq.p.some(p => !Number.isFinite(p.c)) || !Number.isFinite(S.cq.ps[0]) || !Number.isFinite(S.cq.ps[1]);
   const n = Object.fromEntries(['flk', 'inf', 'raid', 'cut', 'blk', 'dep', 'fnt', 'mres', 'gue'].map(k => [k, made.filter(o => o.k === k).length]));
   ok(!err && !H.nan(S) && !bad, era + ' ' + SECS + ' s at map 4, economy ' + ($('ECO').on ? 'on' : 'OFF') + ': no exception, no NaN (' + (Date.now() - t0) + ' ms)' + (err ? ' ' + err.stack : ''));
   console.log('  opened (all kinds): ' + JSON.stringify(n) + '; batch A: ' + KINDS.map(k => k + ' ' + n[k]).join(', ') + '; made ' + made.length + ', over ' + made.filter(o => o.over).length);
@@ -122,8 +122,8 @@ for (const era of ['ww2', 'modern']) {
     ok($('MANG').gue(Cm, X).length === 0 && Cm.gueLo === S.t, 'gue: not at once: it waits MANT.gue.calm s of inferiority first');
     Cm.gueLo = S.t - 100; const cs = $('MANG').gue(Cm, X), c = cs[0];
     ok(cs.length === 1 && c.k === 'gue' && c.sc > 0 && c.sc <= 2 && Math.abs(c.sc - Math.min(2, $('MANT').gue.w * $('MANT').gue.ratio / Rr)) < 1e-6 && c.spec.c === 'harass' && c.spec.n === 2 && /^em inferioridade/.test(c.why), 'gue: a candidate, score ' + (c && c.sc.toFixed(2)) + ', ' + (c && c.why));
-    { const T0 = S.cq.tk[0]; S.cq.tk[0] = S.cq.tk0 * .2; const lo = $('gueLow')(Cm); S.cq.tk[0] = T0; ok(lo === 'ratio', 'gue: the reason is the ratio while it is low (' + lo + ')');
-      const e = Cm.enemy.slice(); Cm.enemy.fill(0); Cm.own.fill(5); S.cq.tk[0] = S.cq.tk0 * .2; for (const p of P) if (!p.base || p.base < 0) if (p.hold === 0 && p.base < 0) p.hold = 1; const lt = $('gueLow')(Cm); ok(lt === 'tk', 'gue: low tickets with fewer points make it a reason too (' + lt + ')'); S.cq.tk[0] = T0; for (const p of P) if (p.k !== 'base' && p.L <= 'D') p.hold = 0; Cm.enemy = e; $('cmdSense')(Cm, own); }
+    { const lo = $('gueLow')(Cm); ok(lo === 'ratio', 'gue: the reason is the ratio while it is low (' + lo + ')');
+      const e = Cm.enemy.slice(); Cm.enemy.fill(0); Cm.own.fill(5); for (const p of P) if (!p.base || p.base < 0) if (p.hold === 0 && p.base < 0) p.hold = 1; const lt = $('gueLow')(Cm); ok(lt === 'pts', 'gue: ' + $('GUEX').pts + ' points or more behind is a reason too (' + lt + ')'); for (const p of P) if (p.k !== 'base' && p.L <= 'D') p.hold = 0; Cm.enemy = e; $('cmdSense')(Cm, own); }
     const r = genCmd(0, { c: 'man', k: 'harass', n: c.spec.n, why: c.spec.why }, 'ai', { spec: c.spec }), op = Cm.man.find(o => o.k === 'gue');
     ok(r.ok && !!op && Cm.gue && Cm.gue.op === op && op.teams.length === 2 && op.teams.every(T => T.q.op === op), 'gue: opened through genCmd ai: two teams of one squad each, C.gue set');
     ok(logOf(S, 0, /^Em inferioridade \([\d,]+:1\): fustigar e evitar combate decisivo$/).length === 1, 'gue: the log says it: ' + (logOf(S, 0, /fustigar/)[0] || {}).s);

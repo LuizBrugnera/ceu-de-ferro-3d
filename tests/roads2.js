@@ -1,6 +1,6 @@
 'use strict';
 /* Roads plan, slice 2 (map version 3): the new places and points. Terrain at map 3 (burgs, buildings, clearance), 10 / 12 points, their links
-   and the ways that join them, every point capturable from its side, the tickets scaled with the points, the general's and the HUD's fit,
+   and the ways that join them, every point capturable from its side, the general's and the HUD's fit,
    and the points over the wire (a host and a client on a map 3 room). Env: PAGE, SERVER, PORT_T. tests/roads.js stays the slice 1 test
    (it builds map 2 itself). */
 const N = require('./net'), H = require('./harness'), { ok, done } = H;
@@ -75,9 +75,7 @@ const hdist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
       }
     });
     ok(!bad.length, 'every point but the bases is taken by either side from a neighbour it holds' + (bad.length ? ' (not: ' + bad + ')' : ''));
-    /* tickets and the strip */
-    const tk = S.cq.tk0, want = Math.round($('CQ').len[S.cq.len][2] * CQ.era[era] * RN.tk[era]);
-    ok(tk === want, 'tickets ' + tk + ' = preset x era x RN.tk (' + RN.tk[era] + ')');
+    /* the strip */
     const u = .62, wHud = P.length * (21 * u + 3 * u) - 3 * u + 2 * (44 * u + 8 * u);
     ok(wHud + 16 < 360, 'the HUD strip is ' + wHud.toFixed(0) + ' px at a 360 px screen (' + P.length + ' points)');
     ok(P.length * 4 <= 64, 'the cq message carries ' + P.length * 4 + ' numbers (the server takes 64)');
@@ -90,14 +88,14 @@ const hdist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
   const page = (era, host) => new Promise(res => { const c = H.load({ WebSocket: N.WebSocket, host: 'localhost:' + N.PORT, seed: 3, mapv: 3 }), Net = c.$('Net'); Net.ui.welcome = () => { c.newState(era, 'tiger', { net: true, cls: 'tank', mouse: true, host: Net.host === Net.id }); res(c); }; Net.ui.refused = code => res({ refused: code }); Net.connect(era, 'p' + host, 'tank', 'tiger'); });
   const a = await page('ww2', 0), b = await page('ww2', 1);
   ok(!a.refused && !b.refused && a.$('Net').mv === 3 && b.$('S').mv === 3 && a.$('S').cq.p.length === 10 && b.$('S').cq.p.length === 10, 'two pages join a map 3 room: 10 points each');
-  const Qa = a.$('S').cq; Qa.p[8].hold = 1; Qa.p[8].c = .4; Qa.p[2].c = -.5; Qa.tk = [321, 123];
+  const Qa = a.$('S').cq; Qa.p[8].hold = 1; Qa.p[8].c = .4; Qa.p[2].c = -.5; Qa.ps = [321, 123];
   a.$('Net').cqSend(); await N.sleep(400);
   const Qb = b.$('S').cq;
-  ok(Qb.p[8].hold === 1 && Math.abs(Qb.p[8].c - .4) < .011 && Math.abs(Qb.p[2].c + .5) < .011 && Qb.tk[0] === 321, 'the client has the host\'s 10 points through the server (cq, 40 numbers)');
+  ok(Qb.p[8].hold === 1 && Math.abs(Qb.p[8].c - .4) < .011 && Math.abs(Qb.p[2].c + .5) < .011 && Qb.ps[0] === 321, 'the client has the host\'s 10 points through the server (cq, 40 numbers)');
   const m = await N.raw(); m.send({ t: 'join', room: 'modern', name: 'q', cls: 'tank', model: 'abrams', mv: 3 }); const w = await m.wait('welcome');
-  m.send({ t: 'cq', n: 0, ph: 0, T: 100, k: [1, 1], k0: 1, len: 1, p: Array.from({ length: 48 }, (_, i) => (i % 4 ? 0 : -1)), l: [0, 0, 0, 0, 0, 0] });
+  m.send({ t: 'cq', n: 0, ph: 0, T: 100, ps: [1, 1], len: 1, p: Array.from({ length: 48 }, (_, i) => (i % 4 ? 0 : -1)), l: [0, 0, 0, 0, 0, 0] });
   const m2 = await N.raw(); m2.send({ t: 'join', room: 'modern', name: 'r', cls: 'tank', model: 'abrams', mv: 3 }); await m2.wait('welcome');
-  m.send({ t: 'cq', n: 0, ph: 0, T: 100, k: [1, 1], k0: 1, len: 1, p: Array.from({ length: 48 }, (_, i) => (i % 4 ? 0 : -1)), l: [0, 0, 0, 0, 0, 0] });
+  m.send({ t: 'cq', n: 0, ph: 0, T: 100, ps: [1, 1], len: 1, p: Array.from({ length: 48 }, (_, i) => (i % 4 ? 0 : -1)), l: [0, 0, 0, 0, 0, 0] });
   const got = await m2.wait('cq'); ok(w && w.mv === 3 && got && got.p.length === 48, 'the server relays a 12-point cq (48 numbers) of a map 3 modern room');
   a.$('Net').close(); b.$('Net').close(); m.close(); m2.close(); N.stop(); done();
 })();

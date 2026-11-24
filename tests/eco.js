@@ -10,7 +10,7 @@ const BEFORE = process.env.BEFORE ? path.resolve(process.env.BEFORE) : path.join
 /* what the match came to, to the last digit, and where the random stream stands */
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.tk.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
+  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.ps.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
 };
 function battle(o) {
   const C = H.load({ seed: 41, page: o.page });
@@ -88,13 +88,12 @@ function section(era, secs) {
       'the view model shows its own sites, the deposits, and of the enemy\'s only those side 0 has found (' + own.length + ' own, ' + fnd.length + ' found)');
     ok(C.genVM(0, true).eco.sites.some(s => s.t === 1), 'all: the enemy\'s sites too');
     /* a site goes down */
-    const pow = S.eco.l.find(e => e.team === 1 && e.k === 'pow' && !e.dead), tk0 = S.cq.tk[1], inc0 = S.eco.d[1].inc.en;
+    const pow = S.eco.l.find(e => e.team === 1 && e.k === 'pow' && !e.dead), inc0 = S.eco.d[1].inc.en;
     ok(!!pow, 'side 1 has a usina to lose');
     if (pow) {
       C.hitObj(pow.o, 1e5, null);
       ok(pow.dead, 'a usina hit hard is dead');
       ok(S.glog.l[1].some(e => e.k === 'eco' && /^Perdemos/.test(e.s)), 'its side wrote "' + (S.glog.l[1].filter(e => /^Perdemos/.test(e.s)).pop() || { s: '-' }).s + '"');
-      ok(S.cq.tk[1] <= tk0 - ECO.site.pow.tk + 1e-9 || S.cq.ph, 'it cost its side ' + ECO.site.pow.tk + ' tickets');
       C.run(1); ok(S.eco.d[1].inc.en < inc0 && S.eco.d[1].inc.en >= (ECO.hq.en + C.ecoPtInc(1).en) * 60 - 1e-6, 'its income dropped on the next pass: ' + Math.round(inc0) + ' -> ' + Math.round(S.eco.d[1].inc.en) + ' a minute');
     }
   }

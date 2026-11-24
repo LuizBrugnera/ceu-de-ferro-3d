@@ -29,6 +29,8 @@ No navegador:
 
 ## Achado: todo veículo fica 1,5 m acima do chão (de antes desta frente)
 
+Resolvido depois, em cf-veiculos: a origem do veículo (modelo, caixas de acerto, `d.mh`, assentos) desceu para o chão junto (`VLIFT` no `Céu de Ferro 3D.html`; teste `tests/veiculos-chao.js`). O registro abaixo é de quando foi achado.
+
 Medido na demonstração: em todo veículo terrestre (tanque, caminhão, carro, artilharia, antiaérea, blindado), o ponto mais baixo do modelo fica exatamente 1,5 m acima do chão sob ele.
 
 A causa vem do primeiro commit e está na simulação inteira, não só no desenho:

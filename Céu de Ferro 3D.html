@@ -32384,7 +32384,7 @@ function los(a, ay, b, by) {
    known: it may be picked. sight: what there is to aim at, the target itself or, for SIGHT.mem s, the still point where it went out of
    sight (lost); then null, and the owner lets go of it */
 const ZERO = { x: 0, y: 0, z: 0 }, eyeY = o => o.y + (o.man ? STANCE[o.st].eye * MAN.sc : o.kind ? o.def.mh : 0), bodyY = o => o.y + (o.man ? o.fy || STANCE[o.st].h * MAN.sc * .6 : o.sup ? 1.6 : o.kind ? 2.5 : 0);
-const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air * (S.T.trv && canopy(t) ? TREES.canopy : 1))) || (!a.kind && !!t.kind && !t.man && !t.lost && !!S.T.trv && dist(a, t) > TREES.air && canopy(t)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);
+const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air * (S.T.trv && canopy(t) ? TREES.canopy : 1))) || (!a.kind && !!t.kind && !t.man && !t.lost && !!S.T.trv && dist(a, t) > TREES.air && canopy(t)) || (!!t.cnv && camHid(a, t)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);   // under a camouflage net (CNET): only from near
 const sees = (a, t) => los(a, eyeY(a), t, bodyY(t)) && !hid(a, t);
 /* the seeker's line: what a guided weapon's sight, seeker or laser needs to its target, for the player and the AI alike, at the lock, at the
    launch and in flight. The one sight rule (los: the ground and whatever hides, every kind with OBJ sight) and anything else solid on the line,
@@ -34463,7 +34463,7 @@ function siteWhy(t, x, z, a) {
   if (hi - lo > BLD.slope * R * 2) return 'steep';
   if (onRoadW(x, z, BLD.road + R)) return 'road';
   if (S.sup.some(b => !b.dead && hdist(b, at) < BLD.apart) || S.base.some(b => hdist(b, at) < BLD.main)) return 'base';
-  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
+  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && !o.K.over && footD(o, x, z) < R + BLD.pad) return 'obj';
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
   for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
   if (S.sup.reduce((n, b) => n + (b.team === t && !b.dead ? 1 : 0), 0) >= supCap(t)) return 'cap';
@@ -40417,7 +40417,7 @@ function fortWhy(k, t, x, z, a, pre) {
   if (hi - lo > FORT.slope * L * 2) return 'steep';
   if (road) return 'road';
   for (const o of near(x, z, L + 6)) {
-    if (S.os[o.id] > 1 && !o.K.ruin) continue;
+    if ((S.os[o.id] > 1 && !o.K.ruin) || o.K.over) continue;   // a camouflage net goes over a work, a work under it (CNET)
     for (const e of FEND) { const d = footD(o, x + ux * L * e * (o.ft ? FORT.lap : 1), z + uz * L * e * (o.ft ? FORT.lap : 1)); if (o.ft ? d < w * .5 : d < w + F.pad) return o.ft ? 'fort' : 'obj'; }
   }
   if (pre) return '';
@@ -40457,7 +40457,8 @@ function fortsAt(x, z) {
   const C = FCELL.m, key = (i, j) => (i + 512) * 8192 + j + 4096;
   if (!S.fg || S.fg.n !== S.fn) {
     const G = (S.fg = new Map()); G.n = S.fn;
-    for (const f of S.forts) { if (f.F.span) continue; const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
+    for (const f of S.forts) { if (f.F.span || f.F.cam) continue;   // a camouflage net shelters nobody (CNET)
+      const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
   }
   return S.fg.get(key(Math.floor(x / C), Math.floor(z / C))) || NONE;
 }
@@ -45225,7 +45226,7 @@ function ecoWhy(t, k, x, z, a) {
   if (hi - lo > BLD.slope * R * 2) return 'steep';
   const rd = routeDist(S.T, x, z);
   if (onRoadW(x, z, BLD.road + R)) return 'road';
-  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
+  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && !o.K.over && footD(o, x, z) < R + BLD.pad) return 'obj';
   const own = ecoLive(t), lot = ecoLot(t, k, x, z) >= 0, pq = k === 'mine' ? ecoDepAt(x, z, true) : null, pp = pq && pq.pt >= 0 && S.cq ? S.cq.p[pq.pt] : null;   // a point's deposit (ECO.pt)
   if (own.some(e => hdist(e, at) < (lot && e.lot >= 0 ? ECO.lot.apart : ECO.apart))) return 'near';
   if (pp && pp.hold !== t) return 'pt';
@@ -45889,7 +45890,7 @@ function genVM(t, all) {
       : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: bySide(() => 0), links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
     sup: S.sup.filter(b => !b.dead && (all || b.team === t || spotted(b, t))).map(b => ({ x: b.x, z: b.z, t: b.team, prog: b.prog, a: b.a })),
-    forts: S.forts.filter(o => !o.dead && (all || o.team === t || o.pre)).map(o => ({ x: o.x, z: o.z, a: o.a, k: o.k, t: o.team, prog: o.prog })),
+    forts: S.forts.filter(o => !o.dead && (all || o.team === t || o.pre)).map(o => Object.assign({ x: o.x, z: o.z, a: o.a, k: o.k, t: o.team, prog: o.prog }, o.F.cam && { rv: camRev(o) ? 1 : 0 })),   // a camouflage net: shown or not (CNET)
     u, me: (S.my && !S.my.dead && S.my.team === t) ? { x: S.my.x, z: S.my.z } : null, f,
     road: C ? R.map((r, ri) => ({ own: C.own[ri], foe: C.enemy[ri], k: C.ratio[ri], post: C.post[ri], fp: routeAt(r, C.front[ri]), ep: routeAt(r, C.foe[ri]), mid: routeAt(r, r.len / 2) })) : null,
     ops, fm: C ? C.fm.filter(M => !M.dead && S.t < M.T).map(M => ({ x: M.x, z: M.z, k: M.k, n: M.n, left: M.T - S.t, by: !!M.by })) : [], sc,
@@ -63494,6 +63495,102 @@ Net.rx.pdl = m => {
   if (m.k === 0) Net.send('pdl', { to: m.from, k: 0, n: ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8) });
   else if (m.k === 1 && Array.isArray(m.n)) { const E = INF[S.era][S.fac[g.team]], kits = m.n.filter(k => Number.isInteger(k) && E[k]).slice(0, 8); if (kits.length) ptrStick(g.team, kits, g, m.r === 1); }
 };
+/* ---------- camouflage nets (CNET, cf-pol2-camuflagem: P31) ----------
+   Two works of the soldier's build mode (N), kinds 14 and 15: a small net (FORT.cns, 10 m square: a vehicle, a gun, a post) and a large
+   one (FORT.cnl, 24 m: a supply base, an economy site). Poles and a canopy over them: nothing stops at it (OBJ.cnet: no height, no bump,
+   no push, over: it lies over a work or a base and they under it), it shelters nobody from fire (no slots, not a man's work, fortsAt),
+   it hides. What stands under a whole net (its middle inside the footprint), has stood still (less than CNET.still m between two looks) and
+   has kept within CNET.move m of where it stopped is covered (o.cnv, the net); a covered thing is seen only from near (D7: strong from far,
+   as before from near): from an aircraft within CNET.R.air m (a helicopter's optics CNET.opt times that), from a vehicle within CNET.R.gnd m
+   (a tank's or an air defence's optics CNET.opt times), from a soldier within CNET.R.man m, from a camera drone within CNET.dr of its
+   camera's reach (camR). Beyond, hid() hides it from every look: the side's map (spot), the economy's (ecoSeen), the drones', an AI's own
+   notice and pick. It breaks: a shot from anything under it reveals the whole net for CNET.fire s (f.rv), moving off the spot uncovers the
+   mover, a burst within CNET.rip m of the footprint tears the net down (where the match is simulated), and a recon drone's mark (DMK)
+   marks what it marked. A sighting from before stays as long as it did (spotted, BLD.keep): a net hides from new looks, it does not wipe
+   a side's memory. D9: no binoculars; the drones and the optics are what find a net.
+   The covers are worked out every CNET.every s on every peer, from what each has; online the nets travel in fort like any work, with a
+   server that knows kinds 14 and 15 (welcome cam) */
+const CNET = { on: 1, every: .25, R: { air: 600, gnd: 900, man: 400 }, opt: 1.5, dr: .6, fire: 20, move: 2, still: .2, rip: 12, slope: .25, n: 0 };
+OBJ.cnet = { hp: [60, 0], take: [0, 0, 0], dug: 1e9, over: 1, veh: () => 1 };
+FORT.cns = { k: 14, name: 'Rede de camuflagem pequena', obj: 'cnet', size: [10, 10, 6], time: 20, cap: 12, cost: [3, 6], put: [7, 10], min: 1, garr: [], cam: 1 };
+FORT.cnl = { k: 15, name: 'Rede de camuflagem grande', obj: 'cnet', size: [24, 24, 7.5], time: 45, cap: 6, cost: [8, 16], put: [14, 18], min: 1, garr: [], cam: 1 };
+FORT.K[14] = FORT.cns; FORT.K[15] = FORT.cnl;
+const camK = k => !!(FORT.K[k] && FORT.K[k].cam);
+Net.cam = false;
+Net.rx.welcome = (g => m => { Net.cam = m.cam === 1; g(m); })(Net.rx.welcome);
+/* why a net may not lie at x z: '' or cserver (an older server), map, water, steep, cnet (on another net), foe, pcap, cost. It may lie over
+   a road, a work, a supply base, a vehicle or a tree: that is what it is for */
+function camWhy(k, t, x, z, a) {
+  const F = FORT.K[k], L = F.size[0] / 2, ux = -Math.sin(a), uz = -Math.cos(a), at = { x, z }; let lo = 1e9, hi = -1e9, n = 0;
+  if (S.net && !Net.cam) return 'cserver';
+  if (!(x > 30 && x < S.W - 30 && Math.abs(z) < S.HW - 30)) return 'map';
+  for (const i of [-1, 0, 1]) for (const j of [-1, 0, 1]) { const h = hgt(x + (ux * i - uz * j) * L, z + (uz * i + ux * j) * L); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  if (lo < S.T.WL + .6) return 'water';
+  if (hi - lo > CNET.slope * L * 2) return 'steep';
+  for (const f of S.forts) if (f.F.cam && !f.gone && Math.hypot(f.x - x, f.z - z) < (f.o.hw + L) * .7) return 'cnet';
+  for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
+  for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
+  for (const f of S.forts) if (f.team === t && f.k === k && !f.gone) n++;
+  if (n >= F.cap) return 'pcap';
+  const d = ecoSim() && S.eco.d[t]; return d && (d.en < F.cost[0] || d.mt < F.cost[1]) ? 'cost' : '';
+}
+fortWhy = (g => (k, t, x, z, a, pre) => (camK(k) ? (pre ? 'map' : camWhy(k, t, x, z, a)) : g(k, t, x, z, a, pre)))(fortWhy);
+fortSlots = (g => f => (f.F.cam ? f.pts || (f.pts = []) : g(f)))(fortSlots);
+fortAt = (g => (f, prog) => { g(f, prog); if (f.F.cam) f.o.h = -.01; })(fortAt);   // no height: no ray stops at it
+/* the reach of a's eyes into a net */
+function camR(a) {
+  if (a.drone) return CNET.dr * ((a.def && a.def.cam) || ECO.see.dr);
+  if (a.man) return CNET.R.man;
+  if (a.kind) return CNET.R.gnd * (a.kind === 'tank' || a.kind === 'aa' ? CNET.opt : 1);
+  if (a.def && a.def.vmax) return CNET.R.air * (a.heli ? CNET.opt : 1);
+  return CNET.R.gnd;
+}
+/* hid()'s share: t is covered (o.cnv, this match's) and a looks from beyond its reach */
+function camHid(a, t) {
+  const f = t.cnv; if (t.cnS !== S.camS || f.gone || a.team === t.team) return false;
+  const R = camR(a), dx = a.x - t.x, dz = a.z - t.z, dy = a.y !== undefined && t.y !== undefined ? a.y - t.y : 0;
+  return dx * dx + dz * dz + dy * dy > R * R;
+}
+/* the net over x z (a standing one of S.camN), or null */
+function camUnder(o) {
+  for (const f of S.camN || NONE) { const q = f.o, dx = o.x - q.x, dz = o.z - q.z; if (Math.abs(dx * q.c - dz * q.s) < q.hw && Math.abs(dx * q.s + dz * q.c) < q.hd) return f; }
+  return null;
+}
+const camRev = f => S.t - (f.rv === undefined ? -1e9 : f.rv) < CNET.fire;
+/* every CNET.every s: what each standing net covers */
+function camStep() {
+  if (S.t < (S.camT || 0)) return;
+  S.camT = S.t + CNET.every; S.camS = S.camS || ++CNET.n;
+  for (const o of S.camL || NONE) o.cnv = null;
+  const N = (S.camN = CNET.on ? S.forts.filter(f => f.F.cam && !f.gone && f.prog >= 1 && !(S.os[f.id] > 1)) : []);
+  S.camL = null; if (!N.length) return;
+  const L = (S.camL = []);
+  const look = o => {
+    if (o.dead || o.gone || o.in) return;
+    const f = camUnder(o); if (!f) { o.cnA = null; return; }
+    const P = o.cnP || (o.cnP = { x: o.x, z: o.z, f: null }), still = P.f === f && Math.abs(o.x - P.x) < CNET.still && Math.abs(o.z - P.z) < CNET.still;
+    P.x = o.x; P.z = o.z; P.f = f;
+    const A = o.cnA;
+    if (!(A && A.f === f && Math.hypot(o.x - A.x, o.z - A.z) <= CNET.move)) { if (!still) { o.cnA = null; return; } o.cnA = { x: o.x, z: o.z, f }; }   // off its spot: uncovered until it stops again
+    const s = shotAt(o); if (s >= 0 && S.t - s < CNET.fire && !(s <= f.rv)) f.rv = s;   // it fired from under the net: the whole net shows (an arm never fired holds -9)
+    L.push(o);
+  };
+  for (const o of S.units) look(o);
+  for (const o of S.men) look(o);
+  for (const o of S.sup) if (o.prog >= 1) { o.cnP = { x: o.x, z: o.z, f: camUnder(o) }; look(o); }   // a base stands still
+  if (S.eco) for (const o of S.eco.l) { o.cnP = { x: o.x, z: o.z, f: camUnder(o) }; look(o); }
+  for (const o of L) if (!camRev(o.cnA.f)) { o.cnv = o.cnA.f; o.cnS = S.camS; }
+}
+step = (g => dt => { g(dt); if (S && S.forts && S.T) camStep(); })(step);
+/* a burst within CNET.rip m of a net's footprint, near the ground, tears it down (where the match is simulated; the guests are told in fort and obj) */
+function camRip(x, y, z, by) {
+  for (const f of S.forts) {
+    if (!f.F.cam || f.gone || S.os[f.id] > 1 || Math.abs(f.x - x) > f.o.r + CNET.rip || Math.abs(f.z - z) > f.o.r + CNET.rip) continue;
+    if (footD(f.o, x, z) <= CNET.rip && y - f.y < CNET.rip + f.F.size[2]) setObj(f.o, 2, by);
+  }
+}
+explode = (g => (x, y, z, r, dmg, by, team, ...a) => { const v = g(x, y, z, r, dmg, by, team, ...a); if (S.forts && S.forts.length && (!S.net || S.host)) camRip(x, y, z, by); return v; })(explode);
+/* ---------- end of the camouflage nets ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -76161,6 +76258,123 @@ ARMI.para = '<path d="M3 10a9 7 0 0118 0z"/><path d="M3.500 10.500l7 7M20.500 10
 CARD.plane = (g => (id, d) => { const c = g(id, d); if (d.para) { const n = PTR.sticks[id] || 1; c.arms = [['para', n * SQUAD[d.era].length + ' paraquedistas', n + (n > 1 ? ' esquadras' : ' esquadra') + ', B lança uma de cada vez']]; } return c; })(CARD.plane);
 CARD.heli = (g => (id, B) => { const c = g(id, B); if (B.lift) c.arms = c.arms.concat([['para', SQUAD.modern.length + ' soldados a bordo', 'G: fast-rope, salto ou pouso']]); return c; })(CARD.heli);
 /* ---------- end of the player's transport on the screen ---------- */
+/* ---------- camouflage nets: what is seen of them (CNET, cf-pol2-camuflagem: P31) ----------
+   CAMV: the poles are boxes of the works' mesh (postBoxes: four at the corners up to `edge` of the net's height and one in the middle to the
+   top, the large net four more halfway along its sides), raised in the first half of the work; the canopy one mesh a look and a size,
+   instanced (camScene), unrolled from one side over the second half. Its shape: a tent, the middle up at the work's height (FORT.cns and
+   cnl size[2]), the edges at `edge` of it, then a skirt hanging out and down to `skirt`; `tile` m a texture repeat. The looks (camTex,
+   a canvas a look, drawn once with its own dice so that the battle's are not touched): today leaf-cut garnish, a cut and colours of each side
+   (D1 the USA's rounded woodland leaves, Russia's pointed leaves in its greens, the Insurgents' rags and tarp), in 1944 hessian scrim with
+   strips of cloth, the same for both sides. The General View: an own net as a dashed square, REDE (REVELADA while it shows); the HUD:
+   CAMUFLADO / REVELADO n s under an own net (camHud) */
+const CAMV = { edge: .72, skirt: .18, tile: 2.6, pole: 0x5a4a32, max: 24, every: 20,
+  pal: { ww2: [0x6f6040, 0x5b5236, 0x7d7150, 0x4a4a2c, 0x857a55],
+    m0: [0x4f5a2e, 0x3a4424, 0x6b5a3a, 0x2c2f22, 0x7d7a52], m1: [0x56683a, 0x3e5230, 0x6f7a4c, 0x34402a, 0x8a8a60], m2: [0x8c7a58, 0x6e6042, 0xa08e66, 0x5a5038, 0x7a6a4a] } };
+const camLook = f => (S.era === 'ww2' ? 'ww2' : 'm' + clamp((S.fac && S.fac[f.team]) | 0, 0, 2));
+postBoxes = (g => (f, box, p, st) => {
+  if (!(f.F && f.F.cam)) return g(f, box, p, st);
+  const F = f.F, h = F.size[2], L = F.size[0] / 2 - .25, W = F.size[1] / 2 - .25, up = Math.min(1, p / .5), e = h * CAMV.edge * up, c = CAMV.pole;
+  for (const [i, j] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) box(i * L, e / 2, j * W, .14, e, .14, c);
+  if (F.size[0] > 15) for (const [i, j] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) box(i * L, e / 2, j * W, .14, e, .14, c);
+  box(0, h * up / 2, 0, .18, h * up, .18, c);
+})(postBoxes);
+/* a canvas of one look, seamless, cut out where it is not cloth */
+function camTex(look) {
+  const N = 256, cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const g = cv.getContext('2d'), P = CAMV.pal[look] || CAMV.pal.m0, R = rngOf(look === 'ww2' ? 44 : look === 'm0' ? 45 : look === 'm1' ? 46 : 47), col = i => '#' + P[i % P.length].toString(16).padStart(6, '0');
+  const wrap = (x, y, fn) => { for (const ox of [-N, 0, N]) for (const oy of [-N, 0, N]) if (Math.abs(x + ox - N / 2) < N * .75 && Math.abs(y + oy - N / 2) < N * .75) { g.save(); g.translate(x + ox, y + oy); fn(); g.restore(); } };
+  g.strokeStyle = look === 'ww2' ? '#4a3d28' : '#26281e'; g.lineWidth = look === 'ww2' ? 2.2 : 1.4;   // the net's string
+  for (let i = -N; i <= N * 2; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + N, N); g.moveTo(i, N); g.lineTo(i + N, 0); g.stroke(); }
+  if (look === 'ww2') {
+    for (let n = 0; n < 34; n++) { const x = R() * N, y = R() * N, w = 18 + R() * 30, d = 10 + R() * 18, a = R() * Math.PI, c = col(n); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.beginPath(); g.moveTo(-w / 2, -d / 2); g.lineTo(w / 2, -d / 2 + R() * 4); g.lineTo(w / 2 - R() * 4, d / 2); g.lineTo(-w / 2 + R() * 4, d / 2); g.fill(); }); }   // hessian
+    for (let n = 0; n < 120; n++) { const x = R() * N, y = R() * N, l = 16 + R() * 26, a = R() * Math.PI, c = col(n + 2); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.fillRect(-l / 2, -2, l, 4 + R() * 2); }); }   // strips of cloth
+  } else if (look === 'm2') {
+    for (let n = 0; n < 26; n++) { const x = R() * N, y = R() * N, w = 26 + R() * 34, d = 14 + R() * 20, a = R() * Math.PI, c = col(n); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.fillRect(-w / 2, -d / 2, w, d); }); }   // tarp
+    for (let n = 0; n < 90; n++) { const x = R() * N, y = R() * N, l = 20 + R() * 30, a = R() * Math.PI, c = col(n + 1); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.beginPath(); g.moveTo(-l / 2, 0); g.lineTo(0, -3); g.lineTo(l / 2, 0); g.lineTo(0, 4); g.fill(); }); }   // rags
+  } else {
+    const pointed = look === 'm1';
+    for (let n = 0; n < 230; n++) {
+      const x = R() * N, y = R() * N, s = 9 + R() * 9, a = R() * TAU, c = col(n);
+      wrap(x, y, () => {
+        g.rotate(a); g.fillStyle = c; g.beginPath();
+        if (pointed) { g.moveTo(-s, 0); for (let i = 1; i < 6; i++) { const t = i / 6, r = s * .55 * Math.sin(Math.PI * t); g.lineTo(-s + 2 * s * t, (i & 1 ? -1 : -.55) * r); } g.lineTo(s, 0); for (let i = 5; i > 0; i--) { const t = i / 6, r = s * .55 * Math.sin(Math.PI * t); g.lineTo(-s + 2 * s * t, (i & 1 ? 1 : .55) * r); } }
+        else { g.ellipse(0, 0, s, s * .62, 0, 0, TAU); }
+        g.fill();
+        g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(pointed ? 0 : s * .55, 0, s * .22, 0, TAU); g.fill(); g.globalCompositeOperation = 'source-over';   // the cut of the garnish
+      });
+    }
+  }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+}
+function rngOf(n) { let s = n >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
+/* the canopy of a net of kind k, in metres round its middle at the ground: the tent, then the skirt */
+function camGeo(k) {
+  const F = FORT.K[k], Lx = F.size[0], Lz = F.size[1], H = F.size[2], n = F.size[0] > 15 ? 16 : 10, E = CAMV.edge, T = CAMV.tile, pos = [], uv = [], idx = [];
+  const Y = (u, v) => { const r = Math.max(Math.abs(u), Math.abs(v)) * 2; return H * (E + (1 - E) * (1 - Math.pow(r, 1.35))) + .12 * Math.sin(u * 31) * Math.sin(v * 27); };
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) { const u = i / n - .5, v = j / n - .5; pos.push(u * Lx, Y(u, v), v * Lz); uv.push(u * Lx / T, v * Lz / T); }
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const a = j * (n + 1) + i, b = a + 1, c = a + n + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  const ring = []; for (let i = 0; i < n; i++) ring.push([i / n - .5, -.5]); for (let j = 0; j < n; j++) ring.push([.5, j / n - .5]); for (let i = n; i > 0; i--) ring.push([i / n - .5, .5]); for (let j = n; j > 0; j--) ring.push([-.5, j / n - .5]);
+  const b0 = pos.length / 3, m = ring.length, per = 2 * (Lx + Lz), sk = H * (E - CAMV.skirt) / T;
+  ring.forEach(([u, v], q) => { const s = q / m * per / T; pos.push(u * Lx, Y(u, v), v * Lz); uv.push(s, 0); pos.push(u * (Lx + 1.2), H * CAMV.skirt, v * (Lz + 1.2)); uv.push(s, sk); });
+  for (let q = 0; q < m; q++) { const a = b0 + q * 2, c = b0 + ((q + 1) % m) * 2; idx.push(a, a + 1, c, c, a + 1, c + 1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const CAMS = { me: new Map(), tex: new Map(), sc: null, seen: -1, tick: 0 };
+function camMesh(look, k) {
+  const key = look + k; let me = CAMS.me.get(key);
+  if (me && me.parent === scene) return me;
+  if (!CAMS.tex.has(look)) CAMS.tex.set(look, camTex(look));
+  me = new THREE.InstancedMesh(camGeo(k), new THREE.MeshLambertMaterial({ map: CAMS.tex.get(look), alphaTest: .5, side: THREE.DoubleSide }), CAMV.max);
+  me.frustumCulled = false; me.count = 0; scene.add(me); CAMS.me.set(key, me); return me;
+}
+/* each frame, after the works: the canopies of the nets past half their work */
+function camScene() {
+  if (!S || !S.forts || typeof THREE === 'undefined') return;
+  if (CAMS.sc !== scene) { CAMS.me.clear(); CAMS.sc = scene; CAMS.seen = -1; }
+  if (CAMS.seen === S.fv && (CAMS.tick = (CAMS.tick + 1) % CAMV.every)) return;
+  CAMS.seen = S.fv;
+  const n = new Map(), M = WM;
+  for (const me of CAMS.me.values()) me.count = 0;
+  for (const f of S.forts) {
+    if (!f.F.cam || f.gone || S.os[f.id] > 1 || f.prog < .5) continue;
+    const me = camMesh(camLook(f), f.k), i = n.get(me) || 0; if (i >= CAMV.max) continue;
+    const s = Math.min(1, (f.prog - .5) / .5 + .08), L = f.F.size[0] / 2, ca = Math.cos(f.a + Math.PI / 2), sa = Math.sin(f.a + Math.PI / 2), off = -(1 - s) * L;   // unrolled from one side
+    M.q.setFromAxisAngle(M.up, f.a + Math.PI / 2);
+    me.setMatrixAt(i, M.mx.compose(M.v.set(f.x + ca * off, f.y, f.z - sa * off), M.q, M.s.set(s, 1, 1)));
+    n.set(me, i + 1);
+  }
+  for (const [me, c] of n) me.count = c;
+  for (const me of CAMS.me.values()) { me.visible = me.count > 0; me.instanceMatrix.needsUpdate = true; }
+}
+fortScene = (g => () => { g(); camScene(); })(fortScene);
+if (typeof rtsForts === 'function') camScene = rtsForts(camScene);   // the commander's view: an enemy net only as the works are (RTS)
+/* the build mode's reasons */
+Object.assign(PWHY, { cserver: 'O servidor desta sala é antigo e não conhece a rede de camuflagem', cnet: 'Em cima de outra rede de camuflagem' });
+/* the General View: an own net, a dashed square (its size, at least a mark), REDE and REVELADA */
+gWorks = (g => (G, V, P) => {
+  const all = V.forts || [], mine = all.filter(f => camK(f.k)); if (!mine.length) return g(G, V, P);
+  V.forts = all.filter(f => !camK(f.k));
+  try { g(G, V, P); } finally { V.forts = all; }
+  for (const f of mine) {
+    if (!gOn(P, f.x, f.z, 30)) continue;
+    const x = P.X(f.x), y = P.Y(f.z), F = FORT.K[f.k], r = Math.max(4.5 * P.k, Math.abs(P.X(f.x + F.size[0] / 2) - x)), c = gCol(V, f.t);
+    G.save(); G.translate(x, y); G.rotate((f.a || 0) + Math.PI / 2); G.setLineDash([3 * P.k, 2.5 * P.k]); G.strokeStyle = f.rv ? FOE : c; G.lineWidth = 1.4; G.globalAlpha = f.prog < 1 ? .55 : 1; G.strokeRect(-r, -r, r * 2, r * 2); G.restore();
+    if (GV.lab) gTxt(G, f.rv ? 'REDE · REVELADA' : 'REDE', x, y + r + 11 * P.k, 9 * P.k, f.rv ? FOE : c, 'center');
+  }
+})(gWorks);
+{ const L = GLAY.find(L => L.id === 'eng'); if (L) L.draw = gWorks; }
+/* the HUD under an own net: CAMUFLADO, REVELADO and the seconds left, or what to do to be hidden */
+function camHud(P, u) {
+  if (!S.camN || !S.camN.length || !P || P.dead) return;
+  const f = camUnder(P); if (!f || f.team !== P.team) return;
+  const rv = camRev(f), cov = P.cnv === f && P.cnS === S.camS, s = rv ? 'REVELADO  ·  ' + Math.ceil(CNET.fire - (S.t - f.rv)) + ' s' : cov ? 'CAMUFLADO' : 'SOB A REDE  ·  PARE PARA SE ESCONDER', w = (cov ? 130 : rv ? 150 : 270) * u;
+  hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - w / 2, ch - 84 * u, w, 19 * u);
+  txt(s, cw / 2, ch - 81 * u, 12 * u, rv ? FOE : cov ? '#8fe39a' : 'rgba(158,170,162,.95)', 'center');
+}
+hudMan = (g => (P, u, ...a) => { g(P, u, ...a); camHud(P, u); })(hudMan);
+hudDrive = (g => (P, u, ...a) => { g(P, u, ...a); camHud(P, u); })(hudDrive);
+/* ---------- end of the camouflage nets on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

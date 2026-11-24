@@ -67025,6 +67025,8 @@ function camClip(p, seat, dt) {
 /* ---------- HUD (2D overlay) ---------- */
 /* the HUD's scale: 1 from 1000 to 1280 px wide (down to .62 on a narrow screen), and over 1280×674 it grows with the screen, both ways, up to 1.25
    (1920×1080), so the text on a big screen is not the size of a small one's (cf-pol-hud) */
+/* P30 (cf-pol2-fase1): the HUD's blink (a warning, a point being taken) held still with "reduzir movimento" on: always lit */
+const hudBlink = k => (reduced ? 1 : (S.t * k | 0) % 2);
 const hudU = () => (cw < 1280 ? clamp(cw / 1000, .62, 1) : clamp(Math.min(cw / 1280, ch / 674), 1, 1.25));
 function txt(s, x, y, size, col, align, font) {
   hx.font = size + "px " + (font || "'Share Tech Mono', ui-monospace, monospace");
@@ -67887,6 +67889,13 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
 }
+/* P30 (cf-pol2-fase1): on the corner map friend and foe differed only by colour (green and red, the pair most often confused). mapDot: a
+   friend a square, a foe a diamond (the square turned 45°, as large), each on its dark edge; an enemy aircraft's triangle is hollow */
+function mapDot(x, y, r, col, foe) {
+  if (!foe) { hx.fillStyle = 'rgba(8,12,13,.85)'; hx.fillRect(x - r - 1, y - r - 1, r * 2 + 2, r * 2 + 2); hx.fillStyle = col; hx.fillRect(x - r, y - r, r * 2, r * 2); return; }
+  const d = (k, c) => { hx.beginPath(); hx.moveTo(x, y - k); hx.lineTo(x + k, y); hx.lineTo(x, y + k); hx.lineTo(x - k, y); hx.closePath(); hx.fillStyle = c; hx.fill(); };
+  const k = Math.max(1.2, r * 1.42); d(k + 1.4, 'rgba(8,12,13,.85)'); d(k, col);
+}
 /* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
    a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */
 const WZONE = ['ferido no tronco', 'ferido na cabeça', 'ferido nas pernas', 'ferido nos braços'];
@@ -68208,7 +68217,7 @@ function drawHud() {
   if (playMode !== 'play' || !S.my) return;
   const P = S.my, u = hudU(), ink = S.modern ? '#c4f1f7' : '#f3ead2', acc = S.modern ? '#63d2e6' : '#e6b53a';
   const disp = S.modern ? "'Chakra Petch', sans-serif" : "'Saira Stencil One', Impact, sans-serif";
-  const me = P.team, blink = (S.t * 5 | 0) % 2, lockName = P.kind ? P.arms[0].d.name : S.lockA && S.lockA.name;
+  const me = P.team, blink = hudBlink(5), lockName = P.kind ? P.arms[0].d.name : S.lockA && S.lockA.name;
   const seat = P.dead ? null : curSeat(), mapV = !!seat && !!seat.map, cp = camera.position;
   hx.textBaseline = 'top'; hx.lineCap = 'round';
   let veil = 0;   // the eye inside a smoke screen sees smoke, thinning toward its edge
@@ -68311,17 +68320,17 @@ function drawHud() {
   /* map: the whole battlefield from above, north-up */
   const mw = Math.min(190 * u, cw * .36), mh = mw * 2 * S.HW / S.W, mx = cw - 14 - mw, my = 8;
   const mX = x => mx + clamp(x / S.W, 0, 1) * mw, mZ = z => my + clamp((z + S.HW) / (2 * S.HW), 0, 1) * mh;
-  const dot = (x, y, r, col) => { hx.fillStyle = 'rgba(8,12,13,.85)'; hx.fillRect(x - r - 1, y - r - 1, r * 2 + 2, r * 2 + 2); hx.fillStyle = col; hx.fillRect(x - r, y - r, r * 2, r * 2); };
+  const dot = (x, y, r, col, foe) => mapDot(x, y, r, col, foe);
   if (!mapV) {   // a gunner's corner map, like the fire-control map, only has the enemy vehicles that someone has in sight
     if (mapCv) { hx.globalAlpha = .92; hx.drawImage(mapCv, mx, my, mw, mh); hx.globalAlpha = 1; }
     hx.strokeStyle = 'rgba(8,12,13,.8)'; hx.lineWidth = 1; hx.strokeRect(mx - .5, my - .5, mw + 1, mh + 1);
-    S.base.forEach((b, t) => dot(mX(b.x), mZ(b.z), 3.5, t !== me ? FOE : FRIEND));
-    for (const b of S.sup) if (!b.dead && (b.team === me || spotted(b, me))) { const x = mX(b.x), y = mZ(b.z); dot(x, y, 2.6, b.team !== me ? FOE : FRIEND); hx.strokeStyle = b.prog < 1 ? 'rgba(255,255,255,.45)' : '#ffffff'; hx.lineWidth = 1; hx.strokeRect(x - 3.6, y - 3.6, 7.2, 7.2); }
-    for (const b of S.eco ? S.eco.l : []) if (!b.dead && (b.team === me || spotted(b, me))) { const x = mX(b.x), y = mZ(b.z); dot(x, y, 2.6, b.team !== me ? FOE : FRIEND); hx.strokeStyle = b.prog < 1 ? 'rgba(255,255,255,.45)' : '#ffffff'; hx.lineWidth = 1; hx.strokeRect(x - 3.6, y - 3.6, 7.2, 7.2); }
-    for (const g of S.units) if (g !== P && (g.team === me || P.kind !== 'art' || spotted(g, me))) dot(mX(g.x), mZ(g.z), isAA(P, g) ? 2.6 : g.pid ? 2.2 : 1.3, isAA(P, g) ? AAC : g.team !== me ? FOE : FRIEND);
+    S.base.forEach((b, t) => dot(mX(b.x), mZ(b.z), 3.5, t !== me ? FOE : FRIEND, t !== me));
+    for (const b of S.sup) if (!b.dead && (b.team === me || spotted(b, me))) { const x = mX(b.x), y = mZ(b.z); dot(x, y, 2.6, b.team !== me ? FOE : FRIEND, b.team !== me); hx.strokeStyle = b.prog < 1 ? 'rgba(255,255,255,.45)' : '#ffffff'; hx.lineWidth = 1; hx.strokeRect(x - 3.6, y - 3.6, 7.2, 7.2); }
+    for (const b of S.eco ? S.eco.l : []) if (!b.dead && (b.team === me || spotted(b, me))) { const x = mX(b.x), y = mZ(b.z); dot(x, y, 2.6, b.team !== me ? FOE : FRIEND, b.team !== me); hx.strokeStyle = b.prog < 1 ? 'rgba(255,255,255,.45)' : '#ffffff'; hx.lineWidth = 1; hx.strokeRect(x - 3.6, y - 3.6, 7.2, 7.2); }
+    for (const g of S.units) if (g !== P && (g.team === me || P.kind !== 'art' || spotted(g, me))) dot(mX(g.x), mZ(g.z), isAA(P, g) ? 2.6 : g.pid ? 2.2 : 1.3, isAA(P, g) ? AAC : g.team !== me ? FOE : FRIEND, g.team !== me);
     for (const g of S.units) if (!g.dead && captured(g) && (g.team === me || spotted(g, me))) { hx.strokeStyle = '#ffd84a'; hx.lineWidth = 1; hx.strokeRect(mX(g.x) - 3.5, mZ(g.z) - 3.5, 7, 7); }   // a captured vehicle: a yellow frame
-    for (const g of S.men) if (!g.dead && g !== P && (g.team === me || spotted(g, me))) dot(mX(g.x), mZ(g.z), g.pid ? 1.8 : .7, g.team !== me ? FOE : FRIEND);
-    for (const q of S.planes) { if (q.dead || q === P) continue; tri(mX(q.x), mZ(q.z), Math.atan2(q.f.z, q.f.x), 4, 'rgba(8,12,13,.85)'); tri(mX(q.x), mZ(q.z), Math.atan2(q.f.z, q.f.x), 3, q.team !== me ? FOE : FRIEND); }
+    for (const g of S.men) if (!g.dead && g !== P && (g.team === me || spotted(g, me))) dot(mX(g.x), mZ(g.z), g.pid ? 1.8 : .7, g.team !== me ? FOE : FRIEND, g.team !== me);
+    for (const q of S.planes) { if (q.dead || q === P) continue; const a = Math.atan2(q.f.z, q.f.x); tri(mX(q.x), mZ(q.z), a, 4, 'rgba(8,12,13,.85)'); tri(mX(q.x), mZ(q.z), a, 3, q.team !== me ? FOE : FRIEND); if (q.team !== me) tri(mX(q.x), mZ(q.z), a, 1.4, 'rgba(8,12,13,.9)'); }   // an enemy aircraft hollow (P30)
     cueMarks(mX, mZ, me, u, false);
     tri(mX(P.x), mZ(P.z), Math.atan2(P.f.z, P.f.x), 7, 'rgba(8,12,13,.9)'); tri(mX(P.x), mZ(P.z), Math.atan2(P.f.z, P.f.x), 5, '#ffffff');
   }
@@ -70012,7 +70021,7 @@ function cqMarks(X, Y, u, big) {
     const x = X(p.x), y = Y(p.z), hot = cqHot(p), sd = cqSide(p);
     hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.fillStyle = 'rgba(8,12,13,.7)'; hx.fill();
     if (p.c && sd >= 0) { hx.beginPath(); hx.arc(x, y, r * Math.sqrt(p.c), 0, TAU); hx.fillStyle = cqCol(sd); hx.globalAlpha = .8; hx.fill(); hx.globalAlpha = 1; }
-    hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.strokeStyle = hot && (S.t * 5 | 0) % 2 ? '#ffffff' : cqCol(p.hold); hx.lineWidth = big ? 2 : 1.3; hx.stroke();
+    hx.beginPath(); hx.arc(x, y, r, 0, TAU); hx.strokeStyle = hot && hudBlink(5) ? '#ffffff' : cqCol(p.hold); hx.lineWidth = big ? 2 : 1.3; hx.stroke();
     if (big) txt(p.L, x, y - 6 * u, 11 * u, '#ffffff', 'center');
   }
   for (const r of S.rl || []) { const own = r.team === S.me; if (!own && !radSeen(r)) continue; const x = X(r.x), y = Y(r.z), s = big ? 5 : 3; hx.fillStyle = 'rgba(8,12,13,.85)'; hx.fillRect(x - s - 1, y - s - 1, 2 * s + 2, 2 * s + 2); hx.fillStyle = !own ? FOE : r.w ? '#7d8a86' : '#ffffff'; hx.fillRect(x - s, y - s, 2 * s, 2 * s); if (big) txt(own ? 'R ' + r.n : 'R', x + s + 3, y - 6 * u, 10 * u, own ? '#ffffff' : FOE); }

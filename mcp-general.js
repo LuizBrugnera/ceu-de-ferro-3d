@@ -204,7 +204,7 @@ const WHY = {
 const PT = { off: 'Ordem indisponível agora', over: 'A partida terminou', ctl: 'Você não está no comando disso', shape: 'Ordem malformada', kind: 'Ordem desconhecida', at: 'Objetivo inválido',
   link: 'Ponto sem ligação com um ponto nosso: ainda não pode ser tomado', own: 'Esse ponto já é nosso', busy: 'Já há uma operação com essa tropa ou nessa estrada',
   max: 'Limite de operações simultâneas', sq: 'Nenhuma esquadra livre para isso', reach: 'Essas esquadras não chegam lá pela estrada delas', nores: 'Sem reserva disponível',
-  fire: 'Nenhum morteiro ou bateria alcança esse ponto', amb: 'Emboscada só junto a uma estrada', id: 'Não encontrado', cool: 'Ainda em espera: tente daqui a pouco', res: 'Faltam recursos (energia ou metal)',
+  fire: 'Nenhum morteiro ou bateria alcança esse ponto', amb: 'Emboscada só junto a uma estrada', id: 'Não encontrado', cool: 'Ainda em espera: tente daqui a pouco', pay: 'Faltam recursos (energia ou metal)',
   stock: 'Sem estoque no depósito', res: 'Nada na reserva: produza antes', rate: 'Ordens rápidas demais: aguarde um instante', host: 'A sala está sem anfitrião', bug: 'Erro ao aplicar a ordem',
   wait: 'Sem resposta do anfitrião', map: 'Fora do mapa ou na água', water: 'Na água', steep: 'Terreno inclinado', road: 'Em cima da estrada', obj: 'Obstruído', base: 'Perto demais de outra base',
   foe: 'Inimigo por perto', cap: 'Limite de bases ou deste tipo de instalação', pop: 'Acima do teto de população do lado', node: 'Nó de suprimento não encontrado', full: 'O nó está cheio',

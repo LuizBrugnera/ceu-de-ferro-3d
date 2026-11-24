@@ -33466,6 +33466,7 @@ function damageMan(m, dmg, by, rx, h) {
   if (relayed(m, dmg, by, rx, h)) return;
   hurtMine(m, dmg, h);
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
+  if (h) m.hz = h.pt;   // the zone of the last hit: the player's ESTADO panel names it (P1)
   if (h && h.pt === 2) m.wl += dmg; else if (h && h.pt === 3) m.wa += dmg;
   if (h && dmg > 0) m.bl = Math.min(DMG.man.cap, (m.bl || 0) + dmg * DMG.man.bleed[h.pt & 3]);
   if ((m.hp -= dmg) <= 0 && !manDown(m, dmg, h)) killMan(m, by);
@@ -67532,13 +67533,43 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   part(37, 8, 14, 13, hs); part(31, 23, 26, 32, hs); part(20, 24, 9, 30, as); part(59, 24, 9, 30, as); part(32, 57, 11, 32, ls); part(45, 57, 11, 32, ls);
   let ty = y0 + 6 * u; const lx = x0 + 80 * u, line = (s, c) => { txt(s, lx, ty, 11 * u, c); ty += 13.5 * u; };
   line('ESTADO', dim); ty += 1.5 * u;
-  if (!hs && !ls && !as) line('sem ferimentos', DCOL[0]);
-  if (hs) line(hs > 1 ? 'ferido grave' : 'ferido', DCOL[hs]);
-  if (ls) line('pernas: mais lento', DCOL[ls]);
-  if (P.bl > 0) line('sangrando: pare e estanque', DCOL[2]);
-  if (as) line('braços: mira treme', DCOL[as]);
+  for (const [s, c] of woundLines(P, hs, ls, as)) line(s, DCOL[c]);
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
+}
+/* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
+   a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */
+const WZONE = ['ferido no tronco', 'ferido na cabeça', 'ferido nas pernas', 'ferido nos braços'];
+function woundLines(P, hs, ls, as) {
+  const r = [], hurt = P.bl > 0 || P.hp < P.max;
+  if (!hs && !ls && !as) r.push(hurt ? [WZONE[P.hz] || WZONE[0], 1] : ['sem ferimentos', 0]);
+  if (hs) r.push([(hs > 1 ? 'ferido grave' : 'ferido') + (P.hz === 1 ? ' na cabeça' : ''), hs]);
+  if (ls) r.push(['pernas: mais lento', ls]);
+  if (P.bl > 0) r.push(['sangrando: pare e estanque', 2]);
+  if (as) r.push(['braços: mira treme', as]);
+  return r;
+}
+/* a hit on the soldier, read at the aim in either camera (P1): a red edge that flares with each hit and stays, growing, as health goes, and
+   an arc on a ring round the aim that points to whoever fired, fading over HITC.arc s. hitArc: that direction on the screen, in radians
+   (0 = right, -π/2 = ahead, up the screen), from the aim's heading on the ground; null with no shooter or one on the soldier */
+const HITC = { flash: .6, fa: .5, low: .4, la: .55, arc: 2.2, r: 74, span: .42 };
+function hitArc(P, ad) {
+  const b = P.lastBy; if (!b || !isFinite(b.x) || !isFinite(b.z)) return null;
+  const vx = b.x - P.x, vz = b.z - P.z, fl = Math.hypot(ad.x, ad.z); if (Math.hypot(vx, vz) < .5 || fl < 1e-6) return null;
+  const fx = ad.x / fl, fz = ad.z / fl;
+  return Math.atan2(-(vx * fx + vz * fz), vx * -fz + vz * fx);
+}
+function hitCue(P, u) {
+  const t = S.t - P.hitT, lo = 1 - P.hp / P.max;
+  if (lo > HITC.low) veil('130,0,0', (lo - HITC.low) / (1 - HITC.low) * HITC.la, 1.3);
+  if (t < 0 || t > HITC.arc) return;
+  if (t < HITC.flash) veil('170,8,8', (1 - t / HITC.flash) * HITC.fa, reduced ? 1.3 : 1.15 + t * .3);
+  const a = hitArc(P, S.aim.d); if (a === null) return;
+  const R = HITC.r * u, k = 1 - t / HITC.arc;
+  hx.save(); hx.lineCap = 'butt'; hx.globalAlpha = Math.min(1, k * 1.6);
+  hx.strokeStyle = 'rgba(8,12,13,.6)'; hx.lineWidth = 8 * u; hx.beginPath(); hx.arc(cw / 2, ch / 2, R, a - HITC.span, a + HITC.span); hx.stroke();
+  hx.strokeStyle = FOE; hx.lineWidth = 4.5 * u; hx.beginPath(); hx.arc(cw / 2, ch / 2, R, a - HITC.span, a + HITC.span); hx.stroke();
+  hx.restore();
 }
 /* first person: the weapon in hand, drawn on the glass. From the hip it comes up from the lower right; sighted (camSt.ak) it stands in the
    middle with its own sight: notch and post in 1944, a red dot today, a range ladder on a rocket launcher, a seeker window on a guided one.
@@ -67764,6 +67795,7 @@ function drawHud() {
   if (veil > 0 && !mapV) { hx.fillStyle = 'rgba(190,192,187,' + (veil * .97).toFixed(3) + ')'; hx.fillRect(0, 0, cw, ch); }
   if (seat) { seat.draw(P, u, ink, acc, disp, blink); fpFx(P); }
   if (!P.dead && S.t - P.dazeT < 1.6) { hx.globalAlpha = .8 * (1 - (S.t - P.dazeT) / 1.6); hx.fillStyle = '#050607'; hx.fillRect(0, 0, cw, ch); hx.globalAlpha = 1; }   // the pilot is hit: the view goes dark for a moment
+  if (P.man && !P.dead) hitCue(P, u);
   (P.man ? hudMan : P.kind ? hudDrive : hudFly)(P, u, ink, acc, disp, blink, seat);
   const fg = S.farGnd;   // a guided bomb's target in sight but beyond what it can reach from here
   if (fg && !P.dead && !fg.dead && !fg.gone && !S.lockGnd) {

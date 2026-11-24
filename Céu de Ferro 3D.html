@@ -251,6 +251,7 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .pick p{margin:0;color:var(--fg);font-size:15px}
 .pick p.hint{font-family:var(--f-data);font-size:12px;color:var(--mute)}
 .pick p[data-no]{color:var(--foe)}
+.pick .swap-dn{margin:0;font-size:15px;color:var(--foe);font-weight:600;letter-spacing:.02em} .pick .swap-dn[data-ff]{color:#ffd24a}
 .pick .cls{justify-content:flex-start;justify-self:start;align-self:flex-start;background:none;border:0;padding:0}
 .pick .cl{min-width:58px;padding:3px 8px 4px;font-size:11px}
 .pick .cl svg{width:24px;height:24px}
@@ -833,6 +834,7 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
     <section class="pick" id="swap" role="dialog" aria-labelledby="swapTitle" hidden>
       <div class="pick-in">
         <h2 id="swapTitle">Trocar de veículo</h2>
+        <p class="swap-dn" id="swapDn" hidden></p>
         <p id="swapNote" role="status"></p>
         <div class="cls" id="swapCls" role="tablist" aria-label="Classe"></div>
         <div class="fleet" id="swapList"></div>
@@ -56149,6 +56151,28 @@ thrown = (g => (u, m, by, f) => {
   if (was && S.my === m && m.dead && !m.pdn) playerDown(m.lastBy || by);
 })(thrown);
 /* ---------- end of cf-bomba-killcam (the sim) ---------- */
+/* ---------- cf-pol2 P2: who killed the player (the sim) ----------
+   On a death the banner "Morto em combate" was covered at once by the swap screen, titled "Próximo veículo" for a soldier on foot, and
+   nobody said who it was; the camera looked at the body. playerDown notes the death (S.dn): the killer (a soldier, a vehicle, an aircraft:
+   by, or what hit the player last), his name, the weapon in his hands, the distance; for DN.t s the swap screen waits (a bomb's kill cam,
+   S.kc, has its own) and the camera turns to the killer; then the screen names him over its choices, and the way back waits pick s more
+   (the 3 s the screen had from the death before, so the turn takes none of the time to choose) */
+const DN = { t: 2.6, pick: 3, far: 2500, turn: [.5, .9] };
+function dnOf(by, P) {
+  if (!by || by === P || typeof by !== 'object' || !Number.isFinite(by.x) || !Number.isFinite(by.z)) return null;
+  const nm = by.name || (by.def && by.def.name) || '', a = by.man && by.arms && by.arms[by.w], w = a && a.d ? a.d.name : '';
+  return { o: by, nm, w: w && w !== nm ? w : '', d: Math.round(Math.hypot(by.x - P.x, by.z - P.z)), ff: by.team === P.team };
+}
+playerDown = (g => (by, left) => {
+  const P = S.my; g(by, left); S.dn = null;
+  if (left || S.demo || !P) return;
+  S.dn = Object.assign(dnOf(by || P.lastBy, P) || { o: null, nm: '', w: '', d: 0, ff: false }, { t0: S.t, end: S.t + DN.t, x: P.x, y: P.y, z: P.z, man: !!P.man });
+  S.respawn = Math.max(S.respawn, DN.t + DN.pick);
+  const t = dnTxt(S.dn); if (t && S.banner) S.banner.sub = t + '. ' + S.banner.sub;   // in the banner's own lines, as a bomb's kill cam names the bomb
+})(playerDown);
+const dnOn = () => !!(S && S.dn && S.my && S.my.dead && S.t < S.dn.end);
+/* the line the swap screen and the HUD write: "Abatido por Fuzileiro (Rússia) · AK-74M · a 140 m", or '' when nobody is known */
+const dnTxt = D => (!D || !D.nm ? '' : (D.ff ? 'Fogo amigo: ' : 'Abatido por ') + D.nm + (D.w ? ' · ' + D.w : '') + (D.d > 1 ? ' · a ' + D.d + ' m' : ''));
 /* ---------- cf-b2-nuke: the nuclear bomb of the strategic bombers (the sim; tests/nuke.js) ----------
    The captain: "coloque a opção de bomba nuclear no b2 e na versão russa dele, só pode ser escolhido pelo player, e deve ser opcional, ou
    leva as bombas padrão ou uma nuke, o poder dela deve ser devastador". The B-2 and the Tu-160 (the Russian side's strategic bomber, ERAS
@@ -69737,7 +69761,8 @@ function drawSwap() {
   swEl.toggleAttribute('data-dead', P.dead); $('#swapCls').hidden = $('#swapKeys').hidden = coarse;
   fleet({ tabs: $('#swapCls'), box: $('#swapList'), cls: k, model: id, side, pre: 'swap-', keys: true, lock: RACKS[id] && LO.off(id) ? 'O servidor desta sala não conhece cargas: todos voam com a carga padrão.' : '',
     pick(c, m) { if (c === sw.cls && (!m || m === sw.sel[c])) return; sw.cls = c; if (m) sw.sel[c] = m; swapTouch(); }, again: swapTouch });
-  $('#swapTitle').textContent = sw.rq ? 'Requisitar veículo' : P.dead ? 'Próximo veículo' : 'Trocar de veículo';
+  $('#swapTitle').textContent = sw.rq ? 'Requisitar veículo' : P.dead ? (P.man ? 'Morto em combate: voltar à batalha' : 'Perdido: voltar à batalha') : 'Trocar de veículo';   // cf-pol2 P2: "Próximo veículo" for a soldier on foot
+  const dk = $('#swapDn'); if (dk) { const t = P.dead && typeof dnTxt === 'function' ? dnTxt(S.dn) : ''; dk.textContent = t; dk.hidden = !t; dk.toggleAttribute('data-ff', !!(S.dn && S.dn.ff)); }
   $('#swapGo').textContent = sw.rq ? 'Requisitar ' + DEFS[k][id].name + ' · ' + rqTxt(rqCost(k, id)) : cd > 0 ? (P.dead ? 'Esperar por ' : 'Indisponível: ') + DEFS[k][id].name + ' (' + Math.ceil(cd) + ' s)' : (P.dead ? 'Entrar com ' : 'Trocar para ') + DEFS[k][id].name;
   $('#swapGo').disabled = sw.rq ? !!rw || S.rqT > 0 : !!why || (!P.dead && (cd > 0 || (k === S.cls && id === S.model)));
   sw.go = $('#swapGo').textContent;
@@ -76791,6 +76816,24 @@ updateCamera = (g => dt => {
   sparks.material.uniforms.scale.value = ch * dpr / (2 * Math.tan(camera.fov * Math.PI / 360));
   camSt.init = false;
 })(updateCamera);
+/* cf-pol2 P2 on the screen: the swap screen waits while S.dn lasts; the camera, where it stood, turns from the body to the killer (and
+   narrows on him), who is bracketed and named; a bomb's kill cam (S.kc) goes first */
+openSwap = (g => () => { if (dnOn()) return; g(); })(openSwap);
+const dnSee = () => { const D = dnOn() && !kcOn() ? S.dn : null, o = D && D.o; return o && !o.gone && (S.my.man || S.my.kind) && Math.hypot(o.x - D.x, o.z - D.z) < DN.far ? D : null; };
+updateCamera = (g => dt => {
+  g(dt);
+  const D = dnSee(); if (!D) return;
+  const o = D.o, s = clamp((S.t - D.t0 - DN.turn[0]) / DN.turn[1], 0, 1), e = s * s * (3 - 2 * s), cp = camera.position, ty = (Number.isFinite(o.y) ? o.y : hgt(o.x, o.z)) + (o.man ? 1.4 : 2.5);
+  const bx = D.x, by = D.y + .4, bz = D.z, d = Math.hypot(o.x - cp.x, ty - cp.y, o.z - cp.z);
+  camera.up.set(0, 1, 0); camera.lookAt(bx + (o.x - bx) * e, by + (ty - by) * e, bz + (o.z - bz) * e);
+  camera.fov = camera.fov + (clamp(2 * Math.atan(14 / Math.max(1, d)) * 57.3, 8, camera.fov) - camera.fov) * e; camera.updateProjectionMatrix(); camera.updateMatrixWorld();
+})(updateCamera);
+drawHud = (g => () => {
+  g();
+  const D = dnOn() && !kcOn() ? S.dn : null; if (!D) return;
+  const u = hudU(), o = dnSee() && D.o;
+  if (o && S.t - D.t0 > DN.turn[0] + DN.turn[1] * .6) { const q = proj(o.x, bodyY(o), o.z); if (onScr(q)) { bracket(q.x, q.y, 22, D.ff ? '#ffd24a' : FOE); txt(o.man ? 'QUEM ATIROU' : (o.def && o.def.name || '').toUpperCase(), q.x, q.y - 30 * u, 11 * u, D.ff ? '#ffd24a' : FOE, 'center'); } }
+})(drawHud);
 /* ---------- cf-b2-nuke, cf-nuke-visual (the view): the nuclear burst as the world shows it ----------
    The captain: "deixe a explosão mais foda e fidedigna, para as infantarias e as que morrem e respawnam ele some". It was gone because its
    mushroom was one of XFX's mushroom slots (2 to 6 by the quality), shared with every heavy bomb: the next big blasts elsewhere took the

@@ -17,3 +17,12 @@ Falta:
 - Sensação com o mouse de verdade (pointer lock real): a troca de câmera ao apertar e soltar rápido, várias vezes seguidas.
 - Controle físico: o gatilho de mirar do perfil passa pela mesma `ctl.ads`, sem teste com controle aqui.
 - Online: a câmera é só local; não testado numa partida em rede.
+
+## P5 — recuo e dispersão
+
+Testado: `tests/recuo.js` (numa rajada de 10 a dispersão abre de 6,0 para 11,0 mrad e volta em 1,5 s; a mira sobe 2,5° em pé e 1,0° deitado e mirando; a supressão multiplica por 2,4; a cruz e o tiro usam `manSpread`) e no navegador (Chromium sem janela, GPU real): a mira sobe na rajada (3,3° em 0,7 s) e a abertura `a.bl` chega a 0,86.
+
+Falta:
+- Sensação com o mouse de verdade (pointer lock real): quanto o jogador precisa puxar para baixo numa rajada longa. Os números ficam em `MAN.climb` e `MAN.bloom`.
+- Equilíbrio: a abertura vale para todo soldado, inclusive os da IA (as rajadas longas da IA ficam menos precisas). O tempo para abater não foi medido em partidas IA × IA.
+- Online: a subida da mira é só do jogador local; a abertura é calculada por quem simula o soldado (o anfitrião). Não testado numa partida em rede.

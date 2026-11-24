@@ -78,6 +78,7 @@ for (const [era, kit, tank, d0] of [['ww2', 'pzjager', 'sherman', 40], ['ww2', '
 }
 
 console.log('-- guided anti-tank missile: tank at 600 m, clear and behind smoke --');
+C.seed(90); // the missile trials get their own dice too: a change in the rifle sections above (cf-pol2 P5's spread) shifted them
 const jav = smoke => {
   fresh('modern'); const t = C.addVehicle('tank', 't72', 1, B.x + 600, B.z, 0), m = C.addMan('blueAT', 0, B.x, B.z, 0), hp = t.hp; let launched = 0, lost = false;
   m.ctl.w = m.w = 1; m.ctl.fire = true;

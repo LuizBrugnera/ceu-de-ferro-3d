@@ -29271,14 +29271,16 @@ const SQUAD = { ww2: [0, 0, 0, 1, 2], modern: [0, 0, 0, 1, 2, 3] };
 /* the body. hp; sc: how much larger than life a soldier is drawn and hit, as the vehicles are; r: its radius, m. walk, run: m/s; stam: s of
    sprint, rest: s to get it back, wind: what must be back before the next. walk and run (cf-movimento: were 2.7 and 5.6, slow for a body drawn
    sc times life size) are the player's and the AI's alike; jump: m the feet rise on Space (MOVE). turn: rad/s; stT: s to change stance; xHold:
-   s X (a pad's stance button) is held to lie down; swap: s to change weapon.
+   s X (a pad's stance button) is held to lie down; swap: s to change weapon. bloom (cf-pol2 P5): each rifle round opens the next one's spread
+   by k (half for a single shot), to max, falling back over tau s; climb: rad the player's aim rises a round and its side jitter, times the
+   round's dmg over [2], within [3] [4] (the first-person kick's rule).
    zone: damage by zone [torso, head, legs, arms]; band: a standing body up to band[0] of its height is legs, above band[1] head; armP: a
    torso hit that takes an arm. limp: speed lost per point of leg wound, at most; shake: spread gained per point of arm wound.
    move: spread when moving; ads: sighted fire, spread, field of view and walking pace. see: m at which one standing in the open is seen,
    air: times that from an aircraft, flash: times that for 2 s after it fires. body: s a body lies. over: a vehicle faster than this m/s runs a soldier over.
    reach: m from a friendly truck to resupply, in fill s. nade, smk: the hand grenades, thrown at spd; a smoke one puts up a screen r by h m */
 const MAN = { hp: 22, sc: 1.7, r: .42, walk: 4, run: 9, jump: 1.4, stam: 9, rest: 14, wind: .3, turn: 7, stT: .45, xHold: .5, swap: .7, zone: [1, 3, .6, .5], band: [.45, .86], armP: .2, limp: [.07, .6], shake: .12,
-  move: 1.9, ads: { sp: .4, fov: 34, spd: .55 }, see: 1100, air: 2.5, flash: 1.5, body: 25, over: 2, reach: 14, fill: 3,
+  move: 1.9, ads: { sp: .4, fov: 34, spd: .55 }, bloom: { k: .2, max: 1.2, tau: .4 }, climb: [.0055, .0022, 8, .8, 1.8], see: 1100, air: 2.5, flash: 1.5, body: 25, over: 2, reach: 14, fill: 3,
   nade: { n: 2, dmg: 60, r: 11, spd: 17, cool: 1.6 }, smk: { n: 1, r: 15, h: 8, spd: 15 } };
 /* the legs on foot (cf-movimento): stride, the share of the ground covered that turns the legs' cycle [walking, running], so the quicker pace
    (MAN.walk, MAN.run) takes longer strides and not only quicker ones; clip: the [walk, run] m/s the pack's walk and run clips were matched
@@ -33548,6 +33550,14 @@ function manLock(m, a) {
 /* tracers (cf-pol-armas): a squad machine gun's belt carries one every lmg rounds, drawn with the glowing head of a vehicle's (b.tr); a
    rifle's carry none. A count on the arm (a.tn), no dice: the battle is the same */
 const TRC = { lmg: 4 };
+/* the spread of a soldier's rifle round, rad: the weapon's, by stance, sights, moving, a wounded arm, the burst's bloom (a.bl, falling back
+   over MAN.bloom.tau s since the last round), the AI's aim error (c.sp) and suppression. The HUD's cross opens by the same (cf-pol2 P5:
+   it left the bloom and suppression out) */
+const bloomNow = a => (a.bl || 0) * Math.exp(-Math.max(0, S.t - a.t) / MAN.bloom.tau);
+function manSpread(m, a) {
+  const w = a.d, c = m.ctl, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
+  return (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) * (1 + bloomNow(a)) + (c.sp || 0)) * (m.sup > S.t ? SUP.sp : 1);
+}
 function manFire(m, a) {
   const w = a.d, c = m.ctl, e = manEye(m), f = m.f, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
   if (w.k) {
@@ -33560,7 +33570,7 @@ function manFire(m, a) {
     return;
   }
   if (w.snp) return snipe(m, a);
-  const s = (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) + c.sp) * (m.sup > S.t ? SUP.sp : 1);
+  const s = manSpread(m, a); a.bl = Math.min(MAN.bloom.max, bloomNow(a) + MAN.bloom.k * (w.auto ? 1 : .5));
   a.mag--; a.cool = w.rate; a.t = m.shotT = S.t; a.tn = (a.tn || 0) + 1;
   S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: w.lmg && a.tn % TRC.lmg === 0 ? 1 : 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
   fx.shot(m === S.my, m, w);
@@ -34523,6 +34533,11 @@ function walk(P, I, dt) {
   if (hit('flare')) c.nade = 1; else if (hit('smoke')) c.nade = 2;
   build(P, I, hit('build'), hit('fire'));
   const g = P.arms[P.w]; S.lead = S.sol = S.gf = null; S.aimR = 0;
+  if (g.t !== P.rcT) {   // a rifle round kicks the aim up and a little aside: the player pulls it back down (cf-pol2 P5; the camera's kick was all)
+    const w = g.d, K = MAN.climb;
+    if (P.rcT !== undefined && S.t - g.t < .2 && !w.k && !w.snp) { const r = clamp(w.dmg / K[2], K[3], K[4]) * (P.st === 2 ? .5 : P.st === 1 ? .75 : 1) * (c.ads ? .8 : 1); a.p += K[0] * r; a.h += rand(-K[1], K[1]) * r; }
+    P.rcT = g.t;
+  }
   if (P.def.mort) mortHands(P, hit);
   S.lockAir = g.d.k === 'sam' ? g.lock : null; S.lockGnd = g.d.k === 'atgm' ? g.lock : null; S.lockOk = !!g.lock && S.t >= g.lockT; S.noLos = g.d.lockT && !g.lock ? g.blk || null : null;
   /* ammunition, grenades and a dressing beside a friendly truck, or solo at the base */
@@ -67839,7 +67854,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   const a = P.arms[P.w], w = a.d, st = STANCE[P.st], L = 14, dim = 'rgba(158,170,162,.95)'; let y = 10 * u;
   if (!P.dead) {
     const ad = S.aim.d, cp = camera.position, s = proj(cp.x + ad.x * 1000, cp.y + ad.y * 1000, cp.z + ad.z * 1000), F = ch / (2 * Math.tan(camera.fov * Math.PI / 360)), t = S.lockAir || S.lockGnd;
-    const sp = w.k ? w.sp || .003 : w.sp * st.sp * (P.ctl.ads ? MAN.ads.sp : 1) * (P.v.x * P.v.x + P.v.z * P.v.z > .3 ? MAN.move : 1) * (1 + P.wa * MAN.shake), g = Math.max(4, sp * F * 1.3);
+    const sp = w.k ? w.sp || .003 : manSpread(P, a), g = Math.max(4, sp * F * 1.3);
     if (s.front && !(seat && (camSt.ak > .6 || seat.map))) {
       hx.strokeStyle = ink; hx.lineWidth = 1.6; hx.beginPath();
       for (const [i, j] of DIR4) { hx.moveTo(s.x + i * g, s.y + j * g); hx.lineTo(s.x + i * (g + 7), s.y + j * (g + 7)); }
@@ -69376,7 +69391,7 @@ const LEGEND = {
   },
   inf(d, o) {
     const [a0, a1] = d.arms;
-    const rows = [['Mouse', 'Apontar. O soldado vira com a mira, e a cruz abre conforme a dispersão: menor agachado, deitado, parado e mirando'],
+    const rows = [['Mouse', 'Apontar. O soldado vira com a mira, e a cruz abre conforme a dispersão: menor agachado, deitado, parado e mirando; maior na rajada e sob fogo. Cada tiro levanta a mira um pouco (menos deitado e mirando): puxe o mouse para baixo'],
       ['W / S / A / D', 'Andar para onde a mira aponta e para os lados'], ['Shift', 'Correr (o fôlego é infinito); agachado ou deitado, levanta'], ['X / Z', 'X agacha, Z deita; a mesma tecla de novo levanta. Mais baixo é mais lento, mais preciso e mais difícil de ver e de acertar'],
       ['Botão esquerdo', a0.name + (a0.auto ? ' (rajada enquanto apertado)' : ' (um tiro por aperto)')], ['Espaço', 'Pular, em pé'], ['Botão direito', 'Mirar pela alça: campo mais fechado e menos dispersão'], ['R', 'Recarregar']];
     if (a1) rows.push(['Q', 'Trocar entre ' + a0.name + ' e ' + a1.name + (a1.lockT ? ' (segure o alvo na mira até travar e o disparo sai; sem linha de visada não trava: morro, prédio, árvores ou fumaça no caminho)' : ' (mire acima do alvo: a escada da mira marca as distâncias)')]);

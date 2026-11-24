@@ -27,6 +27,16 @@ Falta:
 - Equilíbrio: a abertura vale para todo soldado, inclusive os da IA (as rajadas longas da IA ficam menos precisas). O tempo para abater não foi medido em partidas IA × IA.
 - Online: a subida da mira é só do jogador local; a abertura é calculada por quem simula o soldado (o anfitrião). Não testado numa partida em rede.
 
+## P6 — granada com arco, cozinhar e gesto
+
+Testado: `tests/granada.js` (toque de F lança com o pavio inteiro; F segurado cozinha, mostra a granada na mão e o pavio que resta, e lança ao soltar com o pavio menos o tempo segurado; o arco desenhado cai a menos de 1 m de onde a granada toca o chão; no fim do pavio, menos `MAN.nade.safe`, ela sai sozinha uma vez; G segura e lança a fumaça; o braço direito do boneco vai pela IK a `NTH.hand`) e no navegador (Chromium sem janela, GPU real): F segurado mostra o arco, o anel onde cai e "GRANADA COZINHANDO · 2,1 s · SOLTE F PARA LANÇAR"; o braço direito sobe por trás do ombro; soltar lança.
+
+Falta:
+- O movimento do braço ao soltar (0,4 s, do alto para a frente) só foi visto parado em quadros; a sensação do gesto não foi avaliada.
+- Online: o gesto do jogador remoto não foi testado. `m.nk` (segurando) é só local, então os outros não veem o braço erguido enquanto ele segura; o cozinhar vai no lançamento (`P.nCook`, como o da IA já ia).
+- Controle físico: o botão de granada do perfil segurado; sem controle aqui.
+- O arco ignora prédios e árvores (para no chão), como a granada antes de quicar.
+
 ## P2 — a morte diz quem foi
 
 Testado: `tests/morte.js` (`S.dn` guarda quem matou, a arma na mão dele e a distância; fogo amigo diz "Fogo amigo"; sem ninguém conhecido, nenhuma linha; o aviso "Morto em combate" diz "Abatido por …" nas próprias linhas; a tela de troca espera `DN.t` s e depois nomeia quem matou sob o título "Morto em combate: voltar à batalha"; a volta espera `DN.pick` s a mais) e no navegador (Chromium sem janela, GPU real): morto por um Strelok a 126 m, a câmera vira do corpo para ele e fecha o campo (62 → 12°), com a moldura "QUEM ATIROU"; aos 2,6 s a tela de troca abre com "Abatido por Strelok (Rússia) · AK-12 · a 126 m" em vermelho.

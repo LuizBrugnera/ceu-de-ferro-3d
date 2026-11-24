@@ -69,7 +69,7 @@ for (const era of process.env.ERA ? [process.env.ERA] : ['ww2', 'modern']) {
   /* ---- read only ---- */
   const fp = () => {
     let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-    return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.tk.join(), JSON.stringify(Cm.ops.map(o => [o.k, o.id, o.st || '', o.sq.length, o.over ? 1 : 0, o.n0, o.T])), JSON.stringify(S.squads.map(q => [q.id, q.ord && q.ord.k, q.op && q.op.id, q.live, q.s])),
+    return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.ps.join(), JSON.stringify(Cm.ops.map(o => [o.k, o.id, o.st || '', o.sq.length, o.over ? 1 : 0, o.n0, o.T])), JSON.stringify(S.squads.map(q => [q.id, q.ord && q.ord.k, q.op && q.op.id, q.live, q.s])),
       Cm.kz ? Array.from(Cm.kz).reduce((a, b) => a + b, 0) : 0, JSON.stringify(Cm.fb), JSON.stringify(Cm.resAt && [Cm.resAt.x, Cm.resAt.z]), JSON.stringify(Cm.mev), Cm.fpN, S.glog ? S.glog.l[0].length : 0, JSON.stringify(Cm.gue && Cm.gue.op.teams.map(T => T.st)), Cm.man.length].join('|');
   };
   const f0 = fp(); let draws = 0; const r0 = sx.random; sx.random = () => { draws++; return r0(); };

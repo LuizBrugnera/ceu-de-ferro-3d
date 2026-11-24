@@ -30,7 +30,7 @@ function bridge(env) {
     const m = JSON.parse(d);
     if (m.t === 'gcmd' && force.length) { seenCmd.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: false, why: force.shift(), id: 0 }); return; }
     if (m.t === 'gcmd') { seenCmd.push(m); const bad = m.c.c === 'nope' || (m.c.c === 'expand' && m.c.id === 9); h.send({ t: 'gres', to: m.from, n: m.n, ok: !bad, why: bad ? (m.c.c === 'expand' ? 'hasmine' : 'unknown') : '', id: bad ? 0 : 77 }); }
-    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, tickets: [{ loss: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 }, sq: [{ id: 1, nm: 'Esquadra Urso', rank: 2, x: 5, z: 6, n: 4 }], vet: [{ who: 'T-90M', g: 'tank', rank: 3, xp: 40, x: 1, z: 2 }] } }); }
+    if (m.t === 'gask') { seenAsk.push(m); h.send({ t: 'gres', to: m.from, n: m.n, ok: true, why: '', id: 0, r: m.q.q === 'spots' ? [{ x: 1, z: 2, a: 0, sc: 5, why: 'near' }] : m.q.q === 'report' ? { side: m.s, over: false, lost: [{ inf: 3 }, null] } : { t: m.s, stock: { en: 9, mt: 9 }, sq: [{ id: 1, nm: 'Esquadra Urso', rank: 2, x: 5, z: 6, n: 4 }], vet: [{ who: 'T-90M', g: 'tank', rank: 3, xp: 40, x: 1, z: 2 }] } }); }
   });
 
   const b = bridge({});
@@ -160,7 +160,7 @@ function bridge(env) {
   const rel = await b.call('seat', { action: 'release' }); ok(!rel.isError && rel.json.heldByMe === false, 'seat release');
   const nc = await b.call('scout', { x: 1, z: 2 }); ok(nc.isError && /ctl/.test(nc.text), 'a command without the seat: refused ctl by the relay');
   const cl = await b.call('seat', { action: 'claim' }); ok(!cl.isError && cl.json.heldByMe === true, 'seat claim again');
-  const mr = await b.call('get_match_report'); ok(!mr.isError && seenAsk[seenAsk.length - 1].q.q === 'report' && mr.json.data.side === 1 && mr.json.data.tickets[1] === null, 'get_match_report: the host is asked (gask report) about the match on, for this side');
+  const mr = await b.call('get_match_report'); ok(!mr.isError && seenAsk[seenAsk.length - 1].q.q === 'report' && mr.json.data.side === 1 && mr.json.data.lost[1] === null, 'get_match_report: the host is asked (gask report) about the match on, for this side');
   const ml = await b.call('get_match_report', { match: 'list' }); ok(!ml.isError && ml.json.matches.length === 1 && ml.json.matches[0].match === 'ww2/' + MATCH && ml.json.matches[0].winner === 0 && ml.json.matches[0].doctrines[1] === 'aggressive', 'get_match_report list: the matches the server keeps');
   const mo = await b.call('get_match_report', { match: 'ww2/' + MATCH }); ok(!mo.isError && mo.json.data.dur === 1800, 'get_match_report with a match from the list: its review');
   const mb = await b.call('get_match_report', { match: '../x' }), mn = await b.call('get_match_report', { match: 'ww2/2026-01-01-000000000000' }); ok(mb.isError && mn.isError, 'a bad or missing match is an error');

@@ -11,7 +11,7 @@ const all = [], dt = 1 / 60;
 /* solo, to the last digit (tests/eco.js: print) */
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.tk.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
+  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.ps.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
 };
 const solo = page => { const C = H.load({ seed: 41, eco: false, page }), S = C.newState('ww2', C.$('ERAS').ww2.sides[0].fighter, { cls: 'plane' }); C.run(60); return print(C, S); };
 /* a client of the room; keep: its director and plan stay (the host's); pre: a hook before it connects */

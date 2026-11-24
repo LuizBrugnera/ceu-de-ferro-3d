@@ -1,7 +1,7 @@
 'use strict';
 /* the MCP bridge of the Insurgents (CEU_SIDE=2) in a room of three sides (cf-3l-p5-servidor): the relay (SERVER, PORT_T, GENKEY set), a real host
    page of the USA headless in this process (map 9, Net.ns0 3 as the hangar's "Três"), the bridge as a child process over stdio. initialize names
-   the faction and both enemies; get_state says link.faction Insurgents, sides 3, enemies USA and Russia, map.tickets by faction, and points and
+   the faction and both enemies; get_state says link.faction Insurgents, sides 3, enemies USA and Russia, map.pointsHeld by faction, and points and
    bases held by an enemy by its faction's name; seat claims side 2's chair on the host. About a minute */
 const path = require('path'), { spawn } = require('child_process');
 process.env.SERVER = process.env.SERVER || path.join(__dirname, '..', 'server.js'); process.env.GENKEY = 'secret';
@@ -25,10 +25,10 @@ let host = null, pumping = true;
   await N.sleep(1500);
   let st = await call('get_state', { refresh_map: true }); for (let k = 0; k < 4 && !st.map; k++) { await N.sleep(1200); st = await call('get_state', { refresh_map: true }); }
   const L = st.link || {}, M = st.map || {};
-  console.log('   link ' + J(L).slice(0, 300) + '\n   tickets ' + J(M.tickets));
+  console.log('   link ' + J(L).slice(0, 300) + '\n   points held ' + J(M.pointsHeld));
   ok(L.connected && L.side === 2 && L.faction === 'Insurgents' && L.sides === 3, 'get_state: connected as side 2, the Insurgents, of three sides');
   ok(J([...(L.enemies || [])].sort()) === J(['Russia', 'USA']), 'its enemies are the USA and Russia (' + L.enemies + ')');
-  ok(M.tickets && Number.isFinite(M.tickets.USA) && Number.isFinite(M.tickets.Russia) && Number.isFinite(M.tickets['ours (Insurgents)']), 'map.tickets: a map by faction, ours named so (' + J(M.tickets) + ')');
+  ok(M.pointsHeld && Number.isFinite(M.pointsHeld.USA) && Number.isFinite(M.pointsHeld.Russia) && Number.isFinite(M.pointsHeld['ours (Insurgents)']) && M.tickets === undefined, 'map.pointsHeld: a map by faction, ours named so, no tickets (' + J(M.pointsHeld) + ')');
   const ins = init && init.result && (init.result.instructions || '');
   ok(/Insurgents/.test(ins) && /USA/.test(ins) && /Russia/.test(ins), 'initialize: the instructions name the faction and the two enemies');
   const pts = M.points || [], held = pts.map(q => q.holder).filter(Boolean);

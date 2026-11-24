@@ -51,6 +51,26 @@ ok(D && Math.hypot(D.x - P0.x, D.z - P0.z) < 2, 'losing, the AI drops on the con
 const L = S.glog && (S.glog.l[t] || []).filter(e => e && /perdendo tropas/.test(e.s));
 ok(L && L.length > 0, '  and says why in the general\'s log');
 
+/* the drops' cap (the owner's "never releases, always at the limit"): the frame meter's cut of the budget (S.popK) does not stop a drop,
+   the side's whole budget and the paratroopers' allowance do, and the refusal names that limit */
+const lim = $('paraLim'), men = $('popUse')(t).men, GENno = $('GEN').no;
+lt[t] = 0; for (const D of S.pdr) D.end = D.end || S.t; d.res.squad = ['hq'];
+S.popK = .5; const cut = $('popOf')(t).men;
+ok(cut < men + 6 && lim(t) >= men + 6, 'a busy machine cuts the cap to ' + cut + ' men under the ' + men + ' in the field, the drops\' cap stays ' + lim(t));
+const r2 = C.genCmd(t, { c: 'para', x: tg.x, z: tg.z, why: 'teste' }, 'ai');
+ok(r2.ok, '  and the drop goes: ' + JSON.stringify(r2));
+lt[t] = 0; for (const D of S.pdr) D.end = D.end || S.t; d.res.squad = ['hq'];
+const pu = $('popUse'); $('popUse = () => ({ men: 9999, veh: 0, air: 0 })');
+const r3 = C.genCmd(t, { c: 'para', x: tg.x, z: tg.z }, 'ai');
+ok(!r3.ok && r3.why === 'ppop' && /teto de soldados/.test(GENno.ppop), 'over even that, refused naming the soldiers\' cap: ' + r3.why + ' (' + GENno.ppop + ')');
+const g1 = $('ptrGrant')(t, 1, 8);
+ok(!g1.length && g1.why === 'pop', '  the player\'s transport is told the same: ' + g1.why);
+C.__pu = pu; $('popUse = __pu');   // back to the real count
+d.res.squad = [];
+const g2 = $('ptrGrant')(t, 1, 8);
+ok(!g2.length && g2.why === 'res' && $('PTR').say.res !== $('PTR').say.pop, '  and with room but no squad, "no squad in the reserve": ' + g2.why);
+S.popK = 1;
+
 /* three sides: the Insurgents have no transport and keep nothing back */
 const M = H.load({ seed: 3, eco: 1, mapv: 11 }); M.$('AIB').now = () => 0;
 const S3 = M.watch('modern', { len: 0, n: 3 }); M.run(40, null, 1 / 10);

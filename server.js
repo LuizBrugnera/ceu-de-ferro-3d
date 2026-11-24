@@ -734,10 +734,10 @@ RX.ill = (c, m) => {
   /* the player's transport (welcome says ptr: 1; cf-transporte-jogador). pdl, from a guest flying a paratroopers' plane or a transport
      helicopter to the host, 400 ms apart at least: k 0 load me from the side's reserve (w squads, 1 to 4), k 1 a stick goes out of my
      aircraft (n its kits, as lift's; r 1 down the fast-rope, 0 by parachute). From the host to that guest alone (to): k 0, n the squads
-     granted, [[kits]], 4 at most, none when the reserve is empty */
+     granted, [[kits]], 4 at most, none when the reserve is empty or the side is over its soldiers' cap, and then y: res or pop, which of the two */
   RX.pdl = (c, m) => {
     const h = c.room.host, kits = v => Array.isArray(v) && v.length > 0 && v.length <= 8 && v.every(k => Number.isInteger(k) && k >= 0 && k < c.room.inf.size);
-    if (h === c) { const o = c.room.get(m.to); if (o && o !== c && m.k === 0 && Array.isArray(m.n) && m.n.length <= 4 && m.n.every(kits)) send(o.ws, { t: 'pdl', k: 0, n: m.n }); return; }
+    if (h === c) { const o = c.room.get(m.to); if (o && o !== c && m.k === 0 && Array.isArray(m.n) && m.n.length <= 4 && m.n.every(kits)) send(o.ws, Object.assign({ t: 'pdl', k: 0, n: m.n }, (m.y === 'pop' || m.y === 'res') && { y: m.y })); return; }   // y: which limit, when no squad came (cf-general-reservas)
     if (!h || c.spec || (c.player.cls !== 'plane' && c.player.cls !== 'heli')) return;
     const now = Date.now(); if (now - (c.pdt || 0) < 400) return;
     if (m.k === 0 && int(m.w, 1, 4)) { c.pdt = now; send(h.ws, { t: 'pdl', from: c.player.id, k: 0, w: m.w }); }

@@ -159,11 +159,12 @@ console.log('-- a solo game is its own host: the frame meter calibrates the budg
   ok(down[0] === 1 - M.dn && down.every((k, i) => !i || k <= down[i - 1]) && P.men < GP.pop.men, 'offline, every frame over the AI budget: the budget shrinks period by period (' + down.map(k => Math.round(k * 100) + '%').join(' ') + ', ' + P.men + ' soldiers of ' + GP.pop.men + ')');
   ok(Math.abs(S.popK - M.min) < 1e-9 && down.filter(k => Math.abs(k - M.min) < 1e-9).length <= 4, 'and reaches its floor of ' + M.min * 100 + '% only after ' + Math.round((1 - M.min) / M.dn) * M.every + ' s over budget');
   const line = S.glog.l[1].slice(n0).find(e => /Teto de população reduzido/.test(e.s));
-  ok(line && /8 ms por quadro em média nos últimos 10 s \(orçamento 4 ms; pior quadro 8 ms, comandante 1,6 ms\)/.test(line.s), 'the general\'s log gives the numbers measured: "' + (line && line.s) + '"');
+  ok(line && /8 ms por quadro em média nos últimos 10 s \(orçamento 4 ms; pior quadro 8 ms, comandante 1,6 ms\)/.test(line.d), 'the entry keeps the numbers measured (e.d): "' + (line && line.d) + '"');
+  ok(line && !/ms|quadro/.test(line.s) && /não dá conta/.test(line.s), 'and the diary says what it means, with no telemetry (P28): "' + (line && line.s) + '"');
   ms = () => AIB.avg * .5;
   const up = ks(12);
   ok(up.every((k, i) => k >= (i ? up[i - 1] : M.min)) && S.popK === 1, 'the AI time falls to ' + AIB.avg * .5 + ' ms: the budget grows back to whole (' + up.map(k => Math.round(k * 100) + '%').join(' ') + ')');
-  ok(S.glog.l[1].some(e => /Teto de população ampliado a 100%: IA do anfitrião em 2 ms/.test(e.s)), 'and the log says so, with the numbers');
+  ok(S.glog.l[1].some(e => /Teto de população ampliado a 100%: o computador do anfitrião folgou/.test(e.s) && /^IA do anfitrião em 2 ms/.test(e.d)), 'and the log says so, the numbers kept on the entry');
   S.popK = .7; ms = () => AIB.avg * (M.low + 1) / 2;
   ok(ks(3).every(k => k === .7), 'between ' + AIB.avg * M.low + ' and ' + AIB.avg + ' ms it holds where it is (no seesaw)');
   S.popK = 1; ms = () => AIB.avg * 2;

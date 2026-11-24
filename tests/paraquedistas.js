@@ -45,6 +45,8 @@ const far = men.map(m => Math.round(Math.hypot(m.x - tg.x, m.z - tg.z)));
 ok(men.length && Math.max(...far) < 420, '  around the point: ' + far.join(', ') + ' m');
 ok(men.every(m => !m.para && Math.abs(m.y - $('manY')(m.x, m.z)) < 1), '  on their feet, on the ground');
 ok(q.mis && q.mis.kind === 'attack' && Math.hypot(q.mis.area.x - tg.x, q.mis.area.z - tg.z) < 1, '  with the drop\'s mission: ' + (q.mis && q.mis.kind));
+$('setOrd')(q, Object.assign({}, q.ord));   // the contact drill (cnStep) sets the squad's hold order again once the contact is over
+ok(q.mis && q.mis.kind === 'attack', '  which its hold order set again keeps: ' + (q.mis && q.mis.kind));
 ok(p.gone && !p.dead && D.end > 0, 'the transport went home and landed');
 r = gen({ c: 'para', x: tg.x, z: tg.z }); ok(!r.ok && r.why === 'pcd', 'another drop before PARA.cd s: ' + r.why);
 

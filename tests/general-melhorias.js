@@ -146,4 +146,19 @@ console.log('-- idle tanks together attack (gsArm) --');
   const C1 = S.cmd[1]; C1.ops = []; $('gsArm')(C1); ok(!C1.ops.some(o => o.k === 'arm'), 'a side with no idle tanks opens none');
   tanks.forEach(u => { u.dead = true; });
 }
+
+console.log('-- "no strength to attack": a quiet post\'s squad goes to the forming-up place, a dropped squad never (gsPull) --');
+{
+  const O = $('post')(0, 'push', 0), R = S.T.routes, p = O.x !== undefined ? O : $('routeAt')(R[O.ri], Math.max(0, Math.min(O.s, R[O.ri].len)));
+  const sq = S.squads.filter(q => q.team === 0), q = sq.find(q => q.job === 'wood' && q.ri === O.ri && q.live >= 3 && !q.op);
+  ok(!!q, 'a woods post on the road of the forming-up place');
+  if (q) {
+    for (const m of q.men) { m.x = p.x + 300; m.z = p.z + 300; }
+    for (const o of sq) if (o.job === 'push') o.job = 'base';   // no squad waits there yet
+    q.para = 1; C0.gsPT = 0; $('gsPull')(C0, sq);
+    ok(q.job === 'wood', 'a squad from a paratroop drop keeps its point (' + q.job + ')');
+    delete q.para; C0.gsPT = 0; $('gsPull')(C0, sq);
+    ok(q.job === 'push', 'the same squad off a post: to the forming-up place (' + q.job + ')');
+  }
+}
 H.done();

@@ -74245,7 +74245,7 @@ if (PACK.on) setTimeout(() => { for (const id of new Set([...Object.values(PACK.
    world with only the depth cleared: it never goes into a wall, and the world's zoom does not stretch it. From the hip it sits low on the
    right; sighted (camSt.ak) its top comes up to just under the line of sight in the middle, where fpMan's sight marks (as they were) stand
    over it; a launcher sits on the shoulder beside the eye; a scoped rifle gives way to the scope. A step sways it, a shot kicks it back and
-   up, a reload lowers and rolls it, a swap brings it up from below, running turns it across the chest, a turn of the view drags it behind
+   up, a reload lifts it, turns it in and rolls its magazine toward the eye, where the left hand goes, a swap brings it up from below, running turns it across the chest, a turn of the view drags it behind
    for a moment. The light is the world's (its sky and its sun, turned into the eye's frame). Visual only: the aim, the shot, the hit boxes
    and the net are not touched. Off, and fpMan draws the weapon of before on the glass: the pack off (?pack=0, file://, a server without it,
    level 0), ?vm=0 or localStorage cf-vm 0, aboard a vehicle, and until the weapon's model has arrived. The mortar is a tube of boxes of its
@@ -74256,11 +74256,67 @@ const VMW = {
   mg42: ['w_smg', 1.12], bar: ['w_smg', 1.15], m249: ['w_m4', 1.04], pkp: ['w_ak', 1.12], pkm: ['w_ak', 1.1],
   m82: ['w_sniper', 1.45], osv96: ['w_sniper', 1.5], svd: ['w_sniper', 1.22],
   p38: ['w_pistol', .22], m1911: ['w_pistol', .22], m17: ['w_pistol', .2], mp443: ['w_pistol', .2], pm: ['w_pistol', .16],
-  pzf: ['w_bazooka', 1], bazooka: ['w_bazooka', 1.37], rpg: ['w_rpg', .95], rpg7v: ['w_rpg', .95],
+  pzf: ['w_bazooka', 1], bazooka: ['w_rpg', 1.37], rpg: ['w_bazooka', 1.2], rpg7v: ['w_bazooka', 1.2],   // w_bazooka is the RPG-7 (warhead and two grips), w_rpg the plain tube with its sights: the M1's look
   javelin: ['w_launcher', 1.2], stinger: ['w_launcher', 1.5], igla: ['w_launcher', 1.6], strela: ['w_launcher', 1.4], malyutka: ['w_launcher', .9], kornet: ['w_launcher', 1.2]
 };
+/* where the hands hold each model (cf-armas-fp), in the model's own metres as models/pack/*.glb has it (x toward the muzzle, y up, z to the
+   right; read off slices of each model): g the right hand on the pistol grip (on the Kar98, the stock's wrist) and r how far that grip leans
+   back at its foot (rad); f the left hand and its hold: u under the handguard's left side, where the eye sees it, v round a vertical foregrip (fr its lean), c cupping the right
+   hand (the pistol); m where the left hand goes in a reload (the magazine; the Kar98's clip goes in over the action, the launchers have none:
+   the hand drops for the next round and comes back); b the bolt's handle, which a bolt rifle's right hand works after each shot; rot a model
+   that came turned (w_bazooka, the RPG-7: its warhead behind and its grips sideways), as Euler angles. Before, the hands were put by the
+   model's box (the right one on the pack's pivot, 38% along, the left 30% of the length ahead of it and under the box's middle): they hung
+   in the air under the weapons. A model without an entry (the mortar, the grenade, the mine) keeps that */
+const VMH = {
+  w_m4: { g: [-.222, .09, .004], r: .5, f: [.09, .158, -.046], fh: 'u', m: [-.06, .045, 0] },
+  w_ak: { g: [-.192, .105, .004], r: .42, f: [.15, .19, -.03], fh: 'u', m: [.02, .06, 0] },
+  w_kar98: { g: [-.232, .128, -.036], r: .95, f: [.1, .132, -.058], fh: 'u', m: [-.11, .215, -.03], b: [-.18, .145, -.004] },
+  w_smg: { g: [-.045, .115, .004], r: .1, f: [.285, .125, 0], fh: 'v', fr: 0, m: [.125, .06, 0] },
+  w_sniper: { g: [-.335, .145, .004], r: .55, f: [-.02, .215, -.036], fh: 'u', m: [-.21, .16, 0] },
+  w_pistol: { g: [-.083, .03, .002], r: .43, f: [-.077, .02, -.03], fh: 'c' },
+  w_bazooka: { g: [.02, .053, -.06], r: -.15, f: [-.16, .053, -.075], fh: 'v', fr: -.15, rot: [-Math.PI / 2, Math.PI, 0, 'YXZ'] },
+  w_rpg: { g: [-.06, .0, .006], r: 0, f: [.2, .03, -.046], fh: 'u' },
+  w_launcher: { g: [-.18, .0, .012], r: 0, f: [.15, .03, -.046], fh: 'u' }
+};
+/* the arms (cf-armas-fp): each from its shoulder, fixed in the eye's frame (the left one forward, the torso turned to the weapon), to its
+   hand on the weapon, the elbow bent toward pole (two bones, up and fore m long): the hands stay on the weapon in every pose and the arms
+   follow it, where they were two stiff rods hung from the weapon. Out of reach, the arm goes straight and stretches to the hand */
+const VMS = { R: [.19, -.24, .1], L: [-.14, -.25, -.02], up: .3, fore: .29, t: [.075, .085], pole: { R: [.8, -1, .2], L: [-.5, -1, .2] } };
+/* a reload's left hand (VMR.path: [the reload's progress, where]: 0 its hold, 1 the magazine, 2 drop below the magazine, toward the body),
+   and the bolt worked after a shot (VMR.bolt: from s, for s): the hand to the handle, pulled back pull m and pushed home, then to the grip */
+const VMR = { path: [[0, 0], [.14, 1], [.34, 1], [.48, 2], [.6, 1], [.8, 1], [.95, 0]], drop: [-.04, -.16, -.06], bolt: [.06, .55], pull: .07 };
+/* the elbow of an arm from shoulder S to hand H (the eye's frame, arrays), bent toward pole: up m from S and fore m from H; straight, and
+   both stretched alike, when H is out of reach */
+function vmElbow(S, H, pole, up, fore) {
+  const d = [H[0] - S[0], H[1] - S[1], H[2] - S[2]], L = Math.hypot(d[0], d[1], d[2]) || 1e-6, n = d.map(v => v / L);
+  if (L >= (up + fore) * .999) { const k = up / (up + fore); return [S[0] + d[0] * k, S[1] + d[1] * k, S[2] + d[2] * k]; }
+  const x = Math.max(-up, Math.min(up, (up * up - fore * fore + L * L) / (2 * L))), h = Math.sqrt(Math.max(0, up * up - x * x));
+  const pd = pole[0] * n[0] + pole[1] * n[1] + pole[2] * n[2]; let p = [pole[0] - n[0] * pd, pole[1] - n[1] * pd, pole[2] - n[2] * pd];
+  const pl = Math.hypot(p[0], p[1], p[2]); p = pl > 1e-6 ? p.map(v => v / pl) : [0, -1, 0];
+  return [S[0] + n[0] * x + p[0] * h, S[1] + n[1] * x + p[1] * h, S[2] + n[2] * x + p[2] * h];
+}
+/* where the hands are this frame, in the weapon's frame (A: the hold vmBuild worked out): rl the reload's progress 0 to 1 (-1 none), tb s
+   since a shot of a bolt rifle (-1 none) */
+function vmHandPose(A, rl, tb) {
+  const sm = x => x * x * (3 - 2 * x), mix = (p, q, k) => p.map((v, i) => v + (q[i] - v) * k);
+  let L = A.f, R = A.g;
+  if (rl >= 0) {
+    const M = A.m || A.f, D = [M[0] + VMR.drop[0], M[1] + VMR.drop[1], M[2] + VMR.drop[2]], at = [A.f, M, D], P = VMR.path;
+    let i = 0; while (i < P.length - 1 && rl > P[i + 1][0]) i++;
+    L = i >= P.length - 1 ? at[P[i][1]] : mix(at[P[i][1]], at[P[i + 1][1]], sm(Math.min(1, Math.max(0, (rl - P[i][0]) / (P[i + 1][0] - P[i][0])))));
+  }
+  if (A.b && tb >= 0) {
+    const k = (tb - VMR.bolt[0]) / VMR.bolt[1];
+    if (k > 0 && k < 1) { R = mix(A.g, A.b, sm(k < .25 ? k / .25 : k > .75 ? (1 - k) / .25 : 1)); R[0] -= VMR.pull * Math.sin(Math.PI * Math.min(1, Math.max(0, (k - .25) / .5))); }
+  }
+  return { L, R };
+}
 /* where the grip sits in the eye's frame (x right, y up, -z ahead), from the hip and sighted; sighted y and x are worked out from the model */
 const VMP = { rifle: [[.15, -.16, -.3], [0, 0, -.2]], pistol: [[.13, -.13, -.36], [0, 0, -.38]], tube: [[.19, -.1, -.22], [0, 0, -.12]], mort: [[.1, -.36, -.55], [.1, -.36, -.55]] };
+/* where the right hand holds a rifle or a pistol from the hip, in the eye's frame (cf-armas-fp): the same place whichever the model (the
+   pack's pivot sits 12 cm ahead of the M4's grip and 6 cm behind the SMG's), low and away from the eye, so both hands and the whole weapon
+   are in view (it was 8 cm nearer and 7 cm higher: the weapon took the lower right quarter of the screen) */
+const VMPOS = { rifle: [.17, -.23, -.34], pistol: [.15, -.17, -.4] };
 const VM = { fov: 54, M: new Map(), on: false, f: -1, t: 0, rn: 0, sx: 0, sy: 0, ph: null, pp: 0, sc: null, cam: null, hemi: null, sun: null, lsc: null, L: [], box: null, off: false };
 try { VM.off = /[?&]vm=0/.test(location.search) || localStorage.getItem('cf-vm') === '0'; } catch (e) {}
 const vmOk = () => !VM.off && typeof PACK !== 'undefined' && PACK.on && PACK.lvl() > 0;
@@ -74280,17 +74336,13 @@ function vmInit() {
   VM.limb = new THREE.CylinderGeometry(.5, .4, 1, 10); VM.limb.userData.keep = true; VM.fist = new THREE.BoxGeometry(1, 1, 1, 3, 3, 3); { const P = VM.fist.attributes.position, v = new THREE.Vector3(); for (let i = 0; i < P.count; i++) { v.fromBufferAttribute(P, i); const n = v.clone().normalize().multiplyScalar(.56); v.lerp(n, .5); P.setXYZ(i, v.x, v.y, v.z); } VM.fist.computeVertexNormals(); } VM.fist.userData.keep = true;   // a cube pulled half way to a ball: a fist
 }
 const VMY = typeof THREE !== 'undefined' ? new THREE.Vector3(0, 1, 0) : null, VMQ = typeof THREE !== 'undefined' ? new THREE.Quaternion() : null;
-/* a round from a (the wrist's end) to b (an arm's segment), t thick */
-function vmLimb(g, a, b, t, mt) {
-  const A = new THREE.Vector3().fromArray(a), v = new THREE.Vector3().fromArray(b).sub(A), m = new THREE.Mesh(VM.limb || VM.box, mt), L = v.length();
-  m.position.copy(A).addScaledVector(v, .5); m.quaternion.setFromUnitVectors(VMY, v.normalize()); m.scale.set(t, L, t); g.add(m); return m;
-}
 /* the weapon and the arms, built once per model: root (the eye's frame, moved each frame) > turn (the weapon's own frame: +x the muzzle,
-   the grip at the origin) > the model, the scope, the hands and arms, the flash */
+   the grip at the origin) > the model, the scope, the hands, the flash; the arms in root, reaching the hands from the shoulders */
 function vmBuild(pk) {
   vmInit();
   const root = new THREE.Group(), turn = new THREE.Group(); turn.rotation.y = Math.PI / 2; root.add(turn);
-  const metal = mat(0x2b2e2a), sleeve = mat(0x5f6a3c, { flatShading: false }), hand = mat(0xb08a6a, { flatShading: false }), V = { root, sleeve, hand, pk };
+  const metal = mat(0x2b2e2a), sleeve = mat(0x5f6a3c, { flatShading: false }), hand = mat(0xb08a6a, { flatShading: false }), V = { root, sleeve, hand, pk }, h = pk.id ? VMH[pk.id] : null;
+  let m = null;
   if (pk.cls === 'mort') {   // the tube carried slanted up, the base plate at its foot
     const t = new THREE.Group(); t.rotation.z = .8; turn.add(t);
     const tube = new THREE.Mesh(new THREE.CylinderGeometry(.045, .05, pk.len, 10), metal); tube.rotation.z = -Math.PI / 2; tube.position.x = pk.len / 2 - .1; t.add(tube);
@@ -74298,8 +74350,9 @@ function vmBuild(pk) {
     V.box = new THREE.Box3(new THREE.Vector3(-.15, -.15, -.15), new THREE.Vector3(.6, .6, .15)); V.mz = [pk.len - .1, 0];
   } else {
     const P = packGet(pk.id); if (!P) return null;
-    const s = pk.len / P.dims[0], g = packPivot(P, 'hull') || [0, 0, 0], m = packWhole(P, 0, s);
-    m.position.set(-g[0] * s, -g[1] * s, -g[2] * s); turn.add(m); turn.updateMatrixWorld(true);
+    const s = pk.len / P.dims[0], g = packPivot(P, 'hull') || [0, 0, 0], o = new THREE.Group(); m = packWhole(P, 0, s);
+    if (h && h.rot) o.rotation.set(h.rot[0], h.rot[1], h.rot[2], h.rot[3]);   // a model that came turned, turned right round its pivot
+    m.position.set(-g[0] * s, -g[1] * s, -g[2] * s); o.add(m); turn.add(o); turn.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(turn.matrixWorld).invert(), B = new THREE.Box3();
     m.traverse(c => { if (c.isMesh) { c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, c.matrixWorld))); } });
     if (pk.scope) {   // a 1944 sniper's scope over the receiver
@@ -74309,10 +74362,12 @@ function vmBuild(pk) {
     V.box = B; const H = B.max.y - B.min.y; V.mz = [B.max.x + .02, B.min.y + .73 * H, (B.min.z + B.max.z) / 2];
   }
   const B = V.box, L = pk.len, lx = pk.cls === 'pistol' ? .01 : pk.cls === 'mort' ? .3 : clamp(.3 * L, .16, .42), ly = pk.cls === 'pistol' ? -.05 : B.min.y * .5 - .02, lz = pk.cls === 'pistol' ? -.03 : 0;
-  const R = new THREE.Group(); turn.add(R);
-  const hb = (x, y, z) => { const m = new THREE.Mesh(VM.fist || VM.box, hand); m.scale.set(.095, .068, .072); m.position.set(x, y, z); R.add(m); };
-  hb(0, -.035, 0); vmLimb(R, [-.03, -.05, .02], [-.3, -.21, .13], .075, sleeve); vmLimb(R, [-.3, -.21, .13], [-.6, -.36, .32], .085, sleeve);
-  hb(lx, ly, lz); vmLimb(R, [lx - .03, ly - .03, lz - .02], [lx - .26, -.26, -.2], .075, sleeve); vmLimb(R, [lx - .26, -.26, -.2], [lx - .55, -.4, -.38], .085, sleeve);
+  /* the hands where the model is held (VMH), in the weapon's frame; the arms (V.arm, in root's frame) reach them from the shoulders each frame */
+  const at = p => (p && m ? turn.worldToLocal(m.localToWorld(new THREE.Vector3(p[0], p[1], p[2]))).toArray() : null);
+  const A = h && m ? { g: at(h.g), f: at(h.f), m: at(h.m), b: at(h.b), r: h.r || 0, fh: h.fh, fr: h.fr || 0 } : { g: [0, -.035, 0], f: [lx, ly, lz], m: null, b: null, r: 0, fh: 'o', fr: 0 };
+  const fist = (p, hold, r) => { const q = new THREE.Mesh(VM.fist || VM.box, hand); q.position.fromArray(p); vmHold(q, hold, r); turn.add(q); return q; };
+  V.A = A; V.hR = fist(A.g, h ? 'g' : 'o', A.r); V.hL = fist(A.f, A.fh, A.fh === 'v' ? A.fr : A.fh === 'c' ? A.r : 0);
+  V.arm = []; for (let i = 0; i < 4; i++) { const q = new THREE.Mesh(VM.limb || VM.box, sleeve); root.add(q); V.arm.push(q); }   // the right forearm and upper arm, then the left's
   if (pk.cls !== 'mort' && pk.cls !== 'tube') {   // the flash at the muzzle
     const f = new THREE.Sprite(vmFlashMat());
     f.position.set(V.mz[0], V.mz[1], V.mz[2] || 0); f.visible = false; turn.add(f); V.flash = f;
@@ -74320,11 +74375,35 @@ function vmBuild(pk) {
   }
   /* sighted: the grip moved so the top of the weapon is just under the line of sight; a launcher's tube beside the eye */
   const ads = VMP[pk.cls][1].slice();
-  if (pk.cls === 'rifle' || pk.cls === 'pistol') ads[1] = -B.max.y - (pk.cls === 'pistol' ? .006 : .01);
+  if (pk.cls === 'rifle' || pk.cls === 'pistol') { ads[1] = -B.max.y - (pk.cls === 'pistol' ? .006 : .01); ads[0] = -(B.min.z + B.max.z) / 2; }   // the weapon's own middle under the eye (the Kar98's is 3.4 cm off the grip's line)
   else if (pk.cls === 'tube') { ads[0] = (B.max.z - B.min.z) / 2 + .05; ads[1] = -(B.min.y + B.max.y) / 2 - .03; }
-  V.hip = VMP[pk.cls][0]; V.ads = ads;
-  VM.sc.add(root); root.visible = false;
+  const hp = h && VMPOS[pk.cls]; V.hip = hp ? [hp[0] - A.g[2], hp[1] - A.g[1], hp[2] + A.g[0]] : VMP[pk.cls][0]; V.ads = ads;   // the grip where the hand is (VMPOS)
+  VM.sc.add(root); root.visible = false; vmArms(V);
   return V;
+}
+/* a fist's shape and lean for its hold: g and v round a grip leaning back r, c the same cupping the other hand, u flat under a handguard,
+   o the hand of before */
+function vmHold(q, hold, r) {
+  if (hold === 'u') q.scale.set(.09, .058, .078);   // its fingers round the handguard's side: leaning in under it
+  else if (hold === 'o') q.scale.set(.095, .068, .072);
+  else q.scale.set(.075, .092, .072);
+  q.rotation.set(hold === 'u' ? -.6 : 0, 0, hold === 'u' || hold === 'o' ? 0 : -r);
+}
+/* the arms this frame: the hands where vmHandPose put them, each arm from its shoulder (VMS) to its hand, in root's frame */
+const VMT = typeof THREE !== 'undefined' ? { h: new THREE.Vector3(), s: new THREE.Vector3(), e: new THREE.Vector3(), p: new THREE.Vector3(), a: new THREE.Vector3(), q: new THREE.Quaternion() } : null;
+function vmSeg(q, a, b, t) {   // a limb from a (its thin end, toward the hand) to b
+  const T = VMT; T.a.subVectors(b, a); const L = T.a.length() || 1e-6;
+  q.position.copy(a).addScaledVector(T.a, .5); q.quaternion.setFromUnitVectors(VMY, T.a.multiplyScalar(1 / L)); q.scale.set(t, L, t);
+}
+function vmArms(V) {
+  const R = V.root, T = VMT; if (!V.arm) return;
+  R.updateMatrixWorld(true); T.q.copy(R.quaternion).invert();
+  for (let i = 0; i < 2; i++) {
+    const hd = i ? V.hL : V.hR, side = i ? 'L' : 'R';
+    hd.getWorldPosition(T.h); R.worldToLocal(T.h); R.worldToLocal(T.s.fromArray(VMS[side])); T.p.fromArray(VMS.pole[side]).normalize().applyQuaternion(T.q);
+    T.e.fromArray(vmElbow(T.s.toArray(), T.h.toArray(), T.p.toArray(), VMS.up, VMS.fore));
+    vmSeg(V.arm[i * 2], T.h, T.e, VMS.t[0]); vmSeg(V.arm[i * 2 + 1], T.e, T.s, VMS.t[1]);
+  }
 }
 /* the model of a weapon, or null while its pack file is not here (asking for it starts the fetch) */
 function vmGet(pk) {
@@ -74400,7 +74479,8 @@ function vmRender() {
   if (sl) { VM.sun.color.copy(sl.color); VM.sun.intensity = sl.intensity; VM.sun.position.copy(sl.position).sub(sl.target.position).normalize().applyQuaternion(VMQ.copy(camera.quaternion).invert()); }
   const col = (P.cc || (MCOL[P.def.era] && MCOL[P.def.era][P.def.side]) || [0x5f6a3c])[0];
   if (V.sleeve.userData.c !== col) { V.sleeve.color.setHex(col); V.sleeve.userData.c = col; }
-  const hc = S.modern ? 0x34352f : 0xb08a6a; if (V.hand.userData.c !== hc) { V.hand.color.setHex(hc); V.hand.userData.c = hc; }
+  const hc = S.modern ? 0x7a6a4e : 0xb08a6a;   // a coyote glove today (it was near black: on a black weapon the hand did not show where it held)
+  if (V.hand.userData.c !== hc) { V.hand.color.setHex(hc); V.hand.userData.c = hc; }
   /* the motion */
   const k = clamp(camSt.ak || 0, 0, 1), calm = reduced ? .25 : 1, cls = pk.cls, ts = S.t - a.t, big = cls === 'tube' || cls === 'mort';
   const sp = Math.min(1, Math.hypot(P.v.x, P.v.z) / 2.5), ph = P.step || 0;
@@ -74415,8 +74495,9 @@ function vmRender() {
   const hip = V.hip, ads = V.ads, lerp = (i) => hip[i] + (ads[i] - hip[i]) * k, loose = (1 - .75 * k) * calm, run = VM.rn * (1 - k);
   const bx = Math.sin(ph * 1.15) * .009 * sp * loose, by = -Math.abs(Math.sin(ph * 2.3)) * .01 * sp * loose + Math.sin(S.t * 1.6) * .0018 * (1 - k) * calm;
   const R = V.root;
-  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - .03 * rl, lerp(1) + by - .03 * run - .13 * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045 * kp) * rc);
-  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055 * kp) * rc - .15 * run + .25 * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run - VM.sx * loose + (big ? 0 : .02 * (VM.kx || 0) * rc), .35 * run + .55 * rl + (big ? 0 : .045 * (VM.kz || 0) * rc), 'YXZ');
+  R.position.set(lerp(0) + bx - .04 * run + VM.sx * .25 * loose - (big ? .03 : .05) * rl, lerp(1) + by - .03 * run + (big ? -.1 : .08) * rl - .3 * sw - VM.sy * .2 * loose, lerp(2) + (big ? .1 : cls === 'pistol' ? .03 : .045 * kp) * rc - (big ? 0 : .02) * rl);   // a reload: up and in, so the magazine and the left hand at it are in view; a launcher only dips and rolls a little (cf-armas-fp: it went 13 cm down, out of view with the hands)
+  R.rotation.set((big ? .05 : cls === 'pistol' ? .16 : .055 * kp) * rc - .15 * run + (big ? .15 : .3) * rl - .7 * sw - VM.sy * loose, .03 * (1 - k) + .55 * run + (big ? 0 : .2) * rl - VM.sx * loose + (big ? 0 : .02 * (VM.kx || 0) * rc), .35 * run + (big ? .25 : -.55) * rl + (big ? 0 : .045 * (VM.kz || 0) * rc), 'YXZ');
+  { const hp = vmHandPose(V.A, a.rl > 0 && d.rl ? clamp(1 - a.rl / d.rl, 0, 1) : -1, vmEjectAt(d, cls) === VMC.bolt ? ts : -1); V.hL.position.fromArray(hp.L); V.hR.position.fromArray(hp.R); vmArms(V); }   // the hands on the weapon, the arms to them
   if (V.flash) { const on = !d.k && ts >= 0 && ts < .05 && !reduced; V.flash.visible = on; if (on) { const s = (cls === 'pistol' ? .1 : .17) * (.8 + Math.random() * .5); V.flash.scale.set(s, s, 1); V.flash.material.rotation = Math.random() * TAU; } }
   R.visible = true; vmCas(V, dt);
   /* drawn over the world: its own camera and field of view, the depth cleared */

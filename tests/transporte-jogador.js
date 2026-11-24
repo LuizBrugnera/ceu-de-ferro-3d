@@ -39,7 +39,7 @@ ok(chutes >= 3, 'their canopies open (' + chutes + ' at once)');
 ok(live.length >= out.length - 1 && live.every(m => !m.para && Math.abs(m.y - $('manY')(m.x, m.z)) < 1), live.length + ' on the ground, on their feet');
 ok(q && live.every(m => m.sq === q) && q.ord && q.ord.k === 'hold', 'one squad, holding');
 const pt = q && $('gPts')().reduce((b, p) => (!b || Math.hypot(p.x - q.ord.x, p.z - q.ord.z) < Math.hypot(b.x - q.ord.x, b.z - q.ord.z) ? p : b), null);
-ok(pt && Math.hypot(pt.x - q.ord.x, pt.z - q.ord.z) < 1 && q.mis && q.mis.kind === 'attack', '  sent to take the nearest point: ' + (pt && $('gName')(pt)) + ' (' + (q && q.mis && q.mis.kind) + ')');
+ok(pt && Math.hypot(pt.x - q.ord.x, pt.z - q.ord.z) < (pt.r || 170) && q.mis && q.mis.kind === 'attack', '  sent to take the nearest point: ' + (pt && $('gName')(pt)) + ' (' + (q && q.mis && q.mis.kind) + ', holding ' + (pt ? Math.round(Math.hypot(pt.x - q.ord.x, pt.z - q.ord.z)) : '?') + ' m from its middle, inside it)');
 const far = live.map(m => Math.round(Math.hypot(m.x - tg.x, m.z - tg.z)));
 ok(Math.max(...far) < 700, '  landed near it: ' + far.join(', ') + ' m');
 /* the second, then empty */

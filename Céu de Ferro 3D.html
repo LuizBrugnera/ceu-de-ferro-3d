@@ -39,6 +39,17 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cv,#hud{position:absolute;inset:0;width:100%;height:100%;display:block}
 #cv{touch-action:none}
 #hud{pointer-events:none}
+/* the scoreboard (SB, cf-pol2 P27): over the battle while Tab is held, nothing to click */
+.board{position:absolute;inset:0;display:flex;justify-content:center;align-items:flex-start;padding:max(9vh,64px) 16px 16px;pointer-events:none}
+.board[hidden]{display:none}
+.board-in{width:min(720px,100%);max-height:100%;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:16px 22px 14px;background:rgba(18,24,26,.9);border-top:3px solid var(--accent);clip-path:polygon(0 0,calc(100% - 11px) 0,100% 11px,100% 100%,11px 100%,0 calc(100% - 11px))}
+.board-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.board h2{margin:0;font-family:var(--f-display);font-weight:400;font-size:28px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+.board-meta{font-family:var(--f-data);font-size:14px;color:var(--mute);font-variant-numeric:tabular-nums}
+.board .score{font-size:15px}
+.board .score .h{margin-top:0}
+.board .me-row{color:#fff;font-weight:600}
+.board-tip{margin:0;font-size:13px;color:var(--mute)}
 
 .sheet{position:absolute;inset:0;overflow-y:auto;background:linear-gradient(180deg,rgba(18,24,26,.55) 0%,rgba(18,24,26,.9) 34%,var(--bg) 100%)}
 .sheet-in{max-width:1080px;margin:0 auto;padding-block:20px 28px;padding-left:var(--gut-l);padding-right:var(--gut-r);display:flex;flex-direction:column;gap:18px}
@@ -545,6 +556,14 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
   <main class="stage" id="stage">
     <canvas id="cv" aria-label="Campo de batalha"></canvas>
     <canvas id="hud" aria-hidden="true"></canvas>
+    <section class="board" id="board" aria-label="Placar" hidden>
+      <div class="board-in">
+        <div class="board-head"><h2>Placar</h2><span class="board-meta" id="boardMeta"></span></div>
+        <div class="score" id="boardSides"></div>
+        <div class="score" id="boardPl"></div>
+        <p class="board-tip">Solte Tab para voltar ao combate · um toque rápido em Tab abre a Visão de General</p>
+      </div>
+    </section>
 <section class="gen" id="gen" aria-label="Visão de General" hidden>
   <canvas id="genMap" aria-label="Mapa tático do comandante"></canvas>
   <header class="gen-top">
@@ -30231,7 +30250,7 @@ function newState(eraId, model, o) {
   const E = ERAS[eraId], T = genTerrain(eraId, o.net ? (Net.mv || 1) : MAPV, eraId === 'modern' && (o.net ? Net.ns === 3 : o.N !== 2) ? 3 : 2), N = sidesOf(eraId, T, o), sd = d ? d.side || 0 : 0;   // the map of three sides (P1, map version 9) only for a match of three
   const me = N === 3 ? sd : o.net && d ? Math.min(sd, 1) : 0, pf = N === 3 || !d || o.net ? 0 : sd;
   S = { era: eraId, E, T, W: E.W, HW: E.HW, ceil: E.ceil, modern: eraId === 'modern', t: 0, demo: !model, watch: !model && !!o.watch, spec: !!o.spec, cls, model, fac: N === 3 ? [0, 1, 2] : [pf, pf === 2 ? 0 : 1 - pf],
-    net: !!o.net, host: !!o.host, humans: Array(N).fill(0), dir: null, me, pref: !!o.mouse, mouse: false, hold: false, aim: null, gv: null, aimR: 0, lead: null, feed: [],
+    net: !!o.net, host: !!o.host, humans: Array(N).fill(0), dir: null, me, pref: !!o.mouse, mouse: false, hold: false, aim: null, gv: null, aimR: 0, lead: null, feed: [], kf: [],
     fcp: null, mpp: 0, sol: null, gf: null, falls: [], spotT: 0, shellT: -9, smokes: [], threat: null,
     planes: [], units: [], men: [], squads: [], sqn: 0, bullets: [], bombs: [], missiles: [], flares: [], shells: [], parts: [], wrecks: [], floats: [], debris: [],
     my: null, input: {}, invert: false, score: 0, airKills: 0, gndKills: 0, cq: null, cd: {},
@@ -31220,6 +31239,27 @@ function popSmoke(u) {
   if (S.net && (u === S.my || u.aid)) Net.smoke(u);
   return true;
 }
+/* ---------- the kill feed (KF, cf-pol2 P27): who killed whom, with what and from how far, a short list at the top right ----------
+   One row a death the player cares about: his own (he killed or was killed), his squad's (psq), a human player's online (pid), and a
+   vehicle or aircraft lost within r m of him. Rows hold life s (mine s for the player's own), at most n of them, the oldest first out.
+   kfNote reads the entities where the death is simulated (killMan, ruin, downed, and the room's down and aidown on a guest); a death
+   already listed (the server echoes down and aidown back to whoever sent them) is not listed twice */
+const KF = { n: 5, life: 6, mine: 9, r: 1500 };
+const kfName = e => (!e ? '' : e === S.my || e.me ? 'Você' : e.name || (e.def && e.def.name) || '?');
+const kfWpn = by => { const a = by && by.man && by.arms && by.arms[by.w]; return (a && a.d && a.d.name) || ''; };
+function kfPush(r) {
+  const l = S.kf || (S.kf = []);
+  if (r.o && l.some(e => e.o === r.o && S.t - e.t < 3)) return false;
+  r.t = S.t; l.push(r); while (l.length > KF.n) l.shift();
+  return true;
+}
+function kfNote(o, by) {
+  if (!o || S.demo) return false;
+  const P = S.my, own = e => !!e && (e === P || !!e.me || !!e.psq), k = by && by !== o ? by : null, mine = own(o) || own(k);
+  if (!(mine || o.pid || (k && k.pid) || (!o.man && P && hdist(o, P) < KF.r))) return false;
+  return kfPush({ o, k: kfName(k), kt: k ? k.team : -1, kme: !!k && (k === P || !!k.me), v: kfName(o), vt: o.team, vme: o === P || !!o.me, w: kfWpn(k), d: k ? Math.round(hdist(k, o)) : 0, ff: !!k && k.team === o.team, mine });
+}
+const kfLive = () => (S.kf || []).filter(e => S.t - e.t < (e.mine ? KF.mine : KF.life));
 function award(by, pts, label, o, air) {
   if (S.demo || S.net || !by || !by.me) return;
   if (S.cq) S.cq.st.k++;
@@ -31256,7 +31296,7 @@ function lose(p, dmg, by) {
   downed(p, by);
 }
 function downed(p, by) {
-  ffNote(p, by);
+  ffNote(p, by); kfNote(p, by);
   if (p.team !== S.me) award(by, p.role === 'cas' ? 150 : 200, p.def.name, p, true);
   if (p.aid) Net.aidown(p, by);
   if (p === S.my) playerDown(by);
@@ -31322,6 +31362,7 @@ function ruin(u, dmg, by) {
   const n = u.cargo ? u.cargo.length : 0;
   if (n && !u.net) spill(u);
   killUnit(u, u.end === 2); ffNote(u, by);
+  kfNote(u, by);
   if (u.team !== S.me) award(by, u.kind === 'tank' ? 150 : u.kind === 'aa' ? 120 : u.kind === 'art' ? 130 : 60 + 40 * n, u.name + (n ? ' com pelotão' : ''), u, false);
   if (u.aid) Net.aidown(u, by);
   if (u === S.my) playerDown(by);
@@ -33433,7 +33474,7 @@ function damageMan(m, dmg, by, rx, h) {
 }
 function killMan(m, by) {
   if (m.dead) return;
-  m.dead = true; m.deadT = S.t; m.hp = 0; m.ctl.fire = false; cqDead(m); ffNote(m, by);
+  m.dead = true; m.deadT = S.t; m.hp = 0; m.ctl.fire = false; cqDead(m); ffNote(m, by); kfNote(m, by);
   if (m.team !== S.me) award(by, 40, m.name, m, false);
   if (m.aid) Net.aidown(m, by);
   if (m === S.my) playerDown(by);
@@ -36388,7 +36429,9 @@ const Net = {
       const a = Net.players.get(m.id), b = Net.players.get(m.by), g = Net.ghosts.get(m.id), by = b ? b.name : m.by < 0 ? Net.label(Net.ai.get(m.by)) : '';
       if (g) Net.kill(g, m.det);
       const kb = Net.who(m.by), vt = g || (m.id === Net.id ? S.my : null), tk = !!(vt && kb && kb.team === vt.team && kb !== vt);
-      if (tk) Net.say('Fogo amigo: ' + by + ' abateu um aliado'); else if (a) Net.say(by ? by + (a.cls === 'plane' ? ' abateu ' : a.cls === 'inf' ? ' matou ' : ' destruiu ') + a.name : a.name + (m.left ? (a.cls === 'plane' ? ' abandonou a aeronave' : a.cls === 'inf' ? ' deixou o posto' : ' abandonou o veículo') : a.cls === 'plane' ? ' caiu' : a.cls === 'inf' ? ' morreu' : ' foi destruído'));
+      /* the kill feed (KF): a player's death, mine already listed where it happened; one with nobody's credit and an abandoned vehicle stay in the feed */
+      const kd = !!a && !m.left && m.id !== Net.id && (by || m.by === Net.id) && (kfNote(g, kb) || (!g && kfPush({ k: m.by === Net.id ? 'Você' : by, kt: kb ? kb.team : -1, kme: m.by === Net.id, v: a.name, vt: pSide(a), w: kfWpn(kb), d: 0, ff: tk, mine: m.by === Net.id })));
+      if (tk) Net.say('Fogo amigo: ' + by + ' abateu um aliado'); else if (a && !kd && !(m.id === Net.id && by && !m.left)) Net.say(by ? by + (a.cls === 'plane' ? ' abateu ' : a.cls === 'inf' ? ' matou ' : ' destruiu ') + a.name : a.name + (m.left ? (a.cls === 'plane' ? ' abandonou a aeronave' : a.cls === 'inf' ? ' deixou o posto' : ' abandonou o veículo') : a.cls === 'plane' ? ' caiu' : a.cls === 'inf' ? ' morreu' : ' foi destruído'));
       if (m.by === Net.id && S.cq && !tk) S.cq.st.k++;
       if (g && m.by === Net.id && !tk) S.floats.push({ x: g.x, y: g.y + 12, z: g.z, text: (g.man ? 'Abatido: ' : g.kind ? 'Destruído: ' : 'Abate: ') + g.name, life: 2.2 });
     },
@@ -36434,7 +36477,9 @@ const Net = {
     aidown(m) {
       const g = Net.ai.get(m.id), b = Net.players.get(m.by), d = PLANES[m.model] || TANKS[m.model] || AAS[m.model] || ARTS[m.model] || KITS[m.model];
       const kb = Net.who(m.by), tk = !!(g && kb && kb.team === g.team && kb !== g);
-      if (b && tk) Net.say('Fogo amigo: ' + b.name + ' abateu um aliado'); else if (b) Net.say(b.name + (PLANES[m.model] ? ' abateu ' : KITS[m.model] ? ' matou ' : ' destruiu ') + (g ? g.name || g.def.name : d ? d.name : 'um caminhão') + ' (IA)');
+      /* the kill feed (KF): the host listed it where it died (this is the server's echo); a guest lists it from the ghost, or from the names for one it never saw */
+      const kd = S.host || (g ? kfNote(g, kb) : b && kfPush({ k: m.by === Net.id ? 'Você' : b.name, kt: kb ? kb.team : -1, kme: m.by === Net.id, v: d ? d.name : 'um caminhão', vt: -1, w: kfWpn(kb), d: 0, ff: false, mine: m.by === Net.id }));
+      if (b && tk) Net.say('Fogo amigo: ' + b.name + ' abateu um aliado'); else if (b && !kd) Net.say(b.name + (PLANES[m.model] ? ' abateu ' : KITS[m.model] ? ' matou ' : ' destruiu ') + (g ? g.name || g.def.name : d ? d.name : 'um caminhão') + ' (IA)');
       if (!g || !g.net) return;
       if (m.by === Net.id && !tk) { if (S.cq) S.cq.st.k++; S.floats.push({ x: g.x, y: g.y + 12, z: g.z, text: (g.man ? 'Abatido: ' : g.kind ? 'Destruído: ' : 'Abate: ') + (g.name || g.def.name), life: 2.2 }); }
       Net.kill(g, m.det);
@@ -67519,6 +67564,76 @@ addEventListener('keydown', e => { if (e.code === 'Digit5' && !e.repeat && playM
 addEventListener('keydown', e => { if (e.code === 'KeyI' && !e.repeat && !GV.on && S && S.my && S.my.kind && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.fixPri = S.fixPri ? 0 : 1; });
 const BWHY = { unit: 'Há um veículo aí', map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Perto demais da estrada: a base fica a uns 7 m da beira', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
   cap: 'Seu lado já tem o máximo de bases (cresce com os pontos tomados e a economia)', cost: 'Seu lado não tem a energia e o metal desta obra', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
+/* ---------- the kill feed and the scoreboard (cf-pol2 P27) ----------
+   kfDraw: the rows of KF at the top right, under the map, newest last: who ▸ whom · with what · how far. A side's colour on each name
+   (the player is "Você", in white), the arrow amber for a friend's kill; the player's own rows on a darker band with a bar of the era's
+   colour. SB: holding Tab hold s brings up the scoreboard (the sides: points, tickets, losses; online every player of the room; solo the
+   player's own line) for as long as it is held; a tap shorter than that opens the general's view as Tab always did. hint: for that long
+   into a match, until it is first used, the HUD says so ---------- */
+function kfDraw(R, y, u, me, ink) {
+  const l = kfLive(); if (!l.length) return y;
+  const sz = 12.5 * u, lh = 17 * u, sc = t => (t === me ? FRIEND : t < 0 ? ink : foeCol(t));
+  hx.font = sz + "px 'Share Tech Mono', ui-monospace, monospace"; hx.textAlign = 'left';
+  for (const e of l) {
+    const age = S.t - e.t, a = clamp((e.mine ? KF.mine : KF.life) - age, 0, 1) * clamp(age * 6, .2, 1);
+    const seg = (e.k ? [[e.k, e.kme ? '#ffffff' : sc(e.kt)], [' ▸ ', e.ff ? '#ffd24a' : ink]] : [['✕ ', ink]]).concat([[e.v, e.vme ? '#ffffff' : sc(e.vt)]], e.w ? [[' · ' + e.w, '#9eaaa2']] : [], e.d > 0 ? [[' · ' + (e.d < 1000 ? e.d + ' m' : (e.d / 1000).toFixed(1).replace('.', ',') + ' km'), '#9eaaa2']] : []);
+    const ws = seg.map(s => hx.measureText(s[0]).width), W = ws.reduce((p, q) => p + q, 0);
+    let x = R - W;
+    hx.globalAlpha = a;
+    hx.fillStyle = e.mine ? 'rgba(8,12,13,.72)' : 'rgba(8,12,13,.42)'; hx.fillRect(x - 6 * u, y - 2 * u, W + 9 * u, lh - 2 * u);
+    if (e.mine) { hx.fillStyle = S.modern ? '#63d2e6' : '#e6b53a'; hx.fillRect(x - 6 * u, y - 2 * u, 2 * u, lh - 2 * u); }
+    seg.forEach((s, i) => { hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(s[0], x + 1, y + 1); hx.fillStyle = s[1]; hx.fillText(s[0], x, y); x += ws[i]; });
+    y += lh;
+  }
+  hx.globalAlpha = 1;
+  return y + 4 * u;
+}
+const SB = { hold: .3, hint: 90, on: false, used: false, down: 0, tm: 0, at: 0 };
+function sbShow(v) {
+  v = !!v; if (v) SB.used = true;
+  if (SB.on === v) return; SB.on = v; $('#board').hidden = !v; if (v) { SB.at = 0; sbFill(); }
+}
+/* the table: the sides, mine first (points, tickets, losses), then the players (online) or my own line (solo) */
+function sbFill() {
+  const Q = S.cq, me = S.me, N = t => S.E.sides[S.fac[t]].name, sd = $('#boardSides'), pl = $('#boardPl');
+  const cell = (el, t, c, col) => { const e = document.createElement('span'); e.textContent = t; if (c) e.className = c; if (col) e.style.color = col; el.append(e); };
+  sd.textContent = ''; pl.textContent = '';
+  $('#boardMeta').textContent = Q ? 'faltam ' + mmss(Math.max(0, Q.T)) + (Q.tk.length > 2 ? ' · ' + Q.tk.length + ' lados' : '') : '';
+  if (Q) {
+    for (const h of ['Lado', 'Pontos', 'Tíquetes', 'Perdas: sold. / veíc. / aeron.']) cell(sd, h, 'h');
+    const ts = Q.tk.map((_, t) => t).sort((a, b) => (b === me) - (a === me) || cqHeld(b) - cqHeld(a) || Q.tk[b] - Q.tk[a]);
+    for (const t of ts) { const col = t === me ? '' : foeCol(t); cell(sd, N(t) + (Q.out && Q.out[t] ? ' · eliminado' : ''), t === me ? 'f' : 'e', col); cell(sd, cqHeld(t)); cell(sd, Math.max(0, Math.ceil(Q.tk[t]))); cell(sd, Q.lost[t].join(' / ')); }
+  }
+  if (S.net) {
+    for (const h of ['Jogador', 'Abates', 'Quedas', 'IA']) cell(pl, h, 'h');
+    const L = [...Net.players.values()].sort((a, b) => (pSide(b) === me) - (pSide(a) === me) || b.kills + (b.ai || 0) - a.kills - (a.ai || 0) || a.deaths - b.deaths);   // my side first, then by kills
+    for (const o of L.slice(0, 16)) { const mine = o.id === Net.id, c = pSide(o) === me ? 'f' : 'e', x = mine ? ' me-row' : '', col = pSide(o) === me ? '' : foeCol(pSide(o)); cell(pl, (mine ? '▸ ' : '') + o.name + ' · ' + DEFS[o.cls][o.model].name, c + x, col); cell(pl, o.kills, x.trim()); cell(pl, o.deaths, x.trim()); cell(pl, o.ai || 0, x.trim()); }
+    if (L.length > 16) cell(pl, '+ ' + (L.length - 16) + ' jogadores', 'h');
+  } else if (Q) {
+    for (const h of ['Você', 'Abates', 'Capturas', 'Quedas']) cell(pl, h, 'h');
+    cell(pl, '▸ ' + kfName(S.my) + ' · ' + DEFS[S.cls][S.model].name, 'f me-row'); cell(pl, Q.st.k, 'me-row'); cell(pl, Q.st.c, 'me-row'); cell(pl, Q.st.d, 'me-row');
+  }
+}
+/* Tab in play: down starts the clock, held past hold s the board, up a tap's general view (genKey) */
+function sbKey(e, up) {
+  if (up) {
+    if (!SB.down) return false;
+    clearTimeout(SB.tm); SB.down = 0;
+    if (SB.on) sbShow(false); else genOpen(true, true);
+    return true;
+  }
+  if (e.repeat) return true;
+  SB.down = performance.now(); clearTimeout(SB.tm); SB.tm = setTimeout(() => { if (SB.down && playMode === 'play' && !GV.on && !overShown) sbShow(true); }, SB.hold * 1000);
+  return true;
+}
+addEventListener('keyup', e => { if (e.code === 'Tab' && sbKey(e, true)) e.preventDefault(); });
+addEventListener('blur', () => { clearTimeout(SB.tm); SB.down = 0; sbShow(false); });
+drawHud = (g => () => {
+  g();
+  if (!SB.on) return;
+  if (playMode !== 'play' || !S || GV.on || overShown) { SB.down = 0; sbShow(false); return; }
+  const n = performance.now(); if (n - SB.at > 500) { SB.at = n; sbFill(); }
+})(drawHud);
 /* ---------- missiles: what the player is shown ----------
    Top: the warning gear (S.rwr: a radar tracking, a radar missile launched or active, by name and clock; S.warn: a missile the vehicle
    knows of). Beside the centre, for a plane's missile slot: the seeker's word, the launch zone as a scale (rmin, the range no turn
@@ -67674,12 +67789,11 @@ function drawHud() {
 
   const R = cw - 14, bs = S.base[me]; let y = (mapV ? 0 : my + mh) + 10 * u;
   { const c = cueOf(me); if (c && c[0] && !mapV) { txt(CUE[c[0]] || '', R, y, 11 * u, acc, 'right'); y += 15 * u; } }
-  if (S.net) {
-    txt('JOGADOR  ABATES / QUEDAS / IA', R, y, 11 * u, ink, 'right'); y += 16 * u;
-    for (const o of [...Net.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)) {
-      txt((o.id === Net.id ? '▸ ' : '') + o.name + ' · ' + DEFS[o.cls][o.model].name + '  ' + o.kills + ' / ' + o.deaths + ' / ' + (o.ai || 0), R, y, 13 * u, pSide(o) !== me ? FOE : FRIEND, 'right'); y += 16 * u;
-    }
-  } else if (S.cq) { const s = S.cq.st; txt('ABATES ' + s.k + ' · CAPTURAS ' + s.c + ' · QUEDAS ' + s.d, R, y, 11 * u, ink, 'right'); y += 16 * u; }
+  /* the player's own line; the room's table, which grew a row a player, is on the scoreboard (hold Tab, SB) */
+  if (S.cq) { const s = S.cq.st; txt('ABATES ' + s.k + ' · CAPTURAS ' + s.c + ' · QUEDAS ' + s.d, R, y, 11 * u, ink, 'right'); y += 16 * u; }
+  else if (S.net) { const o = Net.players.get(Net.id); if (o) { txt('ABATES ' + (o.kills + (o.ai || 0)) + ' · QUEDAS ' + o.deaths, R, y, 11 * u, ink, 'right'); y += 16 * u; } }
+  if ((S.cq || S.net) && !SB.used && S.t < SB.hint) { txt('segure Tab: placar', R, y, 11 * u, acc, 'right'); y += 15 * u; }
+  y = kfDraw(R, y + 2 * u, u, me, ink);
   const sups = S.sup.filter(b => b.team === me && !b.dead);   // the side's supply bases: built or how far, and how far away
   if (sups.length) {
     y += 6 * u; txt('BASES DE SUPRIMENTO ' + sups.length + '/' + supCap(me), R, y, 11 * u, ink, 'right'); y += 15 * u;
@@ -68770,7 +68884,7 @@ function buildHangar() {
     req: ['U', 'A pé dentro de um depósito (a base principal, uma base de suprimento pronta ou um ponto seu com base de suprimento): requisitar um veículo ali mesmo. Custa tíquetes, menos do que perdê-lo, tem estoque por depósito e um intervalo de ' + RQ.cool + ' s; aeronaves só na base principal'],
     esc: ['Esc', 'Soltar o mouse' + (pvp ? '' : ' e pausar') + '. Clique no jogo para voltar'],
     map: ['M', 'Mapa da batalha: o terreno, as estradas, os pontos e quem os tem, as bases, os rádios, as marcas do comandante e do general, o seu lado e o inimigo só como o seu lado o conhece. Roda ou + − aproxima, arrastar move, duplo clique centra em você, M ou Esc fecha. O jogo não pausa, as teclas continuam guiando e o clique no mapa não dispara. Clique direito num ponto: pedir ao general artilharia, fumaça, ataque aéreo, infantaria, blindado, ajuda na sua posição, cobertura antiaérea ou suprimento; ele decide pelo que tem e pelo que o lado sabe e responde no rádio'],
-    gen: ['Tab', 'Visão de General: o mapa do comandante, suas ordens e o que ele pensa. O jogo continua enquanto o mapa está aberto'],
+    gen: ['Tab', 'Toque rápido: Visão de General (o mapa do comandante, suas ordens e o que ele pensa; o jogo continua). Segure: o placar'],
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab ou M abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
   const lg = (LEGEND[k] || LEGEND.plane)(d, o);
@@ -69591,7 +69705,7 @@ function genAct(a) {
 function genKey(e) {
   if (!S || /INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) return false;
   const live = playMode === 'watch' || (playMode === 'play' && !sw.on && !overShown && !paused);
-  if (e.code === 'Tab' && (live || GV.on) && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); if (!e.repeat) { genOpen(!GV.on, true); } return true; }
+  if (e.code === 'Tab' && (live || GV.on) && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); if (!GV.on && playMode === 'play') return sbKey(e); if (!e.repeat) { genOpen(!GV.on, true); } return true; }   // in play a tap opens the view on its release, a hold shows the scoreboard (SB, P27)
   if (!GV.on) return specKey(e);
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
   if (gorKey(e)) { e.preventDefault(); return true; }

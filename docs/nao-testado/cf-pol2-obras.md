@@ -19,11 +19,11 @@ Itens P13, P15, P16, P17 e P18 do quadro de polimento (fase 3a, obras). A parte 
 
 ## P17 · obra parada e desmontar
 
-- **O aviso OBRA PARADA e a barra DESMONTANDO:** desenhados no HUD do soldado, fora do harness. Conferido no navegador a 1280: uma trincheira deixada a 12 m disse "chegue a até 8 m dela" e quando começa a se desfazer; segurar V 3 s junto dela a desmontou. O caso "sob fogo: espere N s" só no teste.
+- **O aviso OBRA PARADA e a barra DESMONTANDO:** desenhados no HUD do soldado, fora do harness. Conferido no navegador: um posto anticarro deixado longe disse "chegue a até 8 m dela · começa a se desfazer em 24 s", e segurar V junto dele mostrou a barra DESMONTANDO. O caso "sob fogo: espere N s" só no teste.
 - **Rede de camuflagem por cima de outra obra:** a rede (P31) fica sobre a obra, e as duas têm a pegada no mesmo lugar. Segurar V ali desmonta a que vier primeiro na lista das obras, não necessariamente a de baixo. Não testado no navegador.
 - **Convidado online:** coberto por `tests/obras-online.js` (servidor de verdade, sem navegador). Um servidor antigo, sem `fnd`, faz o convidado ver "O servidor desta sala é antigo" em vez de desmontar; isso não foi visto numa sala real.
 
 ## P18 · prévia no Fortificar do general
 
-- **O contorno sob o cursor e `[` `]`:** desenhados no mapa do general (`gorFortGhost`), fora do harness. Conferido no navegador a 1280: verde onde pode, vermelho com o motivo onde não, e `]` girou 15°. Não conferido a 1920.
+- **O contorno sob o cursor e `[` `]`:** desenhados no mapa do general (`gorFortGhost`), fora do harness. Conferido no navegador: a trincheira sob o cursor em verde com "pode construir aqui", e `]` girou o contorno. O vermelho com o motivo, só no teste.
 - **Campos minados, posição antiaérea e anéis dos engenheiros:** não têm pegada própria, então não mostram contorno; só o texto de sempre.

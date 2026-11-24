@@ -3,7 +3,7 @@
    hit on a tank (frontal, and on a track), the switch with its reload and the counts, rearming, the AI's choice, the wire.
    node tests/shells.js (PAGE=<page>; BASE=<the page before the change>, to show the armour-piercing round is untouched) */
 const fs = require('fs'), H = require('./harness.js'), { ok, done } = H;
-const C = H.load({ seed: 21 }), $ = C.$, SHL = $('SHL'), TANKS = $('TANKS'), INF = $('INF'), f1 = v => v.toFixed(1);
+const C = H.load({ seed: 21 }), $ = C.$, SHL = $('SHL'), TANKS = $('TANKS'), INF = $('INF'), f1 = v => v.toFixed(1), VLIFT = (() => { try { return $('VLIFT'); } catch (e) { return 1.5; } })();   // the vehicle frame over the ground (1.5 before cf-veiculos)
 let S, X0, Z0; const NET = $('Net');
 /* everything on the flat disc of base 0, so that no ridge is in the way */
 const fresh = (era, c) => { S = (c || C).sandbox(era); X0 = S.base[0].x - 150; Z0 = S.base[0].z; return S; };
@@ -67,7 +67,7 @@ for (const [era, id, tid] of [['ww2', 'sherman', 'tiger'], ['modern', 'abrams', 
 }
 {   // a track: the direct hit of an HE round is felt, a plain HE shell (artillery) at the same point is not
   fresh('modern'); const u = tank('t90', 1, X0 + 150, Z0, Math.PI), D = u.def.parts, i = D.ix.trackL, d = D[i], b = d.box;
-  const c = Math.cos(u.h), s = Math.sin(u.h), p = [u.x + b[0] * c + b[2] * s, u.y + 1.5 + b[1], u.z - b[0] * s + b[2] * c];
+  const c = Math.cos(u.h), s = Math.sin(u.h), p = [u.x + b[0] * c + b[2] * s, u.y + VLIFT + b[1], u.z - b[0] * s + b[2] * c];
   const dz = p[2] > u.z ? -1 : 1, shoot = (ap, n) => { const v = tank('t90', 1, X0 + 150, Z0, Math.PI); for (let j = 0; j < n; j++) { const h = C.strike(v, $('HK').shell, 40, null, p[0], p[1], p[2], 0, 0, dz, ap); if (h) $('hurt')(v)(v, h.dmg, null, false, h); } return v.parts[i].hp; };
   const hp0 = u.parts[i].hp, apTank = shoot(2, 1), apOld = shoot(true, 1);
   console.log('   track hp ' + f1(hp0) + ': after one HE direct hit ' + f1(apTank) + ', after one artillery HE shell ' + f1(apOld));

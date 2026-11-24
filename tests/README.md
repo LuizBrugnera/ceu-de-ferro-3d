@@ -18,6 +18,7 @@ node tests/brain-honesty.js # cérebro P7 (honestidade): nenhuma seção CEREBRO
 node tests/infantry.js      # soldado: posturas, cobertura (mata e quina de parede), cada arma contra cada alvo, atropelamento
 node tests/tracers.js       # traçantes (cf-pol-armas): a metralhadora de esquadra (MG 42, BAR, M249, PKP) põe uma traçante a cada TRC.lmg balas, a do jogador e a da IA; o fuzil e a pistola nenhuma; e a mesma semente dá a mesma batalha com e sem elas (a conta não sorteia nada)
 node tests/folego.js        # fôlego infinito: a corrida (Shift+W) não cansa nem perde velocidade, o atirador de elite prende o fôlego quanto quiser sem tremer
+node tests/postura.js       # as teclas de postura (cf-pol2 P3): X agacha (de novo levanta; segurado deita, o botão do controle), Z deita (de novo levanta), Shift levanta, menos na luneta, onde prende o fôlego; de agachado para em pé é um passo, nunca passa por deitado; o olho da câmera desce e sobe ao longo do passo
 node tests/squads.js        # pelotões: caminhão, desembarque, comportamento, reação da outra IA
 node tests/pop-push.js      # o lado no teto de população ainda guarnece o assalto com uma esquadra de um posto dispensável (issue #35)
 node tests/mission.js       # contrato de missão e Despacho: toda unidade nasce com u.mis, a IA só entra em campo por ordem, relatórios rep (PARITY=<página antiga>: a mesma batalha)

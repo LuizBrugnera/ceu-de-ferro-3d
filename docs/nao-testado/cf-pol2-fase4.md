@@ -2,7 +2,7 @@
 
 ## P27: feed de abates e placar com Tab segurado
 
-O que é: no alto à direita, sob o mapa, o feed de abates (`KF`, `kfNote`, `kfDraw`) mostra até 5 linhas "quem ▸ quem · arma · distância": os abates e a morte do jogador, os de outros jogadores da sala e os veículos e aeronaves perdidos a até 1,5 km dele. Segurar Tab por 0,3 s mostra o placar (`SB`, `#board`): os lados com pontos, tíquetes e perdas e, online, os jogadores da sala. Um toque curto em Tab continua abrindo a Visão de General, agora ao soltar a tecla. A lista de jogadores que ficava sempre na tela foi para o placar; no HUD fica a linha "ABATES · CAPTURAS · QUEDAS" do jogador.
+O que é: no alto à direita, sob o mapa, o feed de abates (`KF`, `kfNote`, `kfDraw`) mostra até 5 linhas "quem ▸ quem · arma · distância": os abates e a morte do jogador, os de outros jogadores da sala e os veículos e aeronaves perdidos a até 1,5 km dele. Segurar Tab por 0,3 s mostra o placar (`SB`, `#board`): os lados com pontos, ponto-minutos e perdas e, online, os jogadores da sala. Um toque curto em Tab continua abrindo a Visão de General, agora ao soltar a tecla. A lista de jogadores que ficava sempre na tela foi para o placar; no HUD fica a linha "ABATES · CAPTURAS · QUEDAS" do jogador.
 
 ### Testado
 
@@ -13,7 +13,7 @@ O que é: no alto à direita, sob o mapa, o feed de abates (`KF`, `kfNote`, `kfD
 
 - Uma sala com vários jogadores de verdade em navegadores: o placar com muitas linhas (corta em 16 e diz quantos sobram) e o feed com abates de outros jogadores.
 - Tab segurado com o mouse preso (pointer lock real); o navegador sem tela não prende o mouse.
-- Partida de 1944 e de 3 lados com o placar de 3 linhas na tela (o teste cobre só a montagem).
+- Partida de 1944 na tela (o placar de 3 lados foi visto na partida de hoje).
 
 ### Como testar
 

@@ -45824,7 +45824,7 @@ function ecoAI(t, V) {
       const gap = V.pp && V.pp.f[k] !== undefined ? Math.max(0, V.pp.f[k] - (V.pp.h[k] || 0)) : 0;   // the plan's field over what is out (F2)
       const want = (V.keep[k] || 0) + gap + Math.min(2, miss) + (k === 'aaf' ? (V.hq.aa ? 0 : 1) + S0.filter(s => s.gd.aa && !s.aa).length : 0);
       if ((V.res[k] || 0) + queued(k) >= Math.min(want, GASTO.on ? ECO.res : 1e9)) continue;   // never past the reserve's room: a finished order held 'full' stops its producer (cf-general-gasto)
-      const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap) + GASTO.lean * gsLean(c, idle);
+      const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap) + GASTO.lean * gsLean(c, V.stock, idle);
       if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : gap ? 'plano de produção: ' + (V.pp.why[k] || 'mais em campo') : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
     }
     if (best) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
@@ -45850,10 +45850,15 @@ const ecoN2 = out => out.reduce((a, o) => a + (o.c === 'make' ? 0 : 1), 0);
    the kind the plan lacks most and that leans on the idle resource, never past the plan's gap and one in reserve. Idle stock over time
    (GASTO.every s a level, back down as fast without it) grows the plan's field by GASTO.grow a level up to GASTO.top (gsGrow), always fitted
    to the population budget after: the money goes to troops in the field, not to a reserve that waits. */
-const GASTO = { on: 1, over: .5, n: 2, miss: 2, every: 60, grow: .25, top: 3, poor: .3, lean: 3 };
-/* how much of a cost c ([en, mt]) falls on the idle resources (0 to 1): with energy idle and metal short, the kinds that spend energy more than
-   metal (a squad, a helicopter, a drone) go first, so the metal stretches and the energy does not sit at the cap */
-const gsLean = (c, I) => (!GASTO.on || !(I.en > 0 || I.mt > 0) ? 0 : ((I.en > 0 ? c[0] : 0) + (I.mt > 0 ? c[1] : 0)) / Math.max(1, c[0] + c[1]));
+const GASTO = { on: 1, over: .5, n: 2, miss: 2, every: 60, grow: .25, top: 3, poor: .3, lean: 4, tilt: 300 };
+/* how a cost c ([en, mt]) leans on the resource the side has plenty of (-1 to 1): the one idle while the other is not, else the one GASTO.tilt or
+   more over the other. With energy piling up and metal short, the kinds that spend energy more than metal (an aircraft, a squad, a drone) go
+   before a tank, which spends the scarce metal at twice the energy's rate: the metal stretches and the energy does not sit at the cap */
+function gsLean(c, st, I) {
+  if (!GASTO.on || (I.en > 0 && I.mt > 0)) return 0;
+  const d = st.en - st.mt, r = I.en > 0 || d >= GASTO.tilt ? 0 : I.mt > 0 || -d >= GASTO.tilt ? 1 : -1;
+  return r < 0 ? 0 : 2 * c[r] / Math.max(1, c[0] + c[1]) - 1;
+}
 /* the strategic reserve this spending never touches: the economy's keep and the fund a work of the fort plan saves for (the dome's fund is put aside by
    ecoStep itself, see AFD) */
 function gsKeep(t) {
@@ -45904,7 +45909,7 @@ function gsInvest(t, V, out) {
       const c = V.costs[k]; if (c[3] !== cat || ECO.site[k] || STK.k[k] || !can(c)) continue;
       const f = V.pp && V.pp.f[k] !== undefined ? V.pp.f[k] : 0, gap = Math.max(0, f - (V.pp && V.pp.h[k] || 0)), has = (V.res[k] || 0) + qd(k);
       if (has >= Math.min(ECO.res, gap + Math.max(1, V.keep[k] || 0))) continue;   // never past the plan's gap and one in reserve, nor the reserve's room: what is made goes out
-      const sc = 2 * Math.min(3, gap - has) + (A.w[k] || 1) + GASTO.lean * gsLean(c, I);
+      const sc = 2 * Math.min(3, gap - has) + (A.w[k] || 1) + GASTO.lean * gsLean(c, V.stock, I);
       if (sc > bs) { bs = sc; best = k; }
     }
     if (best) { out.push({ c: 'make', k: best, n: 1, why: 'estoque parado (' + idleTx.toLowerCase() + '): investir', key: 'gs' + best }); pay(V.costs[best]); n++; }

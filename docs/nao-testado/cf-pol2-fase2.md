@@ -36,3 +36,12 @@ Falta:
 - Online: o gesto do jogador remoto não foi testado. `m.nk` (segurando) é só local, então os outros não veem o braço erguido enquanto ele segura; o cozinhar vai no lançamento (`P.nCook`, como o da IA já ia).
 - Controle físico: o botão de granada do perfil segurado; sem controle aqui.
 - O arco ignora prédios e árvores (para no chão), como a granada antes de quicar.
+
+## P2 — a morte diz quem foi
+
+Testado: `tests/morte.js` (`S.dn` guarda quem matou, a arma na mão dele e a distância; fogo amigo diz "Fogo amigo"; sem ninguém conhecido, nenhuma linha; o aviso "Morto em combate" diz "Abatido por …" nas próprias linhas; a tela de troca espera `DN.t` s e depois nomeia quem matou sob o título "Morto em combate: voltar à batalha"; a volta espera `DN.pick` s a mais) e no navegador (Chromium sem janela, GPU real): morto por um Strelok a 126 m, a câmera vira do corpo para ele e fecha o campo (62 → 12°), com a moldura "QUEM ATIROU"; aos 2,6 s a tela de troca abre com "Abatido por Strelok (Rússia) · AK-12 · a 126 m" em vermelho.
+
+Falta:
+- Online: no navegador de teste a sala do servidor local não mandou `swap: 1` (`Net.can` falso), e nesse caso a tela de troca não abre e o soldado volta sozinho; para ver a tela forcei `Net.can = true`. Numa sala de verdade, com outro jogador como matador, não foi testado (o nome vem do que o jogo local sabe de quem atirou).
+- Morte por artilharia, mina ou avião fora da vista: `dnSee` só vira a câmera para quem está a menos de `DN.far` (2,5 km) e não sumiu; longe disso só o texto aparece. Não testado no navegador.
+- A volta ficou 2,6 s mais longa (a tela tem os mesmos 3 s de antes, contados depois da câmera). Não avaliado em partida.

@@ -65475,18 +65475,19 @@ function buildRig() {
     torso: box(body, 0, .32, 0, .26, .64, .46), head: box(body, .01, .78, 0, .22, .24, .21), helm: box(body, -.01, .92, 0, .31, .15, .3), arm: [box(armL, 0, -.27, 0, .12, .56, .12), box(armR, 0, -.27, 0, .12, .56, .12)], gunB: box(gun, .25, 0, 0, 1, .07, .07) });
 }
 /* st: the stance, 3 a body. hip height and leg length by it; the stride follows the ground covered, so the feet do not slide */
-const MPOSE = { hip: [.9, .45, .16, .14], leg: [.9, .6, .82, .86], lean: [-.05, -.3, -1.32, 1.45] }, MC = typeof THREE !== 'undefined' ? new THREE.Color() : null;
+const MPOSE = { hip: [.9, .45, .16, .14], leg: [.9, .6, .82, .86], lean: [-.05, -.3, -1.32, 1.45] }, MC = typeof THREE !== 'undefined' ? new THREE.Color() : null, MZV = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 function poseMan(m, put) {
   const R = rig || buildRig(), st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.min(1, Math.hypot(m.v.x, m.v.z) / 2), ph = m.step * 2.3, sw = Math.sin(ph) * mv, run = m.run ? mv : 0, c = m.cc || MCOL[m.def.era][m.def.side];
-  const hip = MPOSE.hip[st], len = MPOSE.leg[st], lean = MPOSE.lean[st] - .3 * run, sp = m.w === 1, a = m.arms[m.w].d, gl = st === 3 || m.civ ? .001 : sp ? 1.25 : a.lmg ? 1.2 : 1;
+  const hip = MPOSE.hip[st], len = MPOSE.leg[st], lean = MPOSE.lean[st] - .3 * run, a = m.arms[m.w].d, sp = !!a.k, e = packArmOf(m);
+  const gl = st === 3 || m.civ || !e ? .001 : sp ? 1.25 : clamp(e[1] / .9, .3, 1.7), th = sp ? .13 : e && e[0] === 'w_pistol' ? .05 : .07;   // each weapon its length (PACK.arm, cf-armas-3p); a sniper's pistol was a launcher's tube
   R.root.position.set(m.x, m.y, m.z); R.root.rotation.y = m.h; R.root.rotation.z = m.para && m.para.st === 'fall' && !m.dead ? PARA.tilt : 0; R.root.scale.setScalar(MAN.sc);   // in free fall belly down (PARA)
   R.body.position.y = hip + (st < 2 ? Math.abs(Math.cos(ph)) * .05 * mv : 0); R.body.rotation.z = lean;
   R.legs.forEach((L, i) => { const s = i ? -1 : 1; L.position.y = hip; L.rotation.z = st === 3 ? 1.5 : st === 2 ? -1.5 + s * sw * .22 : st === 1 ? s * .75 + s * sw * .25 : s * sw * (.55 + .4 * run); R.leg[i].scale.y = len; R.leg[i].position.y = -len / 2; });
   const up = Math.PI / 2 + m.ap - lean;   // the arms and the weapon follow the aim, whatever the body leans
   R.arms.forEach((A, i) => { A.rotation.z = st === 3 ? 2.7 : run > .5 ? (i ? 1 : -1) * sw * .8 + .2 : up - (i ? .22 : .05) + (st === 2 ? .25 : 0); });
   R.gun.rotation.z = run > .5 ? -.7 - lean : m.ap - lean; R.gun.position.y = sp && st < 3 ? .66 : .47;
-  R.gunB.scale.set(gl, sp ? .13 : .07, sp ? .13 : .07); R.gunB.position.x = sp ? .05 : gl / 2 - .2;
-  R.root.updateMatrixWorld(true);
+  R.gunB.scale.set(gl, th, th); R.gunB.position.x = sp ? .05 : gl / 2 - .2;
+  R.root.updateMatrixWorld(true); if (gl > .01) mzSet(m, R.gunB.localToWorld(MZV.set(.5, 0, 0)));   // its muzzle, for the flash (mzAt)
   put(R.torso, c[0]); put(R.head, SKIN); put(R.helm, c[2] || c[1]); put(R.arm[0], c[0]); put(R.arm[1], c[0]); put(R.leg[0], c[1]); put(R.leg[1], c[1]); put(R.gunB, GUNC);
 }
 /* ---------- projectiles A (cf-miras-impl): the right shape per round and a cheap trail ----------
@@ -65563,15 +65564,37 @@ function pjJoin(o, q, put) {
    c: the colours [plain, b.tr 1, b.tr 2] */
 const TRS = { len: [.028, .05, .05], a: [.5, 1, 1], tail: [0, .2, .25], c: [[1, .94, .8], [1, .93, .69], [1, .62, .3]] };
 const trcOf = b => (b.tr === 2 ? 2 : b.tr ? 1 : 0);
-/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle (the eye, then l m along the aim, as manFire lets the round go),
-   within far m of the eye; its size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest; an
-   orange halo halo times as wide */
+/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle of the weapon drawn in his hands this frame (cf-armas-3p:
+   MZW, which the pose writes, packPose for the animated soldier, poseMan for the figure; it was the eye, then l m along the aim, where
+   manFire lets the round go, a metre in front of the face and nowhere near the weapon), else that point; within far m of the eye; its
+   size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest; an orange halo halo times as wide */
 const MZ = { t: .06, l: 1, far: 1800, s: .35, px: 2.4, halo: 2.5 };
+const MZW = new WeakMap();   // a soldier: [x, y, z, frameId] of his drawn muzzle
+function mzSet(m, v) { let a = MZW.get(m); if (!a) MZW.set(m, (a = [0, 0, 0, -1])); a[0] = v.x; a[1] = v.y; a[2] = v.z; a[3] = frameId; }
+const mzDrawn = m => { const a = MZW.get(m); return a && a[3] === frameId ? a : null; };
 function mzAt(m, now, cam) {
   const a = now - m.shotT; if (m.dead || m.in || !(a >= 0 && a < MZ.t)) return null;
   if (Math.abs(m.x - cam.x) > MZ.far || Math.abs(m.z - cam.z) > MZ.far) return null;
+  const k = 1 - .45 * a / MZ.t, w = mzDrawn(m); if (w) return [w[0], w[1], w[2], k];
   const f = m.f || { x: Math.cos(m.h), y: 0, z: -Math.sin(m.h) }, e = STANCE[m.st].eye * MAN.sc;
-  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, 1 - .45 * a / MZ.t];
+  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, k];
+}
+/* where a soldier's round is drawn from (cf-armas-3p): the muzzle his weapon showed when the streak was first drawn, kept with the round
+   (MZB); its streak never reaches back past it, and nothing is drawn of it until it is out. The sim's round goes on from the eye */
+const MZB = new WeakMap();
+function mzRound(b) {
+  let o = MZB.get(b);
+  if (o === undefined) { const w = b.by && b.by.man ? mzDrawn(b.by) : null; o = w ? [w[0], w[1], w[2]] : 0; MZB.set(b, o); }
+  return o;
+}
+/* the streak's tail of round b, tl s of flight long: from its muzzle (mzRound) at the farthest back; null while the round is not yet out of it */
+const MZT = [0, 0, 0];
+function mzTail(b, tl) {
+  const mz = mzRound(b); MZT[0] = b.x - b.vx * tl; MZT[1] = b.y - b.vy * tl; MZT[2] = b.z - b.vz * tl;
+  if (!mz) return MZT;
+  if ((b.x - mz[0]) * b.vx + (b.y - mz[1]) * b.vy + (b.z - mz[2]) * b.vz <= 0) return null;
+  if ((MZT[0] - mz[0]) * b.vx + (MZT[1] - mz[1]) * b.vy + (MZT[2] - mz[2]) * b.vz < 0) { MZT[0] = mz[0]; MZT[1] = mz[1]; MZT[2] = mz[2]; }
+  return MZT;
 }
 function pjTrail(o, p, on) {
   let t = PJ.tr.get(o);
@@ -65623,8 +65646,9 @@ function syncScene(dt) {
   const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value, TB = MAXP - MAXPR;
   for (const b of S.bullets) {
     if (n >= MAXB) break;
-    const t = trcOf(b), tl = TRS.len[t], C = TRS.c[t];
-    bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); tc.set([C[0], C[1], C[2], TRS.a[t], C[0], C[1], C[2], TRS.tail[t]], n * 8); n++;
+    const t = trcOf(b), tl = TRS.len[t], C = TRS.c[t], tail = mzTail(b, tl);   // a soldier's from his weapon's muzzle
+    if (!tail) continue;
+    bp.set([b.x, b.y, b.z, tail[0], tail[1], tail[2]], n * 6); tc.set([C[0], C[1], C[2], TRS.a[t], C[0], C[1], C[2], TRS.tail[t]], n * 8); n++;
     if (!t || k >= MAXP - 1) continue;   // a tracer (jet cannon, AA, a squad machine gun's) carries a glowing head that never shrinks below a few pixels, so the stream reads from far away
     const sz = Math.max(.4, px * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z));   // a coloured halo under a white-hot core
     pp.set([b.x, b.y, b.z, b.x, b.y, b.z], k * 3); pc.set(b.tr === 2 ? [1, .38, .12, .75, 1, .9, .7, 1] : [1, .7, .2, .75, 1, 1, .85, 1], k * 4);
@@ -73488,15 +73512,22 @@ function buildHangarFallback() {
    PACK.on: ?pack=0 or localStorage cf-pack 0 turn the whole pack off. PACK.lvl(), the level: ?packq= or localStorage cf-pack-q (0 off, 1 low,
    2 normal, 3 high), else the hangar's graphics quality (gfxLevel: Baixa 1, Média 2, Alta 3), else PACK.q: how far and how many soldiers and civilians
    are drawn animated (PACK.near m, PACK.max); the rest stay the instanced figures of before.
-   tank, trn: which pack model draws each vehicle (by its id); arm: which weapon each small arm or launcher is (SARMS keys) */
+   tank, trn: which pack model draws each vehicle (by its id); arm: how each small arm or launcher a soldier carries is seen from outside (SARMS
+   keys, cf-armas-3p): [the pack model, the weapon's length in m, what is added to the model: s a scope, b a bipod, a a belt's box]. Every
+   one a kit carries has its own row (tests/armas-3p.js): one missing fell to the side's rifle, and every Russian weapon was an AK */
 const PACK = {
   url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 90, 120, 160], max: [0, 16, 28, 48],
   tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
   trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
     tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', tecS5: 'pickup', tecS8: 'pickup', zuTruck: 'trk_m939', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
   civWreck: { suv: 1, sedan: 1, vbied: 1 },
-  arm: { k98: 'w_kar98', garand: 'w_kar98', m4: 'w_m4', ak: 'w_ak', mg42: 'w_smg', bar: 'w_smg', m249: 'w_m4', pkp: 'w_ak', pzf: 'w_bazooka', bazooka: 'w_bazooka',
-    javelin: 'w_launcher', rpg: 'w_rpg', stinger: 'w_launcher', igla: 'w_launcher' },
+  arm: { k98: ['w_kar98', 1.11], garand: ['w_kar98', 1.1], m1carb: ['w_kar98', .9], k98s: ['w_kar98', 1.11, 's'], m1903: ['w_kar98', 1.1, 's'],
+    m4: ['w_m4', .84], ak: ['w_ak', .94], akm: ['w_ak', .88], aks74u: ['w_ak', .73], mp40: ['w_smg', .83], mp7: ['w_smg', .64], vityaz: ['w_smg', .72],
+    mg42: ['w_smg', 1.22, 'ba'], bar: ['w_smg', 1.21, 'b'], m249: ['w_m4', 1.04, 'ba'], pkp: ['w_ak', 1.16, 'ba'], pkm: ['w_ak', 1.17, 'ba'],
+    m82: ['w_sniper', 1.45, 'b'], osv96: ['w_sniper', 1.54, 'b'], svd: ['w_sniper', 1.22],
+    p38: ['w_pistol', .22], m1911: ['w_pistol', .22], m17: ['w_pistol', .2], mp443: ['w_pistol', .2], pm: ['w_pistol', .16],
+    pzf: ['w_bazooka', 1], bazooka: ['w_bazooka', 1.37], rpg: ['w_rpg', .95], rpg7v: ['w_rpg', .95],
+    javelin: ['w_launcher', 1.2], stinger: ['w_launcher', 1.5], igla: ['w_launcher', 1.6], strela: ['w_launcher', 1.4], malyutka: ['w_launcher', .9], kornet: ['w_launcher', 1.2] },
   cred: 'Modelos 3D: Quaternius (CC0), Poly by Google, Alex Safayan, AdamKokrito, Zsky, J-Toastie, KolosStudios, PabloLuna57, Nico _, madtrollstudio, CreativeTrio, Pichuliru, austincford, Carwyn Pelley, sftwr314r8 (CC-BY 3.0). Lista em models/LICENSES.md.'
 };
 PACK.on = (() => { try { if (/[?&]pack=0/.test(location.search)) return false; if (localStorage.getItem('cf-pack') === '0') return false; } catch (e) {} return typeof location !== 'undefined' && /^https?:$/.test(location.protocol); })();
@@ -73862,13 +73893,65 @@ function packPlay(s, nm, fade) {
   if (s.cur && fade) { a.reset().play(); a.crossFadeFrom(s.cur, fade, false); } else { if (s.cur) s.cur.stop(); a.reset().play(); }
   s.cur = a;
 }
+/* the weapon seen from outside (cf-armas-3p): each its own (PACK.arm), its pack model stretched to the weapon's length (across by that
+   stretch to the power thick, so a long machine gun is not as tall as a door) and sized to the soldier (the model's own height h is a
+   1.85 m man). The group's origin is the grip, where the right hand goes; userData: grip, fore (where the left hand goes: fore of the
+   length ahead of the grip) and mz (the muzzle: the front of the model, at mz of its height, where the bore is), in the group's units.
+   A weapon without a model of its own is told apart by what is added: a scope (s), a bipod folded under the barrel
+   (b), the box of a belt under the receiver (a); a mortar is a tube and its base plate. Where the grip sits in the rig: grip aiming (the
+   arm and the weapon turned by the aim about it), run across the chest, prone along the ground */
+const PW = { grip: [.214, 1.358, .12], run: [.289, 1.178, .12], prone: [-.028, 1.394, .12], thick: .4, fore: .34, mz: .73, man: 1.85 };
+/* the row of the weapon in hand ([model, length, added]), or null: a civilian, or nothing in hand */
+function packArmOf(m) {
+  if (m.civ) return null;
+  const a = m.arms && m.arms[m.w], d = a && a.d; if (!d) return null;
+  const key = PACK_SARM.get(d); if (key && PACK.arm[key]) return PACK.arm[key];
+  if (d.k === 'mort') return ['', .75, 'm'];
+  return d.k ? [d.k === 'sam' || d.k === 'atgm' ? 'w_launcher' : 'w_bazooka', 1.2] : d.snp ? ['w_sniper', 1.2] : d.lmg ? ['w_smg', 1.15, 'b'] : [m.def && m.def.era === 'ww2' ? 'w_kar98' : m.def && m.def.side === 1 ? 'w_ak' : 'w_m4', .9];
+}
+function packArmBuild(e, h) {
+  const P = e[0] ? packGet(e[0]) : null; if (e[0] && !P) return null;
+  const g = new THREE.Group(), U = g.userData, k = (h || PW.man) / PW.man, L = e[1] * k, add = e[2] || '', metal = mat(0x2b2e2a);
+  const part = (geo, x, y, z, rz, c) => { const o = new THREE.Mesh(geo, c || metal); o.position.set(x, y, z); if (rz) o.rotation.z = rz; g.add(o); return o; };
+  const B = new THREE.Box3();
+  if (P) {
+    const sx = L / P.dims[0], sy = k * Math.pow(e[1] / P.dims[0], PW.thick), pv = packPivot(P, 'hull') || [0, 0, 0], m = packWhole(P, 0, 1);
+    m.scale.set(sx, sy, sy); m.position.set(-pv[0] * sx, -pv[1] * sy, -pv[2] * sy); g.add(m); g.updateMatrixWorld(true);
+    m.traverse(c => { if (c.isMesh) { if (!c.geometry.boundingBox) c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(c.matrixWorld)); } });
+  } else B.set(new THREE.Vector3(-.1 * k, -.06 * k, -.05 * k), new THREE.Vector3(L - .1 * k, .06 * k, .05 * k));
+  const H = B.max.y - B.min.y, by = B.min.y + PW.mz * H, zc = (B.min.z + B.max.z) / 2;
+  if (add.includes('m')) {   // a mortar: the tube, and its base plate at the foot
+    const t = new THREE.CylinderGeometry(.045 * k, .05 * k, L, 10); part(t, L / 2 - .1 * k, 0, 0, -Math.PI / 2);
+    part(new THREE.BoxGeometry(.05 * k, .26 * k, .26 * k), -.12 * k, 0, 0);
+  }
+  if (add.includes('s')) {   // a scope over the receiver, a little ahead of the grip
+    part(new THREE.CylinderGeometry(.02 * k, .024 * k, .3 * k, 10), .1 * L, B.max.y + .022 * k, zc, -Math.PI / 2);
+    for (const x of [.02, .2]) part(new THREE.BoxGeometry(.018 * k, .03 * k, .018 * k), x * L, B.max.y + .006 * k, zc);
+    B.max.y += .046 * k;
+  }
+  if (add.includes('b')) {   // a bipod folded forward under the barrel: two legs from a clamp
+    const x0 = B.max.x - .24 * L, y0 = by - .035 * k, lg = .3 * k;
+    part(new THREE.BoxGeometry(.04 * k, .03 * k, .05 * k), x0, y0, zc);
+    for (const sd of [-1, 1]) part(new THREE.BoxGeometry(lg, .014 * k, .014 * k), x0 + lg / 2 * Math.cos(.12), y0 - lg / 2 * Math.sin(.12), zc + sd * .022 * k, -.12);
+  }
+  if (add.includes('a')) {   // the box of the belt, hung under the receiver where a magazine would be, the brass of the belt's end over it
+    const bx = part(new THREE.BoxGeometry(.13 * k, .12 * k, .09 * k), .1 * L, by - .13 * k, zc, 0, mat(0x4a5038));
+    part(new THREE.BoxGeometry(.05 * k, .03 * k, .1 * k), .1 * L, by - .06 * k, zc, 0, mat(0x8a7440));
+    B.min.y = Math.min(B.min.y, bx.position.y - .06 * k);
+  }
+  U.grip = [0, 0, 0]; U.fore = [PW.fore * L, 0, 0]; U.mz = [B.max.x + .01 * k, add.includes('m') ? 0 : by, zc];
+  return g;
+}
 function packWeapon(s, m) {
-  const a = m.arms && m.arms[m.w], key = a && PACK_SARM.get(a.d), wid = m.civ ? null : (key && PACK.arm[key]) || (a && a.d && a.d.k ? (a.d.k === 'sam' || a.d.k === 'atgm' ? 'w_launcher' : 'w_bazooka') : m.def.era === 'ww2' ? 'w_kar98' : m.def.side ? 'w_ak' : 'w_m4');
+  const e = packArmOf(m), wid = e ? e.join(':') : null;
   if (s.wid === wid && s.wpn) return s.wpn;
   if (s.wpn) { kill(s.wpn); s.wpn = null; }
-  s.wid = wid; const P = wid && packGet(wid); if (!P) { s.wid = null; return null; }
-  s.wpn = packWhole(P, 0, 1); s.tilt.add(s.wpn); return s.wpn;
+  s.wid = wid; if (!e) return null;
+  const w = packArmBuild(e, s.h); if (!w) { s.wid = null; return null; }
+  s.wpn = w; s.tilt.add(w); return w;
 }
+/* the weapon in the rig: its grip at at, turned by rz */
+function packHold(w, at, rz) { w.position.set(at[0], at[1], at[2]); w.rotation.set(0, 0, rz); }
 function packPose(s, m, dt, fresh) {
   const st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.hypot(m.v.x, m.v.z), a = m.arms && m.arms[m.w], fire = !!a && S.t - a.t < .3, rl = !!a && a.rl > 0;
   const nm = st === 3 ? 'death' : st === 2 ? 'aim' : mv > 3.2 || (m.run && mv > .5) ? (fire && s.act.runfire ? 'runfire' : 'run') : mv > .3 ? 'walk' : m.civ ? 'idle' : fire ? 'fire' : rl ? 'idle' : st === 1 || m.ap ? 'aim' : 'idle';
@@ -73885,8 +73968,8 @@ function packPose(s, m, dt, fresh) {
   if (w) {
     const run = nm === 'run';
     w.visible = st !== 3;
-    if (st === 2) { w.position.set(.05, 1.5, .12); w.rotation.set(0, 0, Math.PI / 2); }   // prone: along the ground, against the body's tilt
-    else { w.position.set(.32, run ? 1.05 : 1.28, .12); w.rotation.set(0, 0, run ? -.7 : clamp(m.ap || 0, -1, 1)); }
+    if (st === 2) packHold(w, PW.prone, Math.PI / 2);   // prone: along the ground, against the body's tilt
+    else packHold(w, run ? PW.run : PW.grip, run ? -.7 : clamp(m.ap || 0, -1, 1));
   }
 }
 /* before the frame: the people to draw animated, nearest first */
@@ -73930,7 +74013,7 @@ manModel = (f => d => {
     for (const mt of s.mats) { mt.color.setHex(col); mt.userData.c = col; }
     packPlay(s, s.act.aim ? 'aim' : 'idle', 0); s.mixer.update(0);
     const k = MAN.sc * 1.85 / s.h; s.root.position.set(m.x, m.y, m.z); s.root.rotation.set(0, m.h, 0); s.root.scale.setScalar(k);
-    const w = packWeapon(s, m); if (w) { w.position.set(.32, 1.28, .12); w.rotation.set(0, 0, 0); }
+    const w = packWeapon(s, m); if (w) packHold(w, PW.grip, 0);
     s.root.updateMatrixWorld(true); if (typeof packHands === 'function') packHands(s, m, true);   // both hands on the weapon (cf-pol-modelos)
     const g = new THREE.Group(); g.add(s.root); return g;
   } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
@@ -73952,8 +74035,8 @@ const packMedic = d => !!(d && d.med && !d.irr);
 /* both hands on the weapon (PIK, cf-pol-modelos): the pack's soldier aims as with a pistol, the right arm out and the left hanging at his
    side, so a rifle hung from one hand. After the clip, each arm is bent by a two-bone reach (the upper arm turned so the elbow lands
    where the two lengths meet, toward the pole: down and out; then the forearm onto the target): the right hand to the weapon's grip
-   (its pivot), the left to its fore end (fore of its length ahead of the grip). Not lying down, dead or unarmed */
-const PIK = { fore: .34, pole: [0, -1, .7], far: 70, V: null };
+   and the left to its fore end, both where packArmBuild put them (PW.fore). Not lying down, dead or unarmed */
+const PIK = { pole: [0, -1, .7], far: 70, V: null };
 /* only the chain of the arm is brought up to date (the bones above it, the arm's three), never the whole skeleton */
 function packReach(root, side, T) {
   const U = root.getObjectByName('UpperArm_' + side), L = root.getObjectByName('LowerArm_' + side), W = root.getObjectByName('Wrist_' + side); if (!U || !L || !W) return;
@@ -73977,17 +74060,16 @@ function packReach(root, side, T) {
 }
 const PIKT = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 function packHands(s, m, near) {   // near: draw it whatever the eye's distance (the hangar's card)
-  const w = s.wpn, st = m.dead ? 3 : m.st; if (!w || !w.visible || st >= 2 || m.civ || !s.wid) return;
+  const w = s.wpn, st = m.dead ? 3 : m.st; if (!w || !w.visible || st >= 2 || m.civ || !s.wid || !w.userData.grip) return;
   if (!near && typeof camera !== 'undefined' && camera && Math.hypot(m.x - camera.position.x, m.z - camera.position.z) > PIK.far) return;   // too far for hands to be seen
-  const P = PACK.M[s.wid] && PACK.M[s.wid].d; if (!P) return;
-  const g = packPivot(P, 'hull') || [0, 0, 0];
   w.updateWorldMatrix(true, false);
-  packReach(s.root, 'R', w.localToWorld(PIKT.set(g[0], g[1], g[2])));
-  packReach(s.root, 'L', w.localToWorld(PIKT.set(g[0] + P.dims[0] * PIK.fore, g[1], g[2])));
+  packReach(s.root, 'R', w.localToWorld(PIKT.fromArray(w.userData.grip)));   // the weapon's own grip and fore end (packArmBuild)
+  packReach(s.root, 'L', w.localToWorld(PIKT.fromArray(w.userData.fore)));
 }
 packPose = (f => (s, m, dt, fresh) => {
   f(s, m, dt, fresh);
   packHands(s, m);
+  const w = s.wpn; if (w && w.visible && w.userData.mz) { w.updateWorldMatrix(true, false); mzSet(m, w.localToWorld(PIKT.fromArray(w.userData.mz))); }   // where its flash and its rounds' streaks start (mzAt)
   const on = packMedic(m.def) && !m.civ && !m.dead;
   if (on && !s.med) s.med = packMedMarks(s.root);
   if (s.med) for (const o of s.med) o.visible = on;

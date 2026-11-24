@@ -66,11 +66,11 @@ const rawTests = async () => {
   const cm = await s.wait('cmd'), cj = await j.wait('cmd');
   ok(cm && JSON.stringify(cm.c) === '[[1,2],[3,4]]' && cj && JSON.stringify(cj.c) === '[[1,2],[0]]', 'cmd: the spectator sees both commanders whole, a player its own');
   seeAll([h, j, b, s]);
-  h.send({ t: 'ai', k: 0, e: [] }); h.send({ t: 'eco', e: [row] }); h.send({ t: 'cq', n: 1, ph: 0, T: 100, k: [10, 10], k0: 10, len: 1, p: [], l: [0, 0, 0, 0, 0, 0] });
+  h.send({ t: 'ai', k: 0, e: [] }); h.send({ t: 'eco', e: [row] }); h.send({ t: 'cq', n: 1, ph: 0, T: 100, ps: [10, 10], len: 1, p: [], l: [0, 0, 0, 0, 0, 0] });
   ok(!!(await s.wait('ai')) && !!(await s.wait('eco')) && !!(await s.wait('cq')), 'it is sent the host\'s ai, eco and cq');
   seeAll([h, j, b, s]);
   s.send({ t: 'gclaim', on: 1 }); s.send({ t: 'gcmd', d: 'eco', c: { c: 'make', k: 'tank', n: 1 }, n: 1 }); s.send({ t: 'gask', q: { q: 'view' }, n: 2 }); s.send({ t: 'chat', text: 'oi' });
-  s.send({ t: 'shot', p: [0, 0, 0], v: [1, 0, 0] }); s.send({ t: 'ai', k: 0, e: [] }); s.send({ t: 'cq', n: 9, ph: 0, T: 1, k: [1, 1], k0: 1, len: 1, p: [], l: [0, 0, 0, 0, 0, 0] });
+  s.send({ t: 'shot', p: [0, 0, 0], v: [1, 0, 0] }); s.send({ t: 'ai', k: 0, e: [] }); s.send({ t: 'cq', n: 9, ph: 0, T: 1, ps: [1, 1], len: 1, p: [], l: [0, 0, 0, 0, 0, 0] });
   s.send(ecs(0)); s.send(gen(0)); s.send(glog(0)); s.send({ t: 'eco', e: [row] }); s.send({ t: 'ff', v: 1 }); s.send({ t: 'cmd', c: [[1], [2]] }); s.send({ t: 'keep', e: { x: 1 } }); s.send({ t: 'join', room: 'modern', name: 'x', cls: 'tank', model: 'abrams' });
   await N.sleep(250);
   const heard = [h, j, b].flatMap(c => c.got.filter(m => !m.seen).map(m => m.t));

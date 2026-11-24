@@ -4,8 +4,8 @@
 
    Aggregate (default): reads every match the game's server keeps (data/matches, or the folders given; ANA_DIR as for the server), played or from
    a tournament, builds each one's after-action review with the page's own anaReport, and prints what balancing needs: wins by side (a side
-   over ALERT.share of ALERT.n or more decided matches is an alert; with 3 sides ALERT.share3, and the placing 1st/2nd/3rd of each side), by doctrine, how matches end and how long they last, where the tickets
-   went (losses, bleed, points, the rest), cost-effectiveness and life by kind, and the general's manoeuvre (the review's mano, M0): how its
+   over ALERT.share of ALERT.n or more decided matches is an alert; with 3 sides ALERT.share3, and the placing 1st/2nd/3rd of each side), by doctrine, how matches end and how long they last, the points at the
+   end (the winner's margin, and how many were decided by the tie-break, the point-time), cost-effectiveness in resources and life by kind, and the general's manoeuvre (the review's mano, M0): how its
    assaults arrive (the flank rate: samples 70° or more off the axis; off the axis route), assaults with a manoeuvre, ambushes armed, fired
    and good, the traffic off the axes and off the roads, vehicles on the rail, "no strength to attack", the entropy of the arrivals and
    repeated approaches, and the general's own cost per frame (from tournament matches played without --nobudget: the frame meter's AIB.stat()
@@ -31,7 +31,7 @@
    The brain (CEREBRO, P6 of cf-cerebro-pesquisa): every review with the meters (the cb events) adds a section Cérebro, the measures of section 4
    beside their targets (the page's own medSum and medRows), with --ref the same from an earlier --json (tools/ref/cerebro-base.json is the
    baseline with the new brain off). --brain 0|1 plays the tournament with BRAIN.on set so; --brain ab plays it twice on the same seeds and
-   doctrines, off and on, and prints the A×B: the result (wins, draws, length, tickets) and the measures side by side, and how many pairs
+   doctrines, off and on, and prints the A×B: the result (wins, draws, length, points) and the measures side by side, and how many pairs
    played the very same match (no code reads BRAIN yet: all of them). Use --nobudget with it, so the population cap does not depend on how
    busy the machine is and the two halves differ only by the brain.
      node tools/balance.js --torneio N --brain ab [--min minutes] [--nobudget] [--json file] ...
@@ -183,23 +183,23 @@ function aggregate(reps) {
   const place = Array.from({ length: N }, () => Array(N).fill(0)), pn = Array(N).fill(0);
   for (const r of done) if (Array.isArray(r.place)) r.place.forEach((s, k) => { if (place[s]) { place[s][k]++; pn[s]++; } });
   const meanPlace = place.map((p, s) => (pn[s] ? p.reduce((a, c, k) => a + c * (k + 1), 0) / pn[s] : null));
-  const why = {}, docs = {}, pers = {}, kinds = {}, tk = { loss: 0, bleed: 0, pt: 0, civ: 0, other: 0 }, cv = { n: 0, dead: 0, evac: 0, turned: 0, roe: 0 }, durs = done.map(r => r.dur / 60).sort((a, b) => a - b);
+  const why = {}, docs = {}, pers = {}, kinds = {}, pm = { n: 0, margin: 0, tie: 0 }, cv = { n: 0, dead: 0, evac: 0, turned: 0, roe: 0 }, durs = done.map(r => r.dur / 60).sort((a, b) => a - b);
   for (const r of done) why[r.whyTxt || r.why] = (why[r.whyTxt || r.why] || 0) + 1;
   const pl = (r, s) => (Array.isArray(r.place) && r.place.indexOf(s) >= 0 ? r.place.indexOf(s) + 1 : 0);
   for (const r of done) for (const s of sidesOf(r)) {
     const d = r.doc[s] || '?', o = docs[d] || (docs[d] = { w: 0, d: 0, l: 0, n: 0, pl: 0, pn: 0 }); o.n++; if (r.win < 0) o.d++; else if (r.win === s) o.w++; else o.l++;
     if (pl(r, s)) { o.pl += pl(r, s); o.pn++; }
     if (r.per && r.per[s]) { const k = r.per[s] + (r.dif && r.dif[s] && r.dif[s] !== 'normal' ? ' (' + r.dif[s] + ')' : ''), p = pers[k] || (pers[k] = { w: 0, d: 0, l: 0, n: 0, pl: 0, pn: 0 }); p.n++; if (r.win < 0) p.d++; else if (r.win === s) p.w++; else p.l++; if (pl(r, s)) { p.pl += pl(r, s); p.pn++; } }
-    const x = r.tickets[s]; if (x) { tk.loss += x.loss; tk.bleed += x.bleed; tk.pt += x.ptLost - x.ptTook; tk.civ += x.civ || 0; tk.other += x.other; }
   }
+  for (const r of dec) if (Array.isArray(r.pts)) { const o = r.pts.filter((_, s) => s !== r.win), m = (r.pts[r.win] || 0) - Math.max(0, ...o); pm.n++; pm.margin += m; if (!m) pm.tie++; }   // the winner's margin of points; 0: won on point-time
   for (const r of done) if (r.civ) { cv.n++; cv.dead += r.civ.dead; cv.evac += r.civ.evac; cv.turned += r.civ.turned.length; for (const x of r.civ.side) if (x) cv.roe += x.roe; }
   for (const r of reps) for (const e of r.eff) { const k = kinds[e.u] || (kinds[e.u] = { made: 0, lost: 0, kills: 0, paid: 0, value: 0, life: 0, ln: 0 }); k.made += e.made; k.lost += e.lost; k.kills += e.kills; k.paid += e.paid; k.value += e.value; if (e.life !== null) { k.life += e.life * e.lost; k.ln += e.lost; } }
-  const all = tk.loss + tk.bleed + tk.pt + tk.civ + tk.other || 1, share = dec.length ? Math.max(...w) / dec.length : 0, lim = N > 2 ? ALERT.share3 : ALERT.share;
+  const share = dec.length ? Math.max(...w) / dec.length : 0, lim = N > 2 ? ALERT.share3 : ALERT.share;
   const elim = done.reduce((a, r) => a + (Array.isArray(r.out) ? r.out.length : 0), 0);
   return { n, sides: N, over: done.length, draws: done.length - dec.length, wins: w, winShare: w.map(x => (dec.length ? x / dec.length : null)), side0: dec.length ? w[0] / dec.length : null,
     alert: dec.length >= ALERT.n && share > lim, alertAt: lim, few: dec.length < ALERT.n, place, meanPlace, elim: done.length ? elim / done.length : null,
     why, docs, pers, dur: durs.length ? { mean: durs.reduce((a, b) => a + b, 0) / durs.length, median: durs[durs.length >> 1], min: durs[0], max: durs[durs.length - 1] } : null,
-    tickets: { loss: tk.loss / all, bleed: tk.bleed / all, pt: tk.pt / all, civ: tk.civ / all, other: tk.other / all }, kinds,
+    points: pm.n ? { margin: pm.margin / pm.n, tie: pm.tie / pm.n } : null, kinds,
     civ: cv.n ? { dead: cv.dead / cv.n, evac: cv.evac / cv.n, turned: cv.turned / cv.n, roe: cv.roe / cv.n } : null,
     mano: mano(reps), dry: null, missions: null };
 }
@@ -269,9 +269,9 @@ function print(A, title, ref) {
   if (A.pers && Object.keys(A.pers).length) { L.push('', '## Por personalidade do general', '', '| Personalidade | Partidas | V | E | D |' + (ns > 2 ? ' Colocação média |' : ''), '| --- | --- | --- | --- | --- |' + (ns > 2 ? ' --- |' : '')); for (const [d, o] of Object.entries(A.pers)) L.push('| ' + d + ' | ' + o.n + ' | ' + o.w + ' | ' + o.d + ' | ' + o.l + ' |' + (ns > 2 ? ' ' + mp(o) + ' |' : '')); }
   L.push('', '## Fim e duração', '', Object.entries(A.why).map(([k, v]) => k + ': ' + v).join(', ') || '—',
     A.dur ? 'Duração: média ' + f1(A.dur.mean) + ' min, mediana ' + f1(A.dur.median) + ', de ' + f1(A.dur.min) + ' a ' + f1(A.dur.max) + '.' : 'Duração: —');
-  L.push('', '## Para onde foram os tíquetes', '', 'Perdas ' + pc(A.tickets.loss) + ', sangria ' + pc(A.tickets.bleed) + ', pontos ' + pc(A.tickets.pt) + ', civis ' + pc(A.tickets.civ) + ', outros (requisições, instalações) ' + pc(A.tickets.other) + '.');
+  L.push('', '## Pontos no fim', '', A.points ? 'Margem média do vencedor: ' + f1(A.points.margin) + ' pontos; decididas no desempate (ponto-minutos): ' + pc(A.points.tie) + '.' : '—');
   if (A.civ) L.push('', '## Civis (média por partida)', '', 'Mortos ' + f1(A.civ.dead) + ', vilas evacuadas ' + f1(A.civ.evac) + ', vilas que se voltaram contra um lado ' + f1(A.civ.turned) + ', fogo suspenso pelas regras de engajamento ' + f1(A.civ.roe) + '.');
-  L.push('', '## Custo-efetividade por tipo (em tíquetes)', '', '| Tipo | Entrou | Perdidos | Abates | Pago | Destruído | Razão | Vida média (s) |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
+  L.push('', '## Custo-efetividade por tipo (em recursos: energia e metal)', '', '| Tipo | Entrou | Perdidos | Abates | Pago | Destruído | Razão | Vida média (s) |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
   for (const [k, o] of Object.entries(A.kinds).sort((a, b) => b[1].paid + b[1].value - (a[1].paid + a[1].value))) L.push('| ' + k + ' | ' + o.made + ' | ' + o.lost + ' | ' + o.kills + ' | ' + Math.round(o.paid) + ' | ' + Math.round(o.value) + ' | ' + (o.paid ? f1(o.value / o.paid) : '∞') + ' | ' + (o.ln ? Math.round(o.life / o.ln) : '—') + ' |');
   if (A.mano) L.push(manoPrint(A.mano, ref && ref.mano));
   L.push('', 'Minutos de nó seco e sucesso por missão: sem dado até a logística física e o contrato de missão existirem.');
@@ -316,17 +316,17 @@ function urbPrint(C, U, ref) {
   C.$('urbRows')(U.sum).forEach((r, i) => L.push('| ' + r.join(' | ') + ' |' + (R ? ' ' + R[i][1] + ' |' : '')));
   return L.join('\n');
 }
-/* the A×B of the brain: the same seeds off (a) and on (b); pairs that played the very same match (result, length and tickets) */
+/* the A×B of the brain: the same seeds off (a) and on (b); pairs that played the very same match (result, length and points) */
 function abPrint(C, A, B, ra, rb) {
   const key = r => (r.tour ? r.tour.seed + ':' + r.era + ':' + r.doc.join(',') : r.file), m = new Map(ra.map(r => [key(r), r]));
   let same = 0, pairs = 0;
-  for (const r of rb) { const o = m.get(key(r)); if (!o) continue; pairs++; if (o.win === r.win && o.dur === r.dur && JSON.stringify(o.tk) === JSON.stringify(r.tk)) same++; }
+  for (const r of rb) { const o = m.get(key(r)); if (!o) continue; pairs++; if (o.win === r.win && o.dur === r.dur && JSON.stringify(o.pts) === JSON.stringify(r.pts)) same++; }
   const eff = X => { let v = 0, p = 0; for (const k of Object.values(X.kinds)) { v += k.value; p += k.paid; } return p ? v / p : null; };
-  const res = X => [pc(X.winShare ? X.winShare[0] : X.side0), String(X.draws), X.dur ? f1(X.dur.mean) + ' min' : '—', f1(eff(X)), pc(X.tickets.loss)];
+  const res = X => [pc(X.winShare ? X.winShare[0] : X.side0), String(X.draws), X.dur ? f1(X.dur.mean) + ' min' : '—', f1(eff(X)), X.points ? f1(X.points.margin) : '—'];
   const L = ['# Torneio A×B do cérebro', '', A.n + ' partidas com o cérebro desligado (A) e ' + B.n + ' com ele ligado (B), nas mesmas sementes e doutrinas; ' + same + ' de ' + pairs + ' pares jogaram exatamente a mesma partida' + (same === pairs && pairs ? ' (nenhum código lê BRAIN ainda, ou o cérebro não mudou nada).' : '.'),
     '', '## Resultado', '', '| Medida | A: desligado | B: ligado |', '| --- | --- | --- |'];
   const a = res(A), b = res(B);
-  ['Vitórias do lado 0 (das decididas)', 'Empates', 'Duração média', 'Eficiência de tíquetes (destruído / pago)', 'Tíquetes que foram em perdas'].forEach((k, i) => L.push('| ' + k + ' | ' + a[i] + ' | ' + b[i] + ' |'));
+  ['Vitórias do lado 0 (das decididas)', 'Empates', 'Duração média', 'Eficiência em recursos (destruído / pago)', 'Margem média de pontos do vencedor'].forEach((k, i) => L.push('| ' + k + ' | ' + a[i] + ' | ' + b[i] + ' |'));
   if (A.brain || B.brain) {
     const x = A.brain ? C.$('medRows')(A.brain.sum) : null, y = B.brain ? C.$('medRows')(B.brain.sum) : null, rows = x || y;
     L.push('', '## Cérebro', '', 'Os dois lados somados; A em ' + (A.brain ? A.brain.n : 0) + ' partidas, B em ' + (B.brain ? B.brain.n : 0) + '.', '', '| Medida | Meta | A: desligado | B: ligado |', '| --- | --- | --- | --- |');

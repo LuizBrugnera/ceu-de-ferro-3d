@@ -3,7 +3,7 @@
    checked on a three-sided match and against two sides. Quick: no long battle (SECS=<s> runs the AI × AI × AI match longer, default 20 s).
    - P0 the helpers (SIDES, ALL, foes, foeBase, S.rel and an ally in it)
    - P1 the map (three bases, the roads' ends, the seat at HS2, 17 points, side 2's deposits on flat dry ground; two sides keep three roads)
-   - P2 the conquest (the side with the most weight takes a point by its margin over the next, a side out by tickets and by its base, the placing)
+   - P2 the conquest (the side with the most weight takes a point by its margin over the next, a side out by its base, the placing)
    - P3 the sightings per side (one side sees, the other does not; ecoHid by the side's bit; a mine's suspicion to the side that ran on it)
    - P4 the faction (names, no aviation, the anti-air on technicals), P6a (the population caps, the planning turn, each side's roads),
      P6b/P6c (the mn* and ls* helpers), P7 (the doctrine only for the Insurgents), P8 (the town's militia for the right side), P9 (the analytics header) */
@@ -52,7 +52,7 @@ console.log('-- P1: the map of three sides --');
 console.log('-- P2: the conquest with three sides --');
 {
   const Q = S.cq, p = Q.p.find(q => q.base < 0 && q.hold < 0) || Q.p.find(q => q.base < 0), pi = Q.p.indexOf(p);
-  ok(Q.tk.length === 3 && Q.lost.length === 3 && Q.out.length === 3, 'tickets, losses and out a side');
+  ok(Q.ps.length === 3 && Q.lost.length === 3 && Q.out.length === 3 && Q.tk === undefined, 'point-time, losses and out a side (no tickets)');
   // the weights: side 1 leads side 2 by 1, side 0 behind; the point is free to take for whoever is linked (force it linked to all three)
   const links = p.links; p.links = Q.p.map((q, i) => i).filter(i => i !== pi); const hold0 = Q.p.map(q => q.hold);
   for (const q of Q.p) if (q !== p && q.base < 0) q.hold = -1;
@@ -70,9 +70,9 @@ console.log('-- P2: the conquest with three sides --');
 {
   const C3 = H.load({ seed: 3, mapv: 9 }), S3 = C3.watch('modern', { n: 3 }), Q = S3.cq; C3.run(2, null, 1 / 20);
   const held2 = Q.p.filter(p => p.hold === 2 && p.base < 0);
-  Q.tk[2] = 0; Q.acc = 1; C3.$('cqStep')(0);
-  ok(Q.out[2] === 1 && C3.$('cqOut(2)') && !Q.ph, 'side 2 out of tickets is out (out[2] ' + Q.out[2] + '), the match goes on');
-  ok(held2.every(p => p.hold === -1) && S3.cmd[2].out === 1, 'its ' + held2.length + ' points went neutral and its director stopped');
+  const b2 = Q.p.find(p => p.base === 2); b2.hold = 0; b2.c = 1; Q.acc = 1; C3.$('cqStep')(0);
+  ok(Q.out[2] === 3 && C3.$('cqOut(2)') && !Q.ph, 'side 2\'s main base taken: it is out (out[2] ' + Q.out[2] + '), the match goes on');
+  ok(held2.every(p => p.hold !== 2) && S3.cmd[2].out === 1, 'its ' + held2.length + ' points went neutral and its director stopped');
   ok(S3.feed.some(f => /foi eliminado/.test(f.text)), 'the feed says it: ' + (S3.feed.find(f => /eliminado/.test(f.text)) || {}).text);
   ok(!C3.$('cqFree(2, "inf")'), 'a side that is out gets nothing more (cqFree false)');
   const b1 = Q.p.find(p => p.base === 1); b1.hold = 0; b1.c = 1; Q.acc = 1; C3.$('cqStep')(0);
@@ -81,7 +81,7 @@ console.log('-- P2: the conquest with three sides --');
 }
 {
   const C4 = H.load({ seed: 3, mapv: 9 }), S4 = C4.watch('modern', { n: 3 }); S4.me = 2; C4.run(1, null, 1 / 20);
-  const Q = S4.cq; Q.tk[1] = 0; Q.acc = 1; C4.$('cqStep')(0); Q.tk[2] = 0; Q.acc = 1; C4.$('cqStep')(0);
+  const Q = S4.cq, take = s => { const b = Q.p.find(p => p.base === s); b.hold = 0; b.c = 1; Q.acc = 1; C4.$('cqStep')(0); }; take(1); take(2);
   ok(Q.ph === 1 && Q.place.join() === '0,2,1' && /Derrota · 2º lugar/.test(String(S4.over || S4.result || S4.endText || JSON.stringify(S4.banner || ''))) || Q.place.join() === '0,2,1', 'a player of side 2, out second: placed 2nd (' + Q.place + ')');
 }
 
@@ -145,23 +145,23 @@ console.log('-- P4, P6a, P7: the faction --');
   S.cq.fr = fr0;
   const big = [0, 1, 2].map(t => JSON.stringify($('genAnswer')(t, { q: 'state' }).r).length);
   ok(big.every(n => n <= 16384), 'the state each side\'s MCP general asks for fits the relay\'s 16 KB for gres (' + big.join(', ') + ' bytes; the Insurgents\' passed 23 KB and never arrived)');
-  /* the general's view of side 2 (the Insurgents' player opens it with Tab): every side's points, and its ticket trend drew the clock column */
+  /* the general's view of side 2 (the Insurgents' player opens it with Tab): every side's points, and its points trend drew the clock column */
   const V2 = C.genVM(2, true);
   ok(V2.held.length === 3 && V2.f.length === 3, 'the general\'s view of side 2: the points (' + V2.held + ') and a tally of the three sides');
-  ok(JSON.stringify($('genTrendCols')(V2)) === '[[3,2],[1,0],[2,1]]' && JSON.stringify($('genTrendCols')(C.genVM(0, false))) === '[[1,0],[2,1],[3,2]]', 'its ticket trend: its own column of S.gtk, then each enemy\'s');
+  ok(JSON.stringify($('genTrendCols')(V2)) === '[[3,2],[1,0],[2,1]]' && JSON.stringify($('genTrendCols')(C.genVM(0, false))) === '[[1,0],[2,1],[3,2]]', 'its points trend: its own column of S.gtk, then each enemy\'s');
 }
 
 console.log('-- P6b, P6c: the general\'s helpers --');
 {
   const B = S.base, mnBase = $('mnBase'), b = mnBase(0, B[2].x + 10, B[2].z);
   ok(b === B[2] && mnBase(2, B[1].x, B[1].z) === B[1], 'mnBase(t, x, z): the enemy base nearest the place');
-  const Q = S.cq, tk = Q.tk.slice(), hold = Q.p.map(p => p.hold);
+  const Q = S.cq, hold = Q.p.map(p => p.hold);
   Q.p.forEach(p => { if (p.base < 0) p.hold = -1; });
   Q.p.filter(p => p.base < 0).slice(0, 2).forEach(p => { p.hold = 1; });
   ok($('mnLead(0)').e === 1, 'mnLead(0) is side 1 while it holds more points');
   Q.p.filter(p => p.base < 0).slice(2, 5).forEach(p => { p.hold = 2; });
   ok($('mnLead(0)').e === 2, 'and side 2 once it passes side 1 in points');
-  Q.p.forEach((p, i) => { p.hold = hold[i]; }); Q.tk = tk;
+  Q.p.forEach((p, i) => { p.hold = hold[i]; });
   const l2 = (S.eco.l || []).filter(e => e.team === 2);
   ok(S.eco.d.length === 3 && l2.length > 0, 'the economy has three sides and side 2 has sites (' + l2.map(e => e.k).join(', ') + ')');
   const ecoLook = $('ecoLook'), n2 = $('ecoLookN(2)');
@@ -201,7 +201,7 @@ console.log('-- P9: the analytics with three sides --');
   const h = $('ANA').ev.find(e => e.k === 'hdr');
   ok(h && h.n === 3 && h.fac.length === 3, 'the analytics header says three sides (n ' + (h && h.n) + ')');
   const R = $('anaReport')($('ANA').ev);
-  ok(R && R.ns === 3 && (!R.curve || !R.curve.length || R.curve[0].length === 7), 'anaReport: ns 3, the curve [t, 3 tickets, 3 points]');
+  ok(R && R.ns === 3 && (!R.curve || !R.curve.length || R.curve[0].length === 4), 'anaReport: ns 3, the curve [t, 3 points]');
 }
 {
   /* the tournament of three sides as the docs call it (no --mapv: it used map 4, which has no third base, and stopped at once) */

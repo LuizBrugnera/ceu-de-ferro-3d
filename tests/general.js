@@ -10,9 +10,9 @@ const GLYPH = ['inf', 'mort', 'rec', 'eng', 'arm', 'mech', 'aa', 'art', 'trk', '
 /* what the match came to, to the last digit, and where the random stream stands */
 const print = (C, S) => {
   let sum = 0; for (const k of ['men', 'units', 'planes']) for (const o of S[k]) sum += o.x * 1.3 + o.z + (o.hp || 0);
-  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.tk.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
+  return [S.men.length, S.units.length, S.squads.length, sum.toFixed(6), S.cq.ps.map(v => v.toFixed(4)).join(','), C.$('Math').random().toFixed(12)].join(' ');
 };
-/* view: ask the view model for both sides and sample the tickets each simulated second, as the page does */
+/* view: ask the view model for both sides and sample the points each simulated second, as the page does */
 function battle(o) {
   const C = H.load({ seed: 41, page: o.page });
   if (o.noLog) C.$('GEN').log = 0;
@@ -50,7 +50,7 @@ ok(V0.road && V0.road.length === S.T.routes.length, 'a line for each road (' + (
 ok(typeof V0.post.k === 'string' && V0.post.k && typeof V0.post.s === 'string', 'posture: ' + V0.post.k + ' - ' + V0.post.s);
 ok(JSON.stringify(V0.eco) === '{"sites":[],"rows":[]}', 'the economy\'s slot is there and empty');
 ok(Array.isArray(V0.ev) && Array.isArray(V0.ops) && Array.isArray(V0.log), 'the evaluation, the operations and the log are lists');
-ok(V0.tk && V0.tk.length === 2 && V0.trend.length > 0, 'tickets ' + (V0.tk || []).map(Math.round) + ', sampled ' + V0.trend.length + ' times');
+ok(V0.held && V0.held.length === 2 && V0.tk === undefined && V0.trend.length > 0, 'points held ' + (V0.held || []) + ', sampled ' + V0.trend.length + ' times');
 
 console.log('-- no random numbers in the view --');
 { const src = H.source(), a = src.indexOf('/* ---------- the general\'s view (GEN)'), b = src.length;   // the harness cuts the source at the 3D scene's marker
@@ -59,7 +59,7 @@ console.log('-- no random numbers in the view --');
 
 console.log('-- a watch match --');
 { const Cw = H.load({ seed: 9 }), Sw = Cw.newState('ww2', null, { watch: 1, len: 0 });
-  ok(Sw.demo && Sw.watch && !!Sw.cq && !Sw.my, 'no player, a demo with the points and the tickets of a conquest');
+  ok(Sw.demo && Sw.watch && !!Sw.cq && !Sw.my, 'no player, a demo with the points of a conquest');
   Cw.run(20);
   ok(Sw.planes.length > 0 && !H.nan(Sw), 'twenty seconds on: ' + Sw.planes.length + ' aircraft, ' + Sw.units.length + ' vehicles, no bad numbers');
   const V = Sw.cq ? Cw.genVM(0, false) : null; ok(!!V && V.pts.length === Sw.cq.p.length, 'the view of a watch match has its points' + (V ? ' (' + V.pts.length + ')' : ''));

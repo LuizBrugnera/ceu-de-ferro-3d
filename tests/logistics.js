@@ -1,6 +1,6 @@
 'use strict';
 /* Physical logistics (phase F2b, D23 A, D24 A): crates in each forward node, what an entry costs there (the AI's columns and reinforcements,
-   the player, a requisition, a rearm), convoys from the main base and the airlift, a convoy lost or taken, the dry node's morale, the
+   the player, a requisition, a rearm), convoys from the main base and the airlift, a convoy lost or taken, the
    logistics general, the commands conv, alift, sprio and the question logi, the player's own truck. With no economy, nothing of it. About two minutes */
 const H = require('./harness'), ok = H.ok;
 let C, $, S, LG, hd;
@@ -16,7 +16,7 @@ const base = (t, ri, back) => {
   }
   throw new Error('no place for a base');
 };
-const tk = t => S.cq.tk[t];
+const res = t => (S.eco ? Math.round(S.eco.d[t].en) + '/' + Math.round(S.eco.d[t].mt) : '');   // side t's stock: a requisition paid in crates leaves it alone
 
 console.log('-- nodes: who has crates, from when --');
 {
@@ -64,10 +64,10 @@ console.log('-- the player enters at a node: its crates, or the main base --');
 console.log('-- requisition and rearm in crates --');
 {
   load(); S = C.newState('ww2', 'schutze', { cls: 'inf', mouse: true }); C.plan = () => {}; C.director = () => {}; S.men = S.men.filter(m => m === S.my); S.squads = [];
-  const b = base(0, 1, 1500), P = S.my; P.x = b.x + 8; P.z = b.z; P.inv = 1e9; b.lc = 3; const k0 = tk(0);
+  const b = base(0, 1, 1500), P = S.my; P.x = b.x + 8; P.z = b.z; P.inv = 1e9; b.lc = 3; const k0 = res(0);
   ok(C.rqWhy(P, 'trn', 'kubel', 0) === 'crates', 'a requisition at a base with 3 crates: refused for crates (a car takes ' + LG.cost.car + ')');
   b.lc = 50; const w = C.rqAsk('trn', 'kubel');
-  ok(!w && S.my.kind && b.lc === 50 - LG.cost.car && tk(0) === k0, 'with 50: the car is drawn for ' + LG.cost.car + ' crates and no ticket (' + b.lc + ' left, tickets ' + Math.round(tk(0)) + ')');
+  ok(!w && S.my.kind && b.lc === 50 - LG.cost.car && res(0) === k0, 'with 50: the car is drawn for ' + LG.cost.car + ' crates and no energy or metal (' + b.lc + ' left, stock ' + res(0) + ')');
   C.run(1); S.input.yawR = true; C.run(.1); S.input.yawR = false; C.run(.2);   // E: out of it, standing at the base
   const u = S.units.find(u => u.rqc !== undefined) || {}; ok(S.my.man && b.lc === 50 - LG.cost.car + Math.floor(LG.cost.car * $('RQ').refund), 'left whole at the base: half of it comes back (' + b.lc + ')');
   const M = S.my; M.arms[0].res = 0; M.hp = 5; b.lc = 10; C.run($('MAN').fill + .5);
@@ -86,8 +86,8 @@ console.log('-- convoys: from the main base, delivered, lost, taken --');
   C.run(600, () => !u.gone); ok(u.gone && !L.cv.length, 'and went home and off the map');
   d.mt = 10; ok(C.lgConvoy(0, p, '') === 'mt', 'with 10 metal: no convoy (mt)');
   d.mt = 300; p.lc = LG.cap.p; ok(C.lgConvoy(0, p, '') === 'full', 'to a full node: no convoy (full)');
-  p.lc = 0; C.lgConvoy(0, p, ''); const v = L.cv[0].u, k0 = tk(0); C.run(2); C.killUnit(v); C.run(1);
-  ok(!L.cv.length && Math.round(k0 - tk(0)) === LG.lost && p.lc === 0 && S.glog.l[0].some(e => /Comboio perdido/.test(e.s)) && S.glog.l[1].some(e => /Comboio inimigo destruído/.test(e.s)), 'destroyed on the way: the load is lost, the side loses ' + LG.lost + ' tickets and both logs say so');
+  p.lc = 0; C.lgConvoy(0, p, ''); const v = L.cv[0].u; C.run(2); C.killUnit(v); C.run(1);
+  ok(!L.cv.length && p.lc === 0 && S.glog.l[0].some(e => /Comboio perdido/.test(e.s)) && S.glog.l[1].some(e => /Comboio inimigo destruído/.test(e.s)), 'destroyed on the way: the load is lost and both logs say so');
   // taken: a loaded truck standing still, alone, with an enemy soldier at it
   const q = S.cq.p.filter(p => p.hold === 1 && p.base < 0)[0]; q.lc = 0;
   C.lgConvoy(0, p, ''); const w = L.cv[0].u; C.run(1); w.run = null; w.ai.park = 1; w.s = w.home - 2000; C.place(w);   // abandoned on the road, 2 km out (side 0 goes toward s 0)
@@ -111,12 +111,8 @@ console.log('-- the airlift (today only) --');
   load(); watch('ww2'); ok(C.lgAirlift(0, S.cq.p.find(p => p.hold === 0 && p.base < 0), '') === 'era', 'in 1944 there is none (era)');
 }
 
-console.log('-- the dry node, the logistics general --');
+console.log('-- the logistics general --');
 {
-  load(); watch('ww2');
-  const p = S.cq.p.find(p => p.hold === 1 && p.base < 0); for (const o of $('lgNodes')(1)) o.lc = 50; p.lc = 0; S.lg.cmd = [1e9, 1e9]; S.cq.tk = [500, 500];
-  C.run(LG.dry.t - 2); const k1 = tk(1); C.run(64); const k2 = tk(1);
-  ok(Math.abs(k1 - 500) < .05 && Math.abs(k1 - k2 - 64 / 60 * LG.dry.tk) < .1, 'a node dry for ' + LG.dry.t + ' s costs its side ' + LG.dry.tk + ' ticket a minute (' + (k1 - k2).toFixed(2) + ' in 64 s)');
   load(); watch('ww2');
   for (const o of $('lgNodes')(1)) o.lc = $('lgCap')(o);
   const q = S.cq.p.find(p => p.hold === 1 && p.base < 0 && $('lgTied')(1, p)); q.lc = 0; S.eco.d[1].mt = 300; S.lg.cmd = [1e9, 0];
@@ -149,7 +145,7 @@ console.log('-- the player\'s own truck --');
   ok(P.lgc === LG.truck && Math.abs(drop - LG.mt) < 1, 'a truck standing ' + LG.load + ' s by the main base loads ' + LG.truck + ' crates for ' + LG.mt + ' metal');
   p.lc = 10; P.x = p.x + 5; P.z = p.z + 5; P.v = { x: 0, y: 0, z: 0 }; P.lgT = 0; C.run(LG.load + 1);
   ok(P.lgc === 0 && p.lc === 10 + LG.truck, 'driven to ' + p.L + ' and standing there: it unloads into it (' + p.lc + ')');
-  P.lgc = 30; const k0 = tk(0); C.killUnit(P); C.run(1); ok(Math.round(k0 - tk(0)) === LG.lost, 'lost with crates aboard: ' + LG.lost + ' tickets');
+  P.lgc = 30; C.killUnit(P); C.run(1); ok(P.lgc === 0 && S.glog.l[0].some(e => /perdid/.test(e.s) && /30 caixas/.test(e.s)), 'lost with crates aboard: the load is lost and the log says so');
 }
 
 console.log('-- a whole match: the battle goes on, nothing breaks --');

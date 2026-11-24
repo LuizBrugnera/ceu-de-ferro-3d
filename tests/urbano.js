@@ -110,7 +110,7 @@ if (run(4)) {
 }
 if (run(5)) {
   console.log('-- 5. the switch --');
-  const fp = S => { const h = crypto.createHash('md5'); for (const m of S.men) h.update(m.x.toFixed(3) + ',' + m.z.toFixed(3) + ',' + (m.dead ? 1 : 0)); for (const u of S.units) h.update(u.x.toFixed(3) + ',' + u.z.toFixed(3) + ',' + u.hp); h.update(JSON.stringify(S.cq ? S.cq.tk : 0)); return h.digest('hex').slice(0, 12); };
+  const fp = S => { const h = crypto.createHash('md5'); for (const m of S.men) h.update(m.x.toFixed(3) + ',' + m.z.toFixed(3) + ',' + (m.dead ? 1 : 0)); for (const u of S.units) h.update(u.x.toFixed(3) + ',' + u.z.toFixed(3) + ',' + u.hp); h.update(JSON.stringify(S.cq ? S.cq.ps : 0)); return h.digest('hex').slice(0, 12); };
   const play = (page, on, secs) => {
     const C = H.load({ seed: 3, eco: 1, lg: 1, rec: 1, mapv: +process.env.MAPV || 11, ana: true, page }), $ = C.$; $('AIB').now = () => 0;
     if (on !== null) $('URB.on = ' + on);

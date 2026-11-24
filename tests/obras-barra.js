@@ -37,8 +37,12 @@ console.log('-- the keys of the bar --');
     'a list of ' + l.length + ': ' + OBR.keys + ' goes to the next page (' + p2 + '), its 2 picks its second (' + p2b + '), and ' + OBR.keys + ' on the last page goes back to the first');
   key({ n: 2 }); key({ d: -1 }); const sb = at(); key({ d: -1 }); const out = at();
   ok(sb === 'base' && out === 'closed' && !S.fm && !S.bm, 'Shift+N goes back a work, and from the first it closes the mode');
-  tap('build'); key({ n: OBR.keys }); key({ n: 2 }); const was = at(), pg = $('obrPage')(l, $('obrCur')(l)); key({ n: pg[1] - pg[0] + 1 }); const still = at();
-  ok(pg[1] - pg[0] < OBR.page && still === was, 'on the last page (' + (pg[1] - pg[0]) + ' works) a key past them does nothing (' + still + ')');
+}
+{ // a list whose last page is short (with the camouflage nets a 1944 rifleman's 12 fill two pages; today's 13 leave one on the third)
+  const { $, P, tap, key, at } = soldier('modern', 'blueRifle'), OBR = $('OBR'), l = $('obrList')(P);
+  tap('build'); for (let p = 0; p < Math.ceil(l.length / OBR.page) - 1; p++) key({ n: OBR.keys });
+  const was = at(), pg = $('obrPage')(l, $('obrCur')(l)); key({ n: pg[1] - pg[0] + 1 }); const still = at();
+  ok(pg[1] - pg[0] < OBR.page && pg[1] === l.length && still === was, 'on the last page (' + (pg[1] - pg[0]) + ' works) a key past them does nothing (' + still + ')');
 }
 {
   const { $, P, tap, key, at } = soldier('modern', 'blueEng'), l = $('obrList')(P);

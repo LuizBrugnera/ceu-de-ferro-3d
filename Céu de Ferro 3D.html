@@ -39,6 +39,17 @@ button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #cv,#hud{position:absolute;inset:0;width:100%;height:100%;display:block}
 #cv{touch-action:none}
 #hud{pointer-events:none}
+/* the scoreboard (SB, cf-pol2 P27): over the battle while Tab is held, nothing to click */
+.board{position:absolute;inset:0;display:flex;justify-content:center;align-items:flex-start;padding:max(9vh,64px) 16px 16px;pointer-events:none}
+.board[hidden]{display:none}
+.board-in{width:min(720px,100%);max-height:100%;overflow:hidden;display:flex;flex-direction:column;gap:12px;padding:16px 22px 14px;background:rgba(18,24,26,.9);border-top:3px solid var(--accent);clip-path:polygon(0 0,calc(100% - 11px) 0,100% 11px,100% 100%,11px 100%,0 calc(100% - 11px))}
+.board-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.board h2{margin:0;font-family:var(--f-display);font-weight:400;font-size:28px;text-transform:uppercase;letter-spacing:.04em;color:var(--accent)}
+.board-meta{font-family:var(--f-data);font-size:14px;color:var(--mute);font-variant-numeric:tabular-nums}
+.board .score{font-size:15px}
+.board .score .h{margin-top:0}
+.board .me-row{color:#fff;font-weight:600}
+.board-tip{margin:0;font-size:13px;color:var(--mute)}
 
 .sheet{position:absolute;inset:0;overflow-y:auto;background:linear-gradient(180deg,rgba(18,24,26,.55) 0%,rgba(18,24,26,.9) 34%,var(--bg) 100%)}
 .sheet-in{max-width:1080px;margin:0 auto;padding-block:20px 28px;padding-left:var(--gut-l);padding-right:var(--gut-r);display:flex;flex-direction:column;gap:18px}
@@ -575,6 +586,14 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
   <main class="stage" id="stage">
     <canvas id="cv" aria-label="Campo de batalha"></canvas>
     <canvas id="hud" aria-hidden="true"></canvas>
+    <section class="board" id="board" aria-label="Placar" hidden>
+      <div class="board-in">
+        <div class="board-head"><h2>Placar</h2><span class="board-meta" id="boardMeta"></span></div>
+        <div class="score" id="boardSides"></div>
+        <div class="score" id="boardPl"></div>
+        <p class="board-tip">Solte Tab para voltar ao combate · um toque rápido em Tab abre a Visão de General</p>
+      </div>
+    </section>
 <section class="gen" id="gen" aria-label="Visão de General" hidden>
   <canvas id="genMap" aria-label="Mapa tático do comandante"></canvas>
   <header class="gen-top">
@@ -30271,7 +30290,7 @@ function newState(eraId, model, o) {
   const E = ERAS[eraId], T = genTerrain(eraId, o.net ? (Net.mv || 1) : MAPV, eraId === 'modern' && (o.net ? Net.ns === 3 : o.N !== 2) ? 3 : 2), N = sidesOf(eraId, T, o), sd = d ? d.side || 0 : 0;   // the map of three sides (P1, map version 9) only for a match of three
   const me = N === 3 ? sd : o.net && d ? Math.min(sd, 1) : 0, pf = N === 3 || !d || o.net ? 0 : sd;
   S = { era: eraId, E, T, W: E.W, HW: E.HW, ceil: E.ceil, modern: eraId === 'modern', t: 0, demo: !model, watch: !model && !!o.watch, spec: !!o.spec, cls, model, fac: N === 3 ? [0, 1, 2] : [pf, pf === 2 ? 0 : 1 - pf],
-    net: !!o.net, host: !!o.host, humans: Array(N).fill(0), dir: null, me, pref: !!o.mouse, mouse: false, hold: false, aim: null, gv: null, aimR: 0, lead: null, feed: [],
+    net: !!o.net, host: !!o.host, humans: Array(N).fill(0), dir: null, me, pref: !!o.mouse, mouse: false, hold: false, aim: null, gv: null, aimR: 0, lead: null, feed: [], kf: [],
     fcp: null, mpp: 0, sol: null, gf: null, falls: [], spotT: 0, shellT: -9, smokes: [], threat: null,
     planes: [], units: [], men: [], squads: [], sqn: 0, bullets: [], bombs: [], missiles: [], flares: [], shells: [], parts: [], wrecks: [], floats: [], debris: [],
     my: null, input: {}, invert: false, score: 0, airKills: 0, gndKills: 0, cq: null, cd: {},
@@ -31259,6 +31278,27 @@ function popSmoke(u) {
   if (S.net && (u === S.my || u.aid)) Net.smoke(u);
   return true;
 }
+/* ---------- the kill feed (KF, cf-pol2 P27): who killed whom, with what and from how far, a short list at the top right ----------
+   One row a death the player cares about: his own (he killed or was killed), his squad's (psq), a human player's online (pid), and a
+   vehicle or aircraft lost within r m of him. Rows hold life s (mine s for the player's own), at most n of them, the oldest first out.
+   kfNote reads the entities where the death is simulated (killMan, ruin, downed, and the room's down and aidown on a guest); a death
+   already listed (the server echoes down and aidown back to whoever sent them) is not listed twice */
+const KF = { n: 5, life: 6, mine: 9, r: 1500 };
+const kfName = e => (!e ? '' : e === S.my || e.me ? 'Você' : e.name || (e.def && e.def.name) || '?');
+const kfWpn = by => { const a = by && by.man && by.arms && by.arms[by.w]; return (a && a.d && a.d.name) || ''; };
+function kfPush(r) {
+  const l = S.kf || (S.kf = []);
+  if (r.o && l.some(e => e.o === r.o && S.t - e.t < 3)) return false;
+  r.t = S.t; l.push(r); while (l.length > KF.n) l.shift();
+  return true;
+}
+function kfNote(o, by) {
+  if (!o || S.demo) return false;
+  const P = S.my, own = e => !!e && (e === P || !!e.me || !!e.psq), k = by && by !== o ? by : null, mine = own(o) || own(k);
+  if (!(mine || o.pid || (k && k.pid) || (!o.man && P && hdist(o, P) < KF.r))) return false;
+  return kfPush({ o, k: kfName(k), kt: k ? k.team : -1, kme: !!k && (k === P || !!k.me), v: kfName(o), vt: o.team, vme: o === P || !!o.me, w: kfWpn(k), d: k ? Math.round(hdist(k, o)) : 0, ff: !!k && k.team === o.team, mine });
+}
+const kfLive = () => (S.kf || []).filter(e => S.t - e.t < (e.mine ? KF.mine : KF.life));
 function award(by, pts, label, o, air) {
   if (S.demo || S.net || !by || !by.me) return;
   if (S.cq) S.cq.st.k++;
@@ -31295,7 +31335,7 @@ function lose(p, dmg, by) {
   downed(p, by);
 }
 function downed(p, by) {
-  ffNote(p, by);
+  ffNote(p, by); kfNote(p, by);
   if (p.team !== S.me) award(by, p.role === 'cas' ? 150 : 200, p.def.name, p, true);
   if (p.aid) Net.aidown(p, by);
   if (p === S.my) playerDown(by);
@@ -31361,6 +31401,7 @@ function ruin(u, dmg, by) {
   const n = u.cargo ? u.cargo.length : 0;
   if (n && !u.net) spill(u);
   killUnit(u, u.end === 2); ffNote(u, by);
+  kfNote(u, by);
   if (u.team !== S.me) award(by, u.kind === 'tank' ? 150 : u.kind === 'aa' ? 120 : u.kind === 'art' ? 130 : 60 + 40 * n, u.name + (n ? ' com pelotão' : ''), u, false);
   if (u.aid) Net.aidown(u, by);
   if (u === S.my) playerDown(by);
@@ -32423,7 +32464,7 @@ function los(a, ay, b, by) {
    known: it may be picked. sight: what there is to aim at, the target itself or, for SIGHT.mem s, the still point where it went out of
    sight (lost); then null, and the owner lets go of it */
 const ZERO = { x: 0, y: 0, z: 0 }, eyeY = o => o.y + (o.man ? STANCE[o.st].eye * MAN.sc : o.kind ? o.def.mh : 0), bodyY = o => o.y + (o.man ? o.fy || STANCE[o.st].h * MAN.sc * .6 : o.sup ? 1.6 : o.kind ? VLIFT + 1.0 : 0);   // a vehicle's middle, 1.0 over its frame (as 2.5 was over the old frame's 1.5: cf-veiculos)
-const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air * (S.T.trv && canopy(t) ? TREES.canopy : 1))) || (!a.kind && !!t.kind && !t.man && !t.lost && !!S.T.trv && dist(a, t) > TREES.air && canopy(t)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);
+const hid = (a, t) => (!!t.man && !t.lost && dist(a, t) > visR(t) * (a.kind ? 1 : MAN.air * (S.T.trv && canopy(t) ? TREES.canopy : 1))) || (!a.kind && !!t.kind && !t.man && !t.lost && !!S.T.trv && dist(a, t) > TREES.air && canopy(t)) || (!!t.cnv && camHid(a, t)) || smoked(a.x, eyeY(a), a.z, t.x, bodyY(t), t.z);   // under a camouflage net (CNET): only from near
 const sees = (a, t) => los(a, eyeY(a), t, bodyY(t)) && !hid(a, t);
 /* the seeker's line: what a guided weapon's sight, seeker or laser needs to its target, for the player and the AI alike, at the lock, at the
    launch and in flight. The one sight rule (los: the ground and whatever hides, every kind with OBJ sight) and anything else solid on the line,
@@ -33466,13 +33507,14 @@ function damageMan(m, dmg, by, rx, h) {
   if (relayed(m, dmg, by, rx, h)) return;
   hurtMine(m, dmg, h);
   m.hitT = S.t; if (by) m.lastBy = by; if (m.ai) { m.sup = S.t + SUP.t; if (!by || by.team !== m.team) { m.ai.hurt = by; m.ai.hurtT = S.t; } }
+  if (h) m.hz = h.pt;   // the zone of the last hit: the player's ESTADO panel names it (P1)
   if (h && h.pt === 2) m.wl += dmg; else if (h && h.pt === 3) m.wa += dmg;
   if (h && dmg > 0) m.bl = Math.min(DMG.man.cap, (m.bl || 0) + dmg * DMG.man.bleed[h.pt & 3]);
   if ((m.hp -= dmg) <= 0 && !manDown(m, dmg, h)) killMan(m, by);
 }
 function killMan(m, by) {
   if (m.dead) return;
-  m.dead = true; m.deadT = S.t; m.hp = 0; m.ctl.fire = false; cqDead(m); ffNote(m, by);
+  m.dead = true; m.deadT = S.t; m.hp = 0; m.ctl.fire = false; cqDead(m); ffNote(m, by); kfNote(m, by);
   if (m.team !== S.me) award(by, 40, m.name, m, false);
   if (m.aid) Net.aidown(m, by);
   if (m === S.my) playerDown(by);
@@ -34508,7 +34550,7 @@ function siteWhy(t, x, z, a) {
   if (hi - lo > BLD.slope * R * 2) return 'steep';
   if (onRoadW(x, z, BLD.road + R)) return 'road';
   if (S.sup.some(b => !b.dead && hdist(b, at) < BLD.apart) || S.base.some(b => hdist(b, at) < BLD.main)) return 'base';
-  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
+  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && !o.K.over && footD(o, x, z) < R + BLD.pad) return 'obj';
   for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
   for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < BLD.foe) return 'foe';
   if (S.sup.reduce((n, b) => n + (b.team === t && !b.dead ? 1 : 0), 0) >= supCap(t)) return 'cap';
@@ -34596,7 +34638,7 @@ function build(P, I, key, trig) {
   if (key) S.bm = S.bm ? null : {};
   const B = S.bm; if (!B) return;
   const D = clamp(BLD.put[0] + (a.p + .5) * (BLD.put[1] - BLD.put[0]) / .5, BLD.put[0], BLD.put[1]), ch = Math.cos(a.h), sh = Math.sin(a.h);
-  B.x = P.x + ch * D; B.z = P.z - sh * D; B.a = a.h;
+  B.x = P.x + ch * D; B.z = P.z - sh * D; B.a = a.h + (S.brot || 0);   // [ ] and the wheel turn it (P15, OBR)
   const l = supLot(P.team, B.x, B.z); if (l) { B.x = l.x; B.z = l.z; B.a = l.a; }   // inside the seat town's depot lot: on the lot
   B.y = hgt(B.x, B.z);
   B.why = S.net && !Net.sb ? 'server' : S.bw ? 'wait' : siteWhy(P.team, B.x, B.z, B.a) || (P.kit > 0 ? '' : 'kit');
@@ -36432,7 +36474,9 @@ const Net = {
       const a = Net.players.get(m.id), b = Net.players.get(m.by), g = Net.ghosts.get(m.id), by = b ? b.name : m.by < 0 ? Net.label(Net.ai.get(m.by)) : '';
       if (g) Net.kill(g, m.det);
       const kb = Net.who(m.by), vt = g || (m.id === Net.id ? S.my : null), tk = !!(vt && kb && kb.team === vt.team && kb !== vt);
-      if (tk) Net.say('Fogo amigo: ' + by + ' abateu um aliado'); else if (a) Net.say(by ? by + (a.cls === 'plane' ? ' abateu ' : a.cls === 'inf' ? ' matou ' : ' destruiu ') + a.name : a.name + (m.left ? (a.cls === 'plane' ? ' abandonou a aeronave' : a.cls === 'inf' ? ' deixou o posto' : ' abandonou o veículo') : a.cls === 'plane' ? ' caiu' : a.cls === 'inf' ? ' morreu' : ' foi destruído'));
+      /* the kill feed (KF): a player's death, mine already listed where it happened; one with nobody's credit and an abandoned vehicle stay in the feed */
+      const kd = !!a && !m.left && m.id !== Net.id && (by || m.by === Net.id) && (kfNote(g, kb) || (!g && kfPush({ k: m.by === Net.id ? 'Você' : by, kt: kb ? kb.team : -1, kme: m.by === Net.id, v: a.name, vt: pSide(a), w: kfWpn(kb), d: 0, ff: tk, mine: m.by === Net.id })));
+      if (tk) Net.say('Fogo amigo: ' + by + ' abateu um aliado'); else if (a && !kd && !(m.id === Net.id && by && !m.left)) Net.say(by ? by + (a.cls === 'plane' ? ' abateu ' : a.cls === 'inf' ? ' matou ' : ' destruiu ') + a.name : a.name + (m.left ? (a.cls === 'plane' ? ' abandonou a aeronave' : a.cls === 'inf' ? ' deixou o posto' : ' abandonou o veículo') : a.cls === 'plane' ? ' caiu' : a.cls === 'inf' ? ' morreu' : ' foi destruído'));
       if (m.by === Net.id && S.cq && !tk) S.cq.st.k++;
       if (g && m.by === Net.id && !tk) S.floats.push({ x: g.x, y: g.y + 12, z: g.z, text: (g.man ? 'Abatido: ' : g.kind ? 'Destruído: ' : 'Abate: ') + g.name, life: 2.2 });
     },
@@ -36478,7 +36522,9 @@ const Net = {
     aidown(m) {
       const g = Net.ai.get(m.id), b = Net.players.get(m.by), d = PLANES[m.model] || TANKS[m.model] || AAS[m.model] || ARTS[m.model] || KITS[m.model];
       const kb = Net.who(m.by), tk = !!(g && kb && kb.team === g.team && kb !== g);
-      if (b && tk) Net.say('Fogo amigo: ' + b.name + ' abateu um aliado'); else if (b) Net.say(b.name + (PLANES[m.model] ? ' abateu ' : KITS[m.model] ? ' matou ' : ' destruiu ') + (g ? g.name || g.def.name : d ? d.name : 'um caminhão') + ' (IA)');
+      /* the kill feed (KF): the host listed it where it died (this is the server's echo); a guest lists it from the ghost, or from the names for one it never saw */
+      const kd = S.host || (g ? kfNote(g, kb) : b && kfPush({ k: m.by === Net.id ? 'Você' : b.name, kt: kb ? kb.team : -1, kme: m.by === Net.id, v: d ? d.name : 'um caminhão', vt: -1, w: kfWpn(kb), d: 0, ff: false, mine: m.by === Net.id }));
+      if (b && tk) Net.say('Fogo amigo: ' + b.name + ' abateu um aliado'); else if (b && !kd) Net.say(b.name + (PLANES[m.model] ? ' abateu ' : KITS[m.model] ? ' matou ' : ' destruiu ') + (g ? g.name || g.def.name : d ? d.name : 'um caminhão') + ' (IA)');
       if (!g || !g.net) return;
       if (m.by === Net.id && !tk) { if (S.cq) S.cq.st.k++; S.floats.push({ x: g.x, y: g.y + 12, z: g.z, text: (g.man ? 'Abatido: ' : g.kind ? 'Destruído: ' : 'Abate: ') + (g.name || g.def.name), life: 2.2 }); }
       Net.kill(g, m.det);
@@ -38484,7 +38530,7 @@ function pedEtaAir(t, x, z, p) {
 function pedEtaRoad(t, x, z, o) {
   if (o) return pedR5(10 + Math.hypot(o.x - x, o.z - z) / 3);   // a squad already in the field, on foot
   const p = lsRail(t, x, z), s0 = entryS(t, p.ri);
-  return pedR5(15 + Math.abs(p.s - s0) / GAI.march + Math.hypot(p.x - x, p.z - z) / 3);
+  return pedR5(15 + Math.abs(p.s - s0) / GAI.march + (p.d || 0) / 3);   // lsRail gives the distance off the road (d), not a point: hypot of its x z was NaN, and so every new column's ETA
 }
 /* player P (the host's own, or a guest's ghost) asks for k at x z: { st: ok | no | fwd | wait, why, eta, x, z } */
 function pedDecide(P, k, x, z) {
@@ -38547,23 +38593,26 @@ function pedRun(P, k, x, z) {
         for (const g of S.men.concat(S.units)) if (!g.dead && !g.civ && g.team !== t && pedSeen(g, t) && pedNear(g, t, x, z, PED.foe.help)) { const d = Math.hypot(g.x - x, g.z - z); if (d < fd) { fd = d; f = g; } }
         if (f && !P.def.vmax && helpCall(P, P.kind ? (P.hp < P.max * .7 ? 'repair' : 'clear') : 'fire', sX(f, t) === undefined ? f.x : sX(f, t), sZ(f, t) === undefined ? f.z : sZ(f, t))) call = 'os que estão perto foram chamados; ';
       }
-      const res = gResv(t), far = res && pedEtaRoad(t, x, z, helpAt(res)) > PED.far, mv = () => { if (far) return gBad('far'); const r = cmd({ c: 'res', x, z }); return r.ok ? { st: 'ok', why: call + 'a esquadra da reserva vai até lá', eta: pedEtaRoad(t, x, z, res && helpAt(res)) } : r; };
-      const dsp = () => { const r = cmd({ c: 'disp', k: 'squad', n: 1, mk: 'defend', x, z, r: 150, why }); return r.ok ? { st: 'ok', why: call + 'uma esquadra nova sai da base', eta: pedEtaRoad(t, x, z) } : r; };
+      const ex = chmPed(t, k, x, z, why); if (ex) { ex.why = call + ex.why; return ex; }   // a squad already near first (cf-general-chamados)
+      const res = gResv(t), far = res && pedEtaRoad(t, x, z, helpAt(res)) > PED.far, mv = () => { if (far) return gBad('far'); const r = cmd({ c: 'res', x, z }); return r.ok ? { st: 'ok', why: call + 'a esquadra da reserva vai até lá', eta: pedEtaRoad(t, x, z, res && helpAt(res)), rs: 1 } : r; };
+      const dsp = () => { const r = cmd({ c: 'disp', k: 'squad', n: 1, mk: 'defend', x, z, r: 150, why }); return r.ok ? { st: 'ok', why: call + 'uma esquadra nova sai da base', eta: pedEtaRoad(t, x, z), mk: 1 } : r; };
       let r = k === 'help' ? mv() : dsp(); if (r.st === 'ok') return r;
       const r2 = k === 'help' ? dsp() : mv(); if (r2.st === 'ok') return r2;
       return call ? { st: 'ok', why: call + 'o general não tem esquadra para mandar (' + (PED.w[r.why] || GEN.no[r.why] || r.why) + ')' } : bad(r);
     }
     case 'arm': {
       if (!pedFoes(t, x, z, PED.foe.arm)) return no('nenhum inimigo conhecido a menos de ' + PED.foe.arm + ' m: os blindados vão aonde há contato');
+      const ex = chmPed(t, k, x, z, why); if (ex) return ex;
       const r = cmd({ c: 'disp', k: 'tank', n: 1, mk: 'defend', x, z, r: 250, why }); if (!r.ok) return bad(r);
-      return { st: 'ok', why: 'um carro de combate sai da base', eta: pedEtaRoad(t, x, z) };
+      return { st: 'ok', why: 'um carro de combate sai da base', eta: pedEtaRoad(t, x, z), mk: 1 };
     }
     case 'aa': {
       if (!pedFoes(t, x, z, PED.foe.aa, true)) return no('nenhuma aeronave inimiga conhecida por perto');
+      const ex = chmPed(t, k, x, z, why); if (ex) return ex;
       const r = side.fighter ? cmd({ c: 'disp', k: 'fighter', n: 1, mk: 'cap', x, z, r: 1500, why }) : gBad('kind');
-      if (r.ok) return { st: 'ok', why: 'um caça patrulha o céu de lá', eta: pedEtaAir(t, x, z) };
+      if (r.ok) return { st: 'ok', why: 'um caça patrulha o céu de lá', eta: pedEtaAir(t, x, z), mk: 1 };
       const r2 = cmd({ c: 'disp', k: 'aa', n: 1, mk: 'defend', x, z, r: 200, why });
-      if (r2.ok) return { st: 'ok', why: 'uma antiaérea sai da base', eta: pedEtaRoad(t, x, z) };
+      if (r2.ok) return { st: 'ok', why: 'uma antiaérea sai da base', eta: pedEtaRoad(t, x, z), mk: 1 };
       return bad(r.why === 'kind' ? r2 : r);
     }
     case 'sup': {
@@ -38573,6 +38622,149 @@ function pedRun(P, k, x, z) {
   }
   return no(GEN.no.kind);
 }
+/* ---------- calls for support that reach the AI general: reallocate before producing (cf-general-chamados) ----------
+   A call that reaches the AI general is first answered with what the side already has in the field, and only then by production:
+   - a player's request from the map (pedRun): inf and help a squad, arm a tank, aa an AA vehicle (or the fighter already in the air);
+   - a unit's call for help that no friend near took and went up to the command (helpPick's 'up'): fire and clear, a squad from farther
+     than the call's own reach (CHM.up.r, any road it can walk to, arriving within CHM.up.eta s; the call then waits for it). The general
+     never produced for these: they waited.
+   What may be taken: the nearest unit, by its ETA, that is free or on a quieter task (CHM.jobs: a post that holds, patrols or observes,
+   the line's, a recon squad's; never a garrison, a site's guard, the engineers, a mortar, a column's) and can get there (by its road, a switch, a walk of the
+   network), arriving within CHM.eta s, and, while the reserve has one of that kind to send, no later than the new one by CHM.slack s.
+   Never one whose taking opens a worse hole: a squad in an operation, on a supply or a build run, the base's reserve, a dropped or lifted
+   one, the only squad holding its point, the last of its road's line, one with an enemy the side knows within CHM.quiet m (its own fight);
+   a tank or AA vehicle hurt, fighting, on another errand, or the last tank of a road held with difficulty. With none, the old way:
+   dispatch from the reserve, which orders one made when the reserve is empty (the miss).
+   A squad so taken holds at the call and goes back to its old order CHM.hold s after it got there with no enemy known within CHM.quiet m
+   of the place, or CHM.life s after the call; a tank waits there firing (its ai.m5, an armoured group's way); an AA vehicle drives to the
+   call along its road (ai.hs). S.chm[t] counts by side: n calls, re answered by a unit reallocated from the field, rs by the base's reserve
+   squad (as before), mk by production, lc only by the friends near the player (help), no refused, up calls up to
+   the command and upRe of them the general answered, arr units that got there and resp the s from the call to it, eta the s promised */
+const CHM = { on: 1, eta: 420, slack: 60, quiet: 600, hold: 90, life: 600, near: 60, r: { squad: 3000, tank: 4000, aa: 3500 },
+  jobs: ['held', 'road', 'wood', 'line', 'rec'], up: { k: ['fire', 'clear'], r: 1500, eta: 300, again: 15 } };
+const chmSt = t => { const A = S.chm || (S.chm = {}); return A[t] || (A[t] = { n: 0, re: 0, rs: 0, mk: 0, lc: 0, no: 0, up: 0, upRe: 0, arr: 0, resp: 0, eta: 0 }); };
+const chmL = () => S.chmL || (S.chmL = []);
+const chmOrd = q => (q.cnP ? q.cnP.O : q.ord);   // the order the squad has, or the one on its way to it by radio (CN)
+/* the squad of side C.t nearest by its ETA to x z that may leave for a call: { o, eta } or null. max: the latest ETA; R: the call it answers */
+function chmSq(C, x, z, max, R) {
+  const t = C.t, p = railOf(x, z), c = [];
+  for (const q of S.squads) {
+    if (q.team !== t || q.net || !(q.live >= 3) || q.state || q.op || q.lift || q.para || q.help || q.tp || q.rd || q.mil || (R && q === R.by) || !CHM.jobs.includes(q.job)) continue;
+    const O = q.ord; if (!O || O.b || O.res || O.T || O.es || O.wd || O.k === 'supply' || O.k === 'build' || O.k === 'withdraw' || O.k === 'assault') continue;
+    const L = q.men.find(m => !m.dead); if (!L || hdist(L, { x, z }) > CHM.r.squad) continue;
+    const eta = pedEtaRoad(t, x, z, L); if (eta > max) continue;
+    c.push([q, eta, L]);
+  }
+  c.sort((a, b) => a[1] - b[1]);
+  for (const [q, eta, L] of c.slice(0, 8)) {
+    const O = q.ord;
+    if (cmdKnown(C, L.x, L.z, CHM.quiet) > 0) continue;   // its own fight
+    if (O.tw && !S.squads.some(o => o !== q && o.team === t && o.live >= 2 && o.ord && o.ord.tw === O.tw)) continue;   // the only holder of its point
+    if (q.job === 'line' && !S.squads.some(o => o !== q && o.team === t && o.job === 'line' && o.ri === q.ri && o.live >= 3)) continue;   // the last of its road's line
+    if (q.ri === p.ri || gOrdOk(q, p.ri) || (S.T.mv >= 4 && tripSq(q, { x, z, ri: p.ri, s: p.s }))) return { o: q, eta };
+  }
+  return null;
+}
+/* a vehicle of kind k (tank, aa) of side t that may leave for a call */
+const chmVehFree = (u, t, k) => u.kind === k && u.team === t && u.ai && !u.net && !u.dead && !u.gone && u.rail && !u.fixed && !u.trip && !u.ai.amb && !u.ai.m5 && !u.ai.dfp && !(u.ai.tgt && !u.ai.tgt.dead)
+  && !u.run && !u.mr && !u.pid && !u.me && !u.gp && !u.res && !u.lim && !u.help && !u.rqa && u.ai.reloc === null && !(u.ai.hs !== undefined && u.ai.hs !== null) && u.hp >= u.max * .6 && S.t - u.hitT > 20;
+/* the vehicle of kind k nearest by its ETA: a tank by the tactical trip when the road network has one (anywhere within CHM.r.tank), else on the
+   call's road; an AA vehicle on the call's road. { o, eta, s } or null */
+function chmVeh(C, k, x, z, max) {
+  const t = C.t, p = railOf(x, z), c = [];
+  for (const u of S.units) {
+    if (!chmVehFree(u, t, k) || hdist(u, { x, z }) > CHM.r[k]) continue;
+    const net = k === 'tank' && M5.on && m5Net(), eta = 10 + (net ? hdist(u, { x, z }) * 1.3 : u.ri === p.ri ? Math.abs(u.s - p.s) : 1e9) / Math.max(1, u.def.spd * GSPD);
+    if (eta > max || cmdKnown(C, u.x, u.z, CHM.quiet) > 0) continue;
+    if (k === 'tank' && C.post[u.ri] === 'def' && S.units.filter(o => o.team === t && o.kind === 'tank' && !o.dead && o.ri === u.ri).length < 2) continue;   // the last tank of a road held with difficulty stays
+    c.push([u, eta, net]);
+  }
+  c.sort((a, b) => a[1] - b[1]);
+  for (const [u, eta, net] of c.slice(0, 4)) {
+    if (!net) return { o: u, eta: pedR5(eta), s: p.s };
+    if (!m5Go(u, x, z, 'chm')) continue;
+    const e = 10 + m5Eta(u, u.trip); if (e <= max) return { o: u, eta: pedR5(e) };
+    u.trip = null;   // the way there is longer than the call can wait
+  }
+  return null;
+}
+/* send what chmSq or chmVeh found to x z: the order, the tracking, the count */
+function chmSend(t, f, x, z, why) {
+  const o = f.o, E = { t, o, T0: S.t, x, z, at: 0, why };
+  if (o.men) {
+    const p = railOf(x, z); E.cb = o.ord; E.ord = { k: 'hold', ri: p.ri, s: p.s, x, z, R: 14, T: S.t + CHM.life, chm: 1 };
+    setOrd(o, E.ord);
+    if (chmOrd(o) !== E.ord) { setOrd(o, E.cb); return null; }   // setOrd could not send it there after all: it stays
+  } else if (f.s === undefined) { E.h = o.ai.m5 = { x, z, op: { k: 'chm', over: false, st: 'go', O: { x, z } }, T: S.t + f.eta + CHM.life, k: 'chm' }; }
+  else { E.s = o.ai.hs = f.s; }
+  chmL().push(E);
+  const st = chmSt(t); st.re++; st.eta += f.eta;
+  gLog(t, 'help', 'O general manda ' + helpWho(o) + ' atender ' + gNear(x, z) + ', em ~' + f.eta + ' s, sem produzir' + (why ? ' (' + why + ')' : ''), helpAt(o), null, { x, z });
+  return E;
+}
+/* the reallocations on their way or at the call: arrival, the hold, the way back (an up call's squad: the call's own end, helpEnd, gives it back) */
+function chmTick() {
+  const L = chmL(); if (!L.length) return;
+  for (let i = L.length; i--;) {
+    const E = L[i], o = E.o, st = chmSt(E.t), C = S.cmd && S.cmd[E.t];
+    if (E.R) {
+      const R = E.R; if (!E.at && R.atT) { E.at = R.atT; st.arr++; st.resp += R.atT - E.T0; }
+      if (R.resp !== o || R.st === 'done' || R.st === 'gone' || !helpLive(o)) L.splice(i, 1);
+      continue;
+    }
+    let gone = !helpLive(o), there = false;
+    if (!gone && o.men) { gone = chmOrd(o) !== E.ord; there = o.ord === E.ord && !!o.at; }
+    else if (!gone && E.h) { gone = o.ai.m5 !== E.h; there = hdist(o, E) < 80; }
+    else if (!gone) { gone = o.ai.hs !== E.s; there = Math.abs(o.s - E.s) < CHM.near; }
+    if (gone) { L.splice(i, 1); continue; }
+    if (there && !E.at) { E.at = S.t; st.arr++; st.resp += S.t - E.T0; }
+    const calm = !C || cmdKnown(C, E.x, E.z, CHM.quiet) === 0;
+    if (S.t - E.T0 > CHM.life || (E.at && calm && S.t - E.at > CHM.hold)) {
+      if (o.men) setOrd(o, E.cb && E.cb.k ? E.cb : { k: 'hold', ri: o.ri, s: o.s });
+      else if (E.h) E.h.T = 0;   // AI.tank lets it go home
+      else o.ai.hs = null;
+      L.splice(i, 1);
+    }
+  }
+}
+/* the calls nobody near took (up): the AI general sends a squad from farther, any road it can walk; never one it would have to make */
+function chmUp() {
+  const H = S.help; if (!H) return;
+  for (const R of H.l) {
+    if (R.st !== 'up' || R.resp || R.pl || !CHM.up.k.includes(R.k) || !helpLive(R.by) || S.t < (R.chmT || 0)) continue;
+    const t = R.team, st = chmSt(t);
+    if (!R.chmU) { R.chmU = 1; st.up++; }
+    R.chmT = S.t + CHM.up.again;
+    if (genBy(t, 'def') !== 'ai' || !S.cmd || !S.cmd[t]) continue;
+    const C = S.cmd[t], f = chmSq(C, R.x, R.z, CHM.up.eta, R); if (!f || hdist(helpAt(f.o), R) > CHM.up.r) continue;
+    const q = f.o, v = helpVeto(R, q); if (v) { R.tried.add(q); continue; }
+    R.resp = q; R.u = 1; R.st = 'on'; R.atT = 0; q.help = R; R.gen = 1; helps().v++;
+    helpStart(R, q);
+    R.T = Math.max(R.T, S.t + f.eta + MIND.ask.life);   // the call waits for the help it was promised
+    st.upRe++; st.eta += f.eta;
+    chmL().push({ t, o: q, T0: R.T0, x: R.x, z: R.z, at: 0, R });
+    gLog(t, 'help', 'O general manda ' + helpWho(q) + ' atender ' + helpWho(R.by) + ' (' + NEEDS[R.k].s + '), em ~' + f.eta + ' s', helpAt(q), null, R);
+  }
+}
+step = (g => dt => { g(dt); if ((S.net && !S.host) || !CHM.on) return; if ((S.chmT = (S.chmT || 0) - dt) <= 0) { S.chmT = 1; chmUp(); chmTick(); } })(step);
+/* what the reserve holds of kind k now (the economy's), or -1 where it does not gate the field */
+const chmRes = (t, k) => (S.eco && ecoSim() && ECO.gate ? ((S.eco.d[t].res[k] || []).length) : -1);
+/* pedRun first looks for one in the field: the reply when it found one, else null (and production goes on as before) */
+function chmPed(t, k, x, z, why) {
+  if (!CHM.on || !S.cmd || !S.cmd[t]) return null;
+  const C = S.cmd[t], kind = k === 'arm' ? 'tank' : k === 'aa' ? 'aa' : 'squad', fresh = pedEtaRoad(t, x, z), max = chmRes(t, kind) > 0 && Number.isFinite(fresh) ? Math.min(CHM.eta, fresh + CHM.slack) : CHM.eta;
+  const f = kind === 'squad' ? chmSq(C, x, z, max) : chmVeh(C, kind, x, z, max); if (!f || !chmSend(t, f, x, z, why)) return null;
+  return { st: 'ok', why: (kind === 'squad' ? helpWho(f.o).replace(/ \(.*\)$/, '') + ', que estava perto,' : kind === 'tank' ? 'um carro de combate que estava perto' : 'uma antiaérea que estava perto') + ' vai até lá', eta: f.eta, re: 1 };
+}
+/* the count of every request pedRun answers for the kinds that may be reallocated */
+pedRun = (g => (P, k, x, z) => {
+  const r = g(P, k, x, z);
+  if (P && (k === 'inf' || k === 'help' || k === 'arm' || k === 'aa') && r && r.st !== 'fwd' && r.st !== 'wait') {
+    const st = chmSt(P.team); st.n++;
+    if (r.st !== 'ok') st.no++; else if (r.rs) { st.rs++; st.eta += r.eta || 0; } else if (r.mk) { st.mk++; st.eta += r.eta || 0; } else if (!r.re) st.lc++;
+  }
+  return r;
+})(pedRun);
 /* the answer on the player's screen and map (S.pedM, drawn by pedMarks): a banner, a radio line in the feed */
 function pedShow(r, k) {
   if (!S) return;
@@ -40456,7 +40648,7 @@ function fortWhy(k, t, x, z, a, pre) {
   if (hi - lo > FORT.slope * L * 2) return 'steep';
   if (road) return 'road';
   for (const o of near(x, z, L + 6)) {
-    if (S.os[o.id] > 1 && !o.K.ruin) continue;
+    if ((S.os[o.id] > 1 && !o.K.ruin) || o.K.over) continue;   // a camouflage net goes over a work, a work under it (CNET)
     for (const e of FEND) { const d = footD(o, x + ux * L * e * (o.ft ? FORT.lap : 1), z + uz * L * e * (o.ft ? FORT.lap : 1)); if (o.ft ? d < w * .5 : d < w + F.pad) return o.ft ? 'fort' : 'obj'; }
   }
   if (pre) return '';
@@ -40496,7 +40688,8 @@ function fortsAt(x, z) {
   const C = FCELL.m, key = (i, j) => (i + 512) * 8192 + j + 4096;
   if (!S.fg || S.fg.n !== S.fn) {
     const G = (S.fg = new Map()); G.n = S.fn;
-    for (const f of S.forts) { if (f.F.span) continue; const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
+    for (const f of S.forts) { if (f.F.span || f.F.cam) continue;   // a camouflage net shelters nobody (CNET)
+      const R = f.o.r + FCELL.pad, i1 = Math.floor((f.x + R) / C), j1 = Math.floor((f.z + R) / C); for (let i = Math.floor((f.x - R) / C); i <= i1; i++) for (let j = Math.floor((f.z - R) / C); j <= j1; j++) { const k = key(i, j), l = G.get(k); if (l) l.push(f); else G.set(k, [f]); } }
   }
   return S.fg.get(key(Math.floor(x / C), Math.floor(z / C))) || NONE;
 }
@@ -40691,7 +40884,7 @@ function fortBuild(P, I, key, trig) {
   const B = S.fm; if (!B) return false;
   const F = FORT.K[B.k], D = clamp(F.put[0] + (a.p + .5) * (F.put[1] - F.put[0]) / .5, F.put[0], F.put[1]);
   if (S.bh) { if (I.fire) P.ctl.fire = false; else S.bh = false; }
-  B.x = P.x + Math.cos(a.h) * D; B.z = P.z - Math.sin(a.h) * D; B.a = a.h; B.y = hgt(B.x, B.z);
+  B.x = P.x + Math.cos(a.h) * D; B.z = P.z - Math.sin(a.h) * D; B.a = a.h + (S.brot || 0); B.y = hgt(B.x, B.z);   // [ ] and the wheel turn it (P15, OBR)
   if (B.k === 1 && TRN.on) { const p = trSnap(P.team, B.x, B.z, B.a); if (p && !fortWhy(1, P.team, p.x, p.z, p.a)) { B.x = p.x; B.z = p.z; B.a = p.a; B.y = hgt(p.x, p.z); } }   // beside a trench of ours: it lengthens the corridor (TRN)
   B.why = S.net && !Net.ft ? 'server' : S.fw ? 'wait' : fortWhy(B.k, P.team, B.x, B.z, B.a);
   P.ctl.fire = P.ctl.ads = false;
@@ -45257,7 +45450,7 @@ function ecoWhy(t, k, x, z, a) {
   if (hi - lo > BLD.slope * R * 2) return 'steep';
   const rd = routeDist(S.T, x, z);
   if (onRoadW(x, z, BLD.road + R)) return 'road';
-  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && footD(o, x, z) < R + BLD.pad) return 'obj';
+  for (const o of near(x, z, R + BLD.pad + 4)) if ((S.os[o.id] < 2 || o.K.ruin) && !o.K.over && footD(o, x, z) < R + BLD.pad) return 'obj';
   const own = ecoLive(t), lot = ecoLot(t, k, x, z) >= 0, pq = k === 'mine' ? ecoDepAt(x, z, true) : null, pp = pq && pq.pt >= 0 && S.cq ? S.cq.p[pq.pt] : null;   // a point's deposit (ECO.pt)
   if (own.some(e => hdist(e, at) < (lot && e.lot >= 0 ? ECO.lot.apart : ECO.apart))) return 'near';
   if (pp && pp.hold !== t) return 'pt';
@@ -45920,7 +46113,7 @@ function genVM(t, all) {
       : (S.tw || []).map(w => ({ x: w.x, z: w.z, r: FIELD.town, L: '', name: gName(w), hold: w.hold, c: w.hold ? 1 : -1, base: -1, tw: true, w: bySide(() => 0), links: [] })),
     base: S.base.map((b, i) => ({ x: b.x, z: b.z, t: i })),
     sup: S.sup.filter(b => !b.dead && (all || b.team === t || spotted(b, t))).map(b => ({ x: b.x, z: b.z, t: b.team, prog: b.prog, a: b.a })),
-    forts: S.forts.filter(o => !o.dead && (all || o.team === t || o.pre)).map(o => ({ x: o.x, z: o.z, a: o.a, k: o.k, t: o.team, prog: o.prog })),
+    forts: S.forts.filter(o => !o.dead && (all || o.team === t || o.pre)).map(o => Object.assign({ x: o.x, z: o.z, a: o.a, k: o.k, t: o.team, prog: o.prog }, o.F.cam && { rv: camRev(o) ? 1 : 0 })),   // a camouflage net: shown or not (CNET)
     u, me: (S.my && !S.my.dead && S.my.team === t) ? { x: S.my.x, z: S.my.z } : null, f,
     road: C ? R.map((r, ri) => ({ own: C.own[ri], foe: C.enemy[ri], k: C.ratio[ri], post: C.post[ri], fp: routeAt(r, C.front[ri]), ep: routeAt(r, C.foe[ri]), mid: routeAt(r, r.len / 2) })) : null,
     ops, fm: C ? C.fm.filter(M => !M.dead && S.t < M.T).map(M => ({ x: M.x, z: M.z, k: M.k, n: M.n, left: M.T - S.t, by: !!M.by })) : [], sc,
@@ -50094,6 +50287,25 @@ anaReport = (f => (ev, me) => {
     let down = 0, sh = 0, n = 0;
     sn.forEach((e, i) => { const x = e.cn[s]; if (!Array.isArray(x)) return; if (x[7] === 1 && i) down += e.t - sn[i - 1].t; const all = x[8] + x[9] + x[10]; if (all) { sh += (x[9] + x[10]) / all; n++; } });
     return { sent: c[0], del: c[1], late: c[2], lost: c[3], lag: c[1] ? anaR(c[4] / c[1]) : 0, rep: c[5], df: c[6], hqDown: Math.round(down), out: n ? anaR(sh / n * 100) / 100 : 0 };
+  });
+  return R;
+})(anaReport);
+/* the calls for support in the analytics (CHM, cf-general-chamados): each snapshot carries chm, a side [calls, by reallocation, by the base's reserve,
+   by production, by the friends near only, refused, up calls, of them the general answered, units there, s from call to there summed, s promised summed];
+   the review adds calls, a side { n, re, rs, mk, lc, no, up, upRe, arr, resp (mean s), eta (mean s) } */
+anaSnap = (f => () => {
+  f();
+  const e = ANA.ev[ANA.ev.length - 1]; if (!S.chm || !e || e.k !== 'sn') return;
+  e.chm = anaSides(anaN()).map(t => { const c = S.chm[t]; return c ? [c.n, c.re, c.rs, c.mk, c.lc, c.no, c.up, c.upRe, c.arr, Math.round(c.resp), Math.round(c.eta)] : null; });
+})(anaSnap);
+anaReport = (f => (ev, me) => {
+  const R = f(ev, me), sn = ev.filter(e => e.k === 'sn' && Array.isArray(e.chm)).sort((a, b) => a.t - b.t);
+  if (!sn.length) { R.calls = null; return R; }
+  const hide = anaHide(me, R.ns, R.over), last = sn[sn.length - 1];
+  R.calls = anaSides(R.ns).map(s => {
+    const c = last.chm[s]; if ((hide && s !== me) || !Array.isArray(c)) return null;
+    const ans = c[1] + c[2] + c[3] + c[7];
+    return { n: c[0], re: c[1], rs: c[2], mk: c[3], lc: c[4], no: c[5], up: c[6], upRe: c[7], arr: c[8], resp: c[8] ? anaR(c[9] / c[8]) : 0, eta: ans ? anaR(c[10] / ans) : 0 };
   });
   return R;
 })(anaReport);
@@ -62966,7 +63178,7 @@ manThink = (g => m => {
 /* ---------- paratroopers (PARA, cf-paraquedistas) ----------
    A side drops a squad of paratroopers from its transport (ERAS side.para: Ju 52 and C-47 in 1944, C-130J and Il-76MD today; the Insurgents
    have none), and a player on foot jumps from one himself. The general's command para { x, z, why } (domain atk) takes a squad from the
-   reserve (ecoUse squad, as a dispatch; pi: a point by its index instead of x z), one drop of a side in the air at a time (PARA.live) and PARA.cd s between a side's drops; the AI
+   reserve (ecoUse squad, as a dispatch, the squads held for the drops included: paraHold; up to PARA.pop squads over the soldiers' cap; pi: a point by its index instead of x z), one drop of a side in the air at a time (PARA.live) and PARA.cd s between a side's drops; the AI
    general (paraAI) drops on a point it does not hold where it knows few enemies (a weak point, a gap) and no anti-aircraft, never on its own
    troops, at most once per PARA.cd s; a person (the Visão de General's Campanha) and the MCP give the same command, and a player asks for it
    from the battle map (PED 'para'). The transport (a real AI plane, role 'para': anti-aircraft and fighters shoot it down, its loss is a
@@ -62990,13 +63202,19 @@ const PARA = {
   chute: { dead: 16, sink: 5.2, brake: 3.2, glide: 6, run: 8.5, slow: 2.2, turn: .9, hard: 8, hurt: .35 },
   ai: { mem: 300, open: 2, every: 45, first: 420, foes: 2, aaR: 1800, near: 450, mates: 400, base: 900, spot: 26 },
   me: { cd: 150, lead: 2.2, wait: 12 }, slope: .07, turn: .22, far: 1800, home: 1500, out: 5, tilt: -1.35,
+  res: { keep: [1, 2], win: 240, lost: 12, every: 30, foes: 5, link: 2.5, over: .3 },
   nm: { ww2: 'Fallschirmjäger', modern: 'paraquedistas' }
 };
-Object.assign(GEN.no, { pnone: 'Este lado não tem aviação de transporte', pcd: 'Os paraquedistas ainda se preparam para outro lançamento', plive: 'Já há um lançamento de paraquedistas em curso', paa: 'Antiaérea inimiga conhecida perto da zona de salto' });
+Object.assign(GEN.no, { ppop: 'Soldados demais em campo para um lançamento: o lado passou do teto de soldados, mesmo com a folga dos paraquedistas', pnone: 'Este lado não tem aviação de transporte', pcd: 'Os paraquedistas ainda se preparam para outro lançamento', plive: 'Já há um lançamento de paraquedistas em curso', paa: 'Antiaérea inimiga conhecida perto da zona de salto' });
 GEN.cn.para = 'lançamento de paraquedistas';
 const paraType = t => { const sd = S && S.E && isSide(t) ? S.E.sides[S.fac[t]] : null, id = sd && sd.para; return id && PLANES[id] && PLANES[id].era === S.era ? id : null; };
 const paraLive = t => (S.pdr || []).filter(d => d.t === t && !d.end && d.n > 0);
 const paraSpd = p => Math.max(PARA.spd[S.era] || 60, p.def.vs * 1.35);
+/* the soldiers' cap a drop answers to (cf-general-reservas): the side's whole budget, not the frame meter's cut of it (S.popK, gpMeter: on a
+   busy machine it falls under what is already in the field and no drop ever fitted, every one refused as 'pop'), with res.over of it on top
+   (at least PARA.pop squads): the other dispatchers fill the cap, and the paratroopers come first */
+const paraLim = t => { const k = S.popK || 1, m = popOf(t).men / k; return Math.round(m + Math.max(PARA.pop * SQUAD[S.era].length, m * PARA.res.over)); };
+const paraRoom = (t, n, men) => (men === undefined ? popUse(t).men : men) + n <= paraLim(t);
 const paraLead = (vh, ai) => vh * (ai ? PARA.ai.open * .8 : 1 / PARA.fall.k);   // m a jumper drifts on, world units, before he stops going with the plane
 /* ---- the command ---- */
 GC.para = { d: 'atk', f(t, c, by) {
@@ -63005,10 +63223,11 @@ GC.para = { d: 'atk', f(t, c, by) {
   if (!Number.isFinite(c.x) || !Number.isFinite(c.z) || !gMapOk(c.x, c.z)) return gBad('map');
   if (paraLive(t).length >= PARA.live) return gBad('plive');
   const A = S.pdrT || (S.pdrT = {}); if ((A[t] || -1e9) > S.t) return gBad('pcd');
-  const kits = SQUAD[S.era].slice(), P = popOf(t), U = popUse(t);
-  if (U.men + kits.length > P.men) return gBad('pop');
+  const kits = SQUAD[S.era].slice();
+  if (!paraRoom(t, kits.length)) return gBad('ppop');
   if (by === 'ai' && (pedFoes(t, c.x, c.z, PARA.ai.aaR, false, true) || paraRoute(t, c.x, c.z).n)) return gBad('paa');
-  if (!ecoUse(t, 'squad')) return gBad('res');
+  const w0 = PARA.drw; PARA.drw = 1; const got = ecoUse(t, 'squad'); PARA.drw = w0;   // the drop draws from the reserve held for it (paraHold)
+  if (!got) return gBad('res');
   const D = paraLaunch(t, id, Math.round(c.x), Math.round(c.z), { kits, by, why: typeof c.why === 'string' ? c.why.slice(0, 120) : '' });
   if (!D) { if (ecoSim()) ecoBack(t, 'squad', 1); return gBad('bug'); }
   A[t] = S.t + PARA.cd;
@@ -63020,14 +63239,14 @@ GC.para = { d: 'atk', f(t, c, by) {
    n: how many known guns within aaR of the way, d: the nearest } */
 function paraRoute(t, x, z) {
   const b = S.base[t], h0 = headTo(b.x, b.z, x, z), R = PARA.ai.aaR, aa = [];
-  for (const u of S.units) if (!u.dead && u.kind === 'aa' && foeSide(t, u.team) && S.t - sT(u, t) < PARA.ai.mem) { const ux = sX(u, t), uz = sZ(u, t); aa.push({ x: ux === undefined ? u.x : ux, z: uz === undefined ? u.z : uz }); }
+  for (const u of S.units) if (!u.dead && u.kind === 'aa' && foeSide(t, u.team) && S.t - sT(u, t) < PARA.ai.mem) { const ux = sX(u, t), uz = sZ(u, t); aa.push({ x: ux === undefined ? u.x : ux, z: uz === undefined ? u.z : uz, r: u.arms.reduce((r, a) => Math.max(r, (a.d && a.d.range) || 0), R) }); }
   const seg = (q, a, c) => { const ex = c.x - a.x, ez = c.z - a.z, L = ex * ex + ez * ez || 1, k = clamp(((q.x - a.x) * ex + (q.z - a.z) * ez) / L, 0, 1); return Math.hypot(q.x - a.x - ex * k, q.z - a.z - ez * k); };
   let best = null;
   for (const dh of PARA.dh) {
     const h = h0 + dh, d = Math.min(PARA.app, Math.hypot(x - b.x, z - b.z) * (dh ? .8 : 1));
     const A = { x: clamp(x - Math.cos(h) * d, 300, S.W - 300), z: clamp(z + Math.sin(h) * d, -S.HW + 300, S.HW - 300) }, T = { x, z };
-    let n = 0, dm = 1e9; for (const q of aa) { const e = Math.min(seg(q, b, A), seg(q, A, T)); dm = Math.min(dm, e); if (e < R) n++; }
-    const sc = n * 1e5 - Math.min(dm, R * 2) + Math.abs(dh) * 300;
+    let n = 0, nr = 0, dm = 1e9; for (const q of aa) { const e = Math.min(seg(q, b, A), seg(q, A, T)); dm = Math.min(dm, e); if (e < R) n++; if (e < q.r) nr++; }
+    const sc = n * 1e5 + nr * 1e4 - Math.min(dm, R * 2) + Math.abs(dh) * 300;   // nr: the known guns whose own reach (a modern SAM's 8.5 km) covers the way (cf-general-reservas)
     if (!best || sc < best.sc) best = { ax: A.x, az: A.z, h: headTo(A.x, A.z, x, z), n, d: dm, sc };
   }
   return best;
@@ -63249,20 +63468,58 @@ function paraAI(C) {
   const t = C.t;
   if ((S.net && !S.host) || !S.cq || S.cq.ph || !S.eco || !paraType(t) || genBy(t, 'atk') !== 'ai' || S.t < (C.paraT === undefined ? PARA.ai.first : C.paraT)) return;
   C.paraT = S.t + PARA.ai.every;
+  paraHold(t);   // the reserve it keeps for the drops, and whether it is losing (its men or its points)
   if (paraLive(t).length >= PARA.live || ((S.pdrT && S.pdrT[t]) || -1e9) > S.t) return;
   const d = S.eco.d[t]; if (ecoSim() && !(d.res.squad || []).length) return;
+  const lose = S.prs[t].lose, Ps = gPts();
   let best = null, bs = -1e9;
-  for (const P of gPts()) {
+  for (const P of Ps) {
     if (P.hold === t || S.base.some(b => Math.hypot(b.x - P.x, b.z - P.z) < PARA.ai.base)) continue;
     if (pedFoes(t, P.x, P.z, PARA.ai.aaR, false, true) || paraRoute(t, P.x, P.z).n) continue;   // known anti-aircraft there or on every way in: the transport would not come back
-    const foes = pedFoes(t, P.x, P.z, PARA.ai.near); if (foes > PARA.ai.foes) continue;
-    if (pedMates(t, P.x, P.z, PARA.ai.mates)) continue;   // its own are there already
-    const own = S.base[t], far = Math.hypot(P.x - own.x, P.z - own.z), sc = (P.hold >= 0 ? 3 : 2) - foes * 1.5 + far / 4000;
+    const foes = pedFoes(t, P.x, P.z, PARA.ai.near); if (foes > (lose ? PARA.res.foes : PARA.ai.foes)) continue;   // losing, it drops on a contested point too
+    if (pedMates(t, P.x, P.z, PARA.ai.mates) && !(lose && foes)) continue;   // its own are there already (losing: unless they are fighting for it)
+    const own = S.base[t], far = Math.hypot(P.x - own.x, P.z - own.z), link = P.links && P.links.some(i => Ps[i] && Ps[i].hold === t);   // a point linked to one it holds is one the drop can take (cqStep)
+    const sc = (P.hold >= 0 ? 3 : 2) - foes * (lose ? .6 : 1.5) + far / 4000 + (link ? PARA.res.link : 0);
     if (sc > bs) { bs = sc; best = P; }
   }
   if (!best) return;
-  genCmd(t, { c: 'para', x: Math.round(best.x), z: Math.round(best.z), why: (best.hold >= 0 ? 'ponto inimigo mal defendido: ' : 'ponto sem dono: ') + gName(best) }, 'ai');
+  genCmd(t, { c: 'para', x: Math.round(best.x), z: Math.round(best.z), why: (lose ? 'perdendo tropas, a reserva salta: ' : '') + (best.hold >= 0 ? 'ponto inimigo mal defendido: ' : 'ponto sem dono: ') + gName(best) }, 'ai');
 }
+/* the reserve for the drops (cf-general-reservas): a side with a paratroopers' transport and an AI general keeps res.keep[0] squads of its
+   reserve that no other dispatcher (columns, posts, rides, patrols, its own dispatch) may draw, res.keep[1] while it is losing: res.lost men
+   or more lost in the last res.win s, or fewer points than a rival. Only the drops (GC.para, a player's transport) and a person's map request (pedRun) draw them (PARA.drw), the
+   factory's reserve target (d.keep.squad) goes up by as many and the AI economy orders a squad first while it is short (ecoAI), so the front loses only the squads a drop takes. S.prs[t] { n, lose, h: [[t, lost]...] } */
+function paraHold(t) {
+  if (!S.cq || S.cq.ph || !S.eco || !ecoSim() || !isSide(t) || cqOut(t) || !paraType(t) || genBy(t, 'atk') !== 'ai') return 0;
+  const R = S.prs || (S.prs = {}), r = R[t] || (R[t] = { T: -1e9, h: [], n: 0, lose: 0 }), K = PARA.res;
+  if (S.t - r.T < 2) return r.n;
+  r.T = S.t;
+  const L = (S.cq.lost && S.cq.lost[t] && S.cq.lost[t][0]) || 0, P = gPts();
+  if (!r.h.length || S.t - r.h[r.h.length - 1][0] >= K.every) r.h.push([S.t, L]);
+  while (r.h.length > 1 && S.t - r.h[1][0] >= K.win) r.h.shift();
+  const pts = s => P.reduce((n, p) => n + (p.hold === s ? 1 : 0), 0), mine = pts(t);
+  r.lose = L - r.h[0][1] >= K.lost || sdsOf().some(s => s !== t && !cqOut(s) && pts(s) > mine) ? 1 : 0;
+  r.n = K.keep[r.lose];
+  if (S.eco.ctl[t] === 'ai') S.eco.d[t].keep.squad = (ECO.ai.res.squad || 0) + r.n;
+  return r.n;
+}
+ecoUse = (g => (t, k, k2) => {
+  if ((k === 'squad' || k2 === 'squad') && !PARA.drw && ecoSim() && !S.eco.open) {
+    const n = paraHold(t);
+    if (n && (S.eco.d[t].res.squad || []).length <= n) return false;   // held for the paratroopers
+  }
+  return g(t, k, k2);
+})(ecoUse);
+/* and the factory refills it first: a squad ordered ahead of the rest while the reserve and the queue are short of the hold (the unit
+   orders' scores never pick a squad over the aircraft otherwise) */
+ecoAI = (g => (t, V) => {
+  const out = g(t, V), n = paraHold(t);
+  if (n && V.hq.slots.inf && (V.res.squad || 0) + V.q.filter(q => q.k === 'squad').length < n && V.q.length < ECO.q && !out.some(c => c.c === 'make' && c.k === 'squad'))
+    out.unshift({ c: 'make', k: 'squad', n: 1, why: 'reserva para os paraquedistas', key: 'mkpara' });
+  return out;
+})(ecoAI);
+/* a person's request from the battle map (PED) may draw the squads held for the drops: the hold never makes a map request refuse */
+pedRun = (g => (P, k, x, z) => { const w0 = PARA.drw; PARA.drw = 1; try { return g(P, k, x, z); } finally { PARA.drw = w0; } })(pedRun);
 cmdReq = (g => C => { g(C); paraAI(C); })(cmdReq);
 /* what the side sees of it (the general's state, the MCP) */
 function paraView(t) {
@@ -63371,17 +63628,19 @@ const PTR = { sticks: { ju52: 1, c47: 2, c130: 2, il76: 3 }, cd: 90, fill: 4, ne
   jump: { plane: 150, heli: 150 }, rope: { agl: 30, v: 5, spd: 7, gap: .8 }, ask: 3, tries: 4,
   say: { empty: 'Sem paraquedistas a bordo: sobrevoe a sua pista, baixo, para embarcar outra esquadra', low: 'Baixo demais para o salto: suba acima de 150 m do chão',
     mid: 'Fast-rope: abaixo de 30 m do chão e quase parado. Salto: acima de 150 m', water: 'Aqui não: água', old: 'O servidor desta sala não conhece o transporte do jogador',
-    res: 'Sem esquadras na reserva, ou o lado está no limite de soldados', wait: 'Pedindo uma esquadra ao anfitrião…', mute: 'O anfitrião não respondeu ao pedido de esquadra' } };
+    res: 'Sem esquadras na reserva: a fábrica ainda não produziu outra', pop: 'O lado passou do teto de soldados em campo, mesmo com a folga dos paraquedistas', wait: 'Pedindo uma esquadra ao anfitrião…', mute: 'O anfitrião não respondeu ao pedido de esquadra' } };
 const ptrIs = p => !!p && !p.ai && (p.heli ? !!p.def.lift : !!p.def.para);
 const ptrCap = p => (p.heli ? 1 : PTR.sticks[p.id] || 1);   // squads aboard at most
 const ptrAboard = p => (p.heli ? (p.cargo ? p.cargo.length : 0) : (p.pcg || []).reduce((a, k) => a + k.length, 0));
 const ptrHave = p => (p.heli ? (p.cargo ? 1 : 0) : (p.pcg || []).length);
 /* host: up to n squads for side t, each drawn from its reserve, within its soldiers */
 function ptrGrant(t, n, seats) {
-  const out = [], P = popOf(t); let men = popUse(t).men;
+  const out = []; let men = popUse(t).men;
   for (let i = 0; i < n; i++) {
     const kits = SQUAD[S.era].slice(0, seats || 8);
-    if (men + kits.length > P.men || !ecoUse(t, 'squad')) break;
+    if (!paraRoom(t, kits.length, men)) { out.why = 'pop'; break; }   // the drops' own cap (paraLim)
+    const w0 = PARA.drw; PARA.drw = 1; const got = ecoUse(t, 'squad'); PARA.drw = w0;   // a player's drop draws from the reserve held for the drops too (paraHold)
+    if (!got) { out.why = 'res'; break; }
     men += kits.length; out.push(kits);
   }
   return out;
@@ -63390,11 +63649,11 @@ function ptrGrant(t, n, seats) {
 function ptrLoad(P) {
   const n = ptrCap(P) - ptrHave(P); if (n <= 0) return '';
   if (S.net && !S.host) { if (!Net.ptr) return 'old'; P.ptrAsk = S.t; P.ptrTry = 0; Net.send('pdl', { k: 0, w: n }); return 'wait'; }
-  return ptrTake(P, ptrGrant(P.team, n, P.heli ? LIFT.seats : 8));
+  const g = ptrGrant(P.team, n, P.heli ? LIFT.seats : 8); return ptrTake(P, g, g.why);
 }
-function ptrTake(P, g) {
+function ptrTake(P, g, why) {
   P.ptrAsk = 0;
-  if (!g.length) { P.pcgT = S.t - PTR.cd + 20; return 'res'; }   // nothing: it asks again in 20 s over the field
+  if (!g.length) { P.pcgT = S.t - PTR.cd + 20; return why === 'pop' ? 'pop' : 'res'; }   // which limit: no squad in the reserve, or the side's soldiers   // nothing: it asks again in 20 s over the field
   if (P.heli) P.cargo = g[0].slice(0, LIFT.seats); else (P.pcg || (P.pcg = [])).push(...g.slice(0, ptrCap(P) - ptrHave(P)));
   P.pcgT = S.t; P.ptrN = ptrAboard(P);
   return 'in';
@@ -63525,13 +63784,109 @@ Net.rx.pdl = m => {
   if (!S || !S.net) return;
   if (!S.host) {
     const P = S.my, E = P && INF[S.era][S.fac[P.team]];
-    if (m.k === 0 && Array.isArray(m.n) && ptrIs(P) && !P.dead && P.ptrAsk) ptrSay(P, ptrTake(P, m.n.filter(Array.isArray).map(k => k.filter(i => Number.isInteger(i) && E[i])).filter(k => k.length)));
+    if (m.k === 0 && Array.isArray(m.n) && ptrIs(P) && !P.dead && P.ptrAsk) ptrSay(P, ptrTake(P, m.n.filter(Array.isArray).map(k => k.filter(i => Number.isInteger(i) && E[i])).filter(k => k.length), m.y));
     return;
   }
   const g = Net.ghosts.get(m.from); if (!g || g.dead || g.gone || !(g.heli ? g.def.lift : g.def.para)) return;
-  if (m.k === 0) Net.send('pdl', { to: m.from, k: 0, n: ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8) });
+  if (m.k === 0) { const n = ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8); Net.send('pdl', Object.assign({ to: m.from, k: 0, n }, n.why && { y: n.why })); }   // y: which limit, when none came
   else if (m.k === 1 && Array.isArray(m.n)) { const E = INF[S.era][S.fac[g.team]], kits = m.n.filter(k => Number.isInteger(k) && E[k]).slice(0, 8); if (kits.length) ptrStick(g.team, kits, g, m.r === 1); }
 };
+/* ---------- camouflage nets (CNET, cf-pol2-camuflagem: P31) ----------
+   Two works of the soldier's build mode (N), kinds 14 and 15: a small net (FORT.cns, 10 m square: a vehicle, a gun, a post) and a large
+   one (FORT.cnl, 24 m: a supply base, an economy site). Poles and a canopy over them: nothing stops at it (OBJ.cnet: no height, no bump,
+   no push, over: it lies over a work or a base and they under it), it shelters nobody from fire (no slots, not a man's work, fortsAt),
+   it hides. What stands under a whole net (its middle inside the footprint), has stood still (less than CNET.still m between two looks) and
+   has kept within CNET.move m of where it stopped is covered (o.cnv, the net); a covered thing is seen only from near (D7: strong from far,
+   as before from near): from an aircraft within CNET.R.air m (a helicopter's optics CNET.opt times that), from a vehicle within CNET.R.gnd m
+   (a tank's or an air defence's optics CNET.opt times), from a soldier within CNET.R.man m, from a camera drone within CNET.dr of its
+   camera's reach (camR). Beyond, hid() hides it from every look: the side's map (spot), the economy's (ecoSeen), the drones', an AI's own
+   notice and pick. It breaks: a shot from anything under it reveals the whole net for CNET.fire s (f.rv), moving off the spot uncovers the
+   mover, a burst within CNET.rip m of the footprint tears the net down (where the match is simulated), and a recon drone's mark (DMK)
+   marks what it marked. A sighting from before stays as long as it did (spotted, BLD.keep): a net hides from new looks, it does not wipe
+   a side's memory. D9: no binoculars; the drones and the optics are what find a net.
+   The covers are worked out every CNET.every s on every peer, from what each has; online the nets travel in fort like any work, with a
+   server that knows kinds 14 and 15 (welcome cam) */
+const CNET = { on: 1, every: .25, R: { air: 600, gnd: 900, man: 400 }, opt: 1.5, dr: .6, fire: 20, move: 2, still: .2, rip: 12, slope: .25, n: 0 };
+OBJ.cnet = { hp: [60, 0], take: [0, 0, 0], dug: 1e9, over: 1, veh: () => 1 };
+FORT.cns = { k: 14, name: 'Rede de camuflagem pequena', obj: 'cnet', size: [10, 10, 6], time: 20, cap: 12, cost: [3, 6], put: [7, 10], min: 1, garr: [], cam: 1 };
+FORT.cnl = { k: 15, name: 'Rede de camuflagem grande', obj: 'cnet', size: [24, 24, 7.5], time: 45, cap: 6, cost: [8, 16], put: [14, 18], min: 1, garr: [], cam: 1 };
+FORT.K[14] = FORT.cns; FORT.K[15] = FORT.cnl;
+const camK = k => !!(FORT.K[k] && FORT.K[k].cam);
+Net.cam = false;
+Net.rx.welcome = (g => m => { Net.cam = m.cam === 1; g(m); })(Net.rx.welcome);
+/* why a net may not lie at x z: '' or cserver (an older server), map, water, steep, cnet (on another net), foe, pcap, cost. It may lie over
+   a road, a work, a supply base, a vehicle or a tree: that is what it is for */
+function camWhy(k, t, x, z, a) {
+  const F = FORT.K[k], L = F.size[0] / 2, ux = -Math.sin(a), uz = -Math.cos(a), at = { x, z }; let lo = 1e9, hi = -1e9, n = 0;
+  if (S.net && !Net.cam) return 'cserver';
+  if (!(x > 30 && x < S.W - 30 && Math.abs(z) < S.HW - 30)) return 'map';
+  for (const i of [-1, 0, 1]) for (const j of [-1, 0, 1]) { const h = hgt(x + (ux * i - uz * j) * L, z + (uz * i + ux * j) * L); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  if (lo < S.T.WL + .6) return 'water';
+  if (hi - lo > CNET.slope * L * 2) return 'steep';
+  for (const f of S.forts) if (f.F.cam && !f.gone && Math.hypot(f.x - x, f.z - z) < (f.o.hw + L) * .7) return 'cnet';
+  for (const o of S.units) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
+  for (const o of S.men) if (!o.dead && o.team !== t && hdist(o, at) < FORT.foe) return 'foe';
+  for (const f of S.forts) if (f.team === t && f.k === k && !f.gone) n++;
+  if (n >= F.cap) return 'pcap';
+  const d = ecoSim() && S.eco.d[t]; return d && (d.en < F.cost[0] || d.mt < F.cost[1]) ? 'cost' : '';
+}
+fortWhy = (g => (k, t, x, z, a, pre) => (camK(k) ? (pre ? 'map' : camWhy(k, t, x, z, a)) : g(k, t, x, z, a, pre)))(fortWhy);
+fortSlots = (g => f => (f.F.cam ? f.pts || (f.pts = []) : g(f)))(fortSlots);
+fortAt = (g => (f, prog) => { g(f, prog); if (f.F.cam) f.o.h = -.01; })(fortAt);   // no height: no ray stops at it
+/* the reach of a's eyes into a net */
+function camR(a) {
+  if (a.drone) return CNET.dr * ((a.def && a.def.cam) || ECO.see.dr);
+  if (a.man) return CNET.R.man;
+  if (a.kind) return CNET.R.gnd * (a.kind === 'tank' || a.kind === 'aa' ? CNET.opt : 1);
+  if (a.def && a.def.vmax) return CNET.R.air * (a.heli ? CNET.opt : 1);
+  return CNET.R.gnd;
+}
+/* hid()'s share: t is covered (o.cnv, this match's) and a looks from beyond its reach */
+function camHid(a, t) {
+  const f = t.cnv; if (t.cnS !== S.camS || f.gone || a.team === t.team) return false;
+  const R = camR(a), dx = a.x - t.x, dz = a.z - t.z, dy = a.y !== undefined && t.y !== undefined ? a.y - t.y : 0;
+  return dx * dx + dz * dz + dy * dy > R * R;
+}
+/* the net over x z (a standing one of S.camN), or null */
+function camUnder(o) {
+  for (const f of S.camN || NONE) { const q = f.o, dx = o.x - q.x, dz = o.z - q.z; if (Math.abs(dx * q.c - dz * q.s) < q.hw && Math.abs(dx * q.s + dz * q.c) < q.hd) return f; }
+  return null;
+}
+const camRev = f => S.t - (f.rv === undefined ? -1e9 : f.rv) < CNET.fire;
+/* every CNET.every s: what each standing net covers */
+function camStep() {
+  if (S.t < (S.camT || 0)) return;
+  S.camT = S.t + CNET.every; S.camS = S.camS || ++CNET.n;
+  for (const o of S.camL || NONE) o.cnv = null;
+  const N = (S.camN = CNET.on ? S.forts.filter(f => f.F.cam && !f.gone && f.prog >= 1 && !(S.os[f.id] > 1)) : []);
+  S.camL = null; if (!N.length) return;
+  const L = (S.camL = []);
+  const look = o => {
+    if (o.dead || o.gone || o.in) return;
+    const f = camUnder(o); if (!f) { o.cnA = null; return; }
+    const P = o.cnP || (o.cnP = { x: o.x, z: o.z, f: null }), still = P.f === f && Math.abs(o.x - P.x) < CNET.still && Math.abs(o.z - P.z) < CNET.still;
+    P.x = o.x; P.z = o.z; P.f = f;
+    const A = o.cnA;
+    if (!(A && A.f === f && Math.hypot(o.x - A.x, o.z - A.z) <= CNET.move)) { if (!still) { o.cnA = null; return; } o.cnA = { x: o.x, z: o.z, f }; }   // off its spot: uncovered until it stops again
+    const s = shotAt(o); if (s >= 0 && S.t - s < CNET.fire && !(s <= f.rv)) f.rv = s;   // it fired from under the net: the whole net shows (an arm never fired holds -9)
+    L.push(o);
+  };
+  for (const o of S.units) look(o);
+  for (const o of S.men) look(o);
+  for (const o of S.sup) if (o.prog >= 1) { o.cnP = { x: o.x, z: o.z, f: camUnder(o) }; look(o); }   // a base stands still
+  if (S.eco) for (const o of S.eco.l) { o.cnP = { x: o.x, z: o.z, f: camUnder(o) }; look(o); }
+  for (const o of L) if (!camRev(o.cnA.f)) { o.cnv = o.cnA.f; o.cnS = S.camS; }
+}
+step = (g => dt => { g(dt); if (S && S.forts && S.T) camStep(); })(step);
+/* a burst within CNET.rip m of a net's footprint, near the ground, tears it down (where the match is simulated; the guests are told in fort and obj) */
+function camRip(x, y, z, by) {
+  for (const f of S.forts) {
+    if (!f.F.cam || f.gone || S.os[f.id] > 1 || Math.abs(f.x - x) > f.o.r + CNET.rip || Math.abs(f.z - z) > f.o.r + CNET.rip) continue;
+    if (footD(f.o, x, z) <= CNET.rip && y - f.y < CNET.rip + f.F.size[2]) setObj(f.o, 2, by);
+  }
+}
+explode = (g => (x, y, z, r, dmg, by, team, ...a) => { const v = g(x, y, z, r, dmg, by, team, ...a); if (S.forts && S.forts.length && (!S.net || S.host)) camRip(x, y, z, by); return v; })(explode);
+/* ---------- end of the camouflage nets ---------- */
 /* ---------- the build bar (OBR, cf-pol2-obras: P13 of the polish board, the owner's D2 = A) ----------
    N opened the build mode and went on through every work one at a time (16 of them for a sapper), and the HUD named 3 or 8 of them, never
    marking HESCO and the walls. Now every work the soldier P may build is one list, obrList, in N's order (the one build() goes through: the
@@ -63570,7 +63925,21 @@ build = (g => (P, I, key, trig) => {
     key = false;
   }
   g(P, I, key, trig);
+  if (!obrOpen()) S.brot = 0;   // the turn lasts while the mode is open, from one work to the next (P15)
 })(build);
+/* P15: [ ] and the wheel turn the work in hand by OBR.turn rad either way, added to the line of the aim (the general turns his works so,
+   GOR.ba); S.brot, within ±π, read where build() and fortBuild() set B.a. P16: where a work that spans the river would really lie for
+   the outline: along the fallen bridge at hand (k 7, 9), or across the narrow stretch whose bank end is at hand (k 7, 10), as fortAdd lays
+   them; null away from both. { x, z, a the turn of its length (the scene's rotation.y), L, W } */
+OBR.turn = Math.PI / 12;
+function obrTurn(d) { const r = (S.brot || 0) + d * OBR.turn; S.brot = Math.abs(r) < 1e-9 ? 0 : Math.atan2(Math.sin(r), Math.cos(r)); return S.brot; }
+function obrSpan(k, x, z) {
+  const h = k === 10 ? null : brPontAt(x, z, BR.put + 1);
+  if (h) return { x: h.b.x, z: h.b.z, a: Math.atan2(-h.b.dz, h.b.dx), L: h.b.len, W: 2 * BR.pw };
+  if (k === 9 || !S.T.net) return null;
+  const s = brSite(z), e = s.ends && brEndOf(s, x, z);
+  return e && hdist(e, { x, z }) < BR.put + 1 ? { x: s.x, z: s.z, a: 0, L: s.len, W: 2 * BR.pw } : null;
+}
 Object.assign(FORT.trench, { sn: 'Trincheira' }); Object.assign(FORT.bags, { sn: 'Sacos' }); Object.assign(POSTS.atp, { sn: 'Posto AT' }); Object.assign(POSTS.mgn, { sn: 'Ninho MG' });
 Object.assign(POSTS.twr, { sn: 'Torre' }); Object.assign(POSTS.dome, { sn: 'Cúpula' }); Object.assign(FORT.pont, { sn: 'Pontão' }); Object.assign(FORT.rel, { sn: 'Antena' });
 Object.assign(FORT.rebuild, { sn: 'Refazer ponte' }); Object.assign(FORT.nbr, { sn: 'Ponte nova' });
@@ -63589,10 +63958,96 @@ function obrInfo(P, it) {
   const F = FORT.K[it.k], cap = !F.span && S.forts.reduce((n, f) => n + (f.team === t && f.k === it.k && !f.pre ? 1 : 0), 0) >= fortCap(t, it.k);
   return { c: cap ? 'máx.' : [pay(F.cost), F.time + ' s'].filter(Boolean).join(' · '), bad: cap || short(F.cost) };
 }
+/* P14 (cf-pol2-fase1): what the side has against the work in hand, under the bar: its energy and metal (the economy's stock, shown on the
+   soldier's screen only here and on the General's view: P19), and for the base the soldier's kits; bad when the side cannot start it.
+   [text, bad], text '' with no economy and no base in hand */
+function obrStock(P, it) {
+  const d = S.eco && S.eco.d && S.eco.d[P.team], f = it ? obrInfo(P, it) : null;
+  const s = [d && 'SEU LADO TEM ' + Math.round(d.en) + ' ENERGIA · ' + Math.round(d.mt) + ' METAL', it && it.b && 'KIT DE BASE ×' + (P.kit | 0)].filter(Boolean).join('  ·  ');
+  return [s, !!(f && f.bad)];
+}
 /* the help's line for N, from the same list (d a kit; every work of the era for it) */
 function obrHelp(d) {
   const l = typeof S !== 'undefined' && S && S.era ? obrList({ def: d, team: S.me | 0 }).map(it => obrName({ def: d, team: S.me | 0 }, it)) : ['Base', 'Trincheira', 'Sacos'];
-  return 'N abre o modo obras e a barra numerada do que você pode construir: ' + l.join(', ') + '. As teclas 1 a ' + OBR.keys + ' escolhem na barra' + (l.length > OBR.keys ? ' (' + OBR.keys + ': mais…, a página seguinte)' : '') + ', N passa para a próxima e Shift+N volta';
+  return 'N abre o modo obras e a barra numerada do que você pode construir: ' + l.join(', ') + '. As teclas 1 a ' + OBR.keys + ' escolhem na barra' + (l.length > OBR.keys ? ' (' + OBR.keys + ': mais…, a página seguinte)' : '') + ', N passa para a próxima e Shift+N volta; [ ] ou a roda giram a obra 15°. Segure V junto de uma obra do seu lado para desmontá-la (volta ' + Math.round(OBR.back * 100) + '% do custo)';
+}
+/* P17: a work stopped with no word (a builder must stand still within BLD.reach m of it, not hit for BLD.hurt s nor pinned down), decayed
+   BLD.decay[0] s after the last builder left and went with nothing back, could not be taken down, and was CAVANDO or EMPILHANDO whatever
+   it was. obrStall: the unfinished work of P's side (a work, or a supply base's site) nearest P within OBR.near m of its footprint, what
+   holds it (why: far, move, fire with wait s, '' while P builds it), its builders n, the s left at that pace, and since when nobody builds it
+   (idle s; decay once it shrinks). Holding V by a work of its side (any but one across the river or dug before the match, or a base's site)
+   for OBR.undo s takes it down: OBR.back of what it cost comes back to the side, a site's kit back to the soldier. V is the mortar's shell
+   and the sapper's lift by a mine it knows; neither takes a work down. Online a guest asks the host (fundo, where the server knows it: fnd) */
+Object.assign(OBR, { near: 40, undo: 3, back: ECO.refund });
+const obrName0 = w => (w.F ? w.F.name : 'Base de suprimento');
+function obrStall(P) {
+  if (!P || P.dead || P.in) return null;
+  let w = null, bd = OBR.near;
+  for (const l of [S.forts, S.sup]) for (const f of l) if (f.team === P.team && f.prog < 1 && !f.gone && !f.dead && f.o) { const d = footD(f.o, P.x, P.z); if (d < bd) { bd = d; w = f; } }
+  if (!w) return null;
+  const on = builds(P, w), n = on ? Math.max(1, w.n | 0) : w.n | 0, T = w.F ? w.F.time : BLD.time, hurt = Math.max(BLD.hurt - (S.t - P.hitT), (P.sup || 0) - S.t);
+  const why = on ? '' : bd > BLD.reach ? 'far' : P.v.x * P.v.x + P.v.z * P.v.z >= BLD.still * BLD.still ? 'move' : hurt > 0 ? 'fire' : 'other', idle = n || w.workT === undefined ? 0 : S.t - w.workT;
+  return { w, base: !w.F, on, n, d: bd, why, wait: Math.ceil(hurt), left: n ? Math.ceil((1 - w.prog) * T / (1 + BLD.help * (n - 1))) : 0, idle, decay: idle > BLD.decay[0] };
+}
+/* the work of P's side P may take down where it stands, and what comes back for it */
+function obrMine(P) {
+  let w = null, bd = BLD.reach;
+  for (const f of S.forts) if (f.team === P.team && !f.gone && !f.pre && !f.F.span) { const d = footD(f.o, P.x, P.z); if (d < bd) { bd = d; w = f; } }
+  for (const b of S.sup) if (b.team === P.team && b.prog < 1 && !b.dead && b.o) { const d = footD(b.o, P.x, P.z); if (d < bd) { bd = d; w = b; } }
+  return w;
+}
+const obrBack = w => { const c = w.F ? w.F.cost : BLD.cost; return c ? [Math.round(c[0] * OBR.back), Math.round(c[1] * OBR.back)] : null; };
+/* on the host (or solo): work w of side t comes down; by: the soldier who gets a site's kit back */
+function obrUndoAt(t, w, by) {
+  const c = obrBack(w), d = S.eco && S.eco.d[t];
+  if (c && d && ecoSim()) { d.en = Math.min(ECO.cap.en, d.en + c[0]); d.mt = Math.min(ECO.cap.mt, d.mt + c[1]); }
+  if (w.F) fortDrop(w); else { w.dead = w.gone = true; dropObj(w.o); Net.bq = true; if (by && by.man) by.kit = (by.kit | 0) + 1; }
+  return c;
+}
+Net.fnd = false;
+Net.rx.welcome = (old => m => { Net.fnd = m.fnd === 1; old(m); })(Net.rx.welcome);
+Net.rx.fundo = m => {
+  const G = Net.ghosts.get(m.from);
+  if (!S.net || !S.host || !G || G.dead || !G.man || !Number.isInteger(m.id)) return;
+  const w = m.b ? S.sup.find(b => b.id === m.id && b.prog < 1 && !b.dead) : S.forts.find(f => f.id === m.id && !f.gone && !f.pre && !f.F.span);
+  if (w && w.team === G.team && w.o && footD(w.o, G.x, G.z) < BLD.reach + 2) obrUndoAt(G.team, w, null);
+};
+/* V is another thing's for P: the mortar's shell, a sapper's lift by a mine it knows */
+const obrBlockV = P => !!P.def.mort || (!!P.def.sap && mines().some(o => !o.gone && mineKnown(o, P.team) && hdist(o, P) < SAP.near));
+/* the hold of V, each step of the player's hands: S.undo { w, T when it comes down } while V is held by the same work, done until V is let go */
+function obrHold(P, I) {
+  const U = S.undo;
+  if (U && U.done) { if (!I.ordB) S.undo = null; return; }
+  const w = I.ordB && !obrOpen() && P.man && !P.dead && !P.in && !obrBlockV(P) ? obrMine(P) : null;
+  if (!w) { S.undo = null; return; }
+  if (!U || U.w !== w) { S.undo = { w, T: S.t + OBR.undo }; return; }
+  if (S.t < U.T) return;
+  const say = text => S.floats.push({ x: w.x, y: hgt(w.x, w.z) + 3, z: w.z, text, life: 2.5 }), c = obrBack(w), pay = c && S.eco && S.eco.d[P.team] ? ': +' + c[0] + ' energia, +' + c[1] + ' metal' : '';
+  S.undo = { done: true };
+  if (S.net && !S.host) {
+    if (!Net.fnd) { say('O servidor desta sala é antigo: não desmonta obras'); return; }
+    Net.send('fundo', { id: w.id, b: w.F ? 0 : 1 }); if (!w.F) S.uw = { id: w.id, T: S.t + 2.5 };
+  } else obrUndoAt(P.team, w, P);
+  say((w.F ? obrName0(w) : 'Base') + ' desmontada' + pay);
+}
+build = (g => (P, I, key, trig) => {
+  g(P, I, key, trig);
+  obrHold(P, I);
+  if (S.uw) { if (!S.sup.some(b => b.id === S.uw.id && !b.dead)) { P.kit = (P.kit | 0) + 1; S.uw = null; } else if (S.t > S.uw.T) S.uw = null; }   // a guest's site taken down by the host: its kit back
+})(build);
+/* P18: the general's Fortificar showed only a cross and said why not after the click, where Construir has an outline turned with [ ] and
+   its reason live. obrGenFort: where the work of kind k (a key of W21.fort) ordered at x z by side t would lie and why not, as GC.fort and
+   fortPlan lay it: facing a (or the enemy's base, lsFoeBase, as they face it), a work dug OBR.dig m ahead along that facing (fortPlan's
+   first try), a supply base on the click (on the seat town's lot inside it, as GC.sup). { x, z, a, L, W, rot the turn of its length (the
+   scene's rotation.y), why }; null for what has no footprint of its own (the minefields, the AA position, the engineers' rings) */
+OBR.dig = 5;
+function obrGenFort(t, k, x, z, a) {
+  if (k === 'sup') { const l = supLot(t, x, z); if (l) { x = l.x; z = l.z; a = l.a; } }
+  if (!Number.isFinite(a)) { const e = lsFoeBase(t, x, z); a = headTo(x, z, e.x, e.z); }
+  if (k === 'sup') return { x, z, a, L: BLD.size[0], W: BLD.size[1], rot: a, why: siteWhy(t, x, z, a) };
+  const K = W21.dig[k], F = K ? FORT.K[K] : null; if (!F || F.span) return null;
+  const wx = x + Math.cos(a) * OBR.dig, wz = z - Math.sin(a) * OBR.dig;
+  return { x: wx, z: wz, a, L: F.size[0], W: F.size[1], rot: a + Math.PI / 2, why: (F.era && F.era !== S.era) ? 'era' : fortWhy(K, t, wx, wz, a) };
 }
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
@@ -66220,8 +66675,9 @@ function hudFort(P, u, ink, acc, disp) {
     txt(B.k === 1 ? 'CAVAR TRINCHEIRA' : 'EMPILHAR SACOS DE AREIA', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
     txt(B.why ? FWHY[B.why] : 'Clique: começar aqui  ·  botão direito: sair', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
   } else if (!S.bm && !S.sup.concat(ecoFoe(P.team)).some(b => (b.prog < 1 && builds(P, b)) || (!b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach))) {
-    const f = S.forts.find(f => f.prog < 1 && builds(P, f));
-    if (f) { txt((f.k === 1 ? 'CAVANDO ' : 'EMPILHANDO ') + Math.round(f.prog * 100) + '%' + (f.n > 1 ? '  ·  ' + f.n + ' soldados' : ''), cw / 2, ch * .6, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, f.prog, acc); }
+    const f = S.forts.find(f => f.prog < 1 && builds(P, f) && !(S.undo && S.undo.w === f));   // one being taken down says DESMONTANDO (obrStallHud)
+    if (f) { const n = Math.max(1, f.n | 0), left = Math.ceil((1 - f.prog) * f.F.time / (1 + BLD.help * (n - 1)));   // the work's own name and the time left at this pace (P17, OBR)
+      txt((f.k === 1 ? 'CAVANDO A TRINCHEIRA ' : f.k === 2 ? 'EMPILHANDO OS SACOS ' : 'CONSTRUINDO ' + f.F.name.toUpperCase() + ' ') + Math.round(f.prog * 100) + '%  ·  faltam ' + left + ' s' + (n > 1 ? '  ·  ' + n + ' soldados' : ''), cw / 2, ch * .6, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, f.prog, acc); }
   }
   if (P.fc && (P.fc.k === 2 || P.dg > .5)) { hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - 92 * u, ch - 62 * u, 184 * u, 19 * u); txt('ABRIGADO  ·  ' + (P.fc.k === 1 ? 'TRINCHEIRA' : 'SACOS DE AREIA'), cw / 2, ch - 59 * u, 12 * u, '#8fe39a', 'center'); }
 }
@@ -67402,11 +67858,11 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     }
     const amb = cueAmb(P);
     if (amb) txt(amb === 3 ? 'EMBOSCADA: AGUARDE' : 'EMBOSCADA: FOGO!', cw / 2, ch * .32, 15 * u, amb === 3 ? acc : FOE, 'center', disp);
-    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
+    const B = S.bm, site = !B && S.sup.find(b => b.prog < 1 && builds(P, b) && !(S.undo && S.undo.w === b)), eb = !B && !(P.sl && P.sl.n >= 3) && S.sup.concat(ecoFoe(P.team)).find(b => !b.dead && b.team !== P.team && footD(b.o, P.x, P.z) < BLD.charge.reach);
     if (B || S.fm || S.mm) { const bw = Math.min(cw - 32, 620 * u); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, ch * .6 - 30 * u, bw, 86 * u); }   // a band under the build mode's lines: they sit on the bright ghost of the work (cf-pol-hud)
     if (B) {   // build mode: what the outline says
       txt('CONSTRUIR BASE DE SUPRIMENTO', cw / 2, ch * .6, 15 * u, acc, 'center', disp);
-      txt(B.why ? BWHY[B.why] : 'Clique: começar a obra aqui  ·  botão direito ou N: cancelar', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
+      txt(B.why ? BWHY[B.why] : 'Clique: começar a obra aqui  ·  botão direito: sair', cw / 2, ch * .6 + 22 * u, 13 * u, B.why ? FOE : '#8fe39a', 'center');
     } else if (site) { txt('CONSTRUINDO ' + Math.round(site.prog * 100) + '%' + (site.n > 1 ? '  ·  ' + site.n + ' soldados' : ''), cw / 2, ch * .6, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, site.prog, acc); }
     else if (eb) txt(P.chg > 0 ? 'N: ARMAR A CARGA DE DEMOLIÇÃO' : 'SEM CARGA DE DEMOLIÇÃO', cw / 2, ch * .6, 13 * u, P.chg > 0 ? acc : FOE, 'center');
     hudFort(P, u, ink, acc, disp);
@@ -67435,13 +67891,43 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   part(37, 8, 14, 13, hs); part(31, 23, 26, 32, hs); part(20, 24, 9, 30, as); part(59, 24, 9, 30, as); part(32, 57, 11, 32, ls); part(45, 57, 11, 32, ls);
   let ty = y0 + 6 * u; const lx = x0 + 80 * u, line = (s, c) => { txt(s, lx, ty, 11 * u, c); ty += 13.5 * u; };
   line('ESTADO', dim); ty += 1.5 * u;
-  if (!hs && !ls && !as) line('sem ferimentos', DCOL[0]);
-  if (hs) line(hs > 1 ? 'ferido grave' : 'ferido', DCOL[hs]);
-  if (ls) line('pernas: mais lento', DCOL[ls]);
-  if (P.bl > 0) line('sangrando: pare e estanque', DCOL[2]);
-  if (as) line('braços: mira treme', DCOL[as]);
+  for (const [s, c] of woundLines(P, hs, ls, as)) line(s, DCOL[c]);
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
+}
+/* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
+   a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */
+const WZONE = ['ferido no tronco', 'ferido na cabeça', 'ferido nas pernas', 'ferido nos braços'];
+function woundLines(P, hs, ls, as) {
+  const r = [], hurt = P.bl > 0 || P.hp < P.max;
+  if (!hs && !ls && !as) r.push(hurt ? [WZONE[P.hz] || WZONE[0], 1] : ['sem ferimentos', 0]);
+  if (hs) r.push([(hs > 1 ? 'ferido grave' : 'ferido') + (P.hz === 1 ? ' na cabeça' : ''), hs]);
+  if (ls) r.push(['pernas: mais lento', ls]);
+  if (P.bl > 0) r.push(['sangrando: pare e estanque', 2]);
+  if (as) r.push(['braços: mira treme', as]);
+  return r;
+}
+/* a hit on the soldier, read at the aim in either camera (P1): a red edge that flares with each hit and stays, growing, as health goes, and
+   an arc on a ring round the aim that points to whoever fired, fading over HITC.arc s. hitArc: that direction on the screen, in radians
+   (0 = right, -π/2 = ahead, up the screen), from the aim's heading on the ground; null with no shooter or one on the soldier */
+const HITC = { flash: .6, fa: .5, low: .4, la: .55, arc: 2.2, r: 74, span: .42 };
+function hitArc(P, ad) {
+  const b = P.lastBy; if (!b || !isFinite(b.x) || !isFinite(b.z)) return null;
+  const vx = b.x - P.x, vz = b.z - P.z, fl = Math.hypot(ad.x, ad.z); if (Math.hypot(vx, vz) < .5 || fl < 1e-6) return null;
+  const fx = ad.x / fl, fz = ad.z / fl;
+  return Math.atan2(-(vx * fx + vz * fz), vx * -fz + vz * fx);
+}
+function hitCue(P, u) {
+  const t = S.t - P.hitT, lo = 1 - P.hp / P.max;
+  if (lo > HITC.low) veil('130,0,0', (lo - HITC.low) / (1 - HITC.low) * HITC.la, 1.3);
+  if (t < 0 || t > HITC.arc) return;
+  if (t < HITC.flash) veil('170,8,8', (1 - t / HITC.flash) * HITC.fa, reduced ? 1.3 : 1.15 + t * .3);
+  const a = hitArc(P, S.aim.d); if (a === null) return;
+  const R = HITC.r * u, k = 1 - t / HITC.arc;
+  hx.save(); hx.lineCap = 'butt'; hx.globalAlpha = Math.min(1, k * 1.6);
+  hx.strokeStyle = 'rgba(8,12,13,.6)'; hx.lineWidth = 8 * u; hx.beginPath(); hx.arc(cw / 2, ch / 2, R, a - HITC.span, a + HITC.span); hx.stroke();
+  hx.strokeStyle = FOE; hx.lineWidth = 4.5 * u; hx.beginPath(); hx.arc(cw / 2, ch / 2, R, a - HITC.span, a + HITC.span); hx.stroke();
+  hx.restore();
 }
 /* first person: the weapon in hand, drawn on the glass. From the hip it comes up from the lower right; sighted (camSt.ak) it stands in the
    middle with its own sight: notch and post in 1944, a red dot today, a range ladder on a rocket launcher, a seeker window on a guided one.
@@ -67623,6 +68109,77 @@ addEventListener('keydown', e => { if (e.code === 'Digit5' && !e.repeat && playM
 addEventListener('keydown', e => { if (e.code === 'KeyI' && !e.repeat && !GV.on && S && S.my && S.my.kind && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.fixPri = S.fixPri ? 0 : 1; });
 const BWHY = { unit: 'Há um veículo aí', map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Perto demais da estrada: a base fica a uns 7 m da beira', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
   cap: 'Seu lado já tem o máximo de bases (cresce com os pontos tomados e a economia)', cost: 'Seu lado não tem a energia e o metal desta obra', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
+/* ---------- the kill feed and the scoreboard (cf-pol2 P27) ----------
+   kfDraw: the rows of KF at the top right, under the map, newest last: who ▸ whom · with what · how far. A side's colour on each name
+   (the player is "Você", in white), the arrow amber for a friend's kill; the player's own rows on a darker band with a bar of the era's
+   colour. SB: holding Tab hold s brings up the scoreboard (the sides: points, tickets, losses; online every player of the room; solo the
+   player's own line) for as long as it is held; a tap shorter than that opens the general's view as Tab always did. hint: for that long
+   into a match, until it is first used, the HUD says so ---------- */
+function kfDraw(R, y, u, me, ink) {
+  const l = kfLive(); if (!l.length) return y;
+  const sz = 12.5 * u, lh = 17 * u, sc = t => (t === me ? FRIEND : t < 0 ? ink : foeCol(t));
+  hx.font = sz + "px 'Share Tech Mono', ui-monospace, monospace"; hx.textAlign = 'left';
+  for (const e of l) {
+    const age = S.t - e.t, a = clamp((e.mine ? KF.mine : KF.life) - age, 0, 1) * clamp(age * 6, .2, 1);
+    const seg = (e.k ? [[e.k, e.kme ? '#ffffff' : sc(e.kt)], [' ▸ ', e.ff ? '#ffd24a' : ink]] : [['✕ ', ink]]).concat([[e.v, e.vme ? '#ffffff' : sc(e.vt)]], e.w ? [[' · ' + e.w, '#9eaaa2']] : [], e.d > 0 ? [[' · ' + (e.d < 1000 ? e.d + ' m' : (e.d / 1000).toFixed(1).replace('.', ',') + ' km'), '#9eaaa2']] : []);
+    const ws = seg.map(s => hx.measureText(s[0]).width), W = ws.reduce((p, q) => p + q, 0);
+    let x = R - W;
+    hx.globalAlpha = a;
+    hx.fillStyle = e.mine ? 'rgba(8,12,13,.72)' : 'rgba(8,12,13,.42)'; hx.fillRect(x - 6 * u, y - 2 * u, W + 9 * u, lh - 2 * u);
+    if (e.mine) { hx.fillStyle = S.modern ? '#63d2e6' : '#e6b53a'; hx.fillRect(x - 6 * u, y - 2 * u, 2 * u, lh - 2 * u); }
+    seg.forEach((s, i) => { hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(s[0], x + 1, y + 1); hx.fillStyle = s[1]; hx.fillText(s[0], x, y); x += ws[i]; });
+    y += lh;
+  }
+  hx.globalAlpha = 1;
+  return y + 4 * u;
+}
+const SB = { hold: .3, hint: 90, on: false, used: false, down: 0, tm: 0, at: 0 };
+function sbShow(v) {
+  v = !!v; if (v) SB.used = true;
+  if (SB.on === v) return; SB.on = v; $('#board').hidden = !v; if (v) { SB.at = 0; sbFill(); }
+}
+/* the table: the sides, mine first (points, tickets, losses), then the players (online) or my own line (solo) */
+function sbFill() {
+  const Q = S.cq, me = S.me, N = t => S.E.sides[S.fac[t]].name, sd = $('#boardSides'), pl = $('#boardPl');
+  const cell = (el, t, c, col) => { const e = document.createElement('span'); e.textContent = t; if (c) e.className = c; if (col) e.style.color = col; el.append(e); };
+  sd.textContent = ''; pl.textContent = '';
+  $('#boardMeta').textContent = Q ? 'faltam ' + mmss(Math.max(0, Q.T)) + (Q.ps.length > 2 ? ' · ' + Q.ps.length + ' lados' : '') : '';
+  if (Q) {   // as the end screen has them: the points held now, the point-minutes that decide the match, the losses
+    const pm = t => Math.round(cqPs(t) / 60);
+    for (const h of ['Lado', 'Pontos', 'Ponto-minutos', 'Perdas: sold. / veíc. / aeron.']) cell(sd, h, 'h');
+    const ts = Q.ps.map((_, t) => t).sort((a, b) => (b === me) - (a === me) || cqHeld(b) - cqHeld(a) || cqPs(b) - cqPs(a));
+    for (const t of ts) { const col = t === me ? '' : foeCol(t); cell(sd, N(t) + (Q.out && Q.out[t] ? ' · eliminado' : ''), t === me ? 'f' : 'e', col); cell(sd, cqHeld(t)); cell(sd, pm(t)); cell(sd, Q.lost[t].join(' / ')); }
+  }
+  if (S.net) {
+    for (const h of ['Jogador', 'Abates', 'Quedas', 'IA']) cell(pl, h, 'h');
+    const L = [...Net.players.values()].sort((a, b) => (pSide(b) === me) - (pSide(a) === me) || b.kills + (b.ai || 0) - a.kills - (a.ai || 0) || a.deaths - b.deaths);   // my side first, then by kills
+    for (const o of L.slice(0, 16)) { const mine = o.id === Net.id, c = pSide(o) === me ? 'f' : 'e', x = mine ? ' me-row' : '', col = pSide(o) === me ? '' : foeCol(pSide(o)); cell(pl, (mine ? '▸ ' : '') + o.name + ' · ' + DEFS[o.cls][o.model].name, c + x, col); cell(pl, o.kills, x.trim()); cell(pl, o.deaths, x.trim()); cell(pl, o.ai || 0, x.trim()); }
+    if (L.length > 16) cell(pl, '+ ' + (L.length - 16) + ' jogadores', 'h');
+  } else if (Q) {
+    for (const h of ['Você', 'Abates', 'Capturas', 'Quedas']) cell(pl, h, 'h');
+    cell(pl, '▸ ' + kfName(S.my) + ' · ' + DEFS[S.cls][S.model].name, 'f me-row'); cell(pl, Q.st.k, 'me-row'); cell(pl, Q.st.c, 'me-row'); cell(pl, Q.st.d, 'me-row');
+  }
+}
+/* Tab in play: down starts the clock, held past hold s the board, up a tap's general view (genKey) */
+function sbKey(e, up) {
+  if (up) {
+    if (!SB.down) return false;
+    clearTimeout(SB.tm); SB.down = 0;
+    if (SB.on) sbShow(false); else genOpen(true, true);
+    return true;
+  }
+  if (e.repeat) return true;
+  SB.down = performance.now(); clearTimeout(SB.tm); SB.tm = setTimeout(() => { if (SB.down && playMode === 'play' && !GV.on && !overShown) sbShow(true); }, SB.hold * 1000);
+  return true;
+}
+addEventListener('keyup', e => { if (e.code === 'Tab' && sbKey(e, true)) e.preventDefault(); });
+addEventListener('blur', () => { clearTimeout(SB.tm); SB.down = 0; sbShow(false); });
+drawHud = (g => () => {
+  g();
+  if (!SB.on) return;
+  if (playMode !== 'play' || !S || GV.on || overShown) { SB.down = 0; sbShow(false); return; }
+  const n = performance.now(); if (n - SB.at > 500) { SB.at = n; sbFill(); }
+})(drawHud);
 /* ---------- missiles: what the player is shown ----------
    Top: the warning gear (S.rwr: a radar tracking, a radar missile launched or active, by name and clock; S.warn: a missile the vehicle
    knows of). Beside the centre, for a plane's missile slot: the seeker's word, the launch zone as a scale (rmin, the range no turn
@@ -67667,6 +68224,7 @@ function drawHud() {
   if (veil > 0 && !mapV) { hx.fillStyle = 'rgba(190,192,187,' + (veil * .97).toFixed(3) + ')'; hx.fillRect(0, 0, cw, ch); }
   if (seat) { seat.draw(P, u, ink, acc, disp, blink); fpFx(P); }
   if (!P.dead && S.t - P.dazeT < 1.6) { hx.globalAlpha = .8 * (1 - (S.t - P.dazeT) / 1.6); hx.fillStyle = '#050607'; hx.fillRect(0, 0, cw, ch); hx.globalAlpha = 1; }   // the pilot is hit: the view goes dark for a moment
+  if (P.man && !P.dead) hitCue(P, u);
   (P.man ? hudMan : P.kind ? hudDrive : hudFly)(P, u, ink, acc, disp, blink, seat);
   const fg = S.farGnd;   // a guided bomb's target in sight but beyond what it can reach from here
   if (fg && !P.dead && !fg.dead && !fg.gone && !S.lockGnd) {
@@ -67778,12 +68336,11 @@ function drawHud() {
 
   const R = cw - 14, bs = S.base[me]; let y = (mapV ? 0 : my + mh) + 10 * u;
   { const c = cueOf(me); if (c && c[0] && !mapV) { txt(CUE[c[0]] || '', R, y, 11 * u, acc, 'right'); y += 15 * u; } }
-  if (S.net) {
-    txt('JOGADOR  ABATES / QUEDAS / IA', R, y, 11 * u, ink, 'right'); y += 16 * u;
-    for (const o of [...Net.players.values()].sort((a, b) => b.kills - a.kills || a.deaths - b.deaths)) {
-      txt((o.id === Net.id ? '▸ ' : '') + o.name + ' · ' + DEFS[o.cls][o.model].name + '  ' + o.kills + ' / ' + o.deaths + ' / ' + (o.ai || 0), R, y, 13 * u, pSide(o) !== me ? FOE : FRIEND, 'right'); y += 16 * u;
-    }
-  } else if (S.cq) { const s = S.cq.st; txt('ABATES ' + s.k + ' · CAPTURAS ' + s.c + ' · QUEDAS ' + s.d, R, y, 11 * u, ink, 'right'); y += 16 * u; }
+  /* the player's own line; the room's table, which grew a row a player, is on the scoreboard (hold Tab, SB) */
+  if (S.cq) { const s = S.cq.st; txt('ABATES ' + s.k + ' · CAPTURAS ' + s.c + ' · QUEDAS ' + s.d, R, y, 11 * u, ink, 'right'); y += 16 * u; }
+  else if (S.net) { const o = Net.players.get(Net.id); if (o) { txt('ABATES ' + (o.kills + (o.ai || 0)) + ' · QUEDAS ' + o.deaths, R, y, 11 * u, ink, 'right'); y += 16 * u; } }
+  if ((S.cq || S.net) && !SB.used && S.t < SB.hint) { txt('segure Tab: placar', R, y, 11 * u, acc, 'right'); y += 15 * u; }
+  y = kfDraw(R, y + 2 * u, u, me, ink);
   const sups = S.sup.filter(b => b.team === me && !b.dead);   // the side's supply bases: built or how far, and how far away
   if (sups.length) {
     y += 6 * u; txt('BASES DE SUPRIMENTO ' + sups.length + '/' + supCap(me), R, y, 11 * u, ink, 'right'); y += 15 * u;
@@ -68874,7 +69431,7 @@ function buildHangar() {
     req: ['U', 'A pé dentro de um depósito (a base principal, uma base de suprimento pronta ou um ponto seu com base de suprimento): requisitar um veículo ali mesmo. Custa energia e metal do seu lado (com logística, caixas do depósito), tem estoque por depósito e um intervalo de ' + RQ.cool + ' s; aeronaves só na base principal'],
     esc: ['Esc', 'Soltar o mouse' + (pvp ? '' : ' e pausar') + '. Clique no jogo para voltar'],
     map: ['M', 'Mapa da batalha: o terreno, as estradas, os pontos e quem os tem, as bases, os rádios, as marcas do comandante e do general, o seu lado e o inimigo só como o seu lado o conhece. Roda ou + − aproxima, arrastar move, duplo clique centra em você, M ou Esc fecha. O jogo não pausa, as teclas continuam guiando e o clique no mapa não dispara. Clique direito num ponto: pedir ao general artilharia, fumaça, ataque aéreo, infantaria, blindado, ajuda na sua posição, cobertura antiaérea ou suprimento; ele decide pelo que tem e pelo que o lado sabe e responde no rádio'],
-    gen: ['Tab', 'Visão de General: o mapa do comandante, suas ordens e o que ele pensa. O jogo continua enquanto o mapa está aberto'],
+    gen: ['Tab', 'Toque rápido: Visão de General (o mapa do comandante, suas ordens e o que ele pensa; o jogo continua). Segure: o placar'],
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab ou M abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
   const lg = (LEGEND[k] || LEGEND.plane)(d, o);
@@ -69714,7 +70271,7 @@ function genAct(a) {
 function genKey(e) {
   if (!S || /INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) return false;
   const live = playMode === 'watch' || (playMode === 'play' && !sw.on && !overShown && !paused);
-  if (e.code === 'Tab' && (live || GV.on) && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); if (!e.repeat) { genOpen(!GV.on, true); } return true; }
+  if (e.code === 'Tab' && (live || GV.on) && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); if (!GV.on && playMode === 'play') return sbKey(e); if (!e.repeat) { genOpen(!GV.on, true); } return true; }   // in play a tap opens the view on its release, a hold shows the scoreboard (SB, P27)
   if (!GV.on) return specKey(e);
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
   if (gorKey(e)) { e.preventDefault(); return true; }
@@ -71035,6 +71592,7 @@ function gSel(g, V, P, now) {
     if (P2.q && P2.q.ok) gTxt(g, 'OBJ ' + P2.q.nm + ' · ' + gN(P2.q.own) + ' × ' + gN(P2.q.foe), x, y - r - 10, 11 * k, acc, 'center');
   }
   if (GOR.mode === 'build' && GOR.cur && !GOR.dn) gorGhost(g, P, now);
+  if (GOR.mode === 'fort' && GOR.cur && !GOR.dn) gorFortGhost(g, P, now);   // P18 (OBR)
   if (GOR.mode === 'build') GOR.spots.forEach((s, i) => { const x = X(s.x), y = Y(s.z); gRing(g, x, y, 8 * k, '#8fe39a', 2); gTxt(g, String(i + 1), x, y + 4 * k, 11 * k, '#8fe39a', 'center'); });
   if (GOR.box) { const b = GOR.box; g.setLineDash([5, 4]); g.fillStyle = 'rgba(111,195,178,.12)'; g.fillRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); g.strokeStyle = col; g.lineWidth = 1.4; g.strokeRect(Math.min(b.x0, b.x1), Math.min(b.y0, b.y1), Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)); g.setLineDash([]); }
   else if (GOR.mode && GOR.cur && !GOR.dn && GOR.mode !== 'build') { const x = GOR.cur.px, y = GOR.cur.py; gLine(g, x - 10, y, x - 4, y, acc, 1.4); gLine(g, x + 4, y, x + 10, y, acc, 1.4); gLine(g, x, y - 10, x, y - 4, acc, 1.4); gLine(g, x, y + 4, x, y + 10, acc, 1.4); }
@@ -71073,7 +71631,7 @@ const gorWho2 = () => (gorIds().length ? gorIds().length + (gorIds().length > 1 
 Object.defineProperties(GORT, {
   rt: { enumerable: true, get: () => 'Rota: clique para o ponto ' + (GOR.rt.length + 1) + ' de até ' + W21.wp + ' · Backspace apaga o último · Enter ou U termina' },
   ord: { enumerable: true, get: () => 'Ordem ampla: ' + W21.v[GOR.ov] + ' · ' + (GOR.mk2 ? 'criar ' + (GOR.on || 1) + ' × ' + ECO.tx.u[GOR.mk2].toLowerCase() + ' da reserva' : GOR.ov === 'fire' ? 'os morteiros e baterias que alcançam' : gorWho2()) + ' · clique no ' + (GOR.ov === 'esc' ? 'veículo' : 'alvo') + ' · J troca o verbo' },
-  fort: { enumerable: true, get: () => 'Fortificar: ' + W21.fort[GOR.fk] + ' · ' + (gorIds().length ? 'as selecionadas constroem' : 'o general escolhe quem constrói') + ' · clique no lugar · O troca o tipo' },
+  fort: { enumerable: true, get: () => 'Fortificar: ' + W21.fort[GOR.fk] + ' · ' + (gorIds().length ? 'as selecionadas constroem' : 'o general escolhe quem constrói') + ' · clique no lugar · [ ] gira · O troca o tipo' },
   rq: { enumerable: true, get: () => 'Pedido de ' + (W21.rq[GOR.rk] || '') + ': clique no mapa' + (GORRQ[GOR.rk] ? ' · ' + gorWho2() : ' · o general escolhe quem atende') } });
 gorMode = (g => (m, keep) => {
   if (typeof m !== 'string' || !(GORX[m] || m.startsWith('rq:'))) return g(m, keep);
@@ -75407,7 +75965,7 @@ function rtsKey(e) {
     return true;
   }
   if (e.ctrlKey || e.metaKey || e.altKey) return false;
-  if ((c === 'BracketLeft' || c === 'BracketRight') && GOR.mode === 'build') return false;   // the build mode turns the work with them
+  if ((c === 'BracketLeft' || c === 'BracketRight') && (GOR.mode === 'build' || GOR.mode === 'fort')) return false;   // the build mode and Fortificar turn the work with them
   if (RTSK[c]) { RTS.k[c] = 1; return true; }
   if (c === 'Equal' || c === 'NumpadAdd') { rtsZoom(1.25); return true; }
   if (c === 'Minus' || c === 'NumpadSubtract') { rtsZoom(1 / 1.25); return true; }
@@ -76518,6 +77076,123 @@ ARMI.para = '<path d="M3 10a9 7 0 0118 0z"/><path d="M3.500 10.500l7 7M20.500 10
 CARD.plane = (g => (id, d) => { const c = g(id, d); if (d.para) { const n = PTR.sticks[id] || 1; c.arms = [['para', n * SQUAD[d.era].length + ' paraquedistas', n + (n > 1 ? ' esquadras' : ' esquadra') + ', B lança uma de cada vez']]; } return c; })(CARD.plane);
 CARD.heli = (g => (id, B) => { const c = g(id, B); if (B.lift) c.arms = c.arms.concat([['para', SQUAD.modern.length + ' soldados a bordo', 'G: fast-rope, salto ou pouso']]); return c; })(CARD.heli);
 /* ---------- end of the player's transport on the screen ---------- */
+/* ---------- camouflage nets: what is seen of them (CNET, cf-pol2-camuflagem: P31) ----------
+   CAMV: the poles are boxes of the works' mesh (postBoxes: four at the corners up to `edge` of the net's height and one in the middle to the
+   top, the large net four more halfway along its sides), raised in the first half of the work; the canopy one mesh a look and a size,
+   instanced (camScene), unrolled from one side over the second half. Its shape: a tent, the middle up at the work's height (FORT.cns and
+   cnl size[2]), the edges at `edge` of it, then a skirt hanging out and down to `skirt`; `tile` m a texture repeat. The looks (camTex,
+   a canvas a look, drawn once with its own dice so that the battle's are not touched): today leaf-cut garnish, a cut and colours of each side
+   (D1 the USA's rounded woodland leaves, Russia's pointed leaves in its greens, the Insurgents' rags and tarp), in 1944 hessian scrim with
+   strips of cloth, the same for both sides. The General View: an own net as a dashed square, REDE (REVELADA while it shows); the HUD:
+   CAMUFLADO / REVELADO n s under an own net (camHud) */
+const CAMV = { edge: .72, skirt: .18, tile: 2.6, pole: 0x5a4a32, max: 24, every: 20,
+  pal: { ww2: [0x6f6040, 0x5b5236, 0x7d7150, 0x4a4a2c, 0x857a55],
+    m0: [0x4f5a2e, 0x3a4424, 0x6b5a3a, 0x2c2f22, 0x7d7a52], m1: [0x56683a, 0x3e5230, 0x6f7a4c, 0x34402a, 0x8a8a60], m2: [0x8c7a58, 0x6e6042, 0xa08e66, 0x5a5038, 0x7a6a4a] } };
+const camLook = f => (S.era === 'ww2' ? 'ww2' : 'm' + clamp((S.fac && S.fac[f.team]) | 0, 0, 2));
+postBoxes = (g => (f, box, p, st) => {
+  if (!(f.F && f.F.cam)) return g(f, box, p, st);
+  const F = f.F, h = F.size[2], L = F.size[0] / 2 - .25, W = F.size[1] / 2 - .25, up = Math.min(1, p / .5), e = h * CAMV.edge * up, c = CAMV.pole;
+  for (const [i, j] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) box(i * L, e / 2, j * W, .14, e, .14, c);
+  if (F.size[0] > 15) for (const [i, j] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) box(i * L, e / 2, j * W, .14, e, .14, c);
+  box(0, h * up / 2, 0, .18, h * up, .18, c);
+})(postBoxes);
+/* a canvas of one look, seamless, cut out where it is not cloth */
+function camTex(look) {
+  const N = 256, cv = document.createElement('canvas'); cv.width = cv.height = N;
+  const g = cv.getContext('2d'), P = CAMV.pal[look] || CAMV.pal.m0, R = rngOf(look === 'ww2' ? 44 : look === 'm0' ? 45 : look === 'm1' ? 46 : 47), col = i => '#' + P[i % P.length].toString(16).padStart(6, '0');
+  const wrap = (x, y, fn) => { for (const ox of [-N, 0, N]) for (const oy of [-N, 0, N]) if (Math.abs(x + ox - N / 2) < N * .75 && Math.abs(y + oy - N / 2) < N * .75) { g.save(); g.translate(x + ox, y + oy); fn(); g.restore(); } };
+  g.strokeStyle = look === 'ww2' ? '#4a3d28' : '#26281e'; g.lineWidth = look === 'ww2' ? 2.2 : 1.4;   // the net's string
+  for (let i = -N; i <= N * 2; i += 16) { g.beginPath(); g.moveTo(i, 0); g.lineTo(i + N, N); g.moveTo(i, N); g.lineTo(i + N, 0); g.stroke(); }
+  if (look === 'ww2') {
+    for (let n = 0; n < 34; n++) { const x = R() * N, y = R() * N, w = 18 + R() * 30, d = 10 + R() * 18, a = R() * Math.PI, c = col(n); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.beginPath(); g.moveTo(-w / 2, -d / 2); g.lineTo(w / 2, -d / 2 + R() * 4); g.lineTo(w / 2 - R() * 4, d / 2); g.lineTo(-w / 2 + R() * 4, d / 2); g.fill(); }); }   // hessian
+    for (let n = 0; n < 120; n++) { const x = R() * N, y = R() * N, l = 16 + R() * 26, a = R() * Math.PI, c = col(n + 2); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.fillRect(-l / 2, -2, l, 4 + R() * 2); }); }   // strips of cloth
+  } else if (look === 'm2') {
+    for (let n = 0; n < 26; n++) { const x = R() * N, y = R() * N, w = 26 + R() * 34, d = 14 + R() * 20, a = R() * Math.PI, c = col(n); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.fillRect(-w / 2, -d / 2, w, d); }); }   // tarp
+    for (let n = 0; n < 90; n++) { const x = R() * N, y = R() * N, l = 20 + R() * 30, a = R() * Math.PI, c = col(n + 1); wrap(x, y, () => { g.rotate(a); g.fillStyle = c; g.beginPath(); g.moveTo(-l / 2, 0); g.lineTo(0, -3); g.lineTo(l / 2, 0); g.lineTo(0, 4); g.fill(); }); }   // rags
+  } else {
+    const pointed = look === 'm1';
+    for (let n = 0; n < 230; n++) {
+      const x = R() * N, y = R() * N, s = 9 + R() * 9, a = R() * TAU, c = col(n);
+      wrap(x, y, () => {
+        g.rotate(a); g.fillStyle = c; g.beginPath();
+        if (pointed) { g.moveTo(-s, 0); for (let i = 1; i < 6; i++) { const t = i / 6, r = s * .55 * Math.sin(Math.PI * t); g.lineTo(-s + 2 * s * t, (i & 1 ? -1 : -.55) * r); } g.lineTo(s, 0); for (let i = 5; i > 0; i--) { const t = i / 6, r = s * .55 * Math.sin(Math.PI * t); g.lineTo(-s + 2 * s * t, (i & 1 ? 1 : .55) * r); } }
+        else { g.ellipse(0, 0, s, s * .62, 0, 0, TAU); }
+        g.fill();
+        g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(pointed ? 0 : s * .55, 0, s * .22, 0, TAU); g.fill(); g.globalCompositeOperation = 'source-over';   // the cut of the garnish
+      });
+    }
+  }
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 4; return t;
+}
+function rngOf(n) { let s = n >>> 0 || 1; return () => { s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0; return s / 4294967296; }; }
+/* the canopy of a net of kind k, in metres round its middle at the ground: the tent, then the skirt */
+function camGeo(k) {
+  const F = FORT.K[k], Lx = F.size[0], Lz = F.size[1], H = F.size[2], n = F.size[0] > 15 ? 16 : 10, E = CAMV.edge, T = CAMV.tile, pos = [], uv = [], idx = [];
+  const Y = (u, v) => { const r = Math.max(Math.abs(u), Math.abs(v)) * 2; return H * (E + (1 - E) * (1 - Math.pow(r, 1.35))) + .12 * Math.sin(u * 31) * Math.sin(v * 27); };
+  for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) { const u = i / n - .5, v = j / n - .5; pos.push(u * Lx, Y(u, v), v * Lz); uv.push(u * Lx / T, v * Lz / T); }
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const a = j * (n + 1) + i, b = a + 1, c = a + n + 1, d = c + 1; idx.push(a, c, b, b, c, d); }
+  const ring = []; for (let i = 0; i < n; i++) ring.push([i / n - .5, -.5]); for (let j = 0; j < n; j++) ring.push([.5, j / n - .5]); for (let i = n; i > 0; i--) ring.push([i / n - .5, .5]); for (let j = n; j > 0; j--) ring.push([-.5, j / n - .5]);
+  const b0 = pos.length / 3, m = ring.length, per = 2 * (Lx + Lz), sk = H * (E - CAMV.skirt) / T;
+  ring.forEach(([u, v], q) => { const s = q / m * per / T; pos.push(u * Lx, Y(u, v), v * Lz); uv.push(s, 0); pos.push(u * (Lx + 1.2), H * CAMV.skirt, v * (Lz + 1.2)); uv.push(s, sk); });
+  for (let q = 0; q < m; q++) { const a = b0 + q * 2, c = b0 + ((q + 1) % m) * 2; idx.push(a, a + 1, c, c, a + 1, c + 1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+const CAMS = { me: new Map(), tex: new Map(), sc: null, seen: -1, tick: 0 };
+function camMesh(look, k) {
+  const key = look + k; let me = CAMS.me.get(key);
+  if (me && me.parent === scene) return me;
+  if (!CAMS.tex.has(look)) CAMS.tex.set(look, camTex(look));
+  me = new THREE.InstancedMesh(camGeo(k), new THREE.MeshLambertMaterial({ map: CAMS.tex.get(look), alphaTest: .5, side: THREE.DoubleSide }), CAMV.max);
+  me.frustumCulled = false; me.count = 0; scene.add(me); CAMS.me.set(key, me); return me;
+}
+/* each frame, after the works: the canopies of the nets past half their work */
+function camScene() {
+  if (!S || !S.forts || typeof THREE === 'undefined') return;
+  if (CAMS.sc !== scene) { CAMS.me.clear(); CAMS.sc = scene; CAMS.seen = -1; }
+  if (CAMS.seen === S.fv && (CAMS.tick = (CAMS.tick + 1) % CAMV.every)) return;
+  CAMS.seen = S.fv;
+  const n = new Map(), M = WM;
+  for (const me of CAMS.me.values()) me.count = 0;
+  for (const f of S.forts) {
+    if (!f.F.cam || f.gone || S.os[f.id] > 1 || f.prog < .5) continue;
+    const me = camMesh(camLook(f), f.k), i = n.get(me) || 0; if (i >= CAMV.max) continue;
+    const s = Math.min(1, (f.prog - .5) / .5 + .08), L = f.F.size[0] / 2, ca = Math.cos(f.a + Math.PI / 2), sa = Math.sin(f.a + Math.PI / 2), off = -(1 - s) * L;   // unrolled from one side
+    M.q.setFromAxisAngle(M.up, f.a + Math.PI / 2);
+    me.setMatrixAt(i, M.mx.compose(M.v.set(f.x + ca * off, f.y, f.z - sa * off), M.q, M.s.set(s, 1, 1)));
+    n.set(me, i + 1);
+  }
+  for (const [me, c] of n) me.count = c;
+  for (const me of CAMS.me.values()) { me.visible = me.count > 0; me.instanceMatrix.needsUpdate = true; }
+}
+fortScene = (g => () => { g(); camScene(); })(fortScene);
+if (typeof rtsForts === 'function') camScene = rtsForts(camScene);   // the commander's view: an enemy net only as the works are (RTS)
+/* the build mode's reasons */
+Object.assign(PWHY, { cserver: 'O servidor desta sala é antigo e não conhece a rede de camuflagem', cnet: 'Em cima de outra rede de camuflagem' });
+/* the General View: an own net, a dashed square (its size, at least a mark), REDE and REVELADA */
+gWorks = (g => (G, V, P) => {
+  const all = V.forts || [], mine = all.filter(f => camK(f.k)); if (!mine.length) return g(G, V, P);
+  V.forts = all.filter(f => !camK(f.k));
+  try { g(G, V, P); } finally { V.forts = all; }
+  for (const f of mine) {
+    if (!gOn(P, f.x, f.z, 30)) continue;
+    const x = P.X(f.x), y = P.Y(f.z), F = FORT.K[f.k], r = Math.max(4.5 * P.k, Math.abs(P.X(f.x + F.size[0] / 2) - x)), c = gCol(V, f.t);
+    G.save(); G.translate(x, y); G.rotate((f.a || 0) + Math.PI / 2); G.setLineDash([3 * P.k, 2.5 * P.k]); G.strokeStyle = f.rv ? FOE : c; G.lineWidth = 1.4; G.globalAlpha = f.prog < 1 ? .55 : 1; G.strokeRect(-r, -r, r * 2, r * 2); G.restore();
+    if (GV.lab) gTxt(G, f.rv ? 'REDE · REVELADA' : 'REDE', x, y + r + 11 * P.k, 9 * P.k, f.rv ? FOE : c, 'center');
+  }
+})(gWorks);
+{ const L = GLAY.find(L => L.id === 'eng'); if (L) L.draw = gWorks; }
+/* the HUD under an own net: CAMUFLADO, REVELADO and the seconds left, or what to do to be hidden */
+function camHud(P, u) {
+  if (!S.camN || !S.camN.length || !P || P.dead) return;
+  const f = camUnder(P); if (!f || f.team !== P.team) return;
+  const rv = camRev(f), cov = P.cnv === f && P.cnS === S.camS, s = rv ? 'REVELADO  ·  ' + Math.ceil(CNET.fire - (S.t - f.rv)) + ' s' : cov ? 'CAMUFLADO' : 'SOB A REDE  ·  PARE PARA SE ESCONDER', w = (cov ? 130 : rv ? 150 : 270) * u;
+  hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - w / 2, ch - 84 * u, w, 19 * u);
+  txt(s, cw / 2, ch - 81 * u, 12 * u, rv ? FOE : cov ? '#8fe39a' : 'rgba(158,170,162,.95)', 'center');
+}
+hudMan = (g => (P, u, ...a) => { g(P, u, ...a); camHud(P, u); })(hudMan);
+hudDrive = (g => (P, u, ...a) => { g(P, u, ...a); camHud(P, u); })(hudDrive);
+/* ---------- end of the camouflage nets on the screen ---------- */
 /* ---------- the build bar on the screen (OBR, cf-pol2-obras: P13, D2 = A) ----------
    Under the build mode's band, a row of tabs cut at the corners as the hangar's class tabs: the key, the short name, and the cost and time
    (or the mines left, or "máx.") in red where the side cannot start it now; the work in hand filled with the accent. A long list shows the
@@ -76551,7 +77226,14 @@ function obrHud(P, u, ink, acc) {
     });
   }
   hx.drawImage(V.cv, x0 - 1, y0 - 1, W + 2, h + 2);
-  txt((b - a > 1 ? '1–' + (b - a) : '1') + ': escolher' + (more ? '  ·  ' + OBR.keys + ': mais' : '') + '  ·  N: próxima  ·  Shift+N: volta', cw / 2, ch * .6 + 42 * u, 10 * u, dim, 'center');
+  const [st, short] = obrStock(P, l[i]);
+  if (st) {   // the side's stock under the bar (P14), on a dark strip as the bar's tabs: it sits on the ground and the ghost of the work
+    hx.font = 10.5 * u + "px 'Share Tech Mono', ui-monospace, monospace"; const sw = hx.measureText(st).width + 16 * u;
+    hx.fillStyle = 'rgba(8,12,13,.6)'; hx.fillRect(cw / 2 - sw / 2, y0 + h + 3 * u, sw, 17 * u);
+    txt(st, cw / 2, y0 + h + 6 * u, 10.5 * u, short ? FOE : dim, 'center');
+  }
+  const rot = S.fm || S.bm ? '  ·  [ ] ou roda: girar' + (S.brot ? ' (girada ' + (S.brot < 0 ? '+' : '') + Math.round(-S.brot * 180 / Math.PI) + '°)' : '') : '';
+  txt((b - a > 1 ? '1–' + (b - a) : '1') + ': escolher' + (more ? '  ·  ' + OBR.keys + ': mais' : '') + '  ·  N: próxima  ·  Shift+N: volta' + rot, cw / 2, ch * .6 + 42 * u, 10 * u, dim, 'center');
 }
 hudFort = (g => (P, u, ink, acc, disp) => { g(P, u, ink, acc, disp); if (P.man && !P.dead && obrOpen()) obrHud(P, u, ink, acc); })(hudFort);
 addEventListener('keydown', e => {
@@ -76561,6 +77243,106 @@ addEventListener('keydown', e => {
   e.preventDefault(); e.stopImmediatePropagation();   // before the compartments' keys (SLOT), the night vision (6) and the flare (7)
   if (!e.repeat) S.my.bq = back ? { d: -1 } : { n };
 }, true);
+/* P15 and P16 on the screen. The outline of a work was a tall see-through box with a wire edge: it hid the aim and the ground behind it,
+   and said nothing of the slope; a pontoon's was drawn where the aim was, not on the bank. Now a footprint lies on the ground and follows
+   it (OBRG.n × OBRG.n cells, each corner at the ground's height, never under the water), with a low band round its edge (wall m), a line
+   on the band, and a thin post at each corner as tall as the work (red where that corner is in the water, or the whole of it red with the
+   reason); a work across the river lies where it will be (obrSpan). Turned with [ ] and the wheel (obrTurn), its turn on the keys' line */
+const OBRG = { n: 8, lift: .12, wall: .35, op: .26, post: .12, hmax: 2.5, ok: 0x6fd67a, bad: 0xe2604f, sz: 6 };
+let gFoot = null;
+function footMake() {
+  const n = OBRG.n, P = 4 * n, buf = k => new THREE.BufferAttribute(new Float32Array(k * 3), 3).setUsage(THREE.DynamicDrawUsage);
+  const mat = op => new THREE.MeshBasicMaterial({ color: OBRG.ok, transparent: true, opacity: op, depthWrite: false, side: THREE.DoubleSide });
+  const fg = new THREE.BufferGeometry(), fi = [], rg = new THREE.BufferGeometry(), ri = [], lg = new THREE.BufferGeometry();
+  fg.setAttribute('position', buf((n + 1) * (n + 1)));
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { const a = i * (n + 1) + j, c = a + n + 1; fi.push(a, c, a + 1, a + 1, c, c + 1); }
+  fg.setIndex(fi); rg.setAttribute('position', buf(2 * P));
+  for (let i = 0; i < P; i++) { const b = (i + 1) % P; ri.push(i, b, P + i, b, P + b, P + i); }
+  rg.setIndex(ri); lg.setAttribute('position', buf(P));
+  const fill = new THREE.Mesh(fg, mat(OBRG.op)), band = new THREE.Mesh(rg, mat(.5)), line = new THREE.LineLoop(lg, new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: .85 }));
+  const posts = [0, 1, 2, 3].map(() => new THREE.Mesh(new THREE.BoxGeometry(OBRG.post, 1, OBRG.post), new THREE.MeshBasicMaterial({ color: OBRG.ok })));
+  const G = new THREE.Group(); G.add(fill, band, line, ...posts);
+  for (const o of G.children) { o.frustumCulled = false; o.renderOrder = 2; }
+  G.userData = { fill, band, line, posts }; return G;
+}
+/* the footprint L × W m at x z, its length turned by a (rotation.y), posts h m tall, red when bad */
+function footSet(x, z, a, L, W, h, bad) {
+  if (!gFoot || gFoot.parent !== scene) { gFoot = footMake(); scene.add(gFoot); }
+  const U = gFoot.userData, n = OBRG.n, P = 4 * n, c = Math.cos(a), s = Math.sin(a), WL = S.T.WL, col = bad ? OBRG.bad : OBRG.ok;
+  const at = (u, v, A, i, dy) => { const lx = (u - .5) * L, lz = (v - .5) * W, wx = x + lx * c + lz * s, wz = z - lx * s + lz * c, g = hgt(wx, wz); A[i * 3] = wx; A[i * 3 + 1] = Math.max(g, WL) + OBRG.lift + dy; A[i * 3 + 2] = wz; return g; };
+  const F = U.fill.geometry.attributes.position, B = U.band.geometry.attributes.position, Ln = U.line.geometry.attributes.position;
+  for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) at(j / n, i / n, F.array, i * (n + 1) + j, 0);
+  for (let k = 0; k < P; k++) {
+    const sd = k / n | 0, t = (k % n) / n, u = sd === 0 ? t : sd === 1 ? 1 : sd === 2 ? 1 - t : 0, v = sd === 0 ? 0 : sd === 1 ? t : sd === 2 ? 1 : 1 - t;
+    at(u, v, B.array, k, 0); at(u, v, B.array, P + k, OBRG.wall); at(u, v, Ln.array, k, OBRG.wall);
+  }
+  F.needsUpdate = B.needsUpdate = Ln.needsUpdate = true;
+  U.fill.material.color.setHex(col); U.band.material.color.setHex(col);
+  const q = [0, 0, 0];
+  [[0, 0], [1, 0], [1, 1], [0, 1]].forEach(([u, v], i) => { const g = at(u, v, q, 0, 0), o = U.posts[i]; o.scale.y = h; o.position.set(q[0], q[1] + h / 2, q[2]); o.material.color.setHex(bad || g < WL + .6 ? OBRG.bad : OBRG.ok); });
+  gFoot.visible = true;
+}
+fortScene = (g => () => {
+  g();
+  const P = S.my, B = P && !P.dead ? (S.fm && S.fm.x !== undefined ? S.fm : S.bm && S.bm.x !== undefined ? S.bm : null) : null;
+  if (!B) { if (gFoot) gFoot.visible = false; return; }
+  if (B === S.bm) { gGhost.visible = false; footSet(B.x, B.z, B.a, BLD.size[0], BLD.size[1], Math.min(BLD.size[2], OBRG.hmax), !!B.why); return; }
+  const F = FORT.K[B.k], sp = F.span ? obrSpan(B.k, B.x, B.z) : null;
+  gFortGhost.visible = false;
+  if (sp) footSet(sp.x, sp.z, sp.a, sp.L, sp.W, 1.2, !!B.why);
+  else if (F.span) footSet(B.x, B.z, B.a + Math.PI / 2, OBRG.sz, OBRG.sz, 1.2, true);   // no river end at hand: a small red mark where the aim is
+  else footSet(B.x, B.z, B.a + Math.PI / 2, F.size[0], F.size[1], B.k === 1 ? .4 : Math.min(F.size[2] || 1, OBRG.hmax), !!B.why);
+})(fortScene);
+addEventListener('keydown', e => {
+  if ((e.code !== 'BracketLeft' && e.code !== 'BracketRight') || playMode !== 'play' || paused || sw.on || GV.on || !S || !S.my || !S.my.man || S.my.dead || S.my.in || !(S.fm || S.bm) || /INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '')) return;
+  e.preventDefault(); e.stopImmediatePropagation(); obrTurn(e.code === 'BracketRight' ? -1 : 1);   // ] clockwise seen from above (the bearing grows), [ the other way
+}, true);
+addEventListener('wheel', e => {   // before the zoom's wheel: in the build mode it turns the work
+  if (playMode !== 'play' || paused || sw.on || GV.on || BM.on || !S || !S.my || !S.my.man || S.my.dead || S.my.in || !(S.fm || S.bm) || !e.deltaY) return;
+  e.stopImmediatePropagation(); if (e.timeStamp - (OBRV.wt || 0) < 90) return; OBRV.wt = e.timeStamp; obrTurn(e.deltaY < 0 ? -1 : 1);   // up as ]
+}, { capture: true, passive: true });
+/* P17 on the screen: a work that P was building or stands by, that nobody builds, says why it stopped and when it starts to come apart
+   (OBRA PARADA), and how to take it down; while V is held, the bar of DESMONTANDO. OBRV.mine: the last work P built */
+const OBRW = { far: 'chegue a até ' + BLD.reach + ' m dela', move: 'fique parado junto dela', other: 'ninguém a constrói' };
+function obrStallHud(P, u, ink, acc) {
+  const U = S.undo;
+  const band = () => { const bw = Math.min(cw - 32, 560 * u); hx.fillStyle = 'rgba(8,12,13,.55)'; hx.fillRect(cw / 2 - bw / 2, ch * .6 - 6 * u, bw, 40 * u); };
+  if (U && U.w && !U.done) { band(); txt('DESMONTANDO ' + obrName0(U.w).toUpperCase() + '  ·  solte V para parar', cw / 2, ch * .6, 13 * u, acc, 'center'); bar(cw / 2 - 70 * u, ch * .6 + 18 * u, 140 * u, 6 * u, 1 - (U.T - S.t) / OBR.undo, acc); return; }
+  if (obrOpen() || P.dead || P.in) return;
+  const st = obrStall(P); if (!st) return;
+  if (st.on) { OBRV.mine = st.w; return; }
+  if (st.n || (st.w !== OBRV.mine && st.d > BLD.reach)) return;
+  const why = st.why === 'fire' ? 'sob fogo: espere ' + Math.max(1, st.wait) + ' s' : OBRW[st.why], c = st.d <= BLD.reach ? obrBack(st.w) : null;
+  band(); txt('OBRA PARADA  ·  ' + obrName0(st.w).toUpperCase() + ' ' + Math.round(st.w.prog * 100) + '%', cw / 2, ch * .6, 13 * u, st.decay ? FOE : acc, 'center');
+  txt(why + (st.decay ? '  ·  SE DESFAZENDO' : st.idle > 0 ? '  ·  começa a se desfazer em ' + Math.ceil(BLD.decay[0] - st.idle) + ' s' : '') + (st.d <= BLD.reach && !obrBlockV(P) ? '  ·  segure V: desmontar' + (c && S.eco ? ' (+' + c[0] + '/' + c[1] + ')' : '') : ''), cw / 2, ch * .6 + 18 * u, 11 * u, st.decay ? FOE : ink, 'center');
+}
+hudFort = (g => (P, u, ink, acc, disp) => { g(P, u, ink, acc, disp); if (P.man) obrStallHud(P, u, ink, acc); })(hudFort);
+/* P18 on the general's view: under the cursor in Fortificar, the work's footprint where the squad will dig it, its facing, green or red
+   with the reason (obrGenFort at most ten times a second), [ ] turn it 15° (GOR.fa, for the kind GOR.faK; sent as the command's a) */
+const OBRGW = Object.assign({ era: 'Só na frente atual', cost: 'Seu lado não tem a energia e o metal desta obra' }, BWHY);
+function gorFortGhost(g, P, now) {
+  const w = gorW(GOR.cur.px, GOR.cur.py), k = P.k, fa = GOR.faK === GOR.fk ? GOR.fa : null, key = GOR.fk + '|' + Math.round(w.x) + '|' + Math.round(w.z) + '|' + fa;
+  if (key !== GOR.fwP && now - (GOR.fwT || 0) > 100) { GOR.fwT = now; GOR.fwP = key; try { GOR.fw = obrGenFort(S.me, GOR.fk, w.x, w.z, fa === null ? NaN : fa); } catch (e) { GOR.fw = null; } }
+  const G = GOR.fw; if (!G) return;
+  const ok = !G.why, c = ok ? '#8fe39a' : FOE, cs = Math.cos(G.rot), sn = Math.sin(G.rot);
+  g.beginPath();
+  [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([i, j], n) => { const lx = i * G.L / 2, lz = j * G.W / 2, px = P.X(G.x + lx * cs + lz * sn), py = P.Y(G.z - lx * sn + lz * cs); if (n) g.lineTo(px, py); else g.moveTo(px, py); });
+  g.closePath(); g.globalAlpha = .22; g.fillStyle = c; g.fill(); g.globalAlpha = 1; g.strokeStyle = c; g.lineWidth = 2; g.stroke();
+  const cx = P.X(G.x), cy = P.Y(G.z), L = Math.max(G.L, G.W) * .6;
+  gLine(g, cx, cy, P.X(G.x + Math.cos(G.a) * L), P.Y(G.z - Math.sin(G.a) * L), c, 1.6);   // the way it faces
+  const why = (typeof FWHY !== 'undefined' && FWHY && FWHY[G.why]) || PWHY[G.why] || OBRGW[G.why] || G.why;
+  gTxt(g, W21.fort[GOR.fk] + ' · ' + (ok ? 'pode construir aqui' : why) + ' · [ ] gira', cx + 14 * k, cy - 12 * k, 11 * k, c, 'left');
+}
+gorKey = (g => e => {
+  const c = e.code;
+  if ((c === 'BracketLeft' || c === 'BracketRight') && typeof gorOn === 'function' && gorOn() && GOR.mode === 'fort') {
+    let a = GOR.faK === GOR.fk ? GOR.fa : null;
+    if (a === null) { const w = GOR.cur ? gorW(GOR.cur.px, GOR.cur.py) : null, G = w ? obrGenFort(S.me, GOR.fk, w.x, w.z, NaN) : null; a = G ? G.a : 0; }
+    GOR.fa = a + (c === 'BracketRight' ? 1 : -1) * Math.PI / 12; GOR.faK = GOR.fk; return true;
+  }
+  return g(e);
+})(gorKey);
+gorSend = (g => c => { if (c && c.c === 'fort' && GOR.faK === c.k && GOR.fa !== null && GOR.fa !== undefined && !Number.isFinite(c.a)) c.a = +GOR.fa.toFixed(3); return g(c); })(gorSend);
 /* ---------- end of the build bar on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>

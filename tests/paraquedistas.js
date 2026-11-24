@@ -38,8 +38,8 @@ fly(400, () => {
 });
 ok(!!firstOut, 'the men go out of the door: the first ' + (firstOut ? Math.round(firstOut.agl) + ' m over the ground, ' + Math.round(Math.hypot(firstOut.x - tg.x, firstOut.z - tg.z)) + ' m from the point' : 'never'));
 ok(chutes >= Math.min(3, D.n) && maxN >= 2, 'their canopies open (' + chutes + ' under canopy at once, ' + maxN + ' in the air)');
-const q = D.q, men = q ? q.men.filter(m => !m.dead) : [];
-ok(q && D.out === D.n && men.length >= D.n - 1, 'a squad of ' + men.length + ' on the ground (' + D.out + ' jumped)');
+const q = D.q, men = q ? q.men.filter(m => !m.dead) : [], foeK = q ? q.men.filter(m => m.dead && m.lastBy && m.lastBy.team === foe).length : 0;   // the battle goes on round them: a barrage on the point may kill some (cf-general-reservas: a Katyusha's)
+ok(q && D.out === D.n && men.length + foeK >= D.n - 1, 'a squad of ' + men.length + ' on the ground (' + D.out + ' jumped' + (foeK ? ', ' + foeK + ' killed there by enemy fire' : '') + ')');
 const far = men.map(m => Math.round(Math.hypot(m.x - tg.x, m.z - tg.z)));
 ok(men.length && Math.max(...far) < 420, '  around the point: ' + far.join(', ') + ' m');
 ok(men.every(m => !m.para && Math.abs(m.y - $('manY')(m.x, m.z)) < 1), '  on their feet, on the ground');

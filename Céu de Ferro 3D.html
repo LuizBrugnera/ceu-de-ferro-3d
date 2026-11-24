@@ -67023,9 +67023,12 @@ function camClip(p, seat, dt) {
   if (VU.uCut) VU.uCut.value.set(o.x, o.y, o.z, p.man ? CAM.cut[0] : p.heli && p.def.R ? p.def.R + CAM.cut[2] : Math.max(3, (p.def.w || 4) * CAM.cut[1] + CAM.cut[2]));
 }
 /* ---------- HUD (2D overlay) ---------- */
-/* the HUD's scale: 1 from 1000 to 1280 px wide (down to .62 on a narrow screen), and over 1280×674 it grows with the screen, both ways, up to 1.25
-   (1920×1080), so the text on a big screen is not the size of a small one's (cf-pol-hud) */
-const hudU = () => (cw < 1280 ? clamp(cw / 1000, .62, 1) : clamp(Math.min(cw / 1280, ch / 674), 1, 1.25));
+/* the HUD's scale: 1 from 1000 to 1280 px wide, and over 1280×674 it grows with the screen, both ways, so the text on a big screen is not the
+   size of a small one's (cf-pol-hud). P24 (cf-pol2-fase1): it stopped at 1.25, so at 1920×1080 the HUD was the size of a 1600 px one's, and
+   on a desktop window under 1000 px it went down to .62 (11 px text at 6.8 px). Now up to HUDU.max (1.5 at 1920×1080) and, with a mouse,
+   never under HUDU.min; a touch screen keeps .62 (the owner's D5: the phone is left as it is) */
+const HUDU = { min: .8, max: 1.5, touch: .62 };
+const hudU = () => (cw < 1280 ? clamp(cw / 1000, coarse ? HUDU.touch : HUDU.min, 1) : clamp(Math.min(cw / 1280, ch / 674), 1, HUDU.max));
 function txt(s, x, y, size, col, align, font) {
   hx.font = size + "px " + (font || "'Share Tech Mono', ui-monospace, monospace");
   hx.textAlign = align || 'left'; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(s, x + 1, y + 1);   // a dark edge that holds on fog and a bright sky (.6 washed out there)
@@ -67887,6 +67890,11 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
 }
+/* P25 (cf-pol2-fase1): the arrow toward an enemy aircraft off the screen sat on the screen's edge, 22 px in, so at the top left it was
+   drawn over the soldier's list of weapons and at the corners over the minimap and the panels. Now it sits on an ellipse round the aim,
+   ARRW.rx of the width and ARRW.ry of the height out, inside every corner panel and under the top strip. [x, y, the angle it points] */
+const ARRW = { rx: .36, ry: .3 };
+function arrowAt(dx, dy) { const a = Math.atan2(dy, dx); return [cw / 2 + Math.cos(a) * cw * ARRW.rx, ch / 2 + Math.sin(a) * ch * ARRW.ry, a]; }
 /* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
    a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */
 const WZONE = ['ferido no tronco', 'ferido na cabeça', 'ferido nas pernas', 'ferido nos braços'];
@@ -68241,10 +68249,9 @@ function drawHud() {
         far.push([lock ? -1 : rng, (lock ? lockName + ' ' : '') + (rng / 1000).toFixed(1).replace('.', ',') + ' km', s.x, s.y + (lock ? 23 : 16)]);
       } else tri(s.x, s.y - 16, Math.PI / 2, 6, FRIEND);
       if (q.pid) txt(q.name, s.x, s.y - 26 - 12 * u, 12 * u, foe ? FOE : FRIEND, 'center');
-    } else if (foe) {
+    } else if (foe) {   // off the screen: an arrow toward it on a ring round the aim (ARRW), clear of the panels in the corners (P25)
       let dx = s.x - cw / 2, dy = s.y - ch / 2; if (!s.front) { dx = -dx; dy = -dy; }
-      const k = Math.min((cw / 2 - 22) / (Math.abs(dx) || 1), (ch / 2 - 22) / (Math.abs(dy) || 1));
-      tri(cw / 2 + dx * k, ch / 2 + dy * k, Math.atan2(dy, dx), 9, FOE);
+      const [x, y, a] = arrowAt(dx, dy); tri(x, y, a, 9, FOE);
     }
   }
   far.sort((a, b) => a[0] - b[0]); for (const l of far) tagTxt(l[1], l[2], l[3], 11 * u, FOE, 'center');

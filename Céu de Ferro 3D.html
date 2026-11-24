@@ -45794,8 +45794,10 @@ function ecoAI(t, V) {
     for (const q of free) if (!ecoAsk(t, { q: 'why', k: 'mine', x: q.x, z: q.z })) { out.push({ c: 'build', k: 'mine', x: q.x, z: q.z, a: ecoFace(q.x, q.z), why: 'jazida do ponto conquistado ' + ecoNear(q.x, q.z) }); did = true; break; }
   }
   const idle = gsIdle(t, V.stock);
+  let save = null;   // a site wanted and not yet paid for: the unit orders that only fill the reserve wait for it (cf-general-gasto: they now keep the stock low)
   if (!did && !building()) for (const k of ['fab', 'mine', 'pow']) {
-    if (have(k) >= A.want[k][ph] || !pay(k, A.pay) || (k === 'pow' && idle.en > 0) || (k === 'mine' && idle.mt > 0)) continue;   // no plant for what already sits idle (cf-general-gasto)
+    if (have(k) >= A.want[k][ph] || (k === 'pow' && idle.en > 0) || (k === 'mine' && idle.mt > 0)) continue;   // no plant for what already sits idle (cf-general-gasto)
+    if (!pay(k, A.pay)) { if (!save && GASTO.on && ecoAsk(t, { q: 'spots', k }).length) save = k; continue; }
     const s = ecoAsk(t, { q: 'spots', k })[0]; if (!s) continue;
     out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: rebuilt(k) ? 'reconstrói longe do local perdido, ' + s.why : s.why }); break;
   }
@@ -45827,7 +45829,7 @@ function ecoAI(t, V) {
       const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap) + GASTO.lean * gsLean(c, V.stock, idle);
       if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : gap ? 'plano de produção: ' + (V.pp.why[k] || 'mais em campo') : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
     }
-    if (best) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
+    if (best && (!save || V.miss[best])) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
   }
   return out;
 }
@@ -45843,7 +45845,8 @@ const ecoN2 = out => out.reduce((a, o) => a + (o.c === 'make' ? 0 : 1), 0);
    left the factory idle; and a side metal-bound (the dome's fund holds the metal) let energy pile up whatever it chose.
    Now: the unit order is outside the two (ecoN2); a kind whose producers already have their work and one waiting is passed over (gsFull);
    the misses weigh at most GASTO.miss; with a resource idle the kinds that spend it weigh more (gsLean) and no plant is built for it; no
-   kind is ordered past the reserve's room (ECO.res: a finished order held 'full' stops its producer).
+   kind is ordered past the reserve's room (ECO.res: a finished order held 'full' stops its producer); and while a site the economy wants
+   (ECO.ai.want) is not yet paid for, the unit orders that only fill the reserve wait for it (spending as it now does, the stock never reached it).
    A resource is idle over GASTO.over of the cap and over the strategic reserve (gsKeep: the economy's keep and a work the fort plan saves
    for). While a side has idle stock its general asks at most GASTO.n orders more a look (gsInvest): a mine or a power plant for the
    resource that runs short while the other piles up, a second factory when both pile up, and a unit for each producer with nothing to do,

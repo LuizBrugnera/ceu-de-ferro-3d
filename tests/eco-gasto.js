@@ -55,6 +55,19 @@ console.log('-- energy piles up, metal runs short: no order eats into the metal 
   ok(L('tank', { en: 300, mt: 250 }) === 0 && L('tank', { en: 900, mt: 900 }) === 0, 'balanced stocks, or both idle: no lean');
 }
 
+console.log('-- a site wanted and not yet paid for comes before filling the reserve --');
+{
+  fresh(); d.en = ECO.ai.keep.en + 20; d.mt = 200;   // the mine the plan wants (have 1 of 2) needs keep + half its cost: not yet
+  const V = C.ecoView(t), mines = V.sites.filter(s => s.k === 'mine' && !(V.dep[s.dep] && V.dep[s.dep].pt >= 0)).length;
+  ok(mines < ECO.ai.want.mine[0] && C.ecoAsk(t, { q: 'spots', k: 'mine' }).length > 0, 'side 0 wants a mine more (' + mines + ' of ' + ECO.ai.want.mine[0] + ') and has a spot for it');
+  const ask = C.ecoAsk; $('ecoAsk = (f => (t, q) => (q.q === "why" ? "foe" : f(t, q)))(ecoAsk)');   // every point's deposit refused: no expansion mine this look
+  const m = look().filter(o => o.c === 'make' && o.key !== 'mkpara');   // the squad held for the paratroopers (cf-general-reservas) is its own rule
+  ok(m.length === 0, 'no unit order while it saves for the mine: ' + m.map(o => o.k).join(','));
+  d.miss.tank = [S.t];
+  ok(look().some(o => o.c === 'make' && o.k === 'tank'), 'a reinforcement asked for (miss) still gets its order');
+  C.__ask = ask; $('ecoAsk = globalThis.__ask');
+}
+
 console.log('-- a full reserve stops the orders of its kind --');
 {
   fresh();

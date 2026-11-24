@@ -2,6 +2,7 @@
 /* a hand grenade's burst hurts whoever is in it, its thrower too. explode spares the shooter (safe: o === by), the rule for a round, a rocket or a
    bomb; a hand grenade (nadeStep) bursts with own, so its thrower is not spared, whatever friendly fire is set to; a friend near it follows
    friendly fire as before; other bursts still spare their shooter. Every wrapper of explode passes own on (the ones with named parameters dropped it).
+   And it bursts once: a step slower than CLK.h runs stepShots twice, and a grenade gone in the first hop burst again in the second.
    node tests/granada-dano.js */
 const fs = require('fs'), H = require('./harness.js'), { load, ok, done } = H;
 const C = load({ seed: 9 }), $ = C.$, MAN = $('MAN'), INF = $('INF'), GRN = $('GRN'), FF = $('FF');
@@ -42,6 +43,11 @@ clear();
 T = man(0, 0, 0); C.explode(at.x + 1, C.hgt(at.x, at.z) + .3, at.z, MAN.nade.r, MAN.nade.dmg, T, T.team, true, 1, 0);
 ok(T.hp === MAN.hp, 'another burst by him at 1 m spares him, as before');
 clear();
+/* a slow step (1/30 s, two hops of stepShots, CLK.h): it bursts once, not once a hop */
+T = man(0, 0, 0); E = man(1, 30, 0); let n = 0; C.__ex0 = C.$('explode'); C.$('explode = (f => (...a) => { globalThis.__nb = (globalThis.__nb || 0) + 1; return f(...a); })(explode)');
+const x2 = at.x + 30.5, b2 = C.lobbed(T, 'nade', MAN.nade, x2, C.hgt(x2, at.z) + GRN.r, at.z, 0, 0, 0); b2.fz = S.t + .1; C.run(.5, null, 1 / 30); n = C.__nb || 0;
+ok(n === 1, 'stepped at 1/30 s, it bursts ' + n + ' time(s)');
+C.$('explode = globalThis.__ex0'); clear();
 /* every wrapper of explode passes own on */
 const html = fs.readFileSync(H.PAGE, 'utf8'), wr = html.match(/^explode = \([fg] => \([^)]*\)/gm) || [];
 const lost = wr.filter(w => !/\.\.\.a\)$|, own\)$/.test(w));

@@ -31201,9 +31201,11 @@ function blastFx(x, y, z, r) {
 const FF = { on: 1, k: 1, bl: 1, ai: 1, arm: 8, ln: 2.5, sp: .02, dc: 25, dr: 14, ev: .4 };
 const ffOn = () => !!FF.on && (!S || !S.net || !!Net.ff);
 /* is o spared by b (a round, a burst or a missile: team, by; a round also has vx)? An enemy never is; a friend is unless friendly fire reaches it, which
-   it does not for the shooter, its vehicle or crew, nor, for a round, what stands within FF.arm m of the shooter */
+   it does not for the shooter, its vehicle or crew, nor, for a round, what stands within FF.arm m of the shooter. own: a hand grenade's burst, which
+   its thrower is never spared (whatever friendly fire is set to: it is not a friend's fire) */
 function safe(o, b) {
   if (o.team !== b.team) return false;
+  if (b.own && o === b.by) return false;
   const w = b.by;
   if (!ffOn() || !w || o === w || o.in === w || w.in === o || (b.vx === undefined ? FF.bl : FF.k) <= 0) return true;
   return b.vx !== undefined && dist(o, w) < FF.arm;
@@ -31242,9 +31244,9 @@ function ffNote(o, by) {
   if ((S.net && !(S.host && by.aid)) || !(by.me || o.team === S.me)) return;
   S.feed.push({ text: 'Fogo amigo: ' + (by.name || (by.def && by.def.name) || 'um soldado') + ' abateu um aliado', life: 5 }); if (S.feed.length > 4) S.feed.shift();
 }
-function explode(x, y, z, r, dmg, by, team, he, ob, kg) {   // kg: its explosive, for what it does to the buildings near it (cityCharge)
+function explode(x, y, z, r, dmg, by, team, he, ob, kg, own) {   // kg: its explosive, for what it does to the buildings near it (cityCharge); own: its thrower is in it too (safe)
   blastFx(x, y, z, r);
-  const o = { x, y, z }, sb = { team, by }, wall = (t, ty) => (walled(x, y, z, t.x, ty, t.z) ? OBJS.shield : 1);
+  const o = { x, y, z }, sb = { team, by, own }, wall = (t, ty) => (walled(x, y, z, t.x, ty, t.z) ? OBJS.shield : 1);
   for (const u of S.units) { if (u.dead || safe(u, sb)) continue; const d = dist(u, o); if (d < r) impact(u, HK.blast, dmg * (1 - d / r) * (he ? ARMOR[u.kind].frag * (he === 2 && u.kind === 'tank' ? SHL.weak : 1) : 1) * wall(u, u.y + 2), by, x, y, z); }
   for (const m of S.men) {
     if (m.dead || safe(m, sb)) continue;
@@ -35191,7 +35193,7 @@ function nadeStep(b, dt) {
   }
   if (S.t < b.fz && b.life > 0) return;
   b.gone = true;
-  explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast, b.o.kg || CITY.chg.nade);
+  explode(b.x, b.y + .25, b.z, b.o.r, b.o.dmg, b.by, b.team, b.o.frag, OBJD.nade.blast, b.o.kg || CITY.chg.nade, true);   // its thrower too, when he is still near it
 }
 function stepShots(dt) {
   for (let _i = 0, _l = S.bullets, b = _l[0]; _i < _l.length; b = _l[++_i]) {
@@ -44614,8 +44616,8 @@ drive = (f => (P, I, dt) => {
   if (P.dep) { c.drive = c.turn = 0; c.brake = true; }
 })(drive);
 /* a set-down radio is hurt by a burst, is seen by the other side's troops near it, and is then something its batteries and mortars shell */
-explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
-  f(x, y, z, r, dmg, by, team, he, ob, kg);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg, own) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg, own);
   for (const b of S.rad || []) { const d = Math.hypot(b.x - x, b.y - y, b.z - z); if (b.dead || b.team === team || d >= r) continue; b.hitT = S.t; if ((b.hp -= dmg * (1 - d / r)) <= 0) { b.dead = true; S.floats.push({ x: b.x, y: b.y + 3, z: b.z, text: 'Rádio destruído', life: 2.2 }); } }
 })(explode);
 spot = (f => () => { f(); for (const b of S.rad || []) if (!b.dead) for (const s of sdsOf()) if (s !== b.team && (S.men.some(m => !m.dead && !m.in && m.team === s && hdist(m, b) < RAD.see && sees(m, b)) || S.units.some(u => !u.dead && u.team === s && hdist(u, b) < RAD.see && sees(u, b)))) seeBy(b, s); })(spot);   // each other side's own look
@@ -45053,7 +45055,7 @@ function droneShots(dt) {
   for (const s of S.shells) if (!s.gone && s.t + dt >= s.T) for (const o of L) { const r = dist(o, s); if (!o.dead && !safe(o, s) && r < s.o.r) droneHit(o, s.o.dmg * (1 - r / s.o.r), s.by); }
 }
 stepShots = (g => dt => { droneShots(dt); g(dt); })(stepShots);
-explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg) => { g(x, y, z, r, dmg, by, team, he, ob, kg); const sb = { team, by }; if (S.drones) for (const o of S.drones) { const d = Math.hypot(o.x - x, o.y - y, o.z - z); if (!o.dead && !o.gone && !safe(o, sb) && d < r) droneHit(o, dmg * (1 - d / r), by); } })(explode);
+explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg, own) => { g(x, y, z, r, dmg, by, team, he, ob, kg, own); const sb = { team, by }; if (S.drones) for (const o of S.drones) { const d = Math.hypot(o.x - x, o.y - y, o.z - z); if (!o.dead && !o.gone && !safe(o, sb) && d < r) droneHit(o, dmg * (1 - d / r), by); } })(explode);
 impact = (g => (o, k, dmg, by, x, y, z, dx, dy, dz, ap) => (o.drone ? (droneHit(o, dmg, by), null) : g(o, k, dmg, by, x, y, z, dx, dy, dz, ap)))(impact);
 /* air defence: with no aircraft to take, a gun takes a drone inside the reach its size allows (DSHOT); a missile is kept for the large one.
    A locking sight (lockOn over S.planes) finds only a drone a missile may lock */
@@ -50513,11 +50515,11 @@ nadeStep = (f => (b, dt) => {
   if (b.gone && b.medW) { for (const m of b.medW) { const D = medD(m.team); D.gr[0]++; if (!m.dead && !m.down) D.gr[1]++; } b.medW = null; }
 })(nadeStep);
 /* a blast: how many of each side it killed or put down at once */
-explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
-  if (!medOn() || !(r > 0)) return f(x, y, z, r, dmg, by, team, he, ob, kg);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg, own) => {
+  if (!medOn() || !(r > 0)) return f(x, y, z, r, dmg, by, team, he, ob, kg, own);
   const V = [];
   for (const m of S.men) if (!m.dead && !m.down && !m.in && !m.net && m.ai && Math.abs(m.x - x) < r && Math.abs(m.z - z) < r) V.push(m);
-  f(x, y, z, r, dmg, by, team, he, ob, kg);
+  f(x, y, z, r, dmg, by, team, he, ob, kg, own);
   const n = []; for (const m of V) if (m.dead || m.down) n[m.team] = (n[m.team] || 0) + 1;
   n.forEach((k, s) => { if (!k) return; const D = medD(s); D.bl[0]++; if (k > 1) D.bl[1]++; D.bl[2] += k; });
 })(explode);
@@ -57903,8 +57905,8 @@ function tunStep(dt) {
 }
 step = (g => dt => { g(dt); try { tunStep(dt); } catch (er) { if (!S.tunE) { S.tunE = 1; console.warn('túneis:', er); } } })(step);
 /* a big burst at a mouth collapses it (where the match is simulated) */
-explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg) => {
-  const R = g(x, y, z, r, dmg, by, team, he, ob, kg);
+explode = (g => (x, y, z, r, dmg, by, team, he, ob, kg, own) => {
+  const R = g(x, y, z, r, dmg, by, team, he, ob, kg, own);
   if (TUN.on && S && S.tun && S.tun.length && (!S.net || S.host) && dmg >= TUN.blast.dmg) for (const tn of S.tun) {
     if (!tunLive(tn)) continue;
     for (const w of ['a', 'b']) { const p = tunEnd(tn, w); if ((w === 'a' || tn.prog >= 1) && Math.hypot(p.x - x, p.z - z) < Math.max(TUN.blast.r, r * .25) && Math.abs(y - hgt(p.x, p.z)) < 6) { tunFall(tn, team, 'uma explosão fechou a boca'); break; } }
@@ -58300,8 +58302,8 @@ sqRescue = (f => (q, live) => { f(q, live); for (const d of q.men) if (d.down &&
    soldier's aim spreads by sp, he does not fire in the first hold of it, and does not run. Each client throws only the men it moves (its
    own player and, on the host, the AI's) */
 const STUN = { r: 1.6, k: .15, push: 2.2, t: 3.5, sp: .05, hold: .4, prone: .3 };
-explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
-  f(x, y, z, r, dmg, by, team, he, ob, kg);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg, own) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg, own);
   const R = r * STUN.r, w = Math.min(1, dmg / MAN.nade.dmg);
   for (const m of S.men) {
     if (m.dead || m.in || m.net || !(m.ai || m === S.my) || Math.abs(m.x - x) > R || Math.abs(m.z - z) > R) continue;
@@ -60635,8 +60637,8 @@ function brStim(m, k, d) {
 }
 drInc = (f => (m, by, vx, vz, w) => { if (by && by.team !== m.team && (!S.net || S.host)) brStim(m, 'tiro', { w, by, ux: -(vx || 0), uz: -(vz || 0) }); return f(m, by, vx, vz, w); })(drInc);
 damageMan = (f => (m, dmg, by, rx, h) => { const was = m.dead; f(m, dmg, by, rx, h); if (!was && !m.dead && dmg > 0) brStim(m, 'atingido', { by, dmg }); })(damageMan);
-explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg) => {
-  f(x, y, z, r, dmg, by, team, he, ob, kg);
+explode = (f => (x, y, z, r, dmg, by, team, he, ob, kg, own) => {
+  f(x, y, z, r, dmg, by, team, he, ob, kg, own);
   if (!BRAIN.on || (S.net && !S.host)) return;
   const R = Math.max(STIM.hear, r * 2);
   for (const m of S.men) { if (!m.ai || m.dead || m.net || m.in || Math.abs(m.x - x) > R || Math.abs(m.z - z) > R) continue; const d = Math.hypot(m.x - x, m.z - z); if (d < R) brStim(m, 'expl', { x, z, w: clamp((1 - d / R) * Math.min(1, dmg / MAN.nade.dmg) * 1.5, 0, 1) }); }

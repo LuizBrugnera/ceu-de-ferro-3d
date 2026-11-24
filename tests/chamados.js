@@ -5,7 +5,8 @@
    near took (up) is answered by the general with a squad from farther; S.chm and the analytics (sn.chm, the review's calls) count it all. A real ww2 conquest battle, 30 s in (~1 min) */
 const H = require('./harness'), ok = H.ok;
 const C = H.load({ seed: 5, eco: 1, mapv: 6, ana: true }), $ = C.$;
-const S = C.newState('ww2', 'pz4', { cls: 'tank' }), P = S.my, PED = $('PED'), CHM = $('CHM'), CN = $('CN');
+const S = C.newState('ww2', 'pz4', { cls: 'tank' }), P = S.my, PED = $('PED'), CN = $('CN');
+const CHM = $("typeof CHM === 'undefined' ? null : CHM") || { jobs: ['held', 'road', 'wood', 'line', 'rec'], eta: 420, hold: 90, r: { squad: 3000 }, up: { again: 15 } };   // PAGE=<the page before>: the first case fails there, as it should
 CN.on = 0;   // the radio net delays orders: here the order a squad ends up with is read at once
 C.run(30, null, 1 / 20);
 const D = (k, x, z) => $('pedDecide')(P, k, x, z), later = s => { S.t += s; };
@@ -21,7 +22,10 @@ ok(qs.length > 0, 'the side has free squads to take (' + qs.length + ': ' + qs.m
 const q = qs[0], L = lead(q), O0 = q.ord, n0 = S.squads.length;
 const x = L.x + 200, z = L.z;
 let r = D('inf', x, z);
+/* the case the request was about: a player asks for infantry on the map with free troops of his side a few hundred metres off; the general used to
+   answer "nada na reserva do general: ele precisa produzir antes" (or send a new squad from the base) */
 ok(r.st === 'ok' && /estava perto/.test(r.why) && r.eta > 0, 'infantry asked 200 m from a free squad: it goes, ETA ' + r.eta + ' s (' + r.why + ')');
+if (!$("typeof CHM !== 'undefined'")) { H.done(); process.exit(); }   // the page before: nothing more to check
 ok(q.ord.chm && Math.hypot(q.ord.x - x, q.ord.z - z) < 1 && S.squads.length === n0, '  that squad holds at the call, and no new squad entered');
 ok(st().re === 1 && st().n === 1 && st().mk === 0, '  counted as a reallocation: ' + JSON.stringify(st()));
 ok(log().some(s => /^O general manda .* sem produzir/.test(s)), '  and the general\'s log says it');

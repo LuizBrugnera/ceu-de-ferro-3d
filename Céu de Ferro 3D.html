@@ -63133,7 +63133,7 @@ manThink = (g => m => {
 /* ---------- paratroopers (PARA, cf-paraquedistas) ----------
    A side drops a squad of paratroopers from its transport (ERAS side.para: Ju 52 and C-47 in 1944, C-130J and Il-76MD today; the Insurgents
    have none), and a player on foot jumps from one himself. The general's command para { x, z, why } (domain atk) takes a squad from the
-   reserve (ecoUse squad, as a dispatch; pi: a point by its index instead of x z), one drop of a side in the air at a time (PARA.live) and PARA.cd s between a side's drops; the AI
+   reserve (ecoUse squad, as a dispatch, the squads held for the drops included: paraHold; up to PARA.pop squads over the soldiers' cap; pi: a point by its index instead of x z), one drop of a side in the air at a time (PARA.live) and PARA.cd s between a side's drops; the AI
    general (paraAI) drops on a point it does not hold where it knows few enemies (a weak point, a gap) and no anti-aircraft, never on its own
    troops, at most once per PARA.cd s; a person (the Visão de General's Campanha) and the MCP give the same command, and a player asks for it
    from the battle map (PED 'para'). The transport (a real AI plane, role 'para': anti-aircraft and fighters shoot it down, its loss is a
@@ -63157,13 +63157,19 @@ const PARA = {
   chute: { dead: 16, sink: 5.2, brake: 3.2, glide: 6, run: 8.5, slow: 2.2, turn: .9, hard: 8, hurt: .35 },
   ai: { mem: 300, open: 2, every: 45, first: 420, foes: 2, aaR: 1800, near: 450, mates: 400, base: 900, spot: 26 },
   me: { cd: 150, lead: 2.2, wait: 12 }, slope: .07, turn: .22, far: 1800, home: 1500, out: 5, tilt: -1.35,
+  res: { keep: [1, 2], win: 240, lost: 12, every: 30, foes: 5, link: 2.5, over: .3 },
   nm: { ww2: 'Fallschirmjäger', modern: 'paraquedistas' }
 };
-Object.assign(GEN.no, { pnone: 'Este lado não tem aviação de transporte', pcd: 'Os paraquedistas ainda se preparam para outro lançamento', plive: 'Já há um lançamento de paraquedistas em curso', paa: 'Antiaérea inimiga conhecida perto da zona de salto' });
+Object.assign(GEN.no, { ppop: 'Soldados demais em campo para um lançamento: o lado passou do teto de soldados, mesmo com a folga dos paraquedistas', pnone: 'Este lado não tem aviação de transporte', pcd: 'Os paraquedistas ainda se preparam para outro lançamento', plive: 'Já há um lançamento de paraquedistas em curso', paa: 'Antiaérea inimiga conhecida perto da zona de salto' });
 GEN.cn.para = 'lançamento de paraquedistas';
 const paraType = t => { const sd = S && S.E && isSide(t) ? S.E.sides[S.fac[t]] : null, id = sd && sd.para; return id && PLANES[id] && PLANES[id].era === S.era ? id : null; };
 const paraLive = t => (S.pdr || []).filter(d => d.t === t && !d.end && d.n > 0);
 const paraSpd = p => Math.max(PARA.spd[S.era] || 60, p.def.vs * 1.35);
+/* the soldiers' cap a drop answers to (cf-general-reservas): the side's whole budget, not the frame meter's cut of it (S.popK, gpMeter: on a
+   busy machine it falls under what is already in the field and no drop ever fitted, every one refused as 'pop'), with res.over of it on top
+   (at least PARA.pop squads): the other dispatchers fill the cap, and the paratroopers come first */
+const paraLim = t => { const k = S.popK || 1, m = popOf(t).men / k; return Math.round(m + Math.max(PARA.pop * SQUAD[S.era].length, m * PARA.res.over)); };
+const paraRoom = (t, n, men) => (men === undefined ? popUse(t).men : men) + n <= paraLim(t);
 const paraLead = (vh, ai) => vh * (ai ? PARA.ai.open * .8 : 1 / PARA.fall.k);   // m a jumper drifts on, world units, before he stops going with the plane
 /* ---- the command ---- */
 GC.para = { d: 'atk', f(t, c, by) {
@@ -63172,10 +63178,11 @@ GC.para = { d: 'atk', f(t, c, by) {
   if (!Number.isFinite(c.x) || !Number.isFinite(c.z) || !gMapOk(c.x, c.z)) return gBad('map');
   if (paraLive(t).length >= PARA.live) return gBad('plive');
   const A = S.pdrT || (S.pdrT = {}); if ((A[t] || -1e9) > S.t) return gBad('pcd');
-  const kits = SQUAD[S.era].slice(), P = popOf(t), U = popUse(t);
-  if (U.men + kits.length > P.men) return gBad('pop');
+  const kits = SQUAD[S.era].slice();
+  if (!paraRoom(t, kits.length)) return gBad('ppop');
   if (by === 'ai' && (pedFoes(t, c.x, c.z, PARA.ai.aaR, false, true) || paraRoute(t, c.x, c.z).n)) return gBad('paa');
-  if (!ecoUse(t, 'squad')) return gBad('res');
+  const w0 = PARA.drw; PARA.drw = 1; const got = ecoUse(t, 'squad'); PARA.drw = w0;   // the drop draws from the reserve held for it (paraHold)
+  if (!got) return gBad('res');
   const D = paraLaunch(t, id, Math.round(c.x), Math.round(c.z), { kits, by, why: typeof c.why === 'string' ? c.why.slice(0, 120) : '' });
   if (!D) { if (ecoSim()) ecoBack(t, 'squad', 1); return gBad('bug'); }
   A[t] = S.t + PARA.cd;
@@ -63187,14 +63194,14 @@ GC.para = { d: 'atk', f(t, c, by) {
    n: how many known guns within aaR of the way, d: the nearest } */
 function paraRoute(t, x, z) {
   const b = S.base[t], h0 = headTo(b.x, b.z, x, z), R = PARA.ai.aaR, aa = [];
-  for (const u of S.units) if (!u.dead && u.kind === 'aa' && foeSide(t, u.team) && S.t - sT(u, t) < PARA.ai.mem) { const ux = sX(u, t), uz = sZ(u, t); aa.push({ x: ux === undefined ? u.x : ux, z: uz === undefined ? u.z : uz }); }
+  for (const u of S.units) if (!u.dead && u.kind === 'aa' && foeSide(t, u.team) && S.t - sT(u, t) < PARA.ai.mem) { const ux = sX(u, t), uz = sZ(u, t); aa.push({ x: ux === undefined ? u.x : ux, z: uz === undefined ? u.z : uz, r: u.arms.reduce((r, a) => Math.max(r, (a.d && a.d.range) || 0), R) }); }
   const seg = (q, a, c) => { const ex = c.x - a.x, ez = c.z - a.z, L = ex * ex + ez * ez || 1, k = clamp(((q.x - a.x) * ex + (q.z - a.z) * ez) / L, 0, 1); return Math.hypot(q.x - a.x - ex * k, q.z - a.z - ez * k); };
   let best = null;
   for (const dh of PARA.dh) {
     const h = h0 + dh, d = Math.min(PARA.app, Math.hypot(x - b.x, z - b.z) * (dh ? .8 : 1));
     const A = { x: clamp(x - Math.cos(h) * d, 300, S.W - 300), z: clamp(z + Math.sin(h) * d, -S.HW + 300, S.HW - 300) }, T = { x, z };
-    let n = 0, dm = 1e9; for (const q of aa) { const e = Math.min(seg(q, b, A), seg(q, A, T)); dm = Math.min(dm, e); if (e < R) n++; }
-    const sc = n * 1e5 - Math.min(dm, R * 2) + Math.abs(dh) * 300;
+    let n = 0, nr = 0, dm = 1e9; for (const q of aa) { const e = Math.min(seg(q, b, A), seg(q, A, T)); dm = Math.min(dm, e); if (e < R) n++; if (e < q.r) nr++; }
+    const sc = n * 1e5 + nr * 1e4 - Math.min(dm, R * 2) + Math.abs(dh) * 300;   // nr: the known guns whose own reach (a modern SAM's 8.5 km) covers the way (cf-general-reservas)
     if (!best || sc < best.sc) best = { ax: A.x, az: A.z, h: headTo(A.x, A.z, x, z), n, d: dm, sc };
   }
   return best;
@@ -63416,20 +63423,58 @@ function paraAI(C) {
   const t = C.t;
   if ((S.net && !S.host) || !S.cq || S.cq.ph || !S.eco || !paraType(t) || genBy(t, 'atk') !== 'ai' || S.t < (C.paraT === undefined ? PARA.ai.first : C.paraT)) return;
   C.paraT = S.t + PARA.ai.every;
+  paraHold(t);   // the reserve it keeps for the drops, and whether it is losing (its men or its points)
   if (paraLive(t).length >= PARA.live || ((S.pdrT && S.pdrT[t]) || -1e9) > S.t) return;
   const d = S.eco.d[t]; if (ecoSim() && !(d.res.squad || []).length) return;
+  const lose = S.prs[t].lose, Ps = gPts();
   let best = null, bs = -1e9;
-  for (const P of gPts()) {
+  for (const P of Ps) {
     if (P.hold === t || S.base.some(b => Math.hypot(b.x - P.x, b.z - P.z) < PARA.ai.base)) continue;
     if (pedFoes(t, P.x, P.z, PARA.ai.aaR, false, true) || paraRoute(t, P.x, P.z).n) continue;   // known anti-aircraft there or on every way in: the transport would not come back
-    const foes = pedFoes(t, P.x, P.z, PARA.ai.near); if (foes > PARA.ai.foes) continue;
-    if (pedMates(t, P.x, P.z, PARA.ai.mates)) continue;   // its own are there already
-    const own = S.base[t], far = Math.hypot(P.x - own.x, P.z - own.z), sc = (P.hold >= 0 ? 3 : 2) - foes * 1.5 + far / 4000;
+    const foes = pedFoes(t, P.x, P.z, PARA.ai.near); if (foes > (lose ? PARA.res.foes : PARA.ai.foes)) continue;   // losing, it drops on a contested point too
+    if (pedMates(t, P.x, P.z, PARA.ai.mates) && !(lose && foes)) continue;   // its own are there already (losing: unless they are fighting for it)
+    const own = S.base[t], far = Math.hypot(P.x - own.x, P.z - own.z), link = P.links && P.links.some(i => Ps[i] && Ps[i].hold === t);   // a point linked to one it holds is one the drop can take (cqStep)
+    const sc = (P.hold >= 0 ? 3 : 2) - foes * (lose ? .6 : 1.5) + far / 4000 + (link ? PARA.res.link : 0);
     if (sc > bs) { bs = sc; best = P; }
   }
   if (!best) return;
-  genCmd(t, { c: 'para', x: Math.round(best.x), z: Math.round(best.z), why: (best.hold >= 0 ? 'ponto inimigo mal defendido: ' : 'ponto sem dono: ') + gName(best) }, 'ai');
+  genCmd(t, { c: 'para', x: Math.round(best.x), z: Math.round(best.z), why: (lose ? 'perdendo tropas, a reserva salta: ' : '') + (best.hold >= 0 ? 'ponto inimigo mal defendido: ' : 'ponto sem dono: ') + gName(best) }, 'ai');
 }
+/* the reserve for the drops (cf-general-reservas): a side with a paratroopers' transport and an AI general keeps res.keep[0] squads of its
+   reserve that no other dispatcher (columns, posts, rides, patrols, its own dispatch) may draw, res.keep[1] while it is losing: res.lost men
+   or more lost in the last res.win s, or fewer points than a rival. Only the drops (GC.para, a player's transport) and a person's map request (pedRun) draw them (PARA.drw), the
+   factory's reserve target (d.keep.squad) goes up by as many and the AI economy orders a squad first while it is short (ecoAI), so the front loses only the squads a drop takes. S.prs[t] { n, lose, h: [[t, lost]...] } */
+function paraHold(t) {
+  if (!S.cq || S.cq.ph || !S.eco || !ecoSim() || !isSide(t) || cqOut(t) || !paraType(t) || genBy(t, 'atk') !== 'ai') return 0;
+  const R = S.prs || (S.prs = {}), r = R[t] || (R[t] = { T: -1e9, h: [], n: 0, lose: 0 }), K = PARA.res;
+  if (S.t - r.T < 2) return r.n;
+  r.T = S.t;
+  const L = (S.cq.lost && S.cq.lost[t] && S.cq.lost[t][0]) || 0, P = gPts();
+  if (!r.h.length || S.t - r.h[r.h.length - 1][0] >= K.every) r.h.push([S.t, L]);
+  while (r.h.length > 1 && S.t - r.h[1][0] >= K.win) r.h.shift();
+  const pts = s => P.reduce((n, p) => n + (p.hold === s ? 1 : 0), 0), mine = pts(t);
+  r.lose = L - r.h[0][1] >= K.lost || sdsOf().some(s => s !== t && !cqOut(s) && pts(s) > mine) ? 1 : 0;
+  r.n = K.keep[r.lose];
+  if (S.eco.ctl[t] === 'ai') S.eco.d[t].keep.squad = (ECO.ai.res.squad || 0) + r.n;
+  return r.n;
+}
+ecoUse = (g => (t, k, k2) => {
+  if ((k === 'squad' || k2 === 'squad') && !PARA.drw && ecoSim() && !S.eco.open) {
+    const n = paraHold(t);
+    if (n && (S.eco.d[t].res.squad || []).length <= n) return false;   // held for the paratroopers
+  }
+  return g(t, k, k2);
+})(ecoUse);
+/* and the factory refills it first: a squad ordered ahead of the rest while the reserve and the queue are short of the hold (the unit
+   orders' scores never pick a squad over the aircraft otherwise) */
+ecoAI = (g => (t, V) => {
+  const out = g(t, V), n = paraHold(t);
+  if (n && V.hq.slots.inf && (V.res.squad || 0) + V.q.filter(q => q.k === 'squad').length < n && V.q.length < ECO.q && !out.some(c => c.c === 'make' && c.k === 'squad'))
+    out.unshift({ c: 'make', k: 'squad', n: 1, why: 'reserva para os paraquedistas', key: 'mkpara' });
+  return out;
+})(ecoAI);
+/* a person's request from the battle map (PED) may draw the squads held for the drops: the hold never makes a map request refuse */
+pedRun = (g => (P, k, x, z) => { const w0 = PARA.drw; PARA.drw = 1; try { return g(P, k, x, z); } finally { PARA.drw = w0; } })(pedRun);
 cmdReq = (g => C => { g(C); paraAI(C); })(cmdReq);
 /* what the side sees of it (the general's state, the MCP) */
 function paraView(t) {
@@ -63538,17 +63583,19 @@ const PTR = { sticks: { ju52: 1, c47: 2, c130: 2, il76: 3 }, cd: 90, fill: 4, ne
   jump: { plane: 150, heli: 150 }, rope: { agl: 30, v: 5, spd: 7, gap: .8 }, ask: 3, tries: 4,
   say: { empty: 'Sem paraquedistas a bordo: sobrevoe a sua pista, baixo, para embarcar outra esquadra', low: 'Baixo demais para o salto: suba acima de 150 m do chão',
     mid: 'Fast-rope: abaixo de 30 m do chão e quase parado. Salto: acima de 150 m', water: 'Aqui não: água', old: 'O servidor desta sala não conhece o transporte do jogador',
-    res: 'Sem esquadras na reserva, ou o lado está no limite de soldados', wait: 'Pedindo uma esquadra ao anfitrião…', mute: 'O anfitrião não respondeu ao pedido de esquadra' } };
+    res: 'Sem esquadras na reserva: a fábrica ainda não produziu outra', pop: 'O lado passou do teto de soldados em campo, mesmo com a folga dos paraquedistas', wait: 'Pedindo uma esquadra ao anfitrião…', mute: 'O anfitrião não respondeu ao pedido de esquadra' } };
 const ptrIs = p => !!p && !p.ai && (p.heli ? !!p.def.lift : !!p.def.para);
 const ptrCap = p => (p.heli ? 1 : PTR.sticks[p.id] || 1);   // squads aboard at most
 const ptrAboard = p => (p.heli ? (p.cargo ? p.cargo.length : 0) : (p.pcg || []).reduce((a, k) => a + k.length, 0));
 const ptrHave = p => (p.heli ? (p.cargo ? 1 : 0) : (p.pcg || []).length);
 /* host: up to n squads for side t, each drawn from its reserve, within its soldiers */
 function ptrGrant(t, n, seats) {
-  const out = [], P = popOf(t); let men = popUse(t).men;
+  const out = []; let men = popUse(t).men;
   for (let i = 0; i < n; i++) {
     const kits = SQUAD[S.era].slice(0, seats || 8);
-    if (men + kits.length > P.men || !ecoUse(t, 'squad')) break;
+    if (!paraRoom(t, kits.length, men)) { out.why = 'pop'; break; }   // the drops' own cap (paraLim)
+    const w0 = PARA.drw; PARA.drw = 1; const got = ecoUse(t, 'squad'); PARA.drw = w0;   // a player's drop draws from the reserve held for the drops too (paraHold)
+    if (!got) { out.why = 'res'; break; }
     men += kits.length; out.push(kits);
   }
   return out;
@@ -63557,11 +63604,11 @@ function ptrGrant(t, n, seats) {
 function ptrLoad(P) {
   const n = ptrCap(P) - ptrHave(P); if (n <= 0) return '';
   if (S.net && !S.host) { if (!Net.ptr) return 'old'; P.ptrAsk = S.t; P.ptrTry = 0; Net.send('pdl', { k: 0, w: n }); return 'wait'; }
-  return ptrTake(P, ptrGrant(P.team, n, P.heli ? LIFT.seats : 8));
+  const g = ptrGrant(P.team, n, P.heli ? LIFT.seats : 8); return ptrTake(P, g, g.why);
 }
-function ptrTake(P, g) {
+function ptrTake(P, g, why) {
   P.ptrAsk = 0;
-  if (!g.length) { P.pcgT = S.t - PTR.cd + 20; return 'res'; }   // nothing: it asks again in 20 s over the field
+  if (!g.length) { P.pcgT = S.t - PTR.cd + 20; return why === 'pop' ? 'pop' : 'res'; }   // which limit: no squad in the reserve, or the side's soldiers   // nothing: it asks again in 20 s over the field
   if (P.heli) P.cargo = g[0].slice(0, LIFT.seats); else (P.pcg || (P.pcg = [])).push(...g.slice(0, ptrCap(P) - ptrHave(P)));
   P.pcgT = S.t; P.ptrN = ptrAboard(P);
   return 'in';
@@ -63692,11 +63739,11 @@ Net.rx.pdl = m => {
   if (!S || !S.net) return;
   if (!S.host) {
     const P = S.my, E = P && INF[S.era][S.fac[P.team]];
-    if (m.k === 0 && Array.isArray(m.n) && ptrIs(P) && !P.dead && P.ptrAsk) ptrSay(P, ptrTake(P, m.n.filter(Array.isArray).map(k => k.filter(i => Number.isInteger(i) && E[i])).filter(k => k.length)));
+    if (m.k === 0 && Array.isArray(m.n) && ptrIs(P) && !P.dead && P.ptrAsk) ptrSay(P, ptrTake(P, m.n.filter(Array.isArray).map(k => k.filter(i => Number.isInteger(i) && E[i])).filter(k => k.length), m.y));
     return;
   }
   const g = Net.ghosts.get(m.from); if (!g || g.dead || g.gone || !(g.heli ? g.def.lift : g.def.para)) return;
-  if (m.k === 0) Net.send('pdl', { to: m.from, k: 0, n: ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8) });
+  if (m.k === 0) { const n = ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8); Net.send('pdl', Object.assign({ to: m.from, k: 0, n }, n.why && { y: n.why })); }   // y: which limit, when none came
   else if (m.k === 1 && Array.isArray(m.n)) { const E = INF[S.era][S.fac[g.team]], kits = m.n.filter(k => Number.isInteger(k) && E[k]).slice(0, 8); if (kits.length) ptrStick(g.team, kits, g, m.r === 1); }
 };
 /* ---------- camouflage nets (CNET, cf-pol2-camuflagem: P31) ----------

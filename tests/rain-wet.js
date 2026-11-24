@@ -35,8 +35,16 @@ console.log('-- the shaders read it, and are given it --');
   ok(/eB \*= \( 1\.0 - 0\.28 \* eWk \)/.test(th) && /float ePud = /.test(th), 'the ground darkens with it and holds puddles where it is flat');
   ok(/material\.specularShininess = mix\( material\.specularShininess, 48\.0, eWk \)/.test(th), 'and glints sharper');
   ok(/totalEmissiveRadiance \+= fogColor \* pow\( 1\.0 - clamp\( dot\( normalize\( cameraPosition - vEnvW \)/.test(th) && /#ifdef USE_FOG/.test(th), 'and mirrors the sky at a grazing look (a Phong material: cameraPosition is given)');
-  ok(/#if ENV_Q == 0[\s\S]*\* \( 1\.0 - 0\.28 \* eWk \);\n#else/.test(th), 'on Baixa it darkens too');
-  const rh = html.slice(html.indexOf('function envRoadHook(sh, u) {'), html.indexOf('/* the sky: the horizon'));
+  {
+    const ga = html.indexOf('const GRP = {'), gb = html.indexOf('/* the painted blade (GRP)', ga);
+    const tctx = vm.createContext({ GFX: { lv: 0 }, GFXQ: [{ det: 0 }], ENV: { tu: {} }, VU: { uTime: { value: 0 }, uWind: { value: .5 } }, ENVU: { sun: 'sun' } });
+    vm.runInContext(html.slice(ga, gb) + th + '\n;globalThis.$ = s => eval(s);', tctx, { filename: 'terrain.js' });
+    const sh = { uniforms: {}, vertexShader: '#include <begin_vertex>\n', fragmentShader: 'void main() {\n#include <color_fragment>\n}' };
+    tctx.$('envTerrainHook')(sh);
+    const q0 = (sh.fragmentShader.split('#if ENV_Q == 0')[1] || '').split('#else')[0];
+    ok(/#define ENV_Q 0/.test(sh.fragmentShader) && /\* \( 1\.0 - 0\.28 \* eWk \)/.test(q0), 'on Baixa it darkens too');
+  }
+  const rh = html.slice(html.indexOf('function envRoadHook('), html.indexOf('/* the sky: the horizon'));
   ok(/uWet: ENV\.tu\.uWet \|\| \{ value: 0 \}/.test(rh) && /uniform float uWet;/.test(rh), 'the roads declare it and are given it');
   ok(/\* \( 1\.0 - 0\.32 \* uWet \* \( 1\.0 - 0\.3 \* rut \) \)/.test(rh) && /fogColor \* uWet \*/.test(rh) && !/cameraPosition/.test(rh.split('#include <emissivemap_fragment>')[1] || ''), 'and darken and sheen with it (by vRdD: a Lambert material has no cameraPosition)');
   ok(/if \(ENV\.tu && ENV\.tu\.uWet\) ENV\.tu\.uWet\.value = envWet\(clamp\(W\.r, 0, 1\)\);/.test(html), 'set each frame from the rain');

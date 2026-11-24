@@ -1,6 +1,7 @@
 'use strict';
 /* the planes' propeller blades and national markings (PROP, INSIG; cf-pol-modelos) against the planes: every plane named there exists and is
-   drawn from its numbers (a textured model, mdl.glb, keeps its own look), each plane with a propeller (mdl.prop) or propeller discs on its
+   drawn from its numbers or is a textured model (mdl.glb, which keeps its own look: the tables are its fallback for when the GLB does not
+   read), each plane with a propeller (mdl.prop) or propeller discs on its
    nacelles (mdl.nac) has its blades counted, each marking is one the page draws, and each side wears its own: the Luftwaffe the
    Balkenkreuz, the Allies the roundel or the star, Russia the red star. The rounded wing tips (WTIP, wingRound): only on the propeller
    planes, only on an outer panel (the Stuka's inner gull panel keeps its square end, which meets the outer one), and within the square
@@ -20,13 +21,13 @@ const drawn = html.slice(b, html.indexOf('function insigQuads', b)), kinds = ['b
 
 console.log('-- propellers --');
 for (const id in PLANES) {
-  const m = PLANES[id].mdl; if (m.glb || HELIS[id]) continue;
+  const m = PLANES[id].mdl; if (HELIS[id]) continue;
   const props = !!m.prop || (m.nac || []).some(n => n[5]);
   if (props) ok(PROP.blades[id] >= 2, id + ' (' + PLANES[id].name + '): ' + PROP.blades[id] + ' blades a propeller');
 }
-ok(Object.keys(PROP.blades).every(id => PLANES[id] && !PLANES[id].mdl.glb && (PLANES[id].mdl.prop || (PLANES[id].mdl.nac || []).some(n => n[5]))), 'every plane with blades counted has a propeller');
+ok(Object.keys(PROP.blades).every(id => PLANES[id] && (PLANES[id].mdl.prop || (PLANES[id].mdl.nac || []).some(n => n[5]))), 'every plane with blades counted has a propeller');
 console.log('-- markings --');
-ok(Object.keys(INSIG.kind).every(id => PLANES[id] && !PLANES[id].mdl.glb && (!HELIS[id] || HELIS[id].mdl.boom)), 'every plane or helicopter with a marking is drawn from its numbers (a helicopter wears it on its tail boom): ' + Object.keys(INSIG.kind).join(' '));
+ok(Object.keys(INSIG.kind).every(id => PLANES[id] && (!HELIS[id] || HELIS[id].mdl.boom)), 'every plane or helicopter with a marking exists, drawn from its numbers or as the fallback of a textured model (a helicopter wears it on its tail boom): ' + Object.keys(INSIG.kind).join(' '));
 ok(Object.keys(HELIS).every(id => INSIG.kind[id]), 'every helicopter wears one');
 ok(kinds.every(k => drawn.includes("k === '" + k + "'")) && Object.values(INSIG.kind).every(k => kinds.includes(k)), 'every marking is one the page draws: ' + kinds.join(' '));
 const by = {}; for (const id in INSIG.kind) { const d = PLANES[id], s = ERAS[d.era].sides[d.side].name; (by[s] || (by[s] = new Set())).add(INSIG.kind[id]); }
@@ -39,7 +40,7 @@ console.log('-- wing tips --');
 const WTIP = ctx.$('typeof WTIP === "undefined" ? null : WTIP');
 if (WTIP) {
   const wingOuter = ctx.$('wingOuter'), wingRound = ctx.$('wingRound'), near = (x, y) => Math.abs(x - y) < 1e-6;
-  ok(Object.keys(WTIP).every(id => PROP.blades[id] && PLANES[id] && !PLANES[id].mdl.glb && !HELIS[id]), 'only the propeller planes drawn from their numbers have rounded tips: ' + Object.keys(WTIP).join(' '));
+  ok(Object.keys(WTIP).every(id => PROP.blades[id] && PLANES[id] && !HELIS[id]), 'only the propeller planes have rounded tips (on their numbers, the fallback of a textured model): ' + Object.keys(WTIP).join(' '));
   ok(Object.keys(PLANES).every(id => { const W = PLANES[id].mdl.wings; return !W || wingOuter(PLANES[id].mdl, W[W.length - 1]); }), 'every tailplane is an outer panel');
   const st = PLANES.stuka && PLANES.stuka.mdl;
   if (st) ok(st.wings.length === 3 && !wingOuter(st, st.wings[0]) && wingOuter(st, st.wings[1]), 'the Stuka\'s inner gull panel is not rounded, its outer panel is');

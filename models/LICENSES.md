@@ -2,6 +2,8 @@
 
 Os modelos de `models/pack/` (o pack de modelos, carregado pela página em `/models/pack/`) saem de fontes livres pelo `tools/pack/build.js`, que os converte, corta em partes e recolore. Só fontes que permitem redistribuir: CC0 (domínio público) e CC-BY (com crédito, abaixo). Os aviões de `models/` (`f22.glb`, `a10.glb`, `b2.glb`, `su25.glb`, `su57.glb` e `tu160.glb`) são do Hernani (modelos próprios do projeto).
 
+Os seis aviões de 1944 também são do Hernani: `stuka.glb` (Ju 87 D), `bf109.glb` (Bf 109 G-6), `spit.glb` (Spitfire Mk IX), `p47.glb` (P-47D Thunderbolt), `he177.glb` (He 177 A-5 Greif) e `b17.glb` (B-17G Flying Fortress). Ele os gerou no Monumentum Studio a partir de fotos (a foto da frente, a geração no Tripo e a otimização). Para o jogo, cada um foi girado para +x e posto no comprimento do avião de antes. Também tiveram cortados o trem de pouso recolhível, a bequilha e as cargas do próprio modelo (o jogo pendura as dele; o Stuka fica com o trem fixo). Cada um foi separado nas partes de dano, com as pás de cada hélice num nó próprio em volta do cubo, e as texturas foram reduzidas: cor base em JPEG 1024 e normal map em JPEG 512, sem o mapa ORM.
+
 | Arquivo(s) | Fonte | Autor | Licença |
 | --- | --- | --- | --- |
 | `tk_pz4.glb` | [Tank](https://poly.pizza/m/FA5daiyZQq) | Quaternius | CC0 1.0 |

@@ -3,7 +3,8 @@
    with the page's readGlb, the same nodes the procedural model files under the damage parts, nose forward along +x, the nozzle marks where
    mdl.noz puts the hit boxes and the flames, one a nozzle (a jet with pods, mdl.eng, has neither: the pods hold the meshes), each part
    inside its boxes, the length the game reads, and a size kept small for the page. A flying wing (the B-2) files its drag rudders at the
-   tips as the fins */
+   tips as the fins. A propeller plane (d.prop) has neither nozzles nor flames: its blades are nodes of their own, prop at mdl.prop,
+   propL/propR at the pods, propLo/propRo out on the wing, each about its hub and square to x, so that it turns true */
 const fs = require('fs'), path = require('path'), H = require('./harness'), { ok, done } = H;
 const ctx = H.load(), $ = ctx.$, PLANES = $('PLANES'), readGlb = $('readGlb'), MS = $('MS');
 const html = fs.readFileSync(H.PAGE, 'utf8'), DIR = path.join(H.ROOT, 'models');
@@ -27,22 +28,23 @@ for (const id in PLANES) {
     for (const v of n.idx) if (v >= n.pos.length / 3) bad++;
     for (const v of n.pos) if (!Number.isFinite(v)) bad++;
     if (!n.nor || n.nor.length !== n.pos.length || !n.uv || n.uv.length / 2 !== n.pos.length / 3) bad++;
-    each(n, (x, y, z) => { const p = [x, y, z]; for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } });
+    if (!/^prop/.test(n.name)) each(n, (x, y, z) => { const p = [x, y, z]; for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], p[i]); hi[i] = Math.max(hi[i], p[i]); } });   // the blades reach past the fin as they turn
   }
   ok(!bad, 'every index inside its mesh, every number finite, a normal and a uv for each vertex');
   ok(tris < 5000, 'triangles: ' + tris);
   ok(G.map >= 0 && G.images[G.map] && /^image\/(jpeg|png)$/.test(G.images[G.map].mime), 'a base colour texture (' + (G.images[G.map] || {}).mime + ')');
 
   /* the meshes the damage look reaches: a part by its id or through vis, the two-mesh groups by index */
-  const vis = new Set(d.parts.map(p => (p.vis ? p.vis[0] : p.id))), names = meshes.map(n => n.name.replace(/^(stab|fin)[LR]$/, '$1'));
-  const want = ['hull', 'pilot', 'wingL', 'wingR', 'stab', 'fin', 'engL', 'engR'];
-  ok(want.every(w => names.includes(w)) && names.every(w => vis.has(w) || w === 'stab' || w === 'fin'), 'nodes for every part the procedural model draws: ' + [...new Set(names)].join(' '));
+  const vis = new Set(d.parts.map(p => (p.vis ? p.vis[0] : p.id))), names = meshes.map(n => n.name.replace(/^(stab|fin)[LR]$/, '$1').replace(/^prop([LR]?)o?$/, 'eng$1'));
+  const want = ['hull', 'pilot', 'wingL', 'wingR', 'stab', 'fin'].concat(d.mdl.prop ? ['eng'] : ['engL', 'engR']);   // gear: the Stuka's fixed legs, no part of their own
+  ok(want.every(w => names.includes(w)) && names.every(w => vis.has(w) || w === 'stab' || w === 'fin' || w === 'gear'), 'nodes for every part the procedural model draws: ' + [...new Set(names)].join(' '));
   ok(G.nodes.findIndex(n => n.name === 'stabR') < G.nodes.findIndex(n => n.name === 'stabL'), 'the right tailplane first, as vis [stab, 0] reads it');
   ok(N.wingL.t[2] < 0 && N.wingR.t[2] > 0 && Math.abs(Math.abs(N.wingR.t[2]) - d.mdl.wings[0].z0) < .05, 'each wing turns about its root (mdl z0 ' + d.mdl.wings[0].z0 + '), so a lost tip shortens it from the end');
 
   /* frame: the nose ahead, the fin up, the right wing to +z */
   const ctr = n => { let s = [0, 0, 0], c = 0; each(n, (x, y, z) => { s[0] += x; s[1] += y; s[2] += z; c++; }); return s.map(v => v / c); };
-  ok(ctr(N.pilot)[0] > ctr(N.hull)[0] + 2 && ctr(N.pilot)[1] > .5, 'the canopy ahead of the fuselage\'s middle and above it: nose along +x');
+  if (N.eng) ok(ctr(N.eng)[0] > ctr(N.pilot)[0] + 1.5 && ctr(N.pilot)[0] > Math.max(ctr(N.finL)[0], ctr(N.finR)[0]) + 2 && ctr(N.pilot)[1] > .5, 'the engine ahead of the canopy, the canopy ahead of the fin and above the middle: nose along +x');
+  else ok(ctr(N.pilot)[0] > ctr(N.hull)[0] + 2 && ctr(N.pilot)[1] > .5, 'the canopy ahead of the fuselage\'s middle and above it: nose along +x');
   /* a flying wing (the B-2) has no fin: its yaw comes from the split drag rudders at the tips, filed as the fins (mdl.fin.z out past the wing's
      middle), which lie in the wing; its top is the hump of the cockpit, its bottom the belly of the thick centre body (mdl.fus, sy) */
   const w0 = d.mdl.wings[0], tips = Math.min(...d.mdl.fin.z.map(Math.abs)) > w0.z0 + w0.span / 2;
@@ -50,10 +52,24 @@ for (const id in PLANES) {
     : Math.min(ctr(N.finL)[1], ctr(N.finR)[1]) > Math.max(ctr(N.stabL)[1], ctr(N.stabR)[1]) + .3), 'right wing at +z, ' + (tips ? 'the drag rudders out at the tips' : 'the fins above the tailplanes'));
   ok(Math.abs(hi[0] - lo[0] - d.len) / d.len < .02, 'length ' + (hi[0] - lo[0]).toFixed(2) + ' against the ' + d.len.toFixed(2) + ' of mdl.fus (the hit radius, the missile fuse and the shadow read it)');
   const top = tips ? Math.max(...d.mdl.fus.map(f => f[1])) * d.mdl.sy : +(Math.max(...d.mdl.fin.pts.map(p => p[1])) * Math.cos(d.mdl.fin.cant || 0)).toFixed(2);   // a canted fin stands lower
-  ok(Math.abs(hi[2] + lo[2]) < .1 && Math.abs(hi[1] - top) < .3 && lo[1] > -Math.max(2, Math.max(...d.mdl.fus.map(f => f[1])) * d.mdl.sy + .5), 'symmetric, upright: z ' + lo[2].toFixed(2) + '..' + hi[2].toFixed(2) + ', y ' + lo[1].toFixed(2) + '..' + hi[1].toFixed(2) + ' (nothing far below the hull box), the top at the ' + top + ' of ' + (tips ? 'mdl.fus' : 'mdl.fin'));
+  ok(Math.abs(hi[2] + lo[2]) < .1 && Math.abs(hi[1] - top) < .3 && lo[1] > -Math.max(d.mdl.gear ? 3 : 2, Math.max(...d.mdl.fus.map(f => f[1])) * d.mdl.sy + .5), 'symmetric, upright: z ' + lo[2].toFixed(2) + '..' + hi[2].toFixed(2) + ', y ' + lo[1].toFixed(2) + '..' + hi[1].toFixed(2) + ' (nothing far below the hull box but a fixed gear, mdl.gear), the top at the ' + top + ' of ' + (tips ? 'mdl.fus' : 'mdl.fin'));
 
+  /* the propellers: a node each about its hub, its blades square to x (they turn about x), where the procedural model puts its blades:
+     the nose's at mdl.prop, the pods' at mdl.nac (a propeller only, by mdl.eng), the outer ones at mdl.nac too */
+  if (d.prop) {
+    const P = G.nodes.filter(n => /^prop/.test(n.name)), sq = n => { let lo = 1e9, hi = -1e9, r = 0; for (let i = 0; i < n.pos.length; i += 3) { lo = Math.min(lo, n.pos[i]); hi = Math.max(hi, n.pos[i]); r = Math.max(r, Math.hypot(n.pos[i + 1], n.pos[i + 2])); } return [hi - lo, r]; };
+    const hubs = d.mdl.prop ? [['prop', d.mdl.prop[0], null, 0]] : (d.mdl.nac || []).filter(n => n[5]).map(n => [Math.abs(n[2] - d.mdl.eng[2]) < .3 ? 'propR' : 'propRo', null, n[1], n[2]]);
+    ok(P.length === (d.mdl.prop ? 1 : 2 * hubs.length) && !G.nodes.some(n => /^noz/.test(n.name)) && !d.Tab, 'propellers, no nozzle marks and no afterburner: ' + P.map(n => n.name).join(' '));
+    for (const [k, x, y, z] of hubs) {
+      const n = N[k], [dx, r] = n ? sq(n) : [9, 0], m = n && N[k.replace('R', 'L')];
+      ok(n && m && (y === null ? Math.abs(n.t[1]) < .7 : Math.abs(n.t[1] - y) < .35) && Math.abs(n.t[2] - z) < .35 && (x === null || Math.abs(n.t[0] - x) < .05) && Math.abs(n.t[2] + m.t[2]) < .1, k + ' at ' + (n && n.t.map(v => v.toFixed(2)).join(', ')) + ', the procedural blades at ' + [x === null ? '-' : x, y === null ? '(the nose)' : y, z].join(', '));
+      ok(n && dx < r * .5 && r > .8, k + ': blades ' + r.toFixed(2) + ' long, ' + dx.toFixed(2) + ' deep along x');
+    }
+    if (d.mdl.prop) ok(Math.abs(sq(N.prop)[1] - d.mdl.prop[1]) < .1, 'the blades as long as mdl.prop: ' + d.mdl.prop[1]);
+  }
   /* the exhaust: a mark per nozzle, where mdl.noz has it; pods (mdl.eng) carry no marks, and with no afterburner (Tab) no flames either */
-  if (d.mdl.eng) {
+  if (d.mdl.prop) ok(!d.mdl.noz && !d.mdl.eng, 'one engine in the nose: no pods, no nozzles');
+  else if (d.mdl.eng) {
     ok(!d.mdl.noz && !d.Tab && !G.nodes.some(n => /^noz/.test(n.name)), 'pods, no nozzle marks and no afterburner: no flames');
     for (const s of ['L', 'R']) {
       const c = ctr(N['eng' + s]), e = d.mdl.eng, z = s === 'R' ? e[2] : -e[2];
@@ -73,10 +89,10 @@ for (const id in PLANES) {
   /* hit boxes (metres, times MS) around the meshes they stand for */
   const P = {}; for (const p of d.parts) P[p.id] = p.box;
   const share = (n, boxes, e) => { let a = 0, c = 0; each(n, (x, y, z) => { c++; if (boxes.some(b => inBox(b, x * MS, y * MS, z * MS, e))) a++; }); return a / c; };
-  const checks = [['hull', ['hull', 'radar', 'pilot', 'inst', 'gun', 'noz', 'jetL', 'jetR']], ['pilot', ['pilot']], ['wingL', ['wingL', 'tipL']], ['wingR', ['wingR', 'tipR']],
-    ['stabL', ['stabL']], ['stabR', ['stabR']], ['finL', ['fin']], ['finR', ['fin']], ['engL', ['jetL', 'noz']], ['engR', ['jetR', 'noz']]];
+  const checks = [['hull', ['hull', 'radar', 'pilot', 'inst', 'gun', 'noz', 'jetL', 'jetR', 'eng', 'oil', 'cool']], ['pilot', ['pilot']], ['wingL', ['wingL', 'tipL']], ['wingR', ['wingR', 'tipR']],
+    ['stabL', ['stabL']], ['stabR', ['stabR']], ['finL', ['fin']], ['finR', ['fin']], ['engL', ['jetL', 'noz']], ['engR', ['jetR', 'noz']], ['eng', ['eng', 'prop', 'oil', 'cool']]].filter(([n]) => N[n]);
   /* the fins lean out further than the fin box of planeBoxes reaches (fz + 1 across), on this model as on the procedural one */
-  for (const [n, b] of checks) { const f = share(N[n], b.map(i => P[i]), .6), w = /^fin/.test(n) ? .7 : .85; ok(f > w, n + ': ' + (f * 100).toFixed(0) + '% of it inside ' + b.join('/')); }
+  for (const [n, b] of checks) { const f = share(N[n], b.map(i => P[i]).filter(Boolean), .6), w = /^fin/.test(n) ? .7 : .85; ok(f > w, n + ': ' + (f * 100).toFixed(0) + '% of it inside ' + b.join('/')); }
   /* the cockpit eye (fpJet, from mdl.can) under the glass: straight up from it, the canopy's surface, not the fuselage's */
   const ex = d.mdl.can[0], ey = d.mdl.can[1] + d.mdl.can[3] * .12, up = (n, x, z) => {
     let best = 1e9;

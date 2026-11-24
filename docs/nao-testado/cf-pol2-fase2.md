@@ -36,3 +36,14 @@ Falta:
 - Online: o gesto do jogador remoto não foi testado. `m.nk` (segurando) é só local, então os outros não veem o braço erguido enquanto ele segura; o cozinhar vai no lançamento (`P.nCook`, como o da IA já ia).
 - Controle físico: o botão de granada do perfil segurado; sem controle aqui.
 - O arco ignora prédios e árvores (para no chão), como a granada antes de quicar.
+
+## P22 e P23 — menu de pausa e opções
+
+Testado: `tests/pausa.js` (`setPause` não desiste mais online e abre o menu; o menu não para a sala; continuar, opções, controles e sair; com ele aberto, só P e Esc chegam ao jogo, pelo filtro na fase de captura; Esc solta o mouse e isso abre o menu; a sensibilidade vale na mira e o som começa no volume escolhido; o que foi guardado volta, com a sensibilidade presa entre 0,25× e 3×; os controles deslizantes gravam; `sndGain` fica no bloco do som, que `tests/som.js` roda sozinho) e no navegador (Chromium sem janela, GPU real): o menu abre com a batalha andando (3,5 s em 3,5 s), W e 6 não fazem nada com ele aberto, Opções e Controles abrem dentro dele, os deslizantes gravam no `localStorage`, Continuar fecha; o chip Opções do hangar abre o mesmo painel.
+
+Falta:
+- Pointer lock real: no Chromium sem janela, uma tecla não solta o mouse; o menu foi aberto por `setPause(true)`, o caminho que o `pointerlockchange` chama.
+- O volume e o som ouvidos: o navegador de teste não tem áudio.
+- "Sair da partida" não foi clicado no navegador (o teste confere que o botão existe e chama a saída do jogo).
+- Controle físico: o botão de pausa do perfil.
+- A qualidade dos gráficos escolhida no menu vale a partir da próxima partida, como no hangar; não foi trocada durante uma partida.

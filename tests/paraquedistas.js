@@ -12,10 +12,9 @@ C.run(20, null, 1 / 20);
 const t = P.team, foe = 1 - t, gen = c => C.genCmd(t, c, 'sys');
 const fly = (secs, each) => C.run(secs, each, 1 / 20);
 
-/* the transports: one a side, of the era, never the player's to pick */
+/* the transports: one a side, of the era (a player flies them too since cf-transporte-jogador: tests/transporte-jogador.js) */
 ok($('paraType')(0) === 'ju52' && $('paraType')(1) === 'c47', 'ww2: the Luftwaffe drops from the Ju 52, the Allies from the C-47');
-ok(/const fleetIds = [^\n]*!DEFS\[k\]\[id\]\.para/.test(require('fs').readFileSync(H.PAGE, 'utf8')), 'no transport in the hangar\'s planes (fleetIds, the view)');
-ok(!$('canSwap')('plane', $('paraType')(t)), 'nor in the swap');
+ok($('canSwap')('plane', $('paraType')(t)), 'the side\'s own is a player\'s to swap to');
 
 /* a point the side does not hold, far from both bases */
 const pts = $('gPts')().filter(p => p.hold !== t && S.base.every(b => Math.hypot(b.x - p.x, b.z - p.z) > 2000));

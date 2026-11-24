@@ -90,11 +90,11 @@ console.log('door guns');
 }
 console.log('a squad in and out of a transport');
 for (const id of ['uh60', 'mi8']) {
-  const team = HELIS[id].side; S = C.sandbox('modern'); S.fac = [team, 1 - team]; S.cls = 'heli'; S.model = id; S.pref = true; const p = C.spawnPlayer(); p.inv = 0;
+  const team = HELIS[id].side; S = C.sandbox('modern'); S.fac = [team, 1 - team]; S.cls = 'heli'; S.model = id; S.pref = true; const p = C.spawnPlayer(); p.inv = 0; p.cargo = null;   // it takes off loaded from the reserve (cf-transporte-jogador): empty, to embark
   const at = ahead(p, 20, 1.57), sq = C.addSquad(0, at.x, at.z, 0, 0), n = sq.men.length, press = () => { S.input.smoke = true; C.run(.05); S.input.smoke = false; C.run(.05); };
   C.run(1); press();
   ok(p.cargo && p.cargo.length === n && S.men.length === 0 && S.squads.length === 0, id + ' landed beside a squad: G takes its ' + n + ' men aboard, and they are off the field');
-  const y0 = p.y, m0 = p.def.m; S.input.thrUp = true; C.run(3); S.input.thrUp = false; press(); ok(p.cargo && p.cargo.length === n, 'in the air G does nothing (' + S.liftMsg.why + ')');
+  const y0 = p.y, m0 = p.def.m; S.input.thrUp = true; C.run(8); S.input.thrUp = false; press(); ok(p.cargo && p.cargo.length === n, 'in the air, too high for the fast-rope and too low to jump, G keeps them (' + S.liftMsg.why + ', ' + Math.round(p.y - C.hgt(p.x, p.z)) + ' m)');
   S.aim.p = -.25; C.run(12); S.aim.p = .2; C.run(5); S.aim.p = 0; S.input.brake = true; C.run(.1); S.input.brake = false; C.run(6);
   let tv = 0; C.run(40, () => { S.input.thrDown = true; if (p.land) return false; tv = -p.v.y; }); S.input.thrDown = false; C.run(2);
   const far = Math.hypot(p.x - at.x, p.z - at.z); press(); C.run(1);

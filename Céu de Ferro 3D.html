@@ -28924,8 +28924,9 @@ const PLANES = {
     mdl: { glb: 'b17', fus: [[-8, .1], [-6.45, 1.08], [-3.35, .9], [-.25, 1.28], [2.85, 1.12], [5.17, 1.05], [6.73, 1.17], [7.5, .1]], sy: 1, sz: .7, can: [3.74, .5, 2.25, .45, .41],
       wings: [{ z0: .85, y: -.64, span: 10.61, a: [4.7, -1.02, 2.09, .54], dih: .04, t: .35 }, { z0: .23, y: -.2, span: 4.28, a: [-4.3, -7.56, -5.51, -6.2], dih: 0 }],
       fin: { pts: [[-4.82, .41], [-6.37, 3.18], [-7.24, 3.18], [-7.4, .41]], z: [0] }, eng: [3.58, -.6, 2.12, .59, 5.28], nac: [[3.58, -.47, 2.16, 0, 5.28, 1.49], [3.2, -.42, 4.76, .5, 2.8, 1.66]] } },
-  /* the paratroopers' transports (PARA, cf-paraquedistas): para 1, flown only by the AI (the side's drops and the player's jump); never in the
-     hangar, the swap or the requisition. ERAS side.para names the side's own. They carry nothing to drop but men, and no gun */
+  /* the paratroopers' transports (PARA, cf-paraquedistas): para 1, flown by the AI (the side's drops and the player's jump) and by a player
+     (PTR, cf-transporte-jogador: in the hangar and the swap, loaded with sticks of paratroopers B drops); never in the requisition.
+     ERAS side.para names the side's own. They carry nothing to drop but men, and no gun */
   ju52: { name: 'Ju 52/3m', era: 'ww2', side: 0, role: 'Transporte de paraquedistas', para: 1, prop: 1,
     m: 10500, S: 110.5, P: 1620e3, vmax: 76, clmax: 1.7, as: .27, k: .06, gmax: 3, pr: .4, rr: .6, hp: 280, brake: .05,
     c: 0x5b6650, c2: 0x454d3d,
@@ -31271,7 +31272,7 @@ function playerDown(by, left) {
    and the aim all follow from it there. swapTo() changes it in mid-match, to anything of the era on the player's own side, and says '' or why
    not. Dead, the next vehicle is the new one. Alive, the current one is abandoned, a loss like any other: a reserve solo (none left, no swap),
    a death online, and the kill of whoever hit it in the last DMG.credit s. S.hold keeps a dead player out while the choice is being made */
-const canSwap = (cls, model) => { const d = DEFS[cls] && DEFS[cls][model]; return !!d && !d.para && d.era === S.era && d.side === S.fac[S.me]; };
+const canSwap = (cls, model) => { const d = DEFS[cls] && DEFS[cls][model]; return !!d && d.era === S.era && d.side === S.fac[S.me]; };   // a paratroopers' transport too (PTR)
 function swapTo(cls, model) {
   const P = S.my;
   if (S.demo || S.over || !P || !canSwap(cls, model)) return 'no';
@@ -37511,6 +37512,11 @@ const PARTS_HELI = {
   gunner: { lab: 'artilheiro', hp: .25, fx: { slew: [.3, .6, 1], disp: [.5, 1, 2] } }
 };
 PARTS.heli = PARTS_HELI; DEFS.heli = HELIS;
+/* the Insurgents' one aircraft (PTR, cf-transporte-jogador): a Mi-8T taken from a government's airbase, flown by a player only (no side.lift:
+   the AI fields none), loaded with a squad it drops by fast-rope or from altitude, or lands to let out; a few unguided rockets */
+HELIS.mi8i = Object.assign({}, HELIS.mi8, { name: 'Mi-8T capturado', side: 2, role: 'Transporte capturado', hp: 100, flares: 0, c: 0x8a7f62, c2: 0x5c5440,
+  gun: Object.assign({}, HELIS.mi8.gun, { name: 'PKM de porta', ammo: 1200 }), ord: [{ k: 'rocket', name: 'S-5', n: 16, dmg: 70, r: 16 }, null],
+  note: 'Um Mi-8 tomado numa base aérea: velho, sem flares, mas leva uma esquadra para onde ela não chegaria pela estrada.' });
 Object.assign(ERAS.modern.sides[0], { heli: 'ah64', lift: 'uh60' }); Object.assign(ERAS.modern.sides[1], { heli: 'mi28', lift: 'mi8' });
 function heliBoxes(d) {
   const m = d.mdl, f = m.fus, n = f.length, r = Math.max(...f.map(s => s[1])), c = m.can, e = m.eng, R = d.R / MS, t = m.tr, b = m.boom, br = Math.max(b[2], b[3]) + .1, q = m.pods && m.pods[0], g = d.gun.tur;
@@ -42589,7 +42595,7 @@ function manRides(C) {
    wave (push: the assaults keep it), and the line's posts (line, wood), which stand nearest the enemy: a manoeuvre is mostly the work of the troops at the front (the
    others are kilometres back), and its op gives the squad back to its post when it ends (opFree) */
 const MANJ = { held: 1, road: 1, line: 1, wood: 1 };
-const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw' && q.ord.k !== 'build');   // nor a squad on its way to build a supply base (CGN)
+const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw' && q.ord.k !== 'build' && !paraKeep(q));   // nor a squad on its way to build a supply base (CGN), nor a dropped one before its point is taken (PTR)
 /* the men of a squad still standing, counted now (q.live is brought up to date by the squad's own think, half a second late): every kind measures its losses by it */
 const manLive = q => q.men.reduce((a, m) => a + (m.dead ? 0 : 1), 0);
 /* 'Flanqueio encerrado', 'Finta encerrada': the generic words of an op's end agree with the kind's name */
@@ -45382,7 +45388,7 @@ cqFlip = (f => (p, was) => { f(p, was); if (S.eco) ecoPtFlip(p); })(cqFlip);
 function ecoMe() {
   if (!ECO.me || !ecoGate()) return false;
   const c = S.cls, m = S.model, D = DEFS[c] && DEFS[c][m]; if (!D) return false;
-  const k = c === 'plane' ? (D.strat ? 'strat' : S.E.sides[S.fac[S.me]].cas === m ? 'cas' : 'fighter') : c === 'heli' ? (D.atk ? 'heli' : 'lift') : c === 'trn' ? rqKind(c, m) : c === 'inf' ? null : c;
+  const k = c === 'plane' ? (D.para ? null : D.strat ? 'strat' : S.E.sides[S.fac[S.me]].cas === m ? 'cas' : 'fighter') : c === 'heli' ? (D.atk ? 'heli' : 'lift') : c === 'trn' ? rqKind(c, m) : c === 'inf' ? null : c;
   if (!k || !ECO.unit[k] || ecoUse(S.me, k)) return false;
   S.banner = { text: 'Aguardando produção', sub: 'Sem ' + ECO.tx.u[k].toLowerCase() + ' na reserva', life: 1.2 };
   return true;
@@ -63086,8 +63092,13 @@ function paraMan(m, dt) {
     return;
   }
   const v = A.v, gy = manY(m.x, m.z), agl = m.y - gy;
+  if (A.st === 'rope') {   // down the fast-rope from a hovering helicopter (PTR): straight down, at the rope's pace
+    m.y -= PTR.rope.spd * dt; m.v = { x: 0, y: -PTR.rope.spd, z: 0 }; v.x = v.z = 0; v.y = -PTR.rope.spd; m.h = A.h;
+    if (m.y <= gy) paraDown(m, A, gy);
+    return;
+  }
   if (A.st === 'fall') {
-    if ((A.ai && S.t >= A.open) || agl < PARA.aad) paraOpen(m, A);
+    if ((A.ai && S.t >= A.open) || agl < (A.oa || PARA.aad)) paraOpen(m, A);   // oa: a stick out high falls to that height first (PTR)
     const e = Math.exp(-PARA.fall.k * dt); v.x *= e; v.z *= e;
     v.y = Math.max(-PARA.fall.term, v.y - GR * dt);
     if (A.in && (A.in.x || A.in.z)) { v.x += A.in.x * PARA.fall.steer * dt; v.z += A.in.z * PARA.fall.steer * dt; }   // tracking: a little way across, belly to the wind
@@ -63248,7 +63259,7 @@ Net.rx.welcome = (g => m => { Net.para = m.para === 1; g(m); })(Net.rx.welcome);
 Net.paraTick = dt => {
   if (!S || !S.net || !S.host || !Net.para || (Net.pacc = (Net.pacc || 0) + dt) < .2) return;
   Net.pacc = 0;
-  const e = []; for (const m of S.men) if (m.para && m.aid && !m.net && m.para.st !== 'ride' && e.length < 64) e.push([m.aid, Math.round(m.y * 10) / 10, m.para.st === 'chute' ? 2 : 1, Math.round(m.para.h * 100) / 100]);
+  const e = []; for (const m of S.men) if (m.para && m.aid && !m.net && m.para.st !== 'ride' && e.length < 64) e.push([m.aid, Math.round(m.y * 10) / 10, m.para.st === 'chute' ? 2 : m.para.st === 'rope' ? (Net.ptr ? 3 : 1) : 1, Math.round(m.para.h * 100) / 100]);   // 3 on the fast-rope, to a server that knows it (PTR)
   if (e.length || Net.pdr0) Net.send('pdr', { e });
   Net.pdr0 = e.length > 0;
 };
@@ -63263,7 +63274,7 @@ ghostMan = (g => (m, dt) => {
   const s = m.snap, P = m.pdS, gy = m.y;
   if (P && S.t - P.T < 1.5 && P.y > gy + 1) {
     const A = m.para || (m.para = { st: 'fall', v: { x: 0, y: 0, z: 0 }, h: P.h, net: 1 });
-    A.st = P.st === 2 ? 'chute' : 'fall'; A.h = P.h; A.v.y = A.st === 'chute' ? -PARA.chute.sink : -PARA.fall.term * .7;
+    A.st = P.st === 2 ? 'chute' : P.st === 3 ? 'rope' : 'fall'; A.h = P.h; A.v.y = A.st === 'chute' ? -PARA.chute.sink : A.st === 'rope' ? -PTR.rope.spd : -PARA.fall.term * .7;
     m.ay = m.ay === undefined ? P.y : m.ay + A.v.y * dt; m.ay += (P.y - m.ay) * Math.min(1, dt * 5); m.y = Math.max(gy, m.ay); return;
   }
   if (!P && s && s.y !== undefined && s.y > gy + (m.para ? 1.5 : 20) && m.pid && !m.cbin) {   // a player: by his height and how fast it falls
@@ -63274,6 +63285,186 @@ ghostMan = (g => (m, dt) => {
   }
   if (m.para && m.para.net) { delete m.para; m.ay = undefined; }
 })(ghostMan);
+/* ---------- the player's transport (PTR, cf-transporte-jogador) ----------
+   A player flies a side's paratroopers' transport (PARA's planes: Ju 52, C-47, C-130J, Il-76MD) or a transport helicopter (UH-60, Mi-8, and
+   the Insurgents' captured Mi-8T) loaded with infantry, and lets it out like bombs. The plane takes off with sticks[id] sticks of a squad each
+   (SQUAD of the era, as the general's drop: each a squad drawn from the side's reserve, ecoUse squad, inside its soldiers' budget, popOf men);
+   B (the first store's key) sends the next stick out of the door, one man each PARA.gap s, at jump.plane m over the ground at least. Over its
+   own airfield, low (as a plane is rearmed), it takes on more after cd s since its last load, in fill s. The helicopter takes off with one
+   squad (LIFT.seats at most) and G lets it out: on the fast-rope hovering under rope.agl m and slower than rope.v m/s (the men slide down at
+   rope.spd m/s, one each rope.gap s), from jump.heli m up by parachute, or landed as before (heliCargo); landed at its pad with nobody to
+   embark, G takes another squad from the reserve after cd s. The men are PARA's jumpers: static line open after PARA.ai.open s, or from hopen m
+   up a fall to oa m first; the stick is one squad, born at its first man (paraSquad), its order to hold and its mission to take the capture
+   point nearest where it lands within near m (else where it lands). Shot down, the men still aboard are lost with it (counted as
+   infantry losses). The stick is the host's (S.ptrS, stepped in trnStep): it follows the aircraft it leaves (src) while that flies.
+   Online (welcome ptr: 1) a guest asks the host: pdl k 0 load me (w sticks), answered pdl k 0 n [[kits]] to him alone (none: the reserve is
+   empty), and pdl k 1 a stick goes out (n its kits, r 1 the rope), which the host lets out of that guest's ghost; the host's jumpers on the
+   rope go to the room in pdr as state 3 */
+const PTR = { sticks: { ju52: 1, c47: 2, c130: 2, il76: 3 }, cd: 90, fill: 4, near: 1200, hopen: 700, oa: 350,
+  jump: { plane: 150, heli: 150 }, rope: { agl: 30, v: 5, spd: 7, gap: .8 }, ask: 3, tries: 4,
+  say: { empty: 'Sem paraquedistas a bordo: sobrevoe a sua pista, baixo, para embarcar outra esquadra', low: 'Baixo demais para o salto: suba acima de 150 m do chão',
+    mid: 'Fast-rope: abaixo de 30 m do chão e quase parado. Salto: acima de 150 m', water: 'Aqui não: água', old: 'O servidor desta sala não conhece o transporte do jogador',
+    res: 'Sem esquadras na reserva, ou o lado está no limite de soldados', wait: 'Pedindo uma esquadra ao anfitrião…', mute: 'O anfitrião não respondeu ao pedido de esquadra' } };
+const ptrIs = p => !!p && !p.ai && (p.heli ? !!p.def.lift : !!p.def.para);
+const ptrCap = p => (p.heli ? 1 : PTR.sticks[p.id] || 1);   // squads aboard at most
+const ptrAboard = p => (p.heli ? (p.cargo ? p.cargo.length : 0) : (p.pcg || []).reduce((a, k) => a + k.length, 0));
+const ptrHave = p => (p.heli ? (p.cargo ? 1 : 0) : (p.pcg || []).length);
+/* host: up to n squads for side t, each drawn from its reserve, within its soldiers */
+function ptrGrant(t, n, seats) {
+  const out = [], P = popOf(t); let men = popUse(t).men;
+  for (let i = 0; i < n; i++) {
+    const kits = SQUAD[S.era].slice(0, seats || 8);
+    if (men + kits.length > P.men || !ecoUse(t, 'squad')) break;
+    men += kits.length; out.push(kits);
+  }
+  return out;
+}
+/* the player's aircraft takes on what it has room for: the host draws it, a guest asks the host. '' or why not (PTR.say) */
+function ptrLoad(P) {
+  const n = ptrCap(P) - ptrHave(P); if (n <= 0) return '';
+  if (S.net && !S.host) { if (!Net.ptr) return 'old'; P.ptrAsk = S.t; P.ptrTry = 0; Net.send('pdl', { k: 0, w: n }); return 'wait'; }
+  return ptrTake(P, ptrGrant(P.team, n, P.heli ? LIFT.seats : 8));
+}
+function ptrTake(P, g) {
+  P.ptrAsk = 0;
+  if (!g.length) { P.pcgT = S.t - PTR.cd + 20; return 'res'; }   // nothing: it asks again in 20 s over the field
+  if (P.heli) P.cargo = g[0].slice(0, LIFT.seats); else (P.pcg || (P.pcg = [])).push(...g.slice(0, ptrCap(P) - ptrHave(P)));
+  P.pcgT = S.t; P.ptrN = ptrAboard(P);
+  return 'in';
+}
+/* the next stick out: '' or why not */
+function ptrDrop(P, rope) {
+  if (!ptrHave(P)) return 'empty';
+  const agl = P.y - hgt(P.x, P.z) - (P.def.gh || 0), Vh = Math.hypot(P.v.x, P.v.z);
+  if (rope) { if (agl > PTR.rope.agl || Vh > PTR.rope.v) return 'mid'; if (hgt(P.x, P.z) <= S.T.WL + .3) return 'water'; }
+  else if (agl < PTR.jump[P.heli ? 'heli' : 'plane']) return P.heli ? 'mid' : 'low';
+  if (S.net && !S.host && !Net.ptr) return 'old';
+  const kits = P.heli ? P.cargo : P.pcg.shift(); if (P.heli) P.cargo = null;
+  P.ptrN = ptrAboard(P);
+  if (S.net && !S.host) Net.send('pdl', { k: 1, n: kits, r: rope ? 1 : 0 });
+  else ptrStick(P.team, kits, P, !!rope);
+  return rope ? 'rope' : 'out';
+}
+/* a stick leaving src (an aircraft: the host's own, or a guest's ghost) */
+function ptrStick(t, kits, src, rope) {
+  const st = { t, kits: kits.slice(), i: 0, T: 0, src, rope: !!rope, D: null, q: null, agl: src.y - hgt(src.x, src.z) };
+  (S.ptrS || (S.ptrS = [])).push(st);
+  return st;
+}
+/* one man out of the stick's aircraft; the first makes the squad and picks its point */
+function ptrMan(st) {
+  const o = st.src, t = st.t, i = st.i++;
+  if (S.men.length >= IAI.cap) { st.i = st.kits.length; return null; }
+  const E = INF[S.era][S.fac[t]], vx = o.v.x * ASPD, vy = o.v.y * ASPD, vz = o.v.z * ASPD, vh = Math.hypot(vx, vz), hi = !st.rope && st.agl >= PTR.hopen;
+  if (!st.D) {
+    const L = st.rope ? 0 : paraLead(vh, !hi), lx = o.x + (vh > 1 ? vx / vh * L : 0), lz = o.z + (vh > 1 ? vz / vh * L : 0);
+    let pt = null, bd = PTR.near; for (const p of gPts()) { const d = Math.hypot(p.x - lx, p.z - lz); if (d < bd) { bd = d; pt = p; } }
+    const x = Math.round(pt ? pt.x : lx), z = Math.round(pt ? pt.z : lz);
+    st.D = { id: (S.pdrN = (S.pdrN || 0) + 1), t, x, z, M: { kind: 'attack', why: 'paraquedistas do jogador: ' + gNear(x, z), area: { x, z, r: 300 } } };
+    st.q = paraSquad(st.D);
+    gLog(t, 'atk', (st.rope ? 'Esquadra desce de fast-rope do ' : 'Esquadra lançada do ') + o.def.name + (o.name ? ' de ' + o.name : '') + ' ' + gNear(lx, lz) + (pt ? ': vai tomar ' + gName(pt) : ''), { x, z }, 'ptr' + st.D.id);
+  }
+  const D = st.D, q = st.q, kid = E[st.kits[i]] || E[0], h = vh > 1 ? Math.atan2(-vz, vx) : Math.atan2(-(o.f ? o.f.z : 0), o.f ? o.f.x : 1);
+  const r = o.r || { x: 0, z: 1 }, sd = st.rope ? (i % 2 ? -1 : 1) * 1.6 : 0, bx = st.rope ? r.x * sd : -(o.f ? o.f.x : 0) * 6, bz = st.rope ? r.z * sd : -(o.f ? o.f.z : 0) * 6;
+  const m = addMan(kid, t, o.x + bx, o.z + bz, h);
+  m.y = o.y - (st.rope ? 2 : 3); m.ai = manBrain(q.men.length); m.sq = q; q.men.push(m); q.n0++; q.live++; m.mis = q.mis;
+  const a = i * 2.39996, R = PARA.ai.spot * Math.sqrt(i + .5); m.ai.gx = D.x + Math.cos(a) * R; m.ai.gz = D.z + Math.sin(a) * R;
+  m.para = st.rope ? { st: 'rope', v: { x: 0, y: -PTR.rope.spd, z: 0 }, h, T: S.t, ai: 1, oT: 0, tx: m.ai.gx, tz: m.ai.gz }
+    : { st: 'fall', v: { x: vx, y: Math.min(0, vy) - 2, z: vz }, h, T: S.t, open: hi ? 1e9 : S.t + PARA.ai.open + rand(-.2, .3), oa: hi ? PTR.oa : 0, tx: m.ai.gx, tz: m.ai.gz, ai: 1, oT: 0 };
+  if (S.host) Net.own(m);
+  return m;
+}
+/* men lost with an aircraft shot down: the side's diary, and the infantry losses they count */
+function ptrLost(t, n, o) {
+  if (n <= 0 || (S.net && !S.host)) return;
+  gLog(t, 'atk', o.def.name + ' abatido com ' + n + ' homens a bordo', { x: o.x, z: o.z }, 'ptrl');
+  if (S.cq && cqSim()) S.cq.lost[t][0] += n;
+}
+function ptrSay(P, w) {
+  if (P !== S.my || !w) return;
+  const n = ptrAboard(P), s = PTR.say[w];
+  if (w === 'out') S.banner = { text: 'Esquadra lançada', sub: n ? 'restam ' + n + ' homens a bordo' : 'transporte vazio: volte à pista para embarcar mais', life: 2.5 };
+  else if (w === 'rope') S.banner = { text: 'Fast-rope', sub: 'a esquadra desce pelas cordas: mantenha o pairado', life: 2.5 };
+  else if (w === 'in') S.banner = { text: n + ' homens a bordo', sub: P.heli ? 'G: fast-rope pairando baixo, salto do alto, ou pouse' : 'B lança uma esquadra sobre o alvo', life: 2.5 };
+  else if (s) S.banner = { text: P.def.name, sub: s, life: 2.5 };
+}
+/* each step: the sticks going out, the player's own men lost with his aircraft, a guest's unanswered request asked again */
+function ptrStep(dt) {
+  const P = S.my;
+  if (ptrIs(P)) {
+    if (P.dead && P.ptrN > 0) { if (!S.net || S.host) ptrLost(P.team, P.ptrN, P); P.pcg = null; }
+    P.ptrN = P.dead ? 0 : ptrAboard(P);
+    if (P.ptrAsk && S.net && !S.host && S.t - P.ptrAsk > PTR.ask) {
+      if (++P.ptrTry > PTR.tries) { P.ptrAsk = 0; ptrSay(P, 'mute'); } else { P.ptrAsk = S.t; Net.send('pdl', { k: 0, w: Math.max(1, ptrCap(P) - ptrHave(P)) }); }
+    }
+  }
+  if (!S.ptrS || !S.ptrS.length || (S.net && !S.host)) return;
+  for (const st of S.ptrS) {
+    const o = st.src;
+    if (!o || o.dead || o.gone) { ptrLost(st.t, st.kits.length - st.i, o || { def: { name: 'Transporte' }, x: 0, z: 0 }); st.end = 1; continue; }
+    if ((st.T -= dt) > 0) continue;
+    st.T = st.rope ? PTR.rope.gap : PARA.gap; ptrMan(st);
+    if (st.i >= st.kits.length) st.end = 1;
+  }
+  S.ptrS = S.ptrS.filter(st => !st.end);
+}
+trnStep = (g => dt => { g(dt); ptrStep(dt); })(trnStep);
+/* a dropped squad (the general's or a player's) is its drop's until the capture point it was sent to is its side's: no manoeuvre or
+   errand of the general takes it before (manFree; the Insurgents' recruiting walked a squad the player had just dropped off its point) */
+function paraKeep(q) {
+  const a = q.para && q.mis && q.mis.kind === 'attack' && q.mis.area; if (!a) return false;
+  for (const p of gPts()) if (Math.abs(p.x - a.x) < 2 && Math.abs(p.z - a.z) < 2) return p.hold !== q.team;
+  return false;
+}
+/* the soldiers out: a player's men aboard and those of a stick still in the door count (the host's own aircraft) */
+popUse = (g => t => {
+  const o = g(t), P = S.my;
+  if (ptrIs(P) && P.team === t && !P.dead && (!S.net || S.host)) o.men += ptrAboard(P);
+  for (const st of S.ptrS || []) if (st.t === t) o.men += st.kits.length - st.i;
+  return o;
+})(popUse);
+/* loaded at the start */
+spawnPlayer = (g => () => { const p = g(); if (ptrIs(p)) { p.pcg = []; p.pcgT = -1e9; p.ptrN = 0; ptrSay(p, ptrLoad(p)); } return p; })(spawnPlayer);
+/* the plane's hands: B, the first store's key, sends the next stick out (a transport has no store) */
+fly = (g => (P, I, dt) => {
+  const r = g(P, I, dt);
+  if (!P.heli && P.def.para && !P.ai) { const e = !!I.ordA && !P.kdP; P.kdP = !!I.ordA; if (e) ptrSay(P, ptrDrop(P, false)); }
+  return r;
+})(fly);
+/* over its own airfield, low, the plane takes on more sticks, cd s after its last load */
+stepPlane = (g => (p, dt) => {
+  g(p, dt);
+  if (p !== S.my || p.ai || p.dead || !p.def.para || p.heli) return;
+  const b = S.base[p.team], inZone = hdist(p, b) < 1300 && p.y - hgt(p.x, p.z) < 700;
+  if (inZone && ptrHave(p) < ptrCap(p) && !p.ptrAsk && S.t >= (p.pcgT === undefined ? -1e9 : p.pcgT) + PTR.cd) {
+    p.ldT = (p.ldT || 0) + dt; S.rearm = Math.max(S.rearm, clamp(p.ldT / PTR.fill, 0, 1));
+    if (p.ldT > PTR.fill) { p.ldT = 0; ptrSay(p, ptrLoad(p)); }
+  } else p.ldT = 0;
+})(stepPlane);
+/* the helicopter's G: in the air the squad goes out (the rope low and slow, the parachute high); landed at its pad with no squad to embark,
+   one from the reserve */
+heliCargo = (g => p => {
+  if (!ptrIs(p)) return g(p);
+  if (!p.land && p.cargo) { const agl = p.y - hgt(p.x, p.z) - p.def.gh, w = ptrDrop(p, agl < PTR.jump.heli); return PTR.say[w] || (w === 'rope' ? 'Fast-rope: a esquadra desce pelas cordas' : w === 'out' ? 'A esquadra salta de paraquedas' : ''); }
+  const r = g(p);
+  if (r !== 'none' || p.cargo || !heliAtPad(p)) return r;
+  const left = Math.ceil((p.pcgT === undefined ? -1e9 : p.pcgT) + PTR.cd - S.t);
+  if (left > 0) return 'Nenhum pelotão ao lado; a reserva prepara outro em ' + left + ' s';
+  const w = ptrLoad(p); return w === 'in' ? 'Uma esquadra da reserva embarcou: ' + ptrAboard(p) + ' homens' : PTR.say[w] || '';
+})(heliCargo);
+/* online: the guest's request and his sticks, at the host; the host's answer, at the guest */
+Net.rx.welcome = (g => m => { Net.ptr = m.ptr === 1; g(m); })(Net.rx.welcome);
+Net.rx.pdl = m => {
+  if (!S || !S.net) return;
+  if (!S.host) {
+    const P = S.my, E = P && INF[S.era][S.fac[P.team]];
+    if (m.k === 0 && Array.isArray(m.n) && ptrIs(P) && !P.dead && P.ptrAsk) ptrSay(P, ptrTake(P, m.n.filter(Array.isArray).map(k => k.filter(i => Number.isInteger(i) && E[i])).filter(k => k.length)));
+    return;
+  }
+  const g = Net.ghosts.get(m.from); if (!g || g.dead || g.gone || !(g.heli ? g.def.lift : g.def.para)) return;
+  if (m.k === 0) Net.send('pdl', { to: m.from, k: 0, n: ptrGrant(g.team, clamp(Number.isInteger(m.w) ? m.w : 1, 1, g.heli ? 1 : PTR.sticks[g.id] || 1), g.heli ? LIFT.seats : 8) });
+  else if (m.k === 1 && Array.isArray(m.n)) { const E = INF[S.era][S.fac[g.team]], kits = m.n.filter(k => Number.isInteger(k) && E[k]).slice(0, 8); if (kits.length) ptrStick(g.team, kits, g, m.r === 1); }
+};
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');
@@ -65255,18 +65446,19 @@ function buildRig() {
     torso: box(body, 0, .32, 0, .26, .64, .46), head: box(body, .01, .78, 0, .22, .24, .21), helm: box(body, -.01, .92, 0, .31, .15, .3), arm: [box(armL, 0, -.27, 0, .12, .56, .12), box(armR, 0, -.27, 0, .12, .56, .12)], gunB: box(gun, .25, 0, 0, 1, .07, .07) });
 }
 /* st: the stance, 3 a body. hip height and leg length by it; the stride follows the ground covered, so the feet do not slide */
-const MPOSE = { hip: [.9, .45, .16, .14], leg: [.9, .6, .82, .86], lean: [-.05, -.3, -1.32, 1.45] }, MC = typeof THREE !== 'undefined' ? new THREE.Color() : null;
+const MPOSE = { hip: [.9, .45, .16, .14], leg: [.9, .6, .82, .86], lean: [-.05, -.3, -1.32, 1.45] }, MC = typeof THREE !== 'undefined' ? new THREE.Color() : null, MZV = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 function poseMan(m, put) {
   const R = rig || buildRig(), st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.min(1, Math.hypot(m.v.x, m.v.z) / 2), ph = m.step * 2.3, sw = Math.sin(ph) * mv, run = m.run ? mv : 0, c = m.cc || MCOL[m.def.era][m.def.side];
-  const hip = MPOSE.hip[st], len = MPOSE.leg[st], lean = MPOSE.lean[st] - .3 * run, sp = m.w === 1, a = m.arms[m.w].d, gl = st === 3 || m.civ ? .001 : sp ? 1.25 : a.lmg ? 1.2 : 1;
+  const hip = MPOSE.hip[st], len = MPOSE.leg[st], lean = MPOSE.lean[st] - .3 * run, a = m.arms[m.w].d, sp = !!a.k, e = packArmOf(m);
+  const gl = st === 3 || m.civ || !e ? .001 : sp ? 1.25 : clamp(e[1] / .9, .3, 1.7), th = sp ? .13 : e && e[0] === 'w_pistol' ? .05 : .07;   // each weapon its length (PACK.arm, cf-armas-3p); a sniper's pistol was a launcher's tube
   R.root.position.set(m.x, m.y, m.z); R.root.rotation.y = m.h; R.root.rotation.z = m.para && m.para.st === 'fall' && !m.dead ? PARA.tilt : 0; R.root.scale.setScalar(MAN.sc);   // in free fall belly down (PARA)
   R.body.position.y = hip + (st < 2 ? Math.abs(Math.cos(ph)) * .05 * mv : 0); R.body.rotation.z = lean;
   R.legs.forEach((L, i) => { const s = i ? -1 : 1; L.position.y = hip; L.rotation.z = st === 3 ? 1.5 : st === 2 ? -1.5 + s * sw * .22 : st === 1 ? s * .75 + s * sw * .25 : s * sw * (.55 + .4 * run); R.leg[i].scale.y = len; R.leg[i].position.y = -len / 2; });
   const up = Math.PI / 2 + m.ap - lean;   // the arms and the weapon follow the aim, whatever the body leans
   R.arms.forEach((A, i) => { A.rotation.z = st === 3 ? 2.7 : run > .5 ? (i ? 1 : -1) * sw * .8 + .2 : up - (i ? .22 : .05) + (st === 2 ? .25 : 0); });
   R.gun.rotation.z = run > .5 ? -.7 - lean : m.ap - lean; R.gun.position.y = sp && st < 3 ? .66 : .47;
-  R.gunB.scale.set(gl, sp ? .13 : .07, sp ? .13 : .07); R.gunB.position.x = sp ? .05 : gl / 2 - .2;
-  R.root.updateMatrixWorld(true);
+  R.gunB.scale.set(gl, th, th); R.gunB.position.x = sp ? .05 : gl / 2 - .2;
+  R.root.updateMatrixWorld(true); if (gl > .01) mzSet(m, R.gunB.localToWorld(MZV.set(.5, 0, 0)));   // its muzzle, for the flash (mzAt)
   put(R.torso, c[0]); put(R.head, SKIN); put(R.helm, c[2] || c[1]); put(R.arm[0], c[0]); put(R.arm[1], c[0]); put(R.leg[0], c[1]); put(R.leg[1], c[1]); put(R.gunB, GUNC);
 }
 /* ---------- projectiles A (cf-miras-impl): the right shape per round and a cheap trail ----------
@@ -65343,15 +65535,37 @@ function pjJoin(o, q, put) {
    c: the colours [plain, b.tr 1, b.tr 2] */
 const TRS = { len: [.028, .05, .05], a: [.5, 1, 1], tail: [0, .2, .25], c: [[1, .94, .8], [1, .93, .69], [1, .62, .3]] };
 const trcOf = b => (b.tr === 2 ? 2 : b.tr ? 1 : 0);
-/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle (the eye, then l m along the aim, as manFire lets the round go),
-   within far m of the eye; its size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest; an
-   orange halo halo times as wide */
+/* a soldier's muzzle flash: for t s after each shot (m.shotT), at the muzzle of the weapon drawn in his hands this frame (cf-armas-3p:
+   MZW, which the pose writes, packPose for the animated soldier, poseMan for the figure; it was the eye, then l m along the aim, where
+   manFire lets the round go, a metre in front of the face and nowhere near the weapon), else that point; within far m of the eye; its
+   size [x, y, z, k] is k of s m (and of px pixels, as a few at the least), the first frames the biggest; an orange halo halo times as wide */
 const MZ = { t: .06, l: 1, far: 1800, s: .35, px: 2.4, halo: 2.5 };
+const MZW = new WeakMap();   // a soldier: [x, y, z, frameId] of his drawn muzzle
+function mzSet(m, v) { let a = MZW.get(m); if (!a) MZW.set(m, (a = [0, 0, 0, -1])); a[0] = v.x; a[1] = v.y; a[2] = v.z; a[3] = frameId; }
+const mzDrawn = m => { const a = MZW.get(m); return a && a[3] === frameId ? a : null; };
 function mzAt(m, now, cam) {
   const a = now - m.shotT; if (m.dead || m.in || !(a >= 0 && a < MZ.t)) return null;
   if (Math.abs(m.x - cam.x) > MZ.far || Math.abs(m.z - cam.z) > MZ.far) return null;
+  const k = 1 - .45 * a / MZ.t, w = mzDrawn(m); if (w) return [w[0], w[1], w[2], k];
   const f = m.f || { x: Math.cos(m.h), y: 0, z: -Math.sin(m.h) }, e = STANCE[m.st].eye * MAN.sc;
-  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, 1 - .45 * a / MZ.t];
+  return [m.x + f.x * MZ.l, m.y + e + f.y * MZ.l - .12, m.z + f.z * MZ.l, k];
+}
+/* where a soldier's round is drawn from (cf-armas-3p): the muzzle his weapon showed when the streak was first drawn, kept with the round
+   (MZB); its streak never reaches back past it, and nothing is drawn of it until it is out. The sim's round goes on from the eye */
+const MZB = new WeakMap();
+function mzRound(b) {
+  let o = MZB.get(b);
+  if (o === undefined) { const w = b.by && b.by.man ? mzDrawn(b.by) : null; o = w ? [w[0], w[1], w[2]] : 0; MZB.set(b, o); }
+  return o;
+}
+/* the streak's tail of round b, tl s of flight long: from its muzzle (mzRound) at the farthest back; null while the round is not yet out of it */
+const MZT = [0, 0, 0];
+function mzTail(b, tl) {
+  const mz = mzRound(b); MZT[0] = b.x - b.vx * tl; MZT[1] = b.y - b.vy * tl; MZT[2] = b.z - b.vz * tl;
+  if (!mz) return MZT;
+  if ((b.x - mz[0]) * b.vx + (b.y - mz[1]) * b.vy + (b.z - mz[2]) * b.vz <= 0) return null;
+  if ((MZT[0] - mz[0]) * b.vx + (MZT[1] - mz[1]) * b.vy + (MZT[2] - mz[2]) * b.vz < 0) { MZT[0] = mz[0]; MZT[1] = mz[1]; MZT[2] = mz[2]; }
+  return MZT;
 }
 function pjTrail(o, p, on) {
   let t = PJ.tr.get(o);
@@ -65403,8 +65617,9 @@ function syncScene(dt) {
   const cam = camera.position, px = 4 * dpr / sparks.material.uniforms.scale.value, TB = MAXP - MAXPR;
   for (const b of S.bullets) {
     if (n >= MAXB) break;
-    const t = trcOf(b), tl = TRS.len[t], C = TRS.c[t];
-    bp.set([b.x, b.y, b.z, b.x - b.vx * tl, b.y - b.vy * tl, b.z - b.vz * tl], n * 6); tc.set([C[0], C[1], C[2], TRS.a[t], C[0], C[1], C[2], TRS.tail[t]], n * 8); n++;
+    const t = trcOf(b), tl = TRS.len[t], C = TRS.c[t], tail = mzTail(b, tl);   // a soldier's from his weapon's muzzle
+    if (!tail) continue;
+    bp.set([b.x, b.y, b.z, tail[0], tail[1], tail[2]], n * 6); tc.set([C[0], C[1], C[2], TRS.a[t], C[0], C[1], C[2], TRS.tail[t]], n * 8); n++;
     if (!t || k >= MAXP - 1) continue;   // a tracer (jet cannon, AA, a squad machine gun's) carries a glowing head that never shrinks below a few pixels, so the stream reads from far away
     const sz = Math.max(.4, px * Math.hypot(b.x - cam.x, b.y - cam.y, b.z - cam.z));   // a coloured halo under a white-hot core
     pp.set([b.x, b.y, b.z, b.x, b.y, b.z], k * 3); pc.set(b.tr === 2 ? [1, .38, .12, .75, 1, .9, .7, 1] : [1, .7, .2, .75, 1, 1, .85, 1], k * 4);
@@ -66999,7 +67214,7 @@ function hudFly(P, u, ink, acc, disp, blink, seat) {
     if (S.oob) txt('Fora da zona de combate. O piloto automático está voltando.', cw / 2, cy + 22 * u, 13 * u, ink, 'center');
   }
   if (S.rearm > 0) { txt('REARMANDO', cw / 2, ch * .7, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
-  else if (!P.dead && P.ammo <= 0 && P.ord.every(n => n <= 0)) txt('Sem munição. Sobrevoe a sua pista, baixo e perto.', cw / 2, ch * .7, 13 * u, ink, 'center');
+  else if (!P.dead && P.ammo <= 0 && P.ord.every(n => n <= 0) && !d.para) txt('Sem munição. Sobrevoe a sua pista, baixo e perto.', cw / 2, ch * .7, 13 * u, ink, 'center');   // a transport has none to run out of (PTR)
 }
 /* --- the soldier's own instruments: the cross that opens with the spread, the lock of a guided weapon, the kit on the left, the compass,
    and in the damage panel's corner the body by zone with what the ground it stands on gives it --- */
@@ -68278,14 +68493,14 @@ function groundCard(kind, d, role, fire) {
 /* a class with no builder of its own still shows: its name, and the model of a plane if it is one */
 const cardOf = (k, id) => (CARD[k] ? CARD[k](id, DEFS[k][id]) : { mesh: () => (PLANES[id] ? buildPlane(id) : new THREE.Group()), L: 20, role: CLS[k] ? CLS[k][0] : k, meters: [], spec: '', arm: '' });
 /* the hangar only lists models of a side the era has colours for (ERAS[era].sides): the insurgents' side 2 models (#67) exist only in a 3-side match, and the Today era has two sides in the hangar */
-const fleetIds = (k, side) => (DEFS[k] ? Object.keys(DEFS[k]).filter(id => DEFS[k][id].era === era && !DEFS[k][id].para && ERAS[era].sides[DEFS[k][id].side] && (side === undefined || DEFS[k][id].side === side)) : []);
+const fleetIds = (k, side) => (DEFS[k] ? Object.keys(DEFS[k]).filter(id => DEFS[k][id].era === era && ERAS[era].sides[DEFS[k][id].side] && (side === undefined || DEFS[k][id].side === side)) : []);
 const fleetCls = side => Object.keys(CLS).filter(c => fleetIds(c, side).length);
 /* the side the player picks in the hangar (cf-3l-p4-faccao; NOT TESTED): on the modern front each of its sides with its own vehicles and
-   classes only (the Insurgents have no aircraft), kept between visits; 1944 lists both of its sides' together, as before. sides2: the
+   classes only (the Insurgents' one aircraft is a captured Mi-8T, PTR), kept between visits; 1944 lists both of its sides' together, as before. sides2: the
    Partida option of a match of two sides (EUA × Rússia), which has no Insurgents; a touch screen flies only, so it has none either */
 let hSide = 0, sides2 = false;
 try { const v = localStorage.getItem('ceu-de-ferro-3d-lado'); if (v !== null && +v >= 0 && +v <= 2) hSide = +v; sides2 = localStorage.getItem('ceu-de-ferro-3d-lados') === '2'; } catch (e) {}
-const SIDESUB = ['F-22, A-10, Abrams, Paladin', 'Su-57, Su-25, T-90, Msta', 'Sem aviação: técnicas, IED, emboscada'];
+const SIDESUB = ['F-22, A-10, Abrams, Paladin', 'Su-57, Su-25, T-90, Msta', 'Mi-8 capturado, técnicas, IED, emboscada'];
 const map3 = () => { try { return genTerrain('modern', MAPV, 3).bases.length >= 3; } catch (e) { return false; } };   // the map of this page has the Insurgents' base
 const sideOk = i => !!ERAS.modern.sides[i] && !(i === 2 && (sides2 || coarse || !map3()));
 const hangSide = () => (era === 'modern' ? (sideOk(hSide) ? hSide : 0) : undefined);
@@ -68459,6 +68674,7 @@ const LEGEND = {
       ['A / D ou ← / →', 'Rolar para a esquerda e para a direita. Para curvar: role e puxe'],
       ['Q / E', 'Leme'], ['Shift / Z', thr], ['Espaço', d.gun.name]];
     if (ord[0]) rows.push([aim ? 'Botão direito ou B' : 'B', how(ord[0])]);
+    if (d.para) rows.push([aim ? 'Botão direito ou B' : 'B', 'Lança uma esquadra de paraquedistas (acima de ' + PTR.jump.plane + ' m do chão). O anel SALTO mostra onde ela desce; a esquadra vai tomar o ponto mais perto. Vazio, sobrevoe a sua pista, baixo, para embarcar mais']);   // the player's transport (PTR)
     if (ord[1]) rows.push(['V', how(ord[1])]);
     if (ord[2]) rows.push(['G', 'Passar para o próximo armamento: ' + ord.slice(2).map(s => s.name).join(', ') + '. B e V disparam sempre os dois primeiros da lista']);
     if (d.flares) rows.push(['F', 'Flares e chaff, dois por vez: o flare engana o míssil de calor (melhor de longe e fora da pós-combustão), o chaff o de radar quando você voa de lado para ele']);
@@ -71068,14 +71284,14 @@ function hudHeli(P, u, ink, acc, disp, blink, seat) {
     d.ord.forEach((o, i) => { if (!o) return; txt((i > 1 ? 'G ' : i ? 'V ' : 'B ') + o.name + ' ×' + P.ord[i], X, y, 12.5 * u, P.ord[i] ? ink : FOE); y += 16 * u; });
     if (d.flares) { txt('F Flares ×' + P.flares, X, y, 12.5 * u, P.flares ? ink : FOE); y += 16 * u; }
   }
-  if (d.lift) txt(P.cargo ? 'PELOTÃO A BORDO: ' + P.cargo.length + (P.land ? '  ·  G DESEMBARCA' : '') : P.land ? 'G EMBARCA O PELOTÃO AO LADO' : 'SEM PELOTÃO', seat && !(cw < 620 || ch < 400) ? cw / 2 : X, seat && !(cw < 620 || ch < 400) ? 60 * u : y, 9.8 * u, P.cargo ? acc : ink, seat && !(cw < 620 || ch < 400) ? 'center' : 'left');
+  if (d.lift) txt(P.cargo ? 'PELOTÃO A BORDO: ' + P.cargo.length + (P.land ? '  ·  G DESEMBARCA' : '  ·  G: FAST-ROPE (PAIRADO < ' + PTR.rope.agl + ' m) · SALTO (> ' + PTR.jump.heli + ' m)') : P.ptrAsk ? 'PEDINDO UMA ESQUADRA AO ANFITRIÃO' : P.land ? 'G EMBARCA O PELOTÃO AO LADO' + (heliAtPad(P) ? ' OU UM DA RESERVA' : '') : 'SEM PELOTÃO: POUSE NA SUA BASE', seat && !(cw < 620 || ch < 400) ? cw / 2 : X, seat && !(cw < 620 || ch < 400) ? 60 * u : y, 9.8 * u, P.cargo ? acc : ink, seat && !(cw < 620 || ch < 400) ? 'center' : 'left');
   const cy = cw < 620 ? Math.max(y + 22 * u, 215 * u) : 36 * u, warn = (a, b) => { if (blink) txt(a, cw / 2, cy, 12.5 * u, FOE, 'center', disp); txt(b, cw / 2, cy + 15.6 * u, 9 * u, amber, 'center'); };
   if (!P.dead) {
     if (!on) warn('MOTORES FORA', 'autorrotação: Z baixa o coletivo, Shift arredonda perto do chão');
     else if (P.rpm < .85) warn('ROTOR BAIXO', 'baixe o coletivo');
     else if (P.mod.yaw < .35) warn('SEM ROTOR DE CAUDA', 'ganhe velocidade para parar o giro');
     if (S.oob) txt('Fora da zona de combate. O piloto automático está voltando.', cw / 2, cy + 40 * u, 10.1 * u, ink, 'center');
-    const M = S.liftMsg; if (M && S.t - M.t < 2.5 && M.why) txt(LIFTMSG[M.why], cw / 2, ch * .62, 10.1 * u, amber, 'center');
+    const M = S.liftMsg; if (M && S.t - M.t < 2.5 && M.why) txt(LIFTMSG[M.why] || M.why, cw / 2, ch * .62, 10.1 * u, amber, 'center');   // or the line a transport's drop says itself (PTR)
   }
   if (S.rearm > 0) { txt('REARMANDO', cw / 2, ch * .7, 10.1 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
   else if (!P.dead && P.ammo <= 0 && P.ord.every(n => n <= 0)) txt('Sem munição. Pouse e pare ao lado da sua pista.', cw / 2, ch * .7, 10.1 * u, ink, 'center');
@@ -71165,7 +71381,7 @@ function HLEGEND(d, o) {
   if (d.atk && !aim) rows.push(['Y', 'Travar o canhão no alvo mais perto do nariz, aeronave primeiro; de novo para soltar']);
   if (agm && aim) rows.push(['L', 'Trava automática do míssil, liga e desliga. Desligada, o míssil segue o ponto onde a mira está: mantenha a mira no alvo até o impacto']);
   if (d.atk && aim) rows.push(['Y', 'Travar o canhão no alvo sob a mira: avião ou helicóptero até 4,5 km, veículo até 3 km, soldado até 1,8 km. De novo para soltar. A torre acompanha o alvo sozinha, com avanço']);
-  if (d.lift) rows.push(['G', 'Pousado e parado: embarca o pelotão aliado da IA que estiver a menos de ' + LIFT.reach + ' m, ou desembarca o que está a bordo']);
+  if (d.lift) rows.push(['G', 'Pousado e parado: embarca o pelotão aliado da IA que estiver a menos de ' + LIFT.reach + ' m (ou, no heliponto da base, um da reserva), ou desembarca o que está a bordo. No ar: pairando abaixo de ' + PTR.rope.agl + ' m, a esquadra desce de fast-rope; acima de ' + PTR.jump.heli + ' m, salta de paraquedas']);
   rows.push(['R ou roda do mouse', 'Zoom: 2× e 4×, e de volta à visão normal'], ['F', 'Flares e chaff, dois por vez: contra míssil de calor e, voando de lado, contra o de radar'], o.pvp ? ['C', 'Trocar a câmera: externa e cabine'] : ['C / P', 'Trocar a câmera (externa e cabine) / pausar']);
   if (!coarse) rows.push(['1 / 3 / 2 / 4', 'Na cabine: olhar para a esquerda, a direita, para trás e para cima enquanto a tecla estiver apertada' + (aim ? '. Sem tecla, a cabeça acompanha a mira' : '')], o.swap);
   if (aim) rows.push(o.esc);
@@ -71499,8 +71715,8 @@ const PBTN = {
   drone: { fire: 0, mlock: 1, brake: 2, reload: 3, thrDown: 6, thrUp: 7, '!zoom': 11 }
 };
 const PLAB = {
-  plane: { fire: 'Canhão', ordA: 'Primeiro armamento', ordB: 'Segundo armamento', smoke: 'Próximo armamento', flare: 'Flares', brake: 'Freio aerodinâmico', thrUp: 'Mais motor', thrDown: 'Menos motor', lookL: 'Olhar à esquerda (cabine)', lookR: 'Olhar à direita (cabine)', lookB: 'Olhar para trás (cabine)', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo' },
-  heli: { fire: 'Canhão', ordA: 'Foguetes', ordB: 'Míssil', brake: 'Pairado automático', mlock: 'Míssil: travado ou guiado à mão', glock: 'Canhão: travar no alvo sob a mira', flare: 'Flares', smoke: 'Embarcar e desembarcar o pelotão, ou passar ao armamento seguinte', '!cam': 'Câmera', '!zoom': 'Zoom da mira', '!swap': 'Trocar de veículo' },
+  plane: { fire: 'Canhão', ordA: 'Primeiro armamento (no transporte: lançar paraquedistas)', ordB: 'Segundo armamento', smoke: 'Próximo armamento', flare: 'Flares', brake: 'Freio aerodinâmico', thrUp: 'Mais motor', thrDown: 'Menos motor', lookL: 'Olhar à esquerda (cabine)', lookR: 'Olhar à direita (cabine)', lookB: 'Olhar para trás (cabine)', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo' },
+  heli: { fire: 'Canhão', ordA: 'Foguetes', ordB: 'Míssil', brake: 'Pairado automático', mlock: 'Míssil: travado ou guiado à mão', glock: 'Canhão: travar no alvo sob a mira', flare: 'Flares', smoke: 'Embarcar e desembarcar o pelotão (no ar: fast-rope ou salto), ou passar ao armamento seguinte', '!cam': 'Câmera', '!zoom': 'Zoom da mira', '!swap': 'Trocar de veículo' },
   ground: { fire: 'Arma principal', ordA: 'Arma secundária', smoke: 'Fumaça', fix: 'Consertar (segure, parado)', brake: 'Freio', yawR: 'Entrar e sair do veículo', yawL: 'Trocar de assento', flare: 'Chamar ou soltar o pelotão', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo. Na artilharia um toque abre o mapa de tiro, e segurar troca' },
   inf: { fire: 'Atirar', ordA: 'Mirar', thrUp: 'Correr', thrDown: 'Postura', reload: 'Recarregar', yawL: 'Trocar de arma', flare: 'Granada', smoke: 'Granada de fumaça', build: 'Construir', yawR: 'Entrar em veículo', mlock: 'Especial do kit: lançar o drone', glock: 'Especial do kit: escolher o drone', ordB: 'Morteiro: tipo de granada', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de kit ou veículo. Com o morteiro um toque abre o mapa de tiro, e segurar troca' },
   drone: { fire: 'Soltar a bomba, ou mergulhar (munição vagante)', mlock: 'Tirar os óculos', brake: 'Modo assistido ou acro', reload: 'Zoom da câmera', thrUp: 'Subir (assistido)', thrDown: 'Descer (assistido)', '!zoom': 'Zoom da câmera' }
@@ -73282,15 +73498,22 @@ function buildHangarFallback() {
    PACK.on: ?pack=0 or localStorage cf-pack 0 turn the whole pack off. PACK.lvl(), the level: ?packq= or localStorage cf-pack-q (0 off, 1 low,
    2 normal, 3 high), else the hangar's graphics quality (gfxLevel: Baixa 1, Média 2, Alta 3), else PACK.q: how far and how many soldiers and civilians
    are drawn animated (PACK.near m, PACK.max); the rest stay the instanced figures of before.
-   tank, trn: which pack model draws each vehicle (by its id); arm: which weapon each small arm or launcher is (SARMS keys) */
+   tank, trn: which pack model draws each vehicle (by its id); arm: how each small arm or launcher a soldier carries is seen from outside (SARMS
+   keys, cf-armas-3p): [the pack model, the weapon's length in m, what is added to the model: s a scope, b a bipod, a a belt's box]. Every
+   one a kit carries has its own row (tests/armas-3p.js): one missing fell to the side's rifle, and every Russian weapon was an AK */
 const PACK = {
   url: 'models/pack/', M: {}, dirty: false, q: 2, near: [0, 90, 120, 160], max: [0, 16, 28, 48],
   tank: { tiger: 'tk_tiger', pz4: 'tk_pz4', sherman: 'tk_sherman', t34: 'tk_t34', abrams: 'tk_abrams', leo2: 'tk_leo', t90: 'tk_t72', t72: 'tk_t72', t55: 'tk_t55', t62: 'tk_t55' },
   trn: { kubel: 'car_jeep', jeep: 'car_jeep', hmmwv: 'car_hmmwv', tigr: 'car_scout', opel: 'trk_m939', gmc: 'trk_m939', ural: 'trk_m939', zil131: 'trk_m939', hemtt: 'trk_hemtt',
     tecDshk: 'pickup', tecSpg9: 'pickup', tecZu: 'pickup', tecS5: 'pickup', tecS8: 'pickup', zuTruck: 'trk_m939', moto: 'moto', suv: 'suv', sedan: 'sedan', vbied: 'sedan' },
   civWreck: { suv: 1, sedan: 1, vbied: 1 },
-  arm: { k98: 'w_kar98', garand: 'w_kar98', m4: 'w_m4', ak: 'w_ak', mg42: 'w_smg', bar: 'w_smg', m249: 'w_m4', pkp: 'w_ak', pzf: 'w_bazooka', bazooka: 'w_bazooka',
-    javelin: 'w_launcher', rpg: 'w_rpg', stinger: 'w_launcher', igla: 'w_launcher' },
+  arm: { k98: ['w_kar98', 1.11], garand: ['w_kar98', 1.1], m1carb: ['w_kar98', .9], k98s: ['w_kar98', 1.11, 's'], m1903: ['w_kar98', 1.1, 's'],
+    m4: ['w_m4', .84], ak: ['w_ak', .94], akm: ['w_ak', .88], aks74u: ['w_ak', .73], mp40: ['w_smg', .83], mp7: ['w_smg', .64], vityaz: ['w_smg', .72],
+    mg42: ['w_smg', 1.22, 'ba'], bar: ['w_smg', 1.21, 'b'], m249: ['w_m4', 1.04, 'ba'], pkp: ['w_ak', 1.16, 'ba'], pkm: ['w_ak', 1.17, 'ba'],
+    m82: ['w_sniper', 1.45, 'b'], osv96: ['w_sniper', 1.54, 'b'], svd: ['w_sniper', 1.22],
+    p38: ['w_pistol', .22], m1911: ['w_pistol', .22], m17: ['w_pistol', .2], mp443: ['w_pistol', .2], pm: ['w_pistol', .16],
+    pzf: ['w_bazooka', 1], bazooka: ['w_bazooka', 1.37], rpg: ['w_rpg', .95], rpg7v: ['w_rpg', .95],
+    javelin: ['w_launcher', 1.2], stinger: ['w_launcher', 1.5], igla: ['w_launcher', 1.6], strela: ['w_launcher', 1.4], malyutka: ['w_launcher', .9], kornet: ['w_launcher', 1.2] },
   cred: 'Modelos 3D: Quaternius (CC0), Poly by Google, Alex Safayan, AdamKokrito, Zsky, J-Toastie, KolosStudios, PabloLuna57, Nico _, madtrollstudio, CreativeTrio, Pichuliru, austincford, Carwyn Pelley, sftwr314r8 (CC-BY 3.0). Lista em models/LICENSES.md.'
 };
 PACK.on = (() => { try { if (/[?&]pack=0/.test(location.search)) return false; if (localStorage.getItem('cf-pack') === '0') return false; } catch (e) {} return typeof location !== 'undefined' && /^https?:$/.test(location.protocol); })();
@@ -73656,13 +73879,65 @@ function packPlay(s, nm, fade) {
   if (s.cur && fade) { a.reset().play(); a.crossFadeFrom(s.cur, fade, false); } else { if (s.cur) s.cur.stop(); a.reset().play(); }
   s.cur = a;
 }
+/* the weapon seen from outside (cf-armas-3p): each its own (PACK.arm), its pack model stretched to the weapon's length (across by that
+   stretch to the power thick, so a long machine gun is not as tall as a door) and sized to the soldier (the model's own height h is a
+   1.85 m man). The group's origin is the grip, where the right hand goes; userData: grip, fore (where the left hand goes: fore of the
+   length ahead of the grip) and mz (the muzzle: the front of the model, at mz of its height, where the bore is), in the group's units.
+   A weapon without a model of its own is told apart by what is added: a scope (s), a bipod folded under the barrel
+   (b), the box of a belt under the receiver (a); a mortar is a tube and its base plate. Where the grip sits in the rig: grip aiming (the
+   arm and the weapon turned by the aim about it), run across the chest, prone along the ground */
+const PW = { grip: [.214, 1.358, .12], run: [.289, 1.178, .12], prone: [-.028, 1.394, .12], thick: .4, fore: .34, mz: .73, man: 1.85 };
+/* the row of the weapon in hand ([model, length, added]), or null: a civilian, or nothing in hand */
+function packArmOf(m) {
+  if (m.civ) return null;
+  const a = m.arms && m.arms[m.w], d = a && a.d; if (!d) return null;
+  const key = PACK_SARM.get(d); if (key && PACK.arm[key]) return PACK.arm[key];
+  if (d.k === 'mort') return ['', .75, 'm'];
+  return d.k ? [d.k === 'sam' || d.k === 'atgm' ? 'w_launcher' : 'w_bazooka', 1.2] : d.snp ? ['w_sniper', 1.2] : d.lmg ? ['w_smg', 1.15, 'b'] : [m.def && m.def.era === 'ww2' ? 'w_kar98' : m.def && m.def.side === 1 ? 'w_ak' : 'w_m4', .9];
+}
+function packArmBuild(e, h) {
+  const P = e[0] ? packGet(e[0]) : null; if (e[0] && !P) return null;
+  const g = new THREE.Group(), U = g.userData, k = (h || PW.man) / PW.man, L = e[1] * k, add = e[2] || '', metal = mat(0x2b2e2a);
+  const part = (geo, x, y, z, rz, c) => { const o = new THREE.Mesh(geo, c || metal); o.position.set(x, y, z); if (rz) o.rotation.z = rz; g.add(o); return o; };
+  const B = new THREE.Box3();
+  if (P) {
+    const sx = L / P.dims[0], sy = k * Math.pow(e[1] / P.dims[0], PW.thick), pv = packPivot(P, 'hull') || [0, 0, 0], m = packWhole(P, 0, 1);
+    m.scale.set(sx, sy, sy); m.position.set(-pv[0] * sx, -pv[1] * sy, -pv[2] * sy); g.add(m); g.updateMatrixWorld(true);
+    m.traverse(c => { if (c.isMesh) { if (!c.geometry.boundingBox) c.geometry.computeBoundingBox(); B.union(c.geometry.boundingBox.clone().applyMatrix4(c.matrixWorld)); } });
+  } else B.set(new THREE.Vector3(-.1 * k, -.06 * k, -.05 * k), new THREE.Vector3(L - .1 * k, .06 * k, .05 * k));
+  const H = B.max.y - B.min.y, by = B.min.y + PW.mz * H, zc = (B.min.z + B.max.z) / 2;
+  if (add.includes('m')) {   // a mortar: the tube, and its base plate at the foot
+    const t = new THREE.CylinderGeometry(.045 * k, .05 * k, L, 10); part(t, L / 2 - .1 * k, 0, 0, -Math.PI / 2);
+    part(new THREE.BoxGeometry(.05 * k, .26 * k, .26 * k), -.12 * k, 0, 0);
+  }
+  if (add.includes('s')) {   // a scope over the receiver, a little ahead of the grip
+    part(new THREE.CylinderGeometry(.02 * k, .024 * k, .3 * k, 10), .1 * L, B.max.y + .022 * k, zc, -Math.PI / 2);
+    for (const x of [.02, .2]) part(new THREE.BoxGeometry(.018 * k, .03 * k, .018 * k), x * L, B.max.y + .006 * k, zc);
+    B.max.y += .046 * k;
+  }
+  if (add.includes('b')) {   // a bipod folded forward under the barrel: two legs from a clamp
+    const x0 = B.max.x - .24 * L, y0 = by - .035 * k, lg = .3 * k;
+    part(new THREE.BoxGeometry(.04 * k, .03 * k, .05 * k), x0, y0, zc);
+    for (const sd of [-1, 1]) part(new THREE.BoxGeometry(lg, .014 * k, .014 * k), x0 + lg / 2 * Math.cos(.12), y0 - lg / 2 * Math.sin(.12), zc + sd * .022 * k, -.12);
+  }
+  if (add.includes('a')) {   // the box of the belt, hung under the receiver where a magazine would be, the brass of the belt's end over it
+    const bx = part(new THREE.BoxGeometry(.13 * k, .12 * k, .09 * k), .1 * L, by - .13 * k, zc, 0, mat(0x4a5038));
+    part(new THREE.BoxGeometry(.05 * k, .03 * k, .1 * k), .1 * L, by - .06 * k, zc, 0, mat(0x8a7440));
+    B.min.y = Math.min(B.min.y, bx.position.y - .06 * k);
+  }
+  U.grip = [0, 0, 0]; U.fore = [PW.fore * L, 0, 0]; U.mz = [B.max.x + .01 * k, add.includes('m') ? 0 : by, zc];
+  return g;
+}
 function packWeapon(s, m) {
-  const a = m.arms && m.arms[m.w], key = a && PACK_SARM.get(a.d), wid = m.civ ? null : (key && PACK.arm[key]) || (a && a.d && a.d.k ? (a.d.k === 'sam' || a.d.k === 'atgm' ? 'w_launcher' : 'w_bazooka') : m.def.era === 'ww2' ? 'w_kar98' : m.def.side ? 'w_ak' : 'w_m4');
+  const e = packArmOf(m), wid = e ? e.join(':') : null;
   if (s.wid === wid && s.wpn) return s.wpn;
   if (s.wpn) { kill(s.wpn); s.wpn = null; }
-  s.wid = wid; const P = wid && packGet(wid); if (!P) { s.wid = null; return null; }
-  s.wpn = packWhole(P, 0, 1); s.tilt.add(s.wpn); return s.wpn;
+  s.wid = wid; if (!e) return null;
+  const w = packArmBuild(e, s.h); if (!w) { s.wid = null; return null; }
+  s.wpn = w; s.tilt.add(w); return w;
 }
+/* the weapon in the rig: its grip at at, turned by rz */
+function packHold(w, at, rz) { w.position.set(at[0], at[1], at[2]); w.rotation.set(0, 0, rz); }
 function packPose(s, m, dt, fresh) {
   const st = m.dead ? 3 : m.st, mv = m.dead ? 0 : Math.hypot(m.v.x, m.v.z), a = m.arms && m.arms[m.w], fire = !!a && S.t - a.t < .3, rl = !!a && a.rl > 0;
   const nm = st === 3 ? 'death' : st === 2 ? 'aim' : mv > 3.2 || (m.run && mv > .5) ? (fire && s.act.runfire ? 'runfire' : 'run') : mv > .3 ? 'walk' : m.civ ? 'idle' : fire ? 'fire' : rl ? 'idle' : st === 1 || m.ap ? 'aim' : 'idle';
@@ -73679,8 +73954,8 @@ function packPose(s, m, dt, fresh) {
   if (w) {
     const run = nm === 'run';
     w.visible = st !== 3;
-    if (st === 2) { w.position.set(.05, 1.5, .12); w.rotation.set(0, 0, Math.PI / 2); }   // prone: along the ground, against the body's tilt
-    else { w.position.set(.32, run ? 1.05 : 1.28, .12); w.rotation.set(0, 0, run ? -.7 : clamp(m.ap || 0, -1, 1)); }
+    if (st === 2) packHold(w, PW.prone, Math.PI / 2);   // prone: along the ground, against the body's tilt
+    else packHold(w, run ? PW.run : PW.grip, run ? -.7 : clamp(m.ap || 0, -1, 1));
   }
 }
 /* before the frame: the people to draw animated, nearest first */
@@ -73724,7 +73999,7 @@ manModel = (f => d => {
     for (const mt of s.mats) { mt.color.setHex(col); mt.userData.c = col; }
     packPlay(s, s.act.aim ? 'aim' : 'idle', 0); s.mixer.update(0);
     const k = MAN.sc * 1.85 / s.h; s.root.position.set(m.x, m.y, m.z); s.root.rotation.set(0, m.h, 0); s.root.scale.setScalar(k);
-    const w = packWeapon(s, m); if (w) { w.position.set(.32, 1.28, .12); w.rotation.set(0, 0, 0); }
+    const w = packWeapon(s, m); if (w) packHold(w, PW.grip, 0);
     s.root.updateMatrixWorld(true); if (typeof packHands === 'function') packHands(s, m, true);   // both hands on the weapon (cf-pol-modelos)
     const g = new THREE.Group(); g.add(s.root); return g;
   } catch (e) { console.warn('pack: soldado do hangar', e); return f(d); }
@@ -73746,8 +74021,8 @@ const packMedic = d => !!(d && d.med && !d.irr);
 /* both hands on the weapon (PIK, cf-pol-modelos): the pack's soldier aims as with a pistol, the right arm out and the left hanging at his
    side, so a rifle hung from one hand. After the clip, each arm is bent by a two-bone reach (the upper arm turned so the elbow lands
    where the two lengths meet, toward the pole: down and out; then the forearm onto the target): the right hand to the weapon's grip
-   (its pivot), the left to its fore end (fore of its length ahead of the grip). Not lying down, dead or unarmed */
-const PIK = { fore: .34, pole: [0, -1, .7], far: 70, V: null };
+   and the left to its fore end, both where packArmBuild put them (PW.fore). Not lying down, dead or unarmed */
+const PIK = { pole: [0, -1, .7], far: 70, V: null };
 /* only the chain of the arm is brought up to date (the bones above it, the arm's three), never the whole skeleton */
 function packReach(root, side, T) {
   const U = root.getObjectByName('UpperArm_' + side), L = root.getObjectByName('LowerArm_' + side), W = root.getObjectByName('Wrist_' + side); if (!U || !L || !W) return;
@@ -73771,17 +74046,16 @@ function packReach(root, side, T) {
 }
 const PIKT = typeof THREE !== 'undefined' ? new THREE.Vector3() : null;
 function packHands(s, m, near) {   // near: draw it whatever the eye's distance (the hangar's card)
-  const w = s.wpn, st = m.dead ? 3 : m.st; if (!w || !w.visible || st >= 2 || m.civ || !s.wid) return;
+  const w = s.wpn, st = m.dead ? 3 : m.st; if (!w || !w.visible || st >= 2 || m.civ || !s.wid || !w.userData.grip) return;
   if (!near && typeof camera !== 'undefined' && camera && Math.hypot(m.x - camera.position.x, m.z - camera.position.z) > PIK.far) return;   // too far for hands to be seen
-  const P = PACK.M[s.wid] && PACK.M[s.wid].d; if (!P) return;
-  const g = packPivot(P, 'hull') || [0, 0, 0];
   w.updateWorldMatrix(true, false);
-  packReach(s.root, 'R', w.localToWorld(PIKT.set(g[0], g[1], g[2])));
-  packReach(s.root, 'L', w.localToWorld(PIKT.set(g[0] + P.dims[0] * PIK.fore, g[1], g[2])));
+  packReach(s.root, 'R', w.localToWorld(PIKT.fromArray(w.userData.grip)));   // the weapon's own grip and fore end (packArmBuild)
+  packReach(s.root, 'L', w.localToWorld(PIKT.fromArray(w.userData.fore)));
 }
 packPose = (f => (s, m, dt, fresh) => {
   f(s, m, dt, fresh);
   packHands(s, m);
+  const w = s.wpn; if (w && w.visible && w.userData.mz) { w.updateWorldMatrix(true, false); mzSet(m, w.localToWorld(PIKT.fromArray(w.userData.mz))); }   // where its flash and its rounds' streaks start (mzAt)
   const on = packMedic(m.def) && !m.civ && !m.dead;
   if (on && !s.med) s.med = packMedMarks(s.root);
   if (s.med) for (const o of s.med) o.visible = on;
@@ -75831,6 +76105,48 @@ fx.para = k => {
   else thump(50, .22, .5, at);   // feet on the ground
 };
 /* ---------- end of the paratroopers on the screen ---------- */
+/* ---------- the player's transport on the screen (PTR, cf-transporte-jogador; the sim is PTR's, before the 3D scene) ----------
+   The plane's HUD: the men aboard and B, or how long until it may take on more over its airfield; with men aboard, the spot a stick
+   let out now would come down (PTRV.mark: the ring's radius px, the line's), and the helicopter's line under its own (hudHeli). The fast-rope:
+   a line from each man on it up to the helicopter over him (PTRV.max of them) */
+const PTRV = { mark: 14, max: 16, col: 0x2a2620, rope: null };
+hudFly = (g => (P, u, ink, acc, disp, blink, seat) => {
+  g(P, u, ink, acc, disp, blink, seat);
+  if (P.heli || !P.def.para || P.dead) return;
+  const n = ptrAboard(P), k = ptrHave(P), left = Math.ceil((P.pcgT === undefined ? -1e9 : P.pcgT) + PTR.cd - S.t);
+  const t = P.ptrAsk ? 'PEDINDO PARAQUEDISTAS AO ANFITRIÃO' : n ? 'PARAQUEDISTAS A BORDO: ' + n + ' (' + k + (k > 1 ? ' ESQUADRAS' : ' ESQUADRA') + ')  ·  B LANÇA UMA ESQUADRA'
+    : 'TRANSPORTE VAZIO  ·  ' + (left > 0 ? 'NOVA ESQUADRA SOBRE A SUA PISTA EM ' + left + ' s' : 'SOBREVOE A SUA PISTA, BAIXO, PARA EMBARCAR');
+  txt(t, cw / 2, 60 * u, 11 * u, n ? acc : ink, 'center');
+  if (!n) return;
+  const vx = P.v.x * ASPD, vz = P.v.z * ASPD, vh = Math.hypot(vx, vz) || 1, agl = P.y - hgt(P.x, P.z), L = paraLead(vh, agl < PTR.hopen);
+  const x = P.x + vx / vh * L, z = P.z + vz / vh * L, s = proj(x, hgt(x, z) + 2, z);
+  if (s.front) {
+    const r = PTRV.mark * u, low = agl < PTR.jump.plane;
+    hx.strokeStyle = low ? '#ff6a5a' : acc; hx.lineWidth = 1.5; hx.beginPath(); hx.arc(s.x, s.y, r, 0, TAU); hx.moveTo(s.x - r * 1.6, s.y); hx.lineTo(s.x - r * .5, s.y); hx.moveTo(s.x + r * .5, s.y); hx.lineTo(s.x + r * 1.6, s.y); hx.stroke();
+    txt(low ? 'BAIXO DEMAIS' : 'SALTO', s.x, s.y + r + 4 * u, 10 * u, low ? '#ff6a5a' : acc, 'center');
+  }
+})(hudFly);
+function ptrRopes() {
+  const V = PTRV, L = [];
+  for (const m of S.men) if (m.para && m.para.st === 'rope' && !m.dead && L.length < V.max) {
+    let h = null; for (const p of S.planes) if (p.heli && !p.dead && Math.abs(p.x - m.x) < 12 && Math.abs(p.z - m.z) < 12 && p.y > m.y) { h = p; break; }
+    if (h) L.push([m, h]);
+  }
+  if (!L.length && !V.rope) return;
+  if (!V.rope || V.rope.parent !== scene) {
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(V.max * 6), 3));
+    V.rope = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: V.col })); V.rope.frustumCulled = false; scene.add(V.rope);
+  }
+  const a = V.rope.geometry.attributes.position;
+  L.forEach(([m, h], i) => { a.setXYZ(i * 2, m.x, m.y + 1.9, m.z); a.setXYZ(i * 2 + 1, m.x, h.y - 1, m.z); });
+  V.rope.geometry.setDrawRange(0, L.length * 2); a.needsUpdate = true; V.rope.visible = L.length > 0;
+}
+syncScene = (g => dt => { g(dt); try { ptrRopes(); } catch (e) { /* a rope that would not draw: the battle goes on */ } })(syncScene);
+/* the hangar's card: what a transport carries */
+ARMI.para = '<path d="M3 10a9 7 0 0118 0z"/><path d="M3.500 10.500l7 7M20.500 10.500l-7 7M12 10.500v7" stroke-width="1.200" fill="none" stroke="currentColor"/><circle cx="12" cy="19.500" r="2"/>';
+CARD.plane = (g => (id, d) => { const c = g(id, d); if (d.para) { const n = PTR.sticks[id] || 1; c.arms = [['para', n * SQUAD[d.era].length + ' paraquedistas', n + (n > 1 ? ' esquadras' : ' esquadra') + ', B lança uma de cada vez']]; } return c; })(CARD.plane);
+CARD.heli = (g => (id, B) => { const c = g(id, B); if (B.lift) c.arms = c.arms.concat([['para', SQUAD.modern.length + ' soldados a bordo', 'G: fast-rope, salto ou pouso']]); return c; })(CARD.heli);
+/* ---------- end of the player's transport on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>
 

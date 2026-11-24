@@ -40,7 +40,7 @@ const MODELS = {
   modern: { plane: ['f22', 'a10', 'su57', 'su25', 'b2', 'tu160'], tank: ['abrams', 'leo2', 't90', 't72'], aa: ['nasams', 'pantsir'], art: ['pzh', 'm270', 'msta', 'bm21'], inf: ['blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio'], trn: ['hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub'] }
 };
 /* helicopters: aircraft to every check of an AI row or a loss, a class of their own to join, swap and hstate. None in 1944 */
-MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8'];
+MODELS.ww2.heli = []; MODELS.modern.heli = ['ah64', 'uh60', 'mi28', 'mi8', 'mi8i'];   // mi8i: the Insurgents' captured Mi-8T (cf-transporte-jogador)
 /* plane and helicopter loadouts (welcome says lo: 1 and hlo: 1), the other copy of the page's RACKS and STORES. LOADS: per plane the kg it lifts and, per hardpoint group, the most of each
    store; STW: a store's kg, and the lot it comes in when not one by one. The order of STW is the order of the page's STORES: a release names
    its store as 2 + its place there */
@@ -69,9 +69,10 @@ const rooms = { ww2: new Map(), modern: new Map() };
 const MAXN = { ww2: 2, modern: 3 };
 for (const era in MODELS) { const m = MODELS[era]; rooms[era].ns = 2; rooms[era].gen = Array(MAXN[era]).fill(0); rooms[era].genk = Array(MAXN[era]).fill(0); rooms[era].host = null; rooms[era].gens = new Set(); rooms[era].keep = null; rooms[era].models = m; rooms[era].air = new Set(m.plane); rooms[era].gnd = new Set([...m.tank, ...m.aa, ...m.art, ...m.trn, 'truck']); rooms[era].inf = new Set(m.inf); }
 for (const era in MODELS) for (const id of MODELS[era].heli) rooms[era].air.add(id);
-/* the paratroopers' transports (welcome says para: 1; cf-paraquedistas): AI rows only, never a player's model; the page's PLANES with para: 1 */
+/* the paratroopers' transports (welcome says para: 1; cf-paraquedistas): the page's PLANES with para: 1, AI rows and, since the player's
+   transport (welcome ptr: 1; cf-transporte-jogador), a player's plane too, at the end of the plane list so that no older index moves */
 const PARAS = { ww2: ['ju52', 'c47'], modern: ['c130', 'il76'] };
-for (const era in PARAS) for (const id of PARAS[era]) rooms[era].air.add(id);
+for (const era in PARAS) for (const id of PARAS[era]) { rooms[era].air.add(id); MODELS[era].plane.push(id); }
 for (const era in MODELS) rooms[era].specs = new Set();   // spectators: clients with no body, not in the room's map
 /* recovery vehicles, ambulances and repair trucks (rec): models of the AI's ground rows (the page's REC.side is the other copy). The ambulances and
    the repair trucks are a player's too, so they are also in the trn lists above, each on its side in MSIDE */
@@ -173,7 +174,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -626,15 +627,15 @@ RX.gres = (c, m) => {
    here, at the end of their lists, so that no older index moves; they field only in a room of 3 sides (join refuses one in a room of 2) */
 const MSIDE = {
   ww2: [
-    ['stuka', 'bf109', 'he177', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw'],
-    ['spit', 'p47', 'b17', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw']],
+    ['stuka', 'bf109', 'he177', 'tiger', 'pz4', 'wirbel', 'hummel', 'pzwerfer', 'schutze', 'mgschutze', 'pzjager', 'scharf', 'grwTrupp', 'funker', 'pionier', 'kubel', 'opel', 'sdkfz251', 'kfz31', 'opelw', 'ju52'],
+    ['spit', 'p47', 'b17', 'sherman', 't34', 'm16', 'priest', 'bm13', 'rifleman', 'bargunner', 'bazookaman', 'sniper', 'mortarman', 'radioman', 'engineer', 'jeep', 'gmc', 'm3ht', 'wc54', 'gmcw', 'c47']],
   modern: [
     ['f22', 'a10', 'b2', 'abrams', 'leo2', 'nasams', 'pzh', 'm270', 'blueRifle', 'blueSaw', 'blueAT', 'blueAD', 'blueSniper', 'blueMortar', 'blueRadio', 'blueDrone', 'blueEng',
-      'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60'],
+      'hmmwv', 'hemtt', 'lav25', 'm577', 'm997', 'm1089', 'ah64', 'uh60', 'c130'],
     ['su57', 'su25', 'tu160', 't90', 't72', 'pantsir', 'msta', 'bm21', 'redRifle', 'redMG', 'redAT', 'redAD', 'redSniper', 'redMortar', 'redRadio', 'redDrone', 'redEng',
-      'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8'],
+      'tigr', 'ural', 'btr82', 'mtlbu', 'uaz452', 'mtoub', 'mi28', 'mi8', 'il76'],
     ['t55', 't62', 'tec107', 'insRifle', 'insMG', 'insRPG', 'insATGM', 'insKornet', 'insAD', 'insSniper', 'insMortar', 'insRadio', 'insSapper', 'insDrone', 'insBomber',
-      'tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70']] };
+      'tecDshk', 'tecSpg9', 'tecZu', 'zpu4', 'zpu2', 'dshkAA', 'zuTruck', 'tecS5', 'tecS8', 'shilka', 'moto', 'suv', 'sedan', 'vbied', 'zil131', 'btr70', 'mi8i']] };
 {
   const m = MODELS.modern, R = rooms.modern, add = (cls, ids) => { for (const id of ids) { if (m[cls].includes(id)) throw new Error('insurgent model already there: ' + id); m[cls].push(id); } };
   add('tank', ['t55', 't62']); add('art', ['tec107']);
@@ -729,7 +730,19 @@ RX.ill = (c, m) => {
     const o = host(c) && pid(m.to) && [...c.room.values()].find(o => o.player.id === m.to);
     if (o && o !== c && int(m.k, 0, 9) && int(m.s, 0, 3) && txt(m.why, 160) && int(m.eta, 0, 3600) && vec(m.q, 2)) send(o.ws, Object.assign({ t: 'gpr', k: m.k, s: m.s, why: m.why, eta: m.eta, q: m.q }, aid(m.v) && { v: m.v }));
   };
-  RX.pdr = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 64 && m.e.every(e => vec(e, 4) && aid(e[0]) && (e[2] === 1 || e[2] === 2))) cast(c, { t: 'pdr', e: m.e }); };
+  RX.pdr = (c, m) => { if (host(c) && Array.isArray(m.e) && m.e.length <= 64 && m.e.every(e => vec(e, 4) && aid(e[0]) && (e[2] === 1 || e[2] === 2 || e[2] === 3))) cast(c, { t: 'pdr', e: m.e }); };   // 3: on the fast-rope (ptr)
+  /* the player's transport (welcome says ptr: 1; cf-transporte-jogador). pdl, from a guest flying a paratroopers' plane or a transport
+     helicopter to the host, 400 ms apart at least: k 0 load me from the side's reserve (w squads, 1 to 4), k 1 a stick goes out of my
+     aircraft (n its kits, as lift's; r 1 down the fast-rope, 0 by parachute). From the host to that guest alone (to): k 0, n the squads
+     granted, [[kits]], 4 at most, none when the reserve is empty */
+  RX.pdl = (c, m) => {
+    const h = c.room.host, kits = v => Array.isArray(v) && v.length > 0 && v.length <= 8 && v.every(k => Number.isInteger(k) && k >= 0 && k < c.room.inf.size);
+    if (h === c) { const o = c.room.get(m.to); if (o && o !== c && m.k === 0 && Array.isArray(m.n) && m.n.length <= 4 && m.n.every(kits)) send(o.ws, { t: 'pdl', k: 0, n: m.n }); return; }
+    if (!h || c.spec || (c.player.cls !== 'plane' && c.player.cls !== 'heli')) return;
+    const now = Date.now(); if (now - (c.pdt || 0) < 400) return;
+    if (m.k === 0 && int(m.w, 1, 4)) { c.pdt = now; send(h.ws, { t: 'pdl', from: c.player.id, k: 0, w: m.w }); }
+    else if (m.k === 1 && kits(m.n) && (m.r === 0 || m.r === 1)) { c.pdt = now; send(h.ws, { t: 'pdl', from: c.player.id, k: 1, n: m.n, r: m.r }); }
+  };
 }
 function mineKeep(room) { const K = room.mines, n = Math.ceil(K.e.length / 40) || 1; for (let i = 0; i < n; i++) send(room.host.ws, { t: 'mine', q: K.q, i, n, e: K.e.slice(i * 40, (i + 1) * 40), s: K.s }); }
 /* suspended matches (welcome says rs: 1). The battle lives in the host's browser, so the server keeps the last word of each kind the host

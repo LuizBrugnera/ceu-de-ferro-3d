@@ -9,7 +9,8 @@
      ops      every operation the general opened (assaults, counter-attacks, QRFs, manoeuvres such as raids, interdictions, envelopments,
               ambushes, campaigns): how many, for how long, how they ended; the assaults' time by stage (reunião, assalto, combate...)
      thr      the threat board (C.thb): each incident it saw, how fast it answered, what it ignored and why, points lost meanwhile
-     para     paratrooper drops: sent, men out, shot down, did the point near the drop become theirs
+     para     paratrooper drops: sent, men out, shot down, did the point near the drop become theirs; the reserve held for them (paraHold,
+              cf-general-reservas: hold the squads held on average, res the share of the match with a squad in reserve, lose the share losing)
      pts      points held over time, taken and lost, point-time at the end; losses (men, vehicles, aircraft)
      jobs     the squads' jobs as a share of squad-time (garrison, line, assault, reserve...)
      pop      the population budget (GP): the share of it out (men, vehicles, aircraft) and of the match at the cap; the production plan's stance
@@ -62,7 +63,7 @@ function one(m) {
       capT: { en: 0, mt: 0 }, prod: {}, richT: 0, idleT: 0, qT: 0, why: {}, bought: {}, boughtCost: {}, cancel: {}, sites: {}, sitesLost: {}, resAvg: {}, resT: 0, made0: 0 },
     cmd: {}, ops: {}, atkSt: {}, atk: { n: 0, won: 0, end: 0, formMax: 0 },
     thr: { n: 0, byK: {}, resp: 0, respT: [], ign: 0, ignWhy: {}, noWhy: {}, ptLost: 0, ptN: 0 },
-    para: { n: 0, men: 0, out: 0, shot: 0, took: 0, res: {} },
+    para: { n: 0, men: 0, out: 0, shot: 0, took: 0, res: {}, T: 0, holdT: 0, resT: 0, loseT: 0 },
     pts: { took: 0, lost: 0, neut: 0, heldT: 0, maxHeld: 0 }, sq: { liveT: 0, opT: 0, resT: 0, idleT: 0, n: 0 },
     log: { k: {}, tpl: {} }, post: {}, jobs: {}, mev: {}, mevOk: {}, pop: { men: 0, veh: 0, air: 0, full: 0, T: 0 }, st: {} });
   const R = { seed: m.seed, n: N, era: m.era, min: m.min, mapv: m.mapv, page: path.basename(H.PAGE), sides: sides.map(side), series: [], pts: pts.map(p => ({ nm: gName(p), base: p.base, hold0: p.hold })) };
@@ -138,6 +139,7 @@ function one(m) {
         if (!o.over) { s.ops[r.key].T += dt; if (o.k === 'atk' && !pre) { add(s.atkSt, o.st || '?', dt); if (o.st === 'form') s.atk.formMax = Math.max(s.atk.formMax, R0(S.t - r.T)); } }
         else { r.end = 1; if (o.k === 'atk' && !pre) { s.atk.end++; if (r.P && r.P.hold === t) s.atk.won++; } }
       }
+      { const p = s.para, pr = S.prs && S.prs[t]; p.T += dt; if (pr) { p.holdT += pr.n * dt; if (pr.lose) p.loseT += dt; } if (S.eco && (S.eco.d[t].res.squad || []).length) p.resT += dt; }
       if (S.eco) { const U = popUse(t), P = popOf(t), o = s.pop, pp = S.eco.d[t].pp; o.T += dt; for (const k of ['men', 'veh', 'air']) o[k] += (P[k] ? Math.min(1.5, U[k] / P[k]) : 0) * dt;
         if (U.men >= P.men || U.veh >= P.veh) o.full += dt; if (pp) add(s.st, ['atk', 'bal', 'def'][pp.st] || '?', dt); }
       for (const p of Cc.post || []) if (p) add(s.post, p, dt / Math.max(1, (Cc.post || []).length));
@@ -203,6 +205,7 @@ function one(m) {
     s.pts.heldT = R0(s.pts.heldT); s.pts.end = pts.filter(p => p.hold === t).length; s.pts.ps = R0(Q.ps[t]); s.lost = Q.lost[t].slice();
     s.thr.respMed = s.thr.respT.length ? s.thr.respT.slice().sort((a, b) => a - b)[s.thr.respT.length >> 1] : null;
     { const o = s.pop, T = o.T || 1; s.pop = { men: R1(o.men / T), veh: R1(o.veh / T), air: R1(o.air / T), full: R1(o.full / T) }; for (const k in s.st) s.st[k] = R1(s.st[k] / T); }
+    { const p = s.para, T = p.T || 1; p.hold = R1(p.holdT / T); p.resHeld = R1(p.resT / T); p.lose = R1(p.loseT / T); delete p.T; delete p.holdT; delete p.resT; delete p.loseT; }
     for (const k in s.post) s.post[k] = R1(s.post[k] / (S.t || 1));
     s.log.tpl = Object.fromEntries(Object.entries(s.log.tpl).sort((a, b) => b[1] - a[1]).slice(0, 25));
   }
@@ -212,7 +215,7 @@ function one(m) {
 
 /* ---------- the aggregate: one row per match and side, and the means per side count and per side */
 const COLS = ['seed', 'n', 't', 'place', 'win', 'ptsEnd', 'ps', 'took', 'lost_pts', 'heldAvg', 'men_lost', 'veh_lost', 'air_lost', 'inc', 'spentQ', 'other', 'waste', 'stockAvg', 'capT', 'richT', 'qIdleT', 'why_en', 'why_mt', 'why_busy', 'why_none', 'why_full',
-  'bought', 'resAvg', 'atk', 'atkWon', 'atkFormMax', 'man', 'qrf', 'ctr', 'amb', 'thr', 'thrResp', 'thrRespMed', 'thrIgn', 'thrPtLost', 'para', 'paraTook', 'paraShot', 'sqOp', 'sqRes', 'sqIdle', 'popMen', 'popVeh', 'popFull', 'err'];
+  'bought', 'resAvg', 'atk', 'atkWon', 'atkFormMax', 'man', 'qrf', 'ctr', 'amb', 'thr', 'thrResp', 'thrRespMed', 'thrIgn', 'thrPtLost', 'para', 'paraTook', 'paraShot', 'paraHold', 'paraRes', 'sqOp', 'sqRes', 'sqIdle', 'popMen', 'popVeh', 'popFull', 'err'];
 function rows(M) {
   const out = [];
   for (const m of M) for (const s of m.sides) {
@@ -221,7 +224,7 @@ function rows(M) {
       men_lost: s.lost[0], veh_lost: s.lost[1], air_lost: s.lost[2], inc: e.inc.en + e.inc.mt, spentQ: e.spentQ.en + e.spentQ.mt, other: e.other.en + e.other.mt, waste: e.waste.en + e.waste.mt, stockAvg: e.stock.en + e.stock.mt,
       capT: Math.max(e.capT.en, e.capT.mt), richT: e.richT, qIdleT: e.idleT, why_en: e.why.en || 0, why_mt: e.why.mt || 0, why_busy: e.why.busy || 0, why_none: e.why.none || 0, why_full: e.why.full || 0,
       bought: sum(e.bought), resAvg: e.resSum, atk: s.atk.n, atkWon: s.atk.won, atkFormMax: s.atk.formMax, man: opN(k => k.startsWith('man:')), qrf: opN(k => k === 'qrf'), ctr: opN(k => k === 'ctr'), amb: opN(k => k.startsWith('amb:')),
-      thr: s.thr.n, thrResp: s.thr.resp, thrRespMed: s.thr.respMed === null ? '' : s.thr.respMed, thrIgn: s.thr.ign, thrPtLost: s.thr.ptLost, para: s.para.n, paraTook: s.para.took, paraShot: s.para.shot,
+      thr: s.thr.n, thrResp: s.thr.resp, thrRespMed: s.thr.respMed === null ? '' : s.thr.respMed, thrIgn: s.thr.ign, thrPtLost: s.thr.ptLost, para: s.para.n, paraTook: s.para.took, paraShot: s.para.shot, paraHold: s.para.hold === undefined ? '' : s.para.hold, paraRes: s.para.resHeld === undefined ? '' : s.para.resHeld,
       sqOp: s.sq.opT, sqRes: s.sq.resT, sqIdle: s.sq.idleT, popMen: s.pop.men, popVeh: s.pop.veh, popFull: s.pop.full, err: m.err ? 1 : 0 });
   }
   return out;
@@ -244,7 +247,7 @@ function agg(dir, board) {
   }
   fs.writeFileSync(path.join(dir, 'generais.csv'), csv(rs));
   console.log(M.length + ' matches → ' + path.join(dir, 'generais.json') + ', generais.csv');
-  const show = ['n', 'place', 'ptsEnd', 'took', 'lost_pts', 'men_lost', 'inc', 'spentQ', 'waste', 'stockAvg', 'capT', 'why_full', 'atk', 'atkWon', 'man', 'qrf', 'thr', 'thrResp', 'para', 'sqIdle'];
+  const show = ['n', 'place', 'ptsEnd', 'took', 'lost_pts', 'men_lost', 'inc', 'spentQ', 'waste', 'stockAvg', 'capT', 'why_full', 'atk', 'atkWon', 'man', 'qrf', 'thr', 'thrResp', 'para', 'paraHold', 'paraRes', 'sqIdle'];
   console.log('side   ' + show.map(c => c.padStart(9)).join(''));
   for (const k of Object.keys(by).sort()) console.log(k.padEnd(7) + show.map(c => String(by[k][c] === undefined ? '' : by[k][c]).padStart(9)).join(''));
   return by;

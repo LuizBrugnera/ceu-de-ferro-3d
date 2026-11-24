@@ -51,6 +51,17 @@ ok(D && Math.hypot(D.x - P0.x, D.z - P0.z) < 2, 'losing, the AI drops on the con
 const L = S.glog && (S.glog.l[t] || []).filter(e => e && /perdendo tropas/.test(e.s));
 ok(L && L.length > 0, '  and says why in the general\'s log');
 
+/* a person's request from the map may use the squads held for the drops: the hold never makes it refuse */
+{
+  S.prs = {}; hold(); d.res.squad = ['hq']; d.res.truck = ['hq', 'hq'];   // a squad's column rides a truck (ecoCol)
+  const b = S.base[t], at = { x: b.x + 600, z: b.z };
+  const r0 = C.genCmd(t, { c: 'disp', k: 'squad', n: 1, mk: 'defend', x: at.x, z: at.z, r: 150, why: 'teste' }, 'sys');
+  ok(!r0.ok && r0.why === 'res' && d.res.squad.length === 1 && d.res.truck.length === 2, 'the general\'s own dispatch may not take the held squad: ' + r0.why);
+  const P = S.men.find(m => m.team === t && !m.dead && m.ai);
+  $('PED').gap = 0; const r1 = $('pedRun')(P, 'inf', at.x, at.z);
+  ok(r1.st === 'ok' && !/reserva do general/.test(r1.why), 'a soldier\'s map request for infantry is answered: ' + r1.st + ' (' + r1.why + ')');
+}
+
 /* the drops' cap (the owner's "never releases, always at the limit"): the frame meter's cut of the budget (S.popK) does not stop a drop,
    the side's whole budget and the paratroopers' allowance do, and the refusal names that limit */
 const lim = $('paraLim'), men = $('popUse')(t).men, GENno = $('GEN').no;

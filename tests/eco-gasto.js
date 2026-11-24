@@ -48,8 +48,8 @@ console.log('-- energy piles up, metal runs short: no order eats into the metal 
 {
   fresh(); d.en = 1000; d.mt = ECO.ai.keep.mt + 15;
   const V = C.ecoView(t), g = look().filter(o => /estoque parado/.test(o.why || ''));
-  ok(g.every(o => V.costs[o.k][1] <= 15), 'idle-stock orders cost at most the 15 of metal over the reserve: ' + g.map(o => o.c + ' ' + o.k).join(', '));
-  ok(g.every(o => o.c !== 'build' || o.k === 'mine'), 'a site for it is a mine (metal is what is short)');
+  ok(g.every(o => o.c === 'build' || V.costs[o.k][1] <= 15), 'idle-stock unit orders cost at most the 15 of metal over the reserve: ' + g.map(o => o.c + ' ' + o.k).join(', '));
+  ok(g.every(o => o.c !== 'build' || o.k === 'mine'), 'a site for it is a mine (metal is what is short; the cure asks only its own metal, not the reserve)');
   const L = (k, st) => C.gsLean(ECO.unit[k], st, C.gsIdle(t, st));
   ok(L('tank', { en: 450, mt: 100 }) < 0 && L('fighter', { en: 450, mt: 100 }) > 0 && L('squad', { en: 450, mt: 100 }) > 0, 'energy ' + $('GASTO').tilt + ' over metal (none idle): a tank leans on the scarce metal (' + L('tank', { en: 450, mt: 100 }).toFixed(2) + '), a fighter and a squad on the energy');
   ok(L('tank', { en: 300, mt: 250 }) === 0 && L('tank', { en: 900, mt: 900 }) === 0, 'balanced stocks, or both idle: no lean');

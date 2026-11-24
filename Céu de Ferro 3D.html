@@ -45797,7 +45797,7 @@ function ecoAI(t, V) {
   let save = null;   // a site wanted and not yet paid for: the unit orders that only fill the reserve wait for it (cf-general-gasto: they now keep the stock low)
   if (!did && !building()) for (const k of ['fab', 'mine', 'pow']) {
     if (have(k) >= A.want[k][ph] || (k === 'pow' && idle.en > 0) || (k === 'mine' && idle.mt > 0)) continue;   // no plant for what already sits idle (cf-general-gasto)
-    if (!pay(k, A.pay)) { if (!save && GASTO.on && ecoAsk(t, { q: 'spots', k }).length) save = k; continue; }
+    if (!pay(k, A.pay)) { if (!save && GASTO.on && !(idle.en > 0 || idle.mt > 0) && ecoAsk(t, { q: 'spots', k }).length) save = k; continue; }   // with a resource idle there is no saving: gsInvest spends it (a save for a mine the metal never reaches held every order)
     const s = ecoAsk(t, { q: 'spots', k })[0]; if (!s) continue;
     out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: rebuilt(k) ? 'reconstrói longe do local perdido, ' + s.why : s.why }); break;
   }
@@ -45846,7 +45846,9 @@ const ecoN2 = out => out.reduce((a, o) => a + (o.c === 'make' ? 0 : 1), 0);
    Now: the unit order is outside the two (ecoN2); a kind whose producers already have their work and one waiting is passed over (gsFull);
    the misses weigh at most GASTO.miss; with a resource idle the kinds that spend it weigh more (gsLean) and no plant is built for it; no
    kind is ordered past the reserve's room (ECO.res: a finished order held 'full' stops its producer); and while a site the economy wants
-   (ECO.ai.want) is not yet paid for, the unit orders that only fill the reserve wait for it (spending as it now does, the stock never reached it).
+   (ECO.ai.want) is not yet paid for and nothing sits idle, the unit orders that only fill the reserve wait for it (spending as it now does, the
+   stock never reached it); with a resource idle there is no such saving, and the cure site (a mine when energy piles up and metal is short,
+   a power plant the other way) asks only its own cost of the short resource, not the reserve on top.
    A resource is idle over GASTO.over of the cap and over the strategic reserve (gsKeep: the economy's keep and a work the fort plan saves
    for). While a side has idle stock its general asks at most GASTO.n orders more a look (gsInvest): a mine or a power plant for the
    resource that runs short while the other piles up, a second factory when both pile up, and a unit for each producer with nothing to do,
@@ -45900,7 +45902,8 @@ function gsInvest(t, V, out) {
   let n = 0;
   if (!V.sites.some(s => s.prog < 1) && !out.some(o => o.c === 'build')) {   // a site: what runs short while the other piles up, else a factory more
     const k = I.en > 0 && !(I.mt > 0) && V.stock.mt < ECO.cap.mt * GASTO.poor ? 'mine' : I.mt > 0 && !(I.en > 0) && V.stock.en < ECO.cap.en * GASTO.poor ? 'pow' : I.en > 0 && I.mt > 0 ? 'fab' : null;
-    const s = k && can(V.costs[k]) && ecoAsk(t, { q: 'spots', k })[0];
+    const c = k && V.costs[k], r = k === 'mine' ? 'mt' : 'en', o = r === 'mt' ? 'en' : 'mt';
+    const s = k && (k === 'fab' ? can(c) : st[r] >= c[r === 'en' ? 0 : 1] && st[o] - c[o === 'en' ? 0 : 1] >= K[o]) && ecoAsk(t, { q: 'spots', k })[0];   // the cure of the short resource asks only its own cost of it, not the reserve
     if (s) { out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: 'estoque parado (' + idleTx.toLowerCase() + '): ' + (k === 'fab' ? 'mais uma fábrica' : 'falta ' + (k === 'mine' ? 'metal' : 'energia')) + ', ' + s.why }); pay(V.costs[k]); n++; }
   }
   const qd = k => V.q.filter(q => q.k === k).length + out.filter(o => o.c === 'make' && o.k === k).reduce((a, o) => a + (o.n || 1), 0);

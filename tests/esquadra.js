@@ -72,5 +72,7 @@ console.log('-- a guest\'s squad, made by the host --');
   const g = C.addMan('blueSaw', 0, 100, 0, 0); Object.assign(g, { net: true, aid: -40 }); Net.ai.set(-40, g);
   Net.rx.psql({ e: [-40, 2, -41, 2] });
   ok(g.psq && g.own === 2 && $('psqOf')(2).length === 1, 'a guest: the ghosts the host names are his squad');
+  const n0 = S.squads.length; Net.adopt();
+  ok(S.host && !g.net && g.psq && g.own === 2 && !g.sq && g.ai && g.psqk === 1 && S.squads.length === n0, 'the host leaves and he takes the room over: the soldier stays his squad\'s (the machine gunner\'s slot), in no squad of the AI\'s');
 }
 done();

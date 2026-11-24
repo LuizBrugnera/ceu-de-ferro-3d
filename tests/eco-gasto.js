@@ -52,6 +52,16 @@ console.log('-- energy piles up, metal runs short: no order eats into the metal 
   ok(g.every(o => o.c !== 'build' || o.k === 'mine'), 'a site for it is a mine (metal is what is short)');
 }
 
+console.log('-- a full reserve stops the orders of its kind --');
+{
+  fresh();
+  const fab = C.ecoView(t).sites.find(s => s.k === 'fab').id, kinds = Object.keys(ECO.unit).filter(k => cat(k) === 'veh' && C.ecoView(t).costs[k]);
+  for (const k of kinds) d.res[k] = new Array(ECO.res).fill(fab);   // every vehicle kind at the reserve's room
+  d.miss.aa = [S.t, S.t]; d.gs = { a: GASTO.every * GASTO.top, T: S.t }; C.gpPlan(t);   // asked for, and a grown plan that wants more
+  const m = look().filter(o => o.c === 'make' && cat(o.k) === 'veh');
+  ok(m.length === 0, 'every vehicle kind with ' + ECO.res + ' in reserve: no vehicle order (it would finish and wait as full): ' + m.map(o => o.k).join(','));
+}
+
 console.log('-- the plan grows with idle stock, inside the budget --');
 {
   fresh();

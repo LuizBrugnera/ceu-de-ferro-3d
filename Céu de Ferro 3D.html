@@ -45600,8 +45600,9 @@ function ecoAI(t, V) {
     const hq = V.hq, free = V.dep.filter(q => q.pt >= 0 && q.open && !q.own && !q.foe).sort((a, b) => Math.hypot(a.x - hq.x, a.z - hq.z) - Math.hypot(b.x - hq.x, b.z - hq.z));
     for (const q of free) if (!ecoAsk(t, { q: 'why', k: 'mine', x: q.x, z: q.z })) { out.push({ c: 'build', k: 'mine', x: q.x, z: q.z, a: ecoFace(q.x, q.z), why: 'jazida do ponto conquistado ' + ecoNear(q.x, q.z) }); did = true; break; }
   }
+  const idle = gsIdle(t, V.stock);
   if (!did && !building()) for (const k of ['fab', 'mine', 'pow']) {
-    if (have(k) >= A.want[k][ph] || !pay(k, A.pay)) continue;
+    if (have(k) >= A.want[k][ph] || !pay(k, A.pay) || (k === 'pow' && idle.en > 0) || (k === 'mine' && idle.mt > 0)) continue;   // no plant for what already sits idle (cf-general-gasto)
     const s = ecoAsk(t, { q: 'spots', k })[0]; if (!s) continue;
     out.push({ c: 'build', k, x: s.x, z: s.z, a: s.a, why: rebuilt(k) ? 'reconstrói longe do local perdido, ' + s.why : s.why }); break;
   }
@@ -45630,7 +45631,7 @@ function ecoAI(t, V) {
       const gap = V.pp && V.pp.f[k] !== undefined ? Math.max(0, V.pp.f[k] - (V.pp.h[k] || 0)) : 0;   // the plan's field over what is out (F2)
       const want = (V.keep[k] || 0) + gap + Math.min(2, miss) + (k === 'aaf' ? (V.hq.aa ? 0 : 1) + S0.filter(s => s.gd.aa && !s.aa).length : 0);
       if ((V.res[k] || 0) + queued(k) >= want) continue;
-      const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap);
+      const sc = (A.w[k] || 1) + A.wm * (GASTO.on ? Math.min(GASTO.miss, miss) : miss) + A.wl * lost + (air ? A.air : 0) + (arm ? A.arm : 0) + A.wp * Math.min(3, gap) + GASTO.lean * gsLean(c, idle);
       if (sc > bs) { bs = sc; best = k; why = miss ? 'reforços pedidos sem reserva' : gap ? 'plano de produção: ' + (V.pp.why[k] || 'mais em campo') : lost ? 'repor perdas' : air ? 'ataque aéreo há ' + V.air + ' s' : arm ? 'o inimigo tem blindados' : 'manter a reserva'; }
     }
     if (best) out.push({ c: 'make', k: best, n: 1, why, key: 'mk' + best + why });
@@ -45645,14 +45646,20 @@ const ecoN2 = out => out.reduce((a, o) => a + (o.c === 'make' ? 0 : 1), 0);
    air dispatch misses every half second, so aircraft orders piled up waiting for the HQ's one air slot (busy) and filled the queue; the
    plan's field (GP.mix) stayed far under the population budget, so nothing more was wanted; and a side short of metal (under keep) never
    built the mine that would cure it, because pay() asks the reserve on top of the cost.
-   Now: a kind whose producers already have their work and one waiting is passed over (gsFull), and the misses weigh at most GASTO.miss.
+   Also, the unit order of a look did not count in its two commands only when nothing else was asked: a look that built, guarded or scouted
+   left the factory idle; and a side metal-bound (the dome's fund holds the metal) let energy pile up whatever it chose.
+   Now: the unit order is outside the two (ecoN2); a kind whose producers already have their work and one waiting is passed over (gsFull);
+   the misses weigh at most GASTO.miss; with a resource idle the kinds that spend it weigh more (gsLean) and no plant is built for it.
    A resource is idle over GASTO.over of the cap and over the strategic reserve (gsKeep: the economy's keep and a work the fort plan saves
    for). While a side has idle stock its general asks at most GASTO.n orders more a look (gsInvest): a mine or a power plant for the
    resource that runs short while the other piles up, a second factory when both pile up, and a unit for each producer with nothing to do,
    the kind the plan lacks most and that leans on the idle resource, never past the plan's gap and one in reserve. Idle stock over time
    (GASTO.every s a level, back down as fast without it) grows the plan's field by GASTO.grow a level up to GASTO.top (gsGrow), always fitted
    to the population budget after: the money goes to troops in the field, not to a reserve that waits. */
-const GASTO = { on: 1, over: .5, n: 2, miss: 2, every: 60, grow: .25, top: 3, poor: .3 };
+const GASTO = { on: 1, over: .5, n: 2, miss: 2, every: 60, grow: .25, top: 3, poor: .3, lean: 3 };
+/* how much of a cost c ([en, mt]) falls on the idle resources (0 to 1): with energy idle and metal short, the kinds that spend energy more than
+   metal (a squad, a helicopter, a drone) go first, so the metal stretches and the energy does not sit at the cap */
+const gsLean = (c, I) => (!GASTO.on || !(I.en > 0 || I.mt > 0) ? 0 : ((I.en > 0 ? c[0] : 0) + (I.mt > 0 ? c[1] : 0)) / Math.max(1, c[0] + c[1]));
 /* the strategic reserve this spending never touches: the economy's keep and the fund a work of the fort plan saves for (the dome's fund is put aside by
    ecoStep itself, see AFD) */
 function gsKeep(t) {
@@ -45703,8 +45710,7 @@ function gsInvest(t, V, out) {
       const c = V.costs[k]; if (c[3] !== cat || ECO.site[k] || STK.k[k] || !can(c)) continue;
       const f = V.pp && V.pp.f[k] !== undefined ? V.pp.f[k] : 0, gap = Math.max(0, f - (V.pp && V.pp.h[k] || 0)), has = (V.res[k] || 0) + qd(k);
       if (has >= gap + Math.max(1, V.keep[k] || 0)) continue;   // never past the plan's gap and one in reserve: what is made goes out
-      const lean = ((I.en > 0 ? c[0] : 0) + (I.mt > 0 ? c[1] : 0)) / Math.max(1, c[0] + c[1]);
-      const sc = 2 * Math.min(3, gap - has) + (A.w[k] || 1) + 2 * lean;
+      const sc = 2 * Math.min(3, gap - has) + (A.w[k] || 1) + GASTO.lean * gsLean(c, I);
       if (sc > bs) { bs = sc; best = k; }
     }
     if (best) { out.push({ c: 'make', k: best, n: 1, why: 'estoque parado (' + idleTx.toLowerCase() + '): investir', key: 'gs' + best }); pay(V.costs[best]); n++; }

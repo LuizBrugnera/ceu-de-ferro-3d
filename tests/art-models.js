@@ -8,7 +8,7 @@ const H = require('./harness'), { ok, done } = H, { blocks, kit, node } = requir
 console.log('page: ' + H.PAGE);
 const ARTB = blocks('ARTB');
 if (!ARTB) { console.log('no artillery models (ARTB): a page before them'); process.exit(0); }
-const sim = H.load(), ARTS = sim.$('ARTS'), GS = sim.$('GS');
+const sim = H.load(), ARTS = sim.$('ARTS'), GS = sim.$('GS'), VLIFT = (() => { try { return sim.$('VLIFT'); } catch (e) { return 1.5; } })();   // the vehicle frame over the ground (1.5 before cf-veiculos)
 const PARTS = ['hull', 'trackL', 'trackR', 'engine', 'gun', 'ammo'];
 
 console.log('-- every gun and launcher --');
@@ -27,6 +27,6 @@ for (const id of Object.keys(ARTS)) {
   ok(!out.length, 'inside its length (' + d.l + ', the barrel may reach past it) and the hull inside its width (' + d.w + ')' + (out.length ? ': ' + out.map(p => p.pid + '@' + at(p).map(v => v.toFixed(2))).join(' ') : ''));
   const mouth = Math.max(...P.filter(p => p.to === gun).map(p => gun.position.x + p.x + p.hx)), want = d.bl / GS - tx;
   ok(Math.abs(mouth - want) < .35, 'the mouth ' + mouth.toFixed(2) + ' along the turret, the sim\'s muzzle ' + want.toFixed(2) + ' (d.bl)');
-  ok(Math.abs(1.5 + GS * tur.position.y - d.mh) < .01, 'the turret at the sim\'s muzzle height (d.mh ' + d.mh.toFixed(2) + ')');
+  ok(Math.abs(VLIFT + GS * tur.position.y - d.mh) < .01, 'the turret at the sim\'s muzzle height (d.mh ' + d.mh.toFixed(2) + ')');
 }
 done();

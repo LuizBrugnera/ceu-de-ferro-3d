@@ -42597,7 +42597,7 @@ function manRides(C) {
    wave (push: the assaults keep it), and the line's posts (line, wood), which stand nearest the enemy: a manoeuvre is mostly the work of the troops at the front (the
    others are kilometres back), and its op gives the squad back to its post when it ends (opFree) */
 const MANJ = { held: 1, road: 1, line: 1, wood: 1 };
-const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw' && q.ord.k !== 'build');   // nor a squad on its way to build a supply base (CGN)
+const manFree = sq => sq.filter(q => !q.op && MANJ[q.job] && q.live >= 3 && !q.lift && !q.ord.b && !q.ord.T && !q.ord.tw && q.ord.k !== 'withdraw' && q.ord.k !== 'build' && !paraKeep(q));   // nor a squad on its way to build a supply base (CGN), nor a dropped one before its point is taken (PTR)
 /* the men of a squad still standing, counted now (q.live is brought up to date by the squad's own think, half a second late): every kind measures its losses by it */
 const manLive = q => q.men.reduce((a, m) => a + (m.dead ? 0 : 1), 0);
 /* 'Flanqueio encerrado', 'Finta encerrada': the generic words of an op's end agree with the kind's name */
@@ -63438,6 +63438,13 @@ function ptrStep(dt) {
   S.ptrS = S.ptrS.filter(st => !st.end);
 }
 trnStep = (g => dt => { g(dt); ptrStep(dt); })(trnStep);
+/* a dropped squad (the general's or a player's) is its drop's until the capture point it was sent to is its side's: no manoeuvre or
+   errand of the general takes it before (manFree; the Insurgents' recruiting walked a squad the player had just dropped off its point) */
+function paraKeep(q) {
+  const a = q.para && q.mis && q.mis.kind === 'attack' && q.mis.area; if (!a) return false;
+  for (const p of gPts()) if (Math.abs(p.x - a.x) < 2 && Math.abs(p.z - a.z) < 2) return p.hold !== q.team;
+  return false;
+}
 /* the soldiers out: a player's men aboard and those of a stick still in the door count (the host's own aircraft) */
 popUse = (g => t => {
   const o = g(t), P = S.my;
@@ -68494,11 +68501,11 @@ const cardOf = (k, id) => (CARD[k] ? CARD[k](id, DEFS[k][id]) : { mesh: () => (P
 const fleetIds = (k, side) => (DEFS[k] ? Object.keys(DEFS[k]).filter(id => DEFS[k][id].era === era && ERAS[era].sides[DEFS[k][id].side] && (side === undefined || DEFS[k][id].side === side)) : []);
 const fleetCls = side => Object.keys(CLS).filter(c => fleetIds(c, side).length);
 /* the side the player picks in the hangar (cf-3l-p4-faccao; NOT TESTED): on the modern front each of its sides with its own vehicles and
-   classes only (the Insurgents have no aircraft), kept between visits; 1944 lists both of its sides' together, as before. sides2: the
+   classes only (the Insurgents' one aircraft is a captured Mi-8T, PTR), kept between visits; 1944 lists both of its sides' together, as before. sides2: the
    Partida option of a match of two sides (EUA × Rússia), which has no Insurgents; a touch screen flies only, so it has none either */
 let hSide = 0, sides2 = false;
 try { const v = localStorage.getItem('ceu-de-ferro-3d-lado'); if (v !== null && +v >= 0 && +v <= 2) hSide = +v; sides2 = localStorage.getItem('ceu-de-ferro-3d-lados') === '2'; } catch (e) {}
-const SIDESUB = ['F-22, A-10, Abrams, Paladin', 'Su-57, Su-25, T-90, Msta', 'Sem aviação: técnicas, IED, emboscada'];
+const SIDESUB = ['F-22, A-10, Abrams, Paladin', 'Su-57, Su-25, T-90, Msta', 'Mi-8 capturado, técnicas, IED, emboscada'];
 const map3 = () => { try { return genTerrain('modern', MAPV, 3).bases.length >= 3; } catch (e) { return false; } };   // the map of this page has the Insurgents' base
 const sideOk = i => !!ERAS.modern.sides[i] && !(i === 2 && (sides2 || coarse || !map3()));
 const hangSide = () => (era === 'modern' ? (sideOk(hSide) ? hSide : 0) : undefined);
@@ -68672,6 +68679,7 @@ const LEGEND = {
       ['A / D ou ← / →', 'Rolar para a esquerda e para a direita. Para curvar: role e puxe'],
       ['Q / E', 'Leme'], ['Shift / Z', thr], ['Espaço', d.gun.name]];
     if (ord[0]) rows.push([aim ? 'Botão direito ou B' : 'B', how(ord[0])]);
+    if (d.para) rows.push([aim ? 'Botão direito ou B' : 'B', 'Lança uma esquadra de paraquedistas (acima de ' + PTR.jump.plane + ' m do chão). O anel SALTO mostra onde ela desce; a esquadra vai tomar o ponto mais perto. Vazio, sobrevoe a sua pista, baixo, para embarcar mais']);   // the player's transport (PTR)
     if (ord[1]) rows.push(['V', how(ord[1])]);
     if (ord[2]) rows.push(['G', 'Passar para o próximo armamento: ' + ord.slice(2).map(s => s.name).join(', ') + '. B e V disparam sempre os dois primeiros da lista']);
     if (d.flares) rows.push(['F', 'Flares e chaff, dois por vez: o flare engana o míssil de calor (melhor de longe e fora da pós-combustão), o chaff o de radar quando você voa de lado para ele']);
@@ -71363,7 +71371,7 @@ function HLEGEND(d, o) {
   if (d.atk && !aim) rows.push(['Y', 'Travar o canhão no alvo mais perto do nariz, aeronave primeiro; de novo para soltar']);
   if (agm && aim) rows.push(['L', 'Trava automática do míssil, liga e desliga. Desligada, o míssil segue o ponto onde a mira está: mantenha a mira no alvo até o impacto']);
   if (d.atk && aim) rows.push(['Y', 'Travar o canhão no alvo sob a mira: avião ou helicóptero até 4,5 km, veículo até 3 km, soldado até 1,8 km. De novo para soltar. A torre acompanha o alvo sozinha, com avanço']);
-  if (d.lift) rows.push(['G', 'Pousado e parado: embarca o pelotão aliado da IA que estiver a menos de ' + LIFT.reach + ' m, ou desembarca o que está a bordo']);
+  if (d.lift) rows.push(['G', 'Pousado e parado: embarca o pelotão aliado da IA que estiver a menos de ' + LIFT.reach + ' m (ou, no heliponto da base, um da reserva), ou desembarca o que está a bordo. No ar: pairando abaixo de ' + PTR.rope.agl + ' m, a esquadra desce de fast-rope; acima de ' + PTR.jump.heli + ' m, salta de paraquedas']);
   rows.push(['R ou roda do mouse', 'Zoom: 2× e 4×, e de volta à visão normal'], ['F', 'Flares e chaff, dois por vez: contra míssil de calor e, voando de lado, contra o de radar'], o.pvp ? ['C', 'Trocar a câmera: externa e cabine'] : ['C / P', 'Trocar a câmera (externa e cabine) / pausar']);
   if (!coarse) rows.push(['1 / 3 / 2 / 4', 'Na cabine: olhar para a esquerda, a direita, para trás e para cima enquanto a tecla estiver apertada' + (aim ? '. Sem tecla, a cabeça acompanha a mira' : '')], o.swap);
   if (aim) rows.push(o.esc);
@@ -71697,8 +71705,8 @@ const PBTN = {
   drone: { fire: 0, mlock: 1, brake: 2, reload: 3, thrDown: 6, thrUp: 7, '!zoom': 11 }
 };
 const PLAB = {
-  plane: { fire: 'Canhão', ordA: 'Primeiro armamento', ordB: 'Segundo armamento', smoke: 'Próximo armamento', flare: 'Flares', brake: 'Freio aerodinâmico', thrUp: 'Mais motor', thrDown: 'Menos motor', lookL: 'Olhar à esquerda (cabine)', lookR: 'Olhar à direita (cabine)', lookB: 'Olhar para trás (cabine)', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo' },
-  heli: { fire: 'Canhão', ordA: 'Foguetes', ordB: 'Míssil', brake: 'Pairado automático', mlock: 'Míssil: travado ou guiado à mão', glock: 'Canhão: travar no alvo sob a mira', flare: 'Flares', smoke: 'Embarcar e desembarcar o pelotão, ou passar ao armamento seguinte', '!cam': 'Câmera', '!zoom': 'Zoom da mira', '!swap': 'Trocar de veículo' },
+  plane: { fire: 'Canhão', ordA: 'Primeiro armamento (no transporte: lançar paraquedistas)', ordB: 'Segundo armamento', smoke: 'Próximo armamento', flare: 'Flares', brake: 'Freio aerodinâmico', thrUp: 'Mais motor', thrDown: 'Menos motor', lookL: 'Olhar à esquerda (cabine)', lookR: 'Olhar à direita (cabine)', lookB: 'Olhar para trás (cabine)', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo' },
+  heli: { fire: 'Canhão', ordA: 'Foguetes', ordB: 'Míssil', brake: 'Pairado automático', mlock: 'Míssil: travado ou guiado à mão', glock: 'Canhão: travar no alvo sob a mira', flare: 'Flares', smoke: 'Embarcar e desembarcar o pelotão (no ar: fast-rope ou salto), ou passar ao armamento seguinte', '!cam': 'Câmera', '!zoom': 'Zoom da mira', '!swap': 'Trocar de veículo' },
   ground: { fire: 'Arma principal', ordA: 'Arma secundária', smoke: 'Fumaça', fix: 'Consertar (segure, parado)', brake: 'Freio', yawR: 'Entrar e sair do veículo', yawL: 'Trocar de assento', flare: 'Chamar ou soltar o pelotão', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de veículo. Na artilharia um toque abre o mapa de tiro, e segurar troca' },
   inf: { fire: 'Atirar', ordA: 'Mirar', thrUp: 'Correr', thrDown: 'Postura', reload: 'Recarregar', yawL: 'Trocar de arma', flare: 'Granada', smoke: 'Granada de fumaça', build: 'Construir', yawR: 'Entrar em veículo', mlock: 'Especial do kit: lançar o drone', glock: 'Especial do kit: escolher o drone', ordB: 'Morteiro: tipo de granada', '!cam': 'Câmera', '!zoom': 'Zoom', '!swap': 'Trocar de kit ou veículo. Com o morteiro um toque abre o mapa de tiro, e segurar troca' },
   drone: { fire: 'Soltar a bomba, ou mergulhar (munição vagante)', mlock: 'Tirar os óculos', brake: 'Modo assistido ou acro', reload: 'Zoom da câmera', thrUp: 'Subir (assistido)', thrDown: 'Descer (assistido)', '!zoom': 'Zoom da câmera' }
@@ -76066,6 +76074,10 @@ function ptrRopes() {
   V.rope.geometry.setDrawRange(0, L.length * 2); a.needsUpdate = true; V.rope.visible = L.length > 0;
 }
 syncScene = (g => dt => { g(dt); try { ptrRopes(); } catch (e) { /* a rope that would not draw: the battle goes on */ } })(syncScene);
+/* the hangar's card: what a transport carries */
+ARMI.para = '<path d="M3 10a9 7 0 0118 0z"/><path d="M3.500 10.500l7 7M20.500 10.500l-7 7M12 10.500v7" stroke-width="1.200" fill="none" stroke="currentColor"/><circle cx="12" cy="19.500" r="2"/>';
+CARD.plane = (g => (id, d) => { const c = g(id, d); if (d.para) { const n = PTR.sticks[id] || 1; c.arms = [['para', n * SQUAD[d.era].length + ' paraquedistas', n + (n > 1 ? ' esquadras' : ' esquadra') + ', B lança uma de cada vez']]; } return c; })(CARD.plane);
+CARD.heli = (g => (id, B) => { const c = g(id, B); if (B.lift) c.arms = c.arms.concat([['para', SQUAD.modern.length + ' soldados a bordo', 'G: fast-rope, salto ou pouso']]); return c; })(CARD.heli);
 /* ---------- end of the player's transport on the screen ---------- */
 if (window.claude && window.claude.hot && window.claude.hot.ready) window.claude.hot.ready(boot); else boot();
 </script>

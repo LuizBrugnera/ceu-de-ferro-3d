@@ -53,7 +53,7 @@ console.log('-- ww2: emboscada pela esquerda a 150 m, por uma esquadra menor --'
   else info(false, 'no flank in this run (the leader chose ' + (firstFix && firstFix.passo) + '): the bound with the base firing is not exercised');
   info(allCov !== null && allCov <= 2, 'all men in cover and firing ' + (allCov === null ? 'never' : '+' + allCov.toFixed(1) + ' s') + ' (P1)');
   const c = $('genCard')(0, q0.id);
-  ok(c && c.lid && /^Sgt\. /.test(c.lid.nm) && /^Líder: Sgt\. /.test(c.decide[0]) && c.decide.some(s => /^Equipes: A /.test(s)), 'the unit card: ' + (c ? c.decide.slice(0, 3).join(' | ') : '—'));
+  ok(c && c.lid && /^(Sgt|Cb|Sd)\. /.test(c.lid.nm) && /^Líder: (Sgt\. |(Cb|Sd)\. .* no comando)/.test(c.decide[0]) && c.decide.some(s => /^Equipes: A /.test(s)), 'the unit card: ' + (c ? c.decide.slice(0, 3).join(' | ') : '—'));   // the sergeant, or who took command if he fell in the contact (cf-hitbox: a crouched man's head is struck where it is drawn now)
 }
 
 console.log('-- ww2: o líder cai no meio do contato --');

@@ -177,7 +177,19 @@ function one(m) {
     R.series.push({ T: R0(S.t), held: sides.map(t => pts.filter(p => p.hold === t).length), ps: Q.ps.map(R0), lost: Q.lost.map(l => l.slice()),
       en: E ? E.d.map(d => R0(d.en)) : null, mt: E ? E.d.map(d => R0(d.mt)) : null, inc: E ? E.d.map(d => R0(d.inc.en + d.inc.mt)) : null,
       q: E ? E.d.map(d => d.q.length) : null, sq: sides.map(t => S.squads.filter(q => q.team === t && q.live > 0).length),
-      veh: sides.map(t => S.units.filter(u => u.team === t && !u.dead && u.ai).length) });
+      veh: sides.map(t => S.units.filter(u => u.team === t && !u.dead && u.ai).length),
+      mix: sides.map(mix) });
+  }
+  /* what side t has out by class (cf-general-escala): soldiers (popUse), combat vehicles (tank, lav, art, mobile AA), logistics (truck, car and the rest
+     of the ground AI vehicles), aircraft, fixed AA, finished field works and what the works cost so far (d.wt), and the general's wealth level (ESC) */
+  const MECH = { tank: 1, lav: 1, art: 1, aa: 1 };
+  function mix(t) {
+    const U = popUse(t), o = { men: U.men, mech: 0, log: 0, air: U.air, aaf: 0, works: 0, wk: 0, w: null };
+    for (const u of S.units) if (u.team === t && !u.dead) { if (u.fixed) { if (u.kind === 'aa') o.aaf++; } else if (u.ai) { if (MECH[u.kind]) o.mech++; else o.log++; } }
+    for (const f of S.forts || []) if (f.team === t && !f.gone && f.prog >= 1) o.works++;
+    const d = S.eco && S.eco.d[t]; if (d && d.wt) o.wk = R0(d.wt.en + d.wt.mt);
+    if (d && d.esc) o.w = R1(d.esc.w);
+    return o;
   }
   let nS = 0, nT = 0, err = null;
   try {

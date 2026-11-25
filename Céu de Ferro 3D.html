@@ -45316,7 +45316,7 @@ const ECO = { on: 1, gate: 1, me: 0, dt: .5, cap: { en: 1000, mt: 1000 }, start:
     mine: { en: 60, mt: 20, t: 60, out: { mt: .8 }, hp: 260, box: [9, 9, 9], val: 8, max: 4 },
     fab: { en: 100, mt: 150, t: 90, out: {}, hp: 480, box: [26, 14, 7], val: 15, max: 2 } },
   // [en, mt, s, category, era only]
-  unit: { squad: [25, 15, 20, 'inf'], car: [10, 10, 12, 'veh'], truck: [10, 10, 12, 'veh'], lav: [25, 35, 30, 'veh', 'modern'],
+  unit: { squad: [40, 30, 25, 'inf'], car: [10, 10, 12, 'veh'], truck: [10, 10, 12, 'veh'], lav: [25, 35, 30, 'veh', 'modern'],
     aa: [15, 25, 30, 'veh'], art: [15, 25, 35, 'veh'], tank: [20, 40, 45, 'veh'], rad: [20, 30, 35, 'veh'], aaf: [15, 25, 30, 'def'],
     fighter: [60, 40, 40, 'air'], cas: [60, 40, 45, 'air'], heli: [50, 30, 40, 'air', 'modern'], lift: [35, 20, 30, 'air', 'modern'],
     drone: [10, 5, 20, 'veh', 'modern'],
@@ -54689,6 +54689,67 @@ function bmrLine(t) {
     (w.crates >= 0 ? ' · caixas nos nós ' + w.crates : '');
 }
 ecoVM = (g => (t, all) => { const V = g(t, all); if (V && V.rows && S.eco) { const at = Math.max(0, V.rows.length - 1); V.rows.splice(at, 0, { label: 'Obras', value: bmrLine(t).replace(/^Obras: /, '') }); } return V; })(ecoVM);
+/* ---------- the general scales up with its resources (ESC, cf-general-escala) ----------
+   Measured before (tools/generais.js, map 11, 2 and 3 sides): the AI general kept the same field however rich it got. Its plan (GP.mix) and
+   its unit orders (ecoAI) weigh a squad like a tank, a squad cost 25 energy and 15 metal (a tank 20 and 40), and every post short of a squad
+   records a miss that orders one more at the top weight, so a rich side went on buying squads while its stock sat and its works waited.
+   Now a side's wealth w (0 to 1, escW) is the larger of its income a minute between inc[0] and inc[1] and its scarcer resource between st[0]
+   and st[1] of the cap, followed with a time constant of tau s (it climbs and falls over minutes, not on one payment). Where the AI leads the
+   economy, with w:
+   - the plan (escMix, after the personality's taste): squads times 1 - sq w (never under sqMin), the combat vehicles (tank, lav, art, aa)
+     times 1 + mech w, the aircraft times 1 + air w; the budget still fits the whole after (gpPlan's fit);
+   - the unit orders (ecoAI): a squad's weight times 1 - sq w and its misses count at most miss[1] once w passes miss[0] (a post short of a squad
+     still gets one, it no longer outbids a tank), the combat vehicles and aircraft weigh 1 + wt w more;
+   - the bases: the fortification plan one tier up from w >= fort[0], two from fort[1] (afpWant: more nests, posts, fields and the choke
+     point, more works under way); the works' budget a minute times 1 + bud w (bmrPay); from w >= aa the power plants and mines get a fixed
+     AA as their guard too, for a faction that fields one (ecoAI's def).
+   A squad costs ECO.unit.squad: 40 energy and 30 metal, 25 s (was 25, 15, 20 s): the opening's squads are still free (deploy), and the
+   safety floor still sends one when the side has nothing. lvl: the levels the general's log names. No random number is drawn here */
+const ESC = { on: 1, inc: [300, 600], st: [.4, .9], tau: 90, sq: .5, sqMin: 2, mech: .6, air: .5, wt: 2, miss: [.3, 1], fort: [.4, .75], bud: .6, aa: .5,
+  mechK: ['tank', 'lav', 'art', 'aa'], airK: ['fighter', 'cas', 'heli'], lvl: [.25, .5, .75],
+  tx: ['poucos recursos: infantaria e o essencial', 'recursos médios: começa a mecanizar', 'recursos altos: mais blindados, aviação e bases reforçadas', 'recursos muito altos: força pesada e bases fortificadas'] };
+/* side t's wealth now (0 to 1), followed once per moment of the match; 0 without the economy or with ESC off */
+function escW(t) {
+  const d = S.eco && ecoSim() && S.eco.d[t]; if (!ESC.on || !d || !d.inc) return 0;
+  const e = d.esc || (d.esc = { w: 0, T: S.t, L: 0 }), dt = S.t - e.T; if (dt <= 0) return e.w;
+  const lin = (v, a, b) => clamp((v - a) / (b - a), 0, 1), cap = Math.min(ECO.cap.en, ECO.cap.mt);
+  const raw = Math.max(lin(d.inc.en + d.inc.mt, ESC.inc[0], ESC.inc[1]), lin(Math.min(d.en, d.mt) / cap, ESC.st[0], ESC.st[1]));
+  e.w += (raw - e.w) * (1 - Math.exp(-dt / ESC.tau)); e.T = S.t;
+  const L = ESC.lvl.reduce((a, v) => a + (e.w >= v ? 1 : 0), 0);
+  if (L !== e.L) { gLog(t, 'eco', 'Escala do general: ' + ESC.tx[L], S.base[t], 'esc' + L); e.L = L; }
+  return e.w;
+}
+const escAI = t => !!(S.eco && S.eco.ctl && S.eco.ctl[t] === 'ai');
+/* the plan's mix by the wealth (after the personality's, inside gpPlan, before the budget's fit) */
+function escMix(t, f, why) {
+  if (!escAI(t)) return;
+  const w = escW(t); if (w < .05) return;
+  if ('squad' in f && f.squad > ESC.sqMin) { f.squad = Math.max(ESC.sqMin, Math.round(f.squad * (1 - ESC.sq * w))); why.squad += ' · recursos: menos infantaria'; }
+  for (const k of ESC.mechK) if (f[k] > 0) { f[k] = Math.round(f[k] * (1 + ESC.mech * w)); why[k] += ' · recursos: mais mecanizados'; }
+  for (const k of ESC.airK) if (f[k] > 0) { f[k] = Math.round(f[k] * (1 + ESC.air * w)); why[k] += ' · recursos: mais aviação'; }
+}
+perMix = (g => (t, f, why) => { g(t, f, why); escMix(t, f, why); })(perMix);
+/* the unit orders and the guards by the wealth: the tables ecoAI reads, for this look only */
+ecoAI = (g => (t, V) => {
+  if (!ESC.on || !escAI(t)) return g(t, V);
+  const w = escW(t), A = ECO.ai, w0 = A.w, d0 = A.def; if (w < .05) return g(t, V);
+  const W = Object.assign({}, w0); W.squad = (w0.squad || 1) * (1 - ESC.sq * w);
+  for (const k of ESC.mechK.concat(ESC.airK)) W[k] = (w0[k] || 1) * (1 + ESC.wt * w);
+  A.w = W;
+  if (w >= ESC.aa && afpAAF(t)) A.def = Object.assign({}, d0, { pow: [d0.pow[0], 1], mine: [d0.mine[0], 1] });
+  const V2 = w >= ESC.miss[0] && V.miss.squad > ESC.miss[1] ? Object.assign({}, V, { miss: Object.assign({}, V.miss, { squad: ESC.miss[1] }) }) : V;
+  try { return g(t, V2); } finally { A.w = w0; A.def = d0; }
+})(ecoAI);
+/* the bases by the wealth: the fortification plan's tier, the works' budget */
+afpWant = (g => (C, A) => {
+  const w = ESC.on && escAI(C.t) ? escW(C.t) : 0, up = w >= ESC.fort[1] ? 2 : w >= ESC.fort[0] ? 1 : 0, s0 = C.stgAfp;
+  if (!up) return g(C, A);
+  C.stgAfp = (s0 || 0) + up; try { return g(C, A); } finally { C.stgAfp = s0; }
+})(afpWant);
+bmrPay = (g => (t, c) => {
+  const w = ESC.on && escAI(t) ? escW(t) : 0, B = BMR.bud, s0 = B.share; if (w <= 0) return g(t, c);
+  B.share = s0 * (1 + ESC.bud * w); try { return g(t, c); } finally { B.share = s0; }
+})(bmrPay);
 /* ---------- the dome in the general's fortification plan (AFD, cf-cupula-general; NOT TESTED beyond tests/cupula-general.js, see docs/nao-testado/cf-cupula-general.md) ----------
    The AI general never raised a dome: aidDome started one only with the side's stock at its cost plus the economy's reserve (300 + 120
    energy, 400 + 120 metal), and the AI economy spends its metal as it comes in (a 10-min AI × AI match held 40 to 210 of it), so it

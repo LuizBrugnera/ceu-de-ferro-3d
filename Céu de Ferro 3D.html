@@ -37456,6 +37456,20 @@ function crewSeat(o) {
   if (o.aid && o.bye) for (let i = 0; i < b; i++) if (!o.occ[i]) return i;
   return seatFor(o, b);
 }
+/* P11 (cf-pol2-fase1): "E ENTRAR" went away with no word when the vehicle at hand rolled or had no seat left. boardNo: the nearest
+   vehicle of m's side within reach that m cannot board, and why ('move' rolling, 'full' no seat for it), or null */
+function boardNo(m) {
+  if (m.para || m.in) return null;
+  let r = null, bd = 1e9;
+  for (const o of S.units) {
+    if (!o.occ || o.dead || o.team !== m.team) continue;
+    const d = hdist(o, m); if (d >= ENT.reach + o.def.env[3] || d >= bd) continue;
+    const why = Math.abs(o.sp) >= ENT.slow ? 'move' : crewSeat(o) < 0 ? 'full' : ''; if (!why) continue;
+    bd = d; r = { o, why };
+  }
+  return r;
+}
+const BOARDNO = { move: 'em movimento, espere parar', full: 'sem lugar livre' };
 /* the next seat for the one aboard: the wheel when nobody drives, the gun when nobody mans it, a passenger's solo */
 function crewNext(m, u) {
   const n = u.def.lay.length, b = paxBase(u.def);
@@ -37467,7 +37481,7 @@ function crewNext(m, u) {
 }
 trnKeys = function () {
   const P = S.my, I = S.input, K = S.tk, hit = k => { const v = !!I[k], e = v && !K[k]; K[k] = v; return e; }, E = hit('yawR'), Q = hit('yawL'), F = hit('flare');
-  S.near = null; S.nearS = -1;
+  S.near = null; S.nearS = -1; S.nearNo = null;
   if (!P || P.dead || S.demo) return;
   const m = P.man ? P : S.rider && S.rider.in === P ? S.rider : null, u = m && m.in;
   if (m && !u) {
@@ -37477,6 +37491,7 @@ trnKeys = function () {
       const i = crewSeat(o); if (i < 0) continue;
       bd = hdist(o, m); S.near = o; S.nearS = i;
     }
+    if (!S.near) S.nearNo = boardNo(m);
     const o = S.near, i = S.nearS;
     if (!E || !o) return;
     if (!S.net || !o.net) { board(m, o, i); Net.sq = true; }
@@ -69050,6 +69065,7 @@ function trnSight(P, u, ink, acc, disp, blink) {
 trnSight = (f => (P, u, ink, acc, disp, blink) => {
   const n = S.near;
   if (n && !P.in && !P.dead) txt('E ENTRAR (' + SEATN(n.def, S.nearS) + '): ' + n.name, cw / 2, ch * .7, 12 * u, acc, 'center');
+  else if (S.nearNo && !P.in && !P.dead) txt('NÃO DÁ PARA ENTRAR: ' + BOARDNO[S.nearNo.why] + ' (' + S.nearNo.o.name + ')', cw / 2, ch * .7, 12 * u, 'rgba(158,170,162,.95)', 'center');   // why the prompt is gone (P11)
   S.near = null; f(P, u, ink, acc, disp, blink); S.near = n;
 })(trnSight);
 trnSight = (f => (P, u, ink, acc, disp, blink) => {   // beside a civilian who can be recruited

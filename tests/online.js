@@ -52,8 +52,9 @@ const score = (c, id) => c.Net.players.get(id);
   console.log('   a soldier player sends ' + bg.mstate + ' B/s (mstate, 20 Hz); the host\'s tank sends ' + bh.gstate + ' B/s (gstate)');
 
   console.log('-- a guest kills AI soldiers and is credited --');
+  for (const m of host.S.men) if (m.psq && m.own === g1.id && !m.dead) host.killMan(m, null);   // his own squad (PSQ) would fight them too: only his rifle here
   put(g1, sq.men[0].x + 50, sq.men[0].z); g1.S.my.inv = 1e9;
-  await run(45, () => { const t = [...g1.Net.ai.values()].find(o => o.man && !o.dead); if (!t) return false; aimAt(g1, t); g1.S.input.fire = true; g1.S.input.reload = g1.S.my.arms[0].mag === 0; });
+  await run(45, () => { const t = sq.men.map(m => g1.Net.ai.get(m.aid)).find(o => o && !o.dead); if (!t) return false; aimAt(g1, t); g1.S.input.fire = true; g1.S.input.reload = g1.S.my.arms[0].mag === 0; });
   g1.S.input.fire = false; await run(1);
   const deadH = sq.men.filter(m => m.dead).length;
   ok(deadH >= 3, deadH + ' of 6 host soldiers are dead by the guest\'s rifle');
@@ -97,7 +98,7 @@ const score = (c, id) => c.Net.players.get(id);
 
   console.log('-- host migration with a squad on foot and one still in its truck --');
   sq = host.addSquad(1, at(mid - 400).x, at(mid - 400).z, 0, mid - 400); await run(3);
-  const before = host.S.men.filter(m => m.aid && !m.dead && m.team === 1).map(m => m.aid).sort(), loaded = !!truck.cargo && !truck.dead;
+  const before = host.S.men.filter(m => m.aid && !m.dead && m.team === 1 && !m.psq).map(m => m.aid).sort(), loaded = !!truck.cargo && !truck.dead;
   g1.$('CMD').scout.min = 99;   // the new host's commander would send the truck's squad ahead on foot through a stretch it distrusts
   host.on = false; host.Net.close(); await N.sleep(150); await run(3);
   // the new host's own director may already have sent a squad of side 1 out (and side 0 one flown in by a transport helicopter): only the adopted count

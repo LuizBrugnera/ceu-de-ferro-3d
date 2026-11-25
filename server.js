@@ -176,7 +176,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, cam: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1, fnd: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, psq: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, cam: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1, fnd: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -489,6 +489,10 @@ RX.grant = (c, m) => {
   };
   /* amb: what the host's evacuation did with a guest's ambulance (k 1 handed over, 0 taken aboard; n of them, c aboard now), to that guest alone */
   RX.amb = (c, m) => { const o = c.room.get(m.to); if (host(c) && o && o !== c && (m.k === 0 || m.k === 1) && Number.isInteger(m.n) && m.n > 0 && m.n <= 64 && Number.isInteger(m.c) && m.c >= 0 && m.c <= 64) send(o.ws, { t: 'amb', k: m.k, n: m.n, c: m.c }); };
+  /* the player's squad (welcome psq: 1, cf-pol2 P10): psq, a guest on foot to the host (k 0 his soldier came in, 1 follow, 2 hold at p, 3 attack p);
+     psql, the host to the room: pairs of aid and owner, whose soldiers are whose */
+  RX.psq = (c, m) => { const h = c.room.host; if (h && h !== c && c.player.cls === 'inf' && Number.isInteger(m.k) && m.k >= 0 && m.k <= 3 && (m.k === 0 || vec(m.p, 2))) send(h.ws, Object.assign({ t: 'psq', from: c.player.id, k: m.k }, m.k && { p: m.p })); };
+  RX.psql = (c, m) => { if (host(c) && ints(m.e, 96, 2)) cast(c, { t: 'psql', e: m.e }); };
   RX.civrec = (c, m) => { const h = c.room.host; if (h && h !== c && c.player.cls === 'inf' && Number.isInteger(m.id) && m.id >= 0 && m.id < 65536) send(h.ws, { t: 'civrec', from: c.player.id, id: m.id }); };
 }
 /* the economy and the general (welcome eco: 1, gen: 1). A side's private word (ecs, gen, glog) goes to that side's players and its MCP

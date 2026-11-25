@@ -21,7 +21,8 @@
    and brb (bridges built again: the rebuild is the work of kind 9 in fort and fbuild, a bridge's stage goes back to 0 in obj, and a pontoon may lie
    at any narrow stretch of the river, the same kind 7 row placed by its own x z), and bnb (a new permanent bridge at such a stretch: the work of kind 10),
    and hsc (the engineers' walls, cf-engenharia-pontos: the works of kinds 11 to 13, HESCO tall and low and the T-wall, in fort and fbuild),
-   and cam (the camouflage nets, cf-pol2-camuflagem: the works of kinds 14 and 15, the small net and the large one, in fort and fbuild).
+   and cam (the camouflage nets, cf-pol2-camuflagem: the works of kinds 14 and 15, the small net and the large one, in fort and fbuild),
+   and fnd (a soldier takes a work of its side down, cf-pol2-obras P17: fundo to the host).
    rs: a room whose last player leaves is suspended, not ended, and whoever comes back resumes it (snapIn, SUSPEND, GET /partidas).
    ns (3 sides, cf-3-lados P5; NOT TESTED, see docs/nao-testado/cf-3l-p5-servidor.md): the number of sides of the room, 2 or 3 (3 only in modern:
    0 the USA, 1 Russia, 2 the Insurgents). The first player's join says it (ns, as mv), welcome tells it, and a page of another count is refused
@@ -175,7 +176,7 @@ const RX = {
     if (!ts(room, c.side)) return send(c.ws, { t: 'error', code: 'side' });   // an Insurgent model in a room of 2 sides
     c.room = room; room.set(c.player.id, c); if (!room.host) { room.host = c; room.ff = 0; for (const g of room.gens) send(g.ws, { t: 'host', id: c.player.id }); }
     if (sus) { clearTimeout(room.sut); room.sus = 0; }
-    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, cam: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1 }, sus && { host: 0, sus: 1 }));
+    send(c.ws, Object.assign({}, room.wf = { t: 'welcome', dr: 1, id: c.player.id, host: room.host.player.id, swap: 1, inf: 1, obj: 1, sup: 1, hl: 1, lo: 1, hlo: 1, trn: 1, cmd: 1, crew: 1, cap: 1, ms: 1, cq: 1, bld: 1, she: 1, civ: 1, psq: 1, eco: 1, gen: 1, gn: gview(room, c, room.gen), gk: gview(room, c, room.genk), cqn: room.cqn || 0, ff: room.ff || 0, mv: room.mv || 1, ns: room.ns, gc: 2, sap: 1, players: [...room.values()].map(o => o.player), rs: 1, ana: ANA.on ? 1 : 0, sky: 1, hlp: 1, lg: 1, rec: 1, rte: 1, br: 1, brb: 1, bnb: 1, hsc: 1, cam: 1, gq: 1, crl: 1, man2: 1, med: 1, ped: 1, para: 1, ptr: 1, fnd: 1 }, sus && { host: 0, sus: 1 }));
     send(c.ws, { t: 'fcap', v: 1 });   // this server knows fort and fbuild (trenches and sandbags)
     send(c.ws, { t: 'tcap', v: 1 });   // and tun (the tunnels, cf-trincheiras-tuneis)
     send(c.ws, { t: 'dcap', v: 1 });   // and the longer damage model
@@ -311,6 +312,13 @@ const RX = {
     const h = c.room.host, now = Date.now();
     if (h === c || c.player.cls !== 'inf' || !(Number.isInteger(m.k) && m.k >= 1 && m.k <= FKINDS) || !vec(m.p, 2) || !num(m.a) || now - (c.ft || 0) < 700) return;
     c.ft = now; send(h.ws, { t: 'fbuild', from: c.player.id, k: m.k, p: m.p, a: m.a });
+  },
+  /* fundo (cf-pol2-obras, P17): a soldier asks the host to take down a work of its side (id; b 1 a supply base's site), 700 ms apart at
+     least; the host checks it stands by it and pays part of its cost back */
+  fundo(c, m) {
+    const h = c.room.host, now = Date.now();
+    if (h === c || c.player.cls !== 'inf' || !(Number.isInteger(m.id) && m.id >= 0 && m.id < 65536) || (m.b !== 0 && m.b !== 1) || now - (c.fu || 0) < 700) return;
+    c.fu = now; send(h.ws, { t: 'fundo', from: c.player.id, id: m.id, b: m.b });
   },
   /* transport. board: a soldier asks the owner of vehicle v for a seat (s 0) or says it is out (s -1): the player whose vehicle it is, or
      the host for an AI entity's. seats: who is aboard, a row a vehicle, [vehicle, boxed AI soldiers or -1, then a player or 0 per seat]:
@@ -481,6 +489,10 @@ RX.grant = (c, m) => {
   };
   /* amb: what the host's evacuation did with a guest's ambulance (k 1 handed over, 0 taken aboard; n of them, c aboard now), to that guest alone */
   RX.amb = (c, m) => { const o = c.room.get(m.to); if (host(c) && o && o !== c && (m.k === 0 || m.k === 1) && Number.isInteger(m.n) && m.n > 0 && m.n <= 64 && Number.isInteger(m.c) && m.c >= 0 && m.c <= 64) send(o.ws, { t: 'amb', k: m.k, n: m.n, c: m.c }); };
+  /* the player's squad (welcome psq: 1, cf-pol2 P10): psq, a guest on foot to the host (k 0 his soldier came in, 1 follow, 2 hold at p, 3 attack p);
+     psql, the host to the room: pairs of aid and owner, whose soldiers are whose */
+  RX.psq = (c, m) => { const h = c.room.host; if (h && h !== c && c.player.cls === 'inf' && Number.isInteger(m.k) && m.k >= 0 && m.k <= 3 && (m.k === 0 || vec(m.p, 2))) send(h.ws, Object.assign({ t: 'psq', from: c.player.id, k: m.k }, m.k && { p: m.p })); };
+  RX.psql = (c, m) => { if (host(c) && ints(m.e, 96, 2)) cast(c, { t: 'psql', e: m.e }); };
   RX.civrec = (c, m) => { const h = c.room.host; if (h && h !== c && c.player.cls === 'inf' && Number.isInteger(m.id) && m.id >= 0 && m.id < 65536) send(h.ws, { t: 'civrec', from: c.player.id, id: m.id }); };
 }
 /* the economy and the general (welcome eco: 1, gen: 1). A side's private word (ecs, gen, glog) goes to that side's players and its MCP
@@ -735,10 +747,10 @@ RX.ill = (c, m) => {
   /* the player's transport (welcome says ptr: 1; cf-transporte-jogador). pdl, from a guest flying a paratroopers' plane or a transport
      helicopter to the host, 400 ms apart at least: k 0 load me from the side's reserve (w squads, 1 to 4), k 1 a stick goes out of my
      aircraft (n its kits, as lift's; r 1 down the fast-rope, 0 by parachute). From the host to that guest alone (to): k 0, n the squads
-     granted, [[kits]], 4 at most, none when the reserve is empty */
+     granted, [[kits]], 4 at most, none when the reserve is empty or the side is over its soldiers' cap, and then y: res or pop, which of the two */
   RX.pdl = (c, m) => {
     const h = c.room.host, kits = v => Array.isArray(v) && v.length > 0 && v.length <= 8 && v.every(k => Number.isInteger(k) && k >= 0 && k < c.room.inf.size);
-    if (h === c) { const o = c.room.get(m.to); if (o && o !== c && m.k === 0 && Array.isArray(m.n) && m.n.length <= 4 && m.n.every(kits)) send(o.ws, { t: 'pdl', k: 0, n: m.n }); return; }
+    if (h === c) { const o = c.room.get(m.to); if (o && o !== c && m.k === 0 && Array.isArray(m.n) && m.n.length <= 4 && m.n.every(kits)) send(o.ws, Object.assign({ t: 'pdl', k: 0, n: m.n }, (m.y === 'pop' || m.y === 'res') && { y: m.y })); return; }   // y: which limit, when no squad came (cf-general-reservas)
     if (!h || c.spec || (c.player.cls !== 'plane' && c.player.cls !== 'heli')) return;
     const now = Date.now(); if (now - (c.pdt || 0) < 400) return;
     if (m.k === 0 && int(m.w, 1, 4)) { c.pdt = now; send(h.ws, { t: 'pdl', from: c.player.id, k: 0, w: m.w }); }

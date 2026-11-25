@@ -52041,7 +52041,7 @@ brView = (g => t => {
    DIF: the difficulties (S.dif[t]; Normal by default). Only how often the side plans (plan s: 6, 4, 3, 2; Normal is FIELD.every, the battle before W17)
    and how deep: fp, the foot paths (footPath) one plan tick may ask (MAN.fp at Normal); mx, manoeuvres at once more or fewer than the doctrine's
    MAN.max (never under one); look, how much it leans on the enemy's habits (HAB). Never a resource, a sight or an aim: the economy, the perception
-   ladder (VIEW, PERC, AIM) and every unit are the same at every difficulty. tick: s between two looks at whose turn it is to plan.
+   ladder (VIEW, PERC, AIM) and every unit are the same at every difficulty; only, on Easy, the AI lays no camouflage net (CNAI, D8). tick: s between two looks at whose turn it is to plan.
    per and dif in newState's options: [side 0, side 1], each a key, 'sort' (drawn once, at the start) or null */
 const PERS = {
   ret: { nm: 'Retranqueiro', s: 'segura o que tem: só ataca com folga, embosca e guarda o caminho', dk: 'cautious', doc: { atk: 1.8, def: .9, amb: 2, reinf: 35 }, open: 2,
@@ -64211,6 +64211,71 @@ function obrGenFort(t, k, x, z, a) {
   const wx = x + Math.cos(a) * OBR.dig, wz = z - Math.sin(a) * OBR.dig;
   return { x: wx, z: wz, a, L: F.size[0], W: F.size[1], rot: a + Math.PI / 2, why: (F.era && F.era !== S.era) ? 'era' : fortWhy(K, t, wx, wz, a) };
 }
+/* ---------- the AI's camouflage nets (CNAI, cf-pol2-camuflagem: P31 part 2, the owner's D8 = A) ----------
+   The AI general's fortification plan (AFP) orders nets as it orders its other works: through genCmd (fort cnl / cns, in the General View's
+   Fortificar too), a free squad the plan names builds it, the economy pays it (aidPay, bmrPay) and the general's log says why.
+   - Its forward supply bases (S.sup, finished; the main base is not one) get a large net each, the nearest to the enemy first, once the side
+     has seen enemy aviation or a drone: an enemy aircraft, helicopter or drone within CNAI.see m of one of its units, soldiers or bases, or
+     its vehicles under air attack (C.airT). It keeps that for the match (C.cna).
+   - Its artillery (kind art) that has stood within CNAI.move m for CNAI.still s gets a small net over each piece, built by the squads (the
+     platoons) the plan names; no new one once the side has CNAI.left times its dose of small nets (a net stays when what it covered leaves:
+     the AI takes none down).
+   How many: its general's personality's dose (CNAI.dose, [bases, pieces]; '' none), within each net's cap (FORT.cnl 6, FORT.cns 12 a side).
+   They come right after the AA umbrella in the plan's list. On Easy (DIF facil) the AI builds none (D8). Online only with a server that knows
+   the nets (Net.cam).
+   A net is judged where its middle goes (the base, the piece) and laid there: the builder holds OBR.dig m short of it and fortPlan lays the
+   work OBR.dig m ahead (its first try). The tries beside that spot a trench may take would leave a piece outside a 10 m net, so a net an order
+   asked for goes only at that first spot (cnaiSq: the squads of the fortPlan under way) */
+const CNAI = { see: 2500, still: 45, move: 3, left: 2, n: 0, dose: { '': [2, 2], ret: [3, 3], blz: [1, 1], gue: [4, 3], art: [2, 4], log: [3, 2] } };
+Object.assign(W21.fort, { cns: 'rede de camuflagem pequena', cnl: 'rede de camuflagem grande' });
+Object.assign(W21.dig, { cns: FORT.cns.k, cnl: FORT.cnl.k });
+const cnaiDose = t => CNAI.dose[(S.per && S.per[t]) || ''] || CNAI.dose[''];
+/* a net of side t over x z, begun or up */
+const cnaiOver = (t, x, z) => S.forts.some(f => f.F.cam && !f.gone && f.team === t && !(S.os[f.id] > 1) && (q => { const dx = x - q.x, dz = z - q.z; return Math.abs(dx * q.c - dz * q.s) < q.hw && Math.abs(dx * q.s + dz * q.c) < q.hd; })(f.o));
+/* has side t seen enemy aviation or a drone (once is enough) */
+function cnaiAir(C) {
+  if (C.cna !== undefined) return true;
+  const t = C.t, F = foes(t);
+  if (C.airT !== undefined) C.cna = C.airT;
+  else for (const p of S.planes.concat(S.drones || NONE)) {
+    if (p.dead || p.gone || !F.includes(p.team)) continue;
+    const near = o => !o.dead && o.team === t && Math.abs(o.x - p.x) < CNAI.see && Math.abs(o.z - p.z) < CNAI.see && hdist(o, p) < CNAI.see;
+    if (S.units.some(near) || S.sup.some(near) || S.men.some(near)) { C.cna = S.t; break; }
+  }
+  if (C.cna !== undefined) gLog(t, 'eng', 'Aviação ou drone inimigo à vista: as bases avançadas vão para baixo de redes de camuflagem', null, 'cna');
+  return C.cna !== undefined;
+}
+/* has piece u stood within CNAI.move m for CNAI.still s */
+function cnaiStill(u) {
+  const P = u.cnaS; if (!P || Math.hypot(u.x - P.x, u.z - P.z) > CNAI.move) { u.cnaS = { x: u.x, z: u.z, T: S.t }; return false; }
+  return S.t - P.T >= CNAI.still;
+}
+/* the plan's items for side t's nets (afpWant's shape) */
+function cnaiWant(C) {
+  const t = C.t; if (difOf(t) === DIF.facil || (S.net && !Net.cam)) return [];
+  const [nb, na] = cnaiDose(t), e = mnBase(t), out = [];
+  const add = (key, k, x, z, a, nm, why) => {
+    const K = W21.dig[k], sx = x - Math.cos(a) * OBR.dig, sz = z + Math.sin(a) * OBR.dig;
+    out.push({ key, k, x, z, cx: x, cz: z, a, nm, why, spot: () => { const w = fortWhy(K, t, x, z, a); return (!w || w === 'cost') && !S.forts.some(f => f.k === K && !f.gone && Math.abs(f.x - sx) < FORT.ai.post && Math.abs(f.z - sz) < FORT.ai.post) ? { x: sx, z: sz } : null; } });
+  };
+  if (nb > 0 && cnaiAir(C)) {
+    const L = S.sup.filter(b => b.team === t && !b.dead && b.prog >= 1).sort((a, b) => Math.hypot(a.x - e.x, a.z - e.z) - Math.hypot(b.x - e.x, b.z - e.z) || a.id - b.id);
+    for (const b of L.slice(0, nb)) add('cb' + b.id, 'cnl', b.x, b.z, b.a || 0, 'sobre a base de suprimento ' + ecoNear(b.x, b.z), 'rede de camuflagem sobre a base de suprimento ' + ecoNear(b.x, b.z) + ' (aviação ou drone inimigo à vista)');
+  }
+  const G = S.units.filter(u => u.team === t && !u.dead && u.kind === 'art' && u.ai && cnaiStill(u));
+  if (na > 0 && S.forts.reduce((n, f) => n + (f.team === t && f.k === FORT.cns.k && !f.gone ? 1 : 0), 0) < na * CNAI.left)
+    for (const u of G.slice(0, na)) { const P = u.cnaS; add('cg' + (u.cnaN || (u.cnaN = ++CNAI.n)) + ':' + Math.round(P.x / 10) + ',' + Math.round(P.z / 10), 'cns', P.x, P.z, headTo(P.x, P.z, e.x, e.z), 'sobre ' + u.name + ' ' + ecoNear(P.x, P.z), 'rede de camuflagem sobre a artilharia ' + ecoNear(P.x, P.z)); }
+  return out;
+}
+/* the nets go right after the AA umbrella; a net is there when one of the side's covers its spot */
+afpWant = (g => (C, A) => { const W = g(C, A), L = cnaiWant(C); if (L.length) { let i = 0; while (i < W.out.length && W.out[i].k === 'aapos') i++; W.out.splice(i, 0, ...L); } return W; })(afpWant);
+afpHas = (g => (t, it) => (it.cx !== undefined && camK(W21.dig[it.k]) ? cnaiOver(t, it.cx, it.cz) : g(t, it)))(afpHas);
+/* an ordered net only at the spot its order names */
+let cnaiSq = null;
+fortPlan = (g => (t, sq) => { cnaiSq = sq; try { g(t, sq); } finally { cnaiSq = null; } })(fortPlan);
+fortStart = (g => (k, t, x, z, a) => (cnaiSq && camK(k) && !cnaiSq.some(q => { const O = q.ord; return !!O && !!O.dig && O.dig.k === k && Math.abs(O.x + Math.cos(a) * OBR.dig - x) < 1 && Math.abs(O.z - Math.sin(a) * OBR.dig - z) < 1; }) ? null : g(k, t, x, z, a)))(fortStart);
+GC.fort.f = (g => (t, c, by) => (c && camK(W21.dig[c.k]) && S.net && !Net.cam ? gBad('off') : g(t, c, by)))(GC.fort.f);
+/* ---------- end of the AI's camouflage nets ---------- */
 /* ---------- 3D scene (three.js) ---------- */
 const $ = s => document.querySelector(s);
 const cv = $('#cv'), hudCv = $('#hud'), hx = hudCv.getContext('2d');

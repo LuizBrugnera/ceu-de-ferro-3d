@@ -56,7 +56,7 @@ fresh('modern'); const rP = rifleOn('art', 'pzh');
 console.log('   soldier ' + rI.dmg.toFixed(0) + ', truck ' + rT.dmg.toFixed(0) + ', AA ' + rA.dmg.toFixed(0) + ', tank ' + rK.dmg.toFixed(2) + ', open-topped gun ' + rH.dmg.toFixed(2) + ' (crew left ' + rH.crew + ' of 3), closed gun ' + rP.dmg.toFixed(2) + ' (crew ' + rP.crew + ')');
 ok(rI.dmg > 50 && rT.dmg > 50 && rA.dmg > 50, 'small arms hurt soldiers, trucks and AA');
 ok(rK.dmg === 0 && !rK.parts, 'small arms do nothing to a tank');
-ok(rH.dmg < 3 && rH.crew < 3 && rP.crew === 3 && rP.dmg < 3, 'on artillery they only reach the crew of an open-topped gun');
+ok(rH.dmg < 3 && rH.crew < 3 && rP.crew === 3 && rP.dmg < $('ARTS').pzh.hp * .1, 'on artillery they only reach the crew of an open-topped gun; a closed one\'s hull only chips (under a tenth of its hp from 400 rounds: since cf-tiro-origem every round aimed at it strikes the box, not the one in three that ended its hop near it)');
 
 console.log('-- anti-tank rocket against a tank, by the face struck (20 rockets each, from 40 m) --');
 const rocketOn = (era, kit, tank, ang, dist0) => {
@@ -78,6 +78,7 @@ for (const [era, kit, tank, d0] of [['ww2', 'pzjager', 'sherman', 40], ['ww2', '
 }
 
 console.log('-- guided anti-tank missile: tank at 600 m, clear and behind smoke --');
+C.seed(90); // the missile trials get their own dice too: a change in the rifle sections above (cf-pol2 P5's spread) shifted them
 const jav = smoke => {
   fresh('modern'); const t = C.addVehicle('tank', 't72', 1, B.x + 600, B.z, 0), m = C.addMan('blueAT', 0, B.x, B.z, 0), hp = t.hp; let launched = 0, lost = false;
   m.ctl.w = m.w = 1; m.ctl.fire = true;

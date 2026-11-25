@@ -17,6 +17,11 @@
      plan     the manoeuvres its planner weighed (C.mev: every candidate, and those over MAN.min) beside those it ran; each route's posture
               (ataque, manter, defesa) as a share of the match
      log      the general's own log lines, by kind and by template (numbers and names stripped)
+     man      how fast its assaults go (cf-general-manobra): each assault's timeline (opened, every stage, first squad at the objective,
+              the point taken, ended and how) with its losses; the squads gsPull sent to the forming-up place (pull) and
+              from rear points (rear); how long a point was the side's first aim before an assault on it opened
+              (lag); how often the first aim changed (sw) and the assaults that ended before reaching their objective (drop); what held
+              the next assault back (gate: cool, max, ap, pool, weak..., as a share of the match); the points taken in or out of an assault
    and a time series every 60 s (held, stock, income, losses, squads) for charts.
 
      node tools/generais.js [--lados 2,3] [--seeds 1,2,3] [--min 20] [--era modern] [--mapv 11] [--jobs 2] [--out dir] [--nice 10]
@@ -65,7 +70,7 @@ function one(m) {
     thr: { n: 0, byK: {}, resp: 0, respT: [], ign: 0, ignWhy: {}, noWhy: {}, ptLost: 0, ptN: 0 },
     para: { n: 0, men: 0, out: 0, shot: 0, took: 0, res: {}, T: 0, holdT: 0, resT: 0, loseT: 0 },
     pts: { took: 0, lost: 0, neut: 0, heldT: 0, maxHeld: 0 }, sq: { liveT: 0, opT: 0, resT: 0, idleT: 0, n: 0 },
-    log: { k: {}, tpl: {} }, post: {}, jobs: {}, mev: {}, mevOk: {}, pop: { men: 0, veh: 0, air: 0, full: 0, T: 0 }, st: {} });
+    log: { k: {}, tpl: {} }, man: { ops: [], sw: 0, gate: {}, tookOp: 0, tookElse: 0 }, post: {}, jobs: {}, mev: {}, mevOk: {}, pop: { men: 0, veh: 0, air: 0, full: 0, T: 0 }, st: {} });
   const R = { seed: m.seed, n: N, era: m.era, min: m.min, mapv: m.mapv, page: path.basename(H.PAGE), sides: sides.map(side), series: [], pts: pts.map(p => ({ nm: gName(p), base: p.base, hold0: p.hold })) };
   const SD = R.sides, add = (o, k, v) => { o[k] = (o[k] || 0) + (v === undefined ? 1 : v); };
 
@@ -118,7 +123,7 @@ function one(m) {
   $('genCmd = (g => function (t, c, by) { const r = g.apply(this, arguments); try { globalThis.__gc(t, c || {}, r, by || "ai"); } catch (e) {} return r; })(genCmd)');
   /* the general's log, each line once (gLog drops repeats within GEN.dup s itself) */
   const tpl = s => String(s).replace(/[A-Z]\s·\s[^:,;—(]+/g, '◦').replace(/-?\d+([.,]\d+)?/g, '#').split(/\s+/).slice(0, 7).join(' ');
-  C.__gl = (t, k, s) => { if (!SD[t]) return; add(SD[t].log.k, k); add(SD[t].log.tpl, tpl(s)); };
+  C.__gl = (t, k, s) => { if (!SD[t]) return; add(SD[t].log.k, k); add(SD[t].log.tpl, tpl(s)); if (/de postos quietos/.test(s)) add(SD[t].man, 'pull'); else if (/\(retaguarda, sem inimigo perto\)/.test(s)) add(SD[t].man, 'rear'); };
   $('gLog = (g => function (t, k, s) { const L = S.glog && S.glog.l && S.glog.l[t], e0 = L && L[L.length - 1]; g.apply(this, arguments); const L2 = S.glog && S.glog.l && S.glog.l[t]; if (L2 && L2.length && L2[L2.length - 1] !== e0) try { globalThis.__gl(t, k, s); } catch (e) {} })(gLog)');
 
   /* every 2 s: operations, the threat board, drops, points, squads */
@@ -126,7 +131,38 @@ function one(m) {
   const nearPt = (x, z, r) => { let b = null, bd = r; for (const p of pts) { const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; b = p; } } return b; };
   const popUse = $('popUse'), popOf = $('popOf');
   const opKey = o => (o.man ? 'man:' : '') + o.k;
+  /* the assaults' timelines, the aim and the gate (man) */
+  const cqAim = $('cqAim'), opLiveF = $('opLive'), aimP = sides.map(() => null), aimT = sides.map(() => 0), atkR = new Map(), lastOp = new Map();
+  function manSample(dt) {
+    for (const t of sides) {
+      const Cc = S.cmd && S.cmd[t], m = SD[t].man; if (!Cc) continue;
+      let a = null; try { a = cqAim(Cc)[0] || null; } catch (e) {}
+      if (a !== aimP[t]) { if (aimP[t]) m.sw++; aimP[t] = a; aimT[t] = S.t; }
+      const g = Cc.gate ? Cc.gate : Cc.ev && Cc.evT > S.t - 4 && Cc.ev.length ? (Cc.ev.some(e => e.why === 'go') ? 'go' : Cc.ev[0].why || '?') : 'idle';
+      add(m.gate, g, dt);
+      for (const o of Cc.ops) {
+        if (!o || o.k !== 'atk' || o.man) continue;
+        let r = atkR.get(o);
+        const P = o.O && o.O.tw;
+        if (!r) {
+          r = { t, nm: gName(o.O), walk: o.walk ? 1 : 0, by: o.by || 'ai', T0: R0(o.T0), n: o.sq.length, men: 0, lost: 0, st: { form: 0 }, arr: -1, cap: -1, end: -1, how: '',
+            lag: P && aimP[t] === P ? R0(o.T0 - aimT[t]) : -1, had: P ? P.hold : -9, live: new Map() };
+          atkR.set(o, r); m.ops.push(r);
+          for (const q of o.sq) if (q.live > 0) r.men += q.live;
+        }
+        if (r.end >= 0) continue;
+        const now = R0(S.t - o.T0);
+        if (o.st && r.st[o.st] === undefined) r.st[o.st] = now;
+        for (const q of o.sq) { if (q.op !== o) continue; const p = r.live.has(q) ? r.live.get(q) : q.live; if (q.live < p) r.lost += p - q.live; r.live.set(q, q.live); }
+        if (r.arr < 0) for (const q of opLiveF(o)) { const L = q.men.find(x => !x.dead); if (L && Math.hypot(L.x - o.O.x, L.z - o.O.z) < 120) { r.arr = now; break; } }
+        if (P && r.cap < 0 && P.hold === t && r.had !== t) r.cap = now;
+        if (P) lastOp.set(pts.indexOf(P) + ':' + t, S.t);
+        if (o.over) { r.end = now; r.how = r.cap >= 0 ? 'cap' : o.st === 'form' ? 'form' : o.st === 'back' || o.why ? 'back:' + (o.why || '') : o.st; }
+      }
+    }
+  }
   function sample(dt) {
+    manSample(dt);
     for (const t of sides) {
       const Cc = S.cmd && S.cmd[t], s = SD[t]; if (!Cc) continue;
       for (const [list, pre] of [[Cc.ops, ''], [Cc.amb, 'amb:'], [Cc.camp || [], 'camp:']]) for (const o of list) {
@@ -163,7 +199,7 @@ function one(m) {
     pts.forEach((p, i) => {
       if (p.hold !== hold[i]) {
         if (hold[i] >= 0 && SD[hold[i]]) SD[hold[i]].pts.lost++;
-        if (p.hold >= 0 && SD[p.hold]) SD[p.hold].pts.took++;
+        if (p.hold >= 0 && SD[p.hold]) { SD[p.hold].pts.took++; const lo = lastOp.get(i + ':' + p.hold); if (lo !== undefined && S.t - lo < 30) SD[p.hold].man.tookOp++; else SD[p.hold].man.tookElse++; }
         hold[i] = p.hold;
       }
     });
@@ -177,7 +213,19 @@ function one(m) {
     R.series.push({ T: R0(S.t), held: sides.map(t => pts.filter(p => p.hold === t).length), ps: Q.ps.map(R0), lost: Q.lost.map(l => l.slice()),
       en: E ? E.d.map(d => R0(d.en)) : null, mt: E ? E.d.map(d => R0(d.mt)) : null, inc: E ? E.d.map(d => R0(d.inc.en + d.inc.mt)) : null,
       q: E ? E.d.map(d => d.q.length) : null, sq: sides.map(t => S.squads.filter(q => q.team === t && q.live > 0).length),
-      veh: sides.map(t => S.units.filter(u => u.team === t && !u.dead && u.ai).length) });
+      veh: sides.map(t => S.units.filter(u => u.team === t && !u.dead && u.ai).length),
+      mix: sides.map(mix) });
+  }
+  /* what side t has out by class (cf-general-escala): soldiers (popUse), combat vehicles (tank, lav, art, mobile AA), logistics (truck, car and the rest
+     of the ground AI vehicles), aircraft, fixed AA, finished field works and what the works cost so far (d.wt), and the general's wealth level (ESC) */
+  const MECH = { tank: 1, lav: 1, art: 1, aa: 1 };
+  function mix(t) {
+    const U = popUse(t), o = { men: U.men, mech: 0, log: 0, air: U.air, aaf: 0, works: 0, wk: 0, w: null };
+    for (const u of S.units) if (u.team === t && !u.dead) { if (u.fixed) { if (u.kind === 'aa') o.aaf++; } else if (u.ai) { if (MECH[u.kind]) o.mech++; else o.log++; } }
+    for (const f of S.forts || []) if (f.team === t && !f.gone && f.prog >= 1) o.works++;
+    const d = S.eco && S.eco.d[t]; if (d && d.wt) o.wk = R0(d.wt.en + d.wt.mt);
+    if (d && d.esc) o.w = R1(d.esc.w);
+    return o;
   }
   let nS = 0, nT = 0, err = null;
   try {
@@ -207,6 +255,11 @@ function one(m) {
     { const o = s.pop, T = o.T || 1; s.pop = { men: R1(o.men / T), veh: R1(o.veh / T), air: R1(o.air / T), full: R1(o.full / T) }; for (const k in s.st) s.st[k] = R1(s.st[k] / T); }
     { const p = s.para, T = p.T || 1; p.hold = R1(p.holdT / T); p.resHeld = R1(p.resT / T); p.lose = R1(p.loseT / T); delete p.T; delete p.holdT; delete p.resT; delete p.loseT; }
     for (const k in s.post) s.post[k] = R1(s.post[k] / (S.t || 1));
+    { const m = s.man, T = S.t || 1; for (const k in m.gate) m.gate[k] = R1(m.gate[k] / T); for (const r of m.ops) { delete r.live; delete r.had; if (r.end < 0) { r.how = 'open'; } }
+      const ok = m.ops.filter(r => !r.walk), med = a => a.length ? a.slice().sort((x, y) => x - y)[a.length >> 1] : null;
+      m.n = m.ops.length; m.drop = m.ops.filter(r => r.end >= 0 && r.arr < 0).length;
+      m.arrMed = med(m.ops.filter(r => r.arr >= 0).map(r => r.arr)); m.capMed = med(m.ops.filter(r => r.cap >= 0).map(r => r.cap)); m.cap = m.ops.filter(r => r.cap >= 0).length;
+      m.goMed = med(ok.filter(r => r.st.go !== undefined).map(r => r.st.go)); m.lagMed = med(m.ops.filter(r => r.lag >= 0).map(r => r.lag)); m.lost = m.ops.reduce((a, r) => a + r.lost, 0); }
     s.log.tpl = Object.fromEntries(Object.entries(s.log.tpl).sort((a, b) => b[1] - a[1]).slice(0, 25));
   }
   Object.assign(R, { T: R0(S.t), over: !!Q.ph, win: Q.res ? Q.res[0] : null, why: Q.res ? Q.res[1] : null, place: Q.place || null, err, wall: R0((Date.now() - t0) / 1000) });
@@ -215,7 +268,7 @@ function one(m) {
 
 /* ---------- the aggregate: one row per match and side, and the means per side count and per side */
 const COLS = ['seed', 'n', 't', 'place', 'win', 'ptsEnd', 'ps', 'took', 'lost_pts', 'heldAvg', 'men_lost', 'veh_lost', 'air_lost', 'inc', 'spentQ', 'other', 'waste', 'stockAvg', 'capT', 'richT', 'qIdleT', 'why_en', 'why_mt', 'why_busy', 'why_none', 'why_full',
-  'bought', 'resAvg', 'atk', 'atkWon', 'atkFormMax', 'man', 'qrf', 'ctr', 'amb', 'thr', 'thrResp', 'thrRespMed', 'thrIgn', 'thrPtLost', 'para', 'paraTook', 'paraShot', 'paraHold', 'paraRes', 'sqOp', 'sqRes', 'sqIdle', 'popMen', 'popVeh', 'popFull', 'err'];
+  'bought', 'resAvg', 'atk', 'atkWon', 'atkFormMax', 'man', 'qrf', 'ctr', 'amb', 'thr', 'thrResp', 'thrRespMed', 'thrIgn', 'thrPtLost', 'para', 'paraTook', 'paraShot', 'paraHold', 'paraRes', 'sqOp', 'sqRes', 'sqIdle', 'popMen', 'popVeh', 'popFull', 'mOps', 'mArr', 'mCap', 'mCapN', 'mGo', 'mLag', 'mDrop', 'mSw', 'mLost', 'mTookOp', 'mTookElse', 'mCool', 'mAp', 'err'];
 function rows(M) {
   const out = [];
   for (const m of M) for (const s of m.sides) {
@@ -225,7 +278,9 @@ function rows(M) {
       capT: Math.max(e.capT.en, e.capT.mt), richT: e.richT, qIdleT: e.idleT, why_en: e.why.en || 0, why_mt: e.why.mt || 0, why_busy: e.why.busy || 0, why_none: e.why.none || 0, why_full: e.why.full || 0,
       bought: sum(e.bought), resAvg: e.resSum, atk: s.atk.n, atkWon: s.atk.won, atkFormMax: s.atk.formMax, man: opN(k => k.startsWith('man:')), qrf: opN(k => k === 'qrf'), ctr: opN(k => k === 'ctr'), amb: opN(k => k.startsWith('amb:')),
       thr: s.thr.n, thrResp: s.thr.resp, thrRespMed: s.thr.respMed === null ? '' : s.thr.respMed, thrIgn: s.thr.ign, thrPtLost: s.thr.ptLost, para: s.para.n, paraTook: s.para.took, paraShot: s.para.shot, paraHold: s.para.hold === undefined ? '' : s.para.hold, paraRes: s.para.resHeld === undefined ? '' : s.para.resHeld,
-      sqOp: s.sq.opT, sqRes: s.sq.resT, sqIdle: s.sq.idleT, popMen: s.pop.men, popVeh: s.pop.veh, popFull: s.pop.full, err: m.err ? 1 : 0 });
+      sqOp: s.sq.opT, sqRes: s.sq.resT, sqIdle: s.sq.idleT, popMen: s.pop.men, popVeh: s.pop.veh, popFull: s.pop.full,
+      ...(M => M ? { mOps: M.n, mArr: M.arrMed === null ? '' : M.arrMed, mCap: M.capMed === null ? '' : M.capMed, mCapN: M.cap, mGo: M.goMed === null ? '' : M.goMed, mLag: M.lagMed === null ? '' : M.lagMed, mDrop: M.drop, mSw: M.sw, mLost: M.lost, mTookOp: M.tookOp, mTookElse: M.tookElse, mCool: M.gate.cool || 0, mAp: M.gate.ap || 0 } : {})(s.man),
+      err: m.err ? 1 : 0 });
   }
   return out;
 }
@@ -247,7 +302,7 @@ function agg(dir, board) {
   }
   fs.writeFileSync(path.join(dir, 'generais.csv'), csv(rs));
   console.log(M.length + ' matches → ' + path.join(dir, 'generais.json') + ', generais.csv');
-  const show = ['n', 'place', 'ptsEnd', 'took', 'lost_pts', 'men_lost', 'inc', 'spentQ', 'waste', 'stockAvg', 'capT', 'why_full', 'atk', 'atkWon', 'man', 'qrf', 'thr', 'thrResp', 'para', 'paraHold', 'paraRes', 'sqIdle'];
+  const show = ['n', 'place', 'ptsEnd', 'took', 'lost_pts', 'men_lost', 'mOps', 'mArr', 'mCap', 'mCapN', 'mGo', 'mLag', 'mDrop', 'mSw', 'mTookOp', 'inc', 'spentQ', 'waste', 'stockAvg', 'capT', 'why_full', 'atk', 'atkWon', 'man', 'qrf', 'thr', 'thrResp', 'para', 'paraHold', 'paraRes', 'sqIdle'];
   console.log('side   ' + show.map(c => c.padStart(9)).join(''));
   for (const k of Object.keys(by).sort()) console.log(k.padEnd(7) + show.map(c => String(by[k][c] === undefined ? '' : by[k][c]).padStart(9)).join(''));
   return by;

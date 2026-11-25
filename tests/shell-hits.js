@@ -26,7 +26,7 @@ for (const era of ['ww2', 'modern']) for (const fps of [60, 20]) for (const load
   for (const [kind, id] of targets(era)) {
     const N = 4; let hits = 0;
     for (let i = 0; i < N; i++) {
-      const S = flat(era), X0 = S.base[0].x - 200 - R, Z0 = S.base[0].z, tx = X0 + R, tz = Z0 + (i - 1.5) * .2;
+      const S = flat(era), X0 = S.base[0].x - 200 - R, Z0 = S.base[0].z, tx = X0 + R, tz = Z0 + (i - 1.5) * (kind === 'man' ? .1 : .2);   // a soldier within .15 m of his middle: his body is as wide as drawn (cf-hitbox, MHIT), no longer a cylinder 1.4 m across
       const sh = C.addVehicle('tank', GUN[era], 0, X0, Z0, 0); sh.inv = 0; sh.ai = null;
       let t, ty;
       if (kind === 'man') { t = C.addMan(INF[era][1][0], 1, tx, tz, Math.PI); t.ai = null; t.st = t.ctl.st = id; ty = t.y + [1.1, .8, .62][id]; }   // prone: just over the half metre where a round counts as in the ground

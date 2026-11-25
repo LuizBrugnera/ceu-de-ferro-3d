@@ -63,7 +63,7 @@ const rocketOn = (era, kit, tank, ang, dist0) => {
   let dmg = 0, kills = 0, n = 0, plate = 0, bare = 0;
   for (let i = 0; i < 20; i++) {
     fresh(era); const t = C.addVehicle('tank', tank, 0, B.x + dist0, B.z, ang), m = C.addMan(kit, 1, B.x, B.z, 0), hp = t.hp;
-    m.ctl.w = m.w = 1; m.ctl.fire = true; const w = m.arms[1].d, tt = dist0 / w.spd;
+    m.ctl.w = m.w = 1; const w = m.arms[1].d, tt = dist0 / w.spd; aimAt(m, t, .125 * 9.81 * tt * tt); m.ctl.fire = false;   // aimed before the first step: the trigger held from the start fired the rocket level from the eye, over a low tank's turret (cf-hitbox: the old 6.5 m tall box took it)
     C.run(4, () => { aimAt(m, t, .125 * 9.81 * tt * tt); m.ctl.fire = S.t > .3; return !t.dead && (m.arms[1].t < 0 || S.bombs.length > 0); });
     const d = t.dead ? hp : hp - t.hp; n++; dmg += d; if (t.dead) kills++;
     if (t.def.parts.some((p, j) => p.shield && t.parts[j].hp <= 0)) plate++; else bare += d;   // the rocket set off a reactive plate, or did not
@@ -73,7 +73,8 @@ const rocketOn = (era, kit, tank, ang, dist0) => {
 for (const [era, kit, tank, d0] of [['ww2', 'pzjager', 'sherman', 40], ['ww2', 'bazookaman', 'pz4', 40], ['modern', 'redAT', 'abrams', 80]]) {
   const f = rocketOn(era, kit, tank, Math.PI, d0), s = rocketOn(era, kit, tank, Math.PI / 2, d0), r = rocketOn(era, kit, tank, 0, d0);
   console.log('   ' + KITS[kit].arms[1].name + ' on ' + tank + ' (' + $('TANKS')[tank].hp + ' hp): front ' + f.dmg.toFixed(0) + ' (' + f.kills + '/20 kills), side ' + s.dmg.toFixed(0) + ' (' + s.kills + (s.plate ? '; ' + s.plate + ' on its reactive plates, the others ' + s.bare.toFixed(0) : '') + '), rear ' + r.dmg.toFixed(0) + ' (' + r.kills + ')');
-  ok(r.dmg > f.dmg && s.bare > f.dmg && r.kills >= f.kills && r.kills > 0, '  flank and rear shots do more than frontal ones' + (s.plate ? ' (on the flank, off its reactive plates: DMG.era)' : ''));
+  const all = f.kills === 20;   // it destroys from the front every time (the Panzerfaust on a Sherman, which now bursts on the hull drawn, not a metre ahead of it: cf-hitbox): flank and rear must too
+  ok(all ? r.kills === 20 && s.kills + s.plate >= 20 : r.dmg > f.dmg && s.bare > f.dmg && r.kills >= f.kills && r.kills > 0, '  flank and rear shots do more than frontal ones' + (all ? ' (the front already destroys it every time: so do they)' : '') + (s.plate ? ' (on the flank, off its reactive plates: DMG.era)' : ''));
   if ($('DMG').era[tank]) ok(s.plate > 0 && s.dmg < s.bare, '  reactive plates on the flank take part of the rockets');
 }
 

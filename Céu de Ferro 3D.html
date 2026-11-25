@@ -67242,9 +67242,12 @@ function camClip(p, seat, dt) {
   if (VU.uCut) VU.uCut.value.set(o.x, o.y, o.z, p.man ? CAM.cut[0] : p.heli && p.def.R ? p.def.R + CAM.cut[2] : Math.max(3, (p.def.w || 4) * CAM.cut[1] + CAM.cut[2]));
 }
 /* ---------- HUD (2D overlay) ---------- */
-/* the HUD's scale: 1 from 1000 to 1280 px wide (down to .62 on a narrow screen), and over 1280×674 it grows with the screen, both ways, up to 1.25
-   (1920×1080), so the text on a big screen is not the size of a small one's (cf-pol-hud) */
-const hudU = () => (cw < 1280 ? clamp(cw / 1000, .62, 1) : clamp(Math.min(cw / 1280, ch / 674), 1, 1.25));
+/* the HUD's scale: 1 from 1000 to 1280 px wide, and over 1280×674 it grows with the screen, both ways, so the text on a big screen is not the
+   size of a small one's (cf-pol-hud). P24 (cf-pol2-fase1): it stopped at 1.25, so at 1920×1080 the HUD was the size of a 1600 px one's, and
+   on a desktop window under 1000 px it went down to .62 (11 px text at 6.8 px). Now up to HUDU.max (1.5 at 1920×1080) and, with a mouse,
+   never under HUDU.min; a touch screen keeps .62 (the owner's D5: the phone is left as it is) */
+const HUDU = { min: .8, max: 1.5, touch: .62 };
+const hudU = () => (cw < 1280 ? clamp(cw / 1000, coarse ? HUDU.touch : HUDU.min, 1) : clamp(Math.min(cw / 1280, ch / 674), 1, HUDU.max));
 function txt(s, x, y, size, col, align, font) {
   hx.font = size + "px " + (font || "'Share Tech Mono', ui-monospace, monospace");
   hx.textAlign = align || 'left'; hx.fillStyle = 'rgba(8,12,13,.88)'; hx.fillText(s, x + 1, y + 1);   // a dark edge that holds on fog and a bright sky (.6 washed out there)
@@ -68084,6 +68087,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
       if (q && q.front) { if (S.lockOk || blink) bracket(q.x, q.y, S.lockOk ? 17 : 24, S.lockOk ? FOE : acc); if (near) txt('PERTO DEMAIS', q.x, q.y + 27, 11 * u, FOE, 'center'); }   // cf-miras-impl: locking blinks, locked holds; only the warning is words
       else if (!t) txt(a.mag ? 'SEM ALVO NA MIRA' : a.rl > 0 ? 'RECARREGANDO' : 'SEM MUNIÇÃO', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
     } else if (!a.mag && !(a.rl > 0)) txt(a.res ? 'R: RECARREGAR' : 'SEM MUNIÇÃO', cw / 2, ch * .5 + 44 * u, 12 * u, FOE, 'center');
+    else if (!(P.sl && P.sl.n >= 3) && magLow(a) === 1) txt(a.res ? 'PENTE BAIXO  ·  R: RECARREGAR' : 'ÚLTIMO PENTE', cw / 2, ch * .5 + 44 * u, 12 * u, acc, 'center');   // P9
     if (S.rearm > 0) { txt(S.dep === 2 ? 'REABASTECENDO' : 'REMUNICIANDO', cw / 2, ch * .7, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
     if (w.k === 'mort' && !(seat && seat.map)) {
       const sol = S.sol, set = P.swT - S.t, n1 = v => v.toFixed(2).replace('.', ',');
@@ -68104,6 +68108,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - 62 * k, cy - 3 * u, 124 * k, 22 * u);
     for (let d = 0; d < 360; d += 15) { const e = ((d - b + 540) % 360) - 180; if (Math.abs(e) > 58) continue; const x = cw / 2 + e * k; if (d % 90) { hx.fillStyle = dim; hx.fillRect(x, cy + 4 * u, 1, (d % 45 ? 5 : 9) * u); } else txt('NLSO'[d / 90], x, cy, 13 * u, d ? ink : acc, 'center'); }
     tri(cw / 2, cy - 7 * u, Math.PI / 2, 4, acc); txt(String(Math.round(b)).padStart(3, '0') + '°', cw / 2 + 66 * k, cy + 1 * u, 12 * u, ink);
+    if (!(P.sl && P.sl.n >= 3) && !(seat && seat.map)) ammoHud(a, u, ink, acc, dim, disp);
   }
   txt(P.def.name, L, y, 17 * u, acc, 'left', disp); y += 23 * u;
   txt('SAÚDE', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.hp / P.max, P.hp < P.max * .45 ? FOE : ink); y += 15 * u;
@@ -68128,6 +68133,32 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   for (const [s, c] of woundLines(P, hs, ls, as)) line(s, DCOL[c]);
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
+}
+/* P25 (cf-pol2-fase1): the arrow toward an enemy aircraft off the screen sat on the screen's edge, 22 px in, so at the top left it was
+   drawn over the soldier's list of weapons and at the corners over the minimap and the panels. Now it sits on an ellipse round the aim,
+   ARRW.rx of the width and ARRW.ry of the height out, inside every corner panel and under the top strip. [x, y, the angle it points] */
+const ARRW = { rx: .36, ry: .3 };
+function arrowAt(dx, dy) { const a = Math.atan2(dy, dx); return [cw / 2 + Math.cos(a) * cw * ARRW.rx, ch / 2 + Math.sin(a) * ch * ARRW.ry, a]; }
+/* P9 (cf-pol2-fase1): the ammunition of the weapon in hand was only a line of 12 px in the list at the top left, and nothing said a magazine
+   was running low. magLow(m): 0 enough, 1 low (MAGLOW of a magazine or less, at least the last round), 2 empty, for a weapon that loads
+   magazines (not one counted in units, d.k: grenades, launchers, the mortar). ammoHud: the weapon in hand at the bottom right, its rounds
+   in the magazine large and the magazines left, in the accent while low and red when empty; under the aim, PENTE BAIXO (or ÚLTIMO PENTE
+   with none left) while low, as R: RECARREGAR said once it was empty */
+const MAGLOW = .25;
+function magLow(m) {
+  const d = m.d; if (d.k || !(d.mag > 1)) return 0;
+  return m.mag <= 0 ? 2 : m.mag <= Math.max(1, Math.floor(d.mag * MAGLOW)) ? 1 : 0;
+}
+function ammoHud(m, u, ink, acc, dim, disp) {
+  const d = m.d, R = cw - 16, y = ch - 16 - 42 * u, lo = magLow(m), col = lo === 2 || !(m.mag + m.res) ? FOE : lo ? acc : ink;
+  hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(R - 168 * u, y - 6 * u, 168 * u + 8, 54 * u);
+  txt(d.name.toUpperCase(), R, y, 11 * u, dim, 'right');
+  if (d.k) { txt('×' + (m.mag + m.res), R, y + 15 * u, 24 * u, col, 'right', disp); return; }
+  const rs = '  ' + m.res + (d.lmg && d.mag > 40 ? (m.res === 1 ? ' cinta' : ' cintas') : m.res === 1 ? ' pente' : ' pentes');
+  hx.font = 12 * u + "px 'Share Tech Mono', ui-monospace, monospace"; const rw = hx.measureText(rs).width;
+  txt(rs, R, y + 25 * u, 12 * u, m.res ? ink : FOE, 'right');
+  txt(String(m.mag), R - rw, y + 15 * u, 24 * u, col, 'right', disp);
+  if (m.rl > 0) bar(R - 160 * u, y + 43 * u, 160 * u, 3 * u, 1 - m.rl / d.rl, acc);
 }
 /* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
    a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */
@@ -68479,6 +68510,7 @@ function hudMsl(P, u, ink, acc, disp, blink) {
 function drawHud() {
   hx.setTransform(dpr, 0, 0, dpr, 0, 0); hx.clearRect(0, 0, cw, ch); HTAG.r.length = 0;
   if (playMode !== 'play' || !S.my) return;
+  invChip();   // the stick's chip follows what the player is in (P21)
   const P = S.my, u = hudU(), ink = S.modern ? '#c4f1f7' : '#f3ead2', acc = S.modern ? '#63d2e6' : '#e6b53a';
   const disp = S.modern ? "'Chakra Petch', sans-serif" : "'Saira Stencil One', Impact, sans-serif";
   const me = P.team, blink = (S.t * 5 | 0) % 2, lockName = P.kind ? P.arms[0].d.name : S.lockA && S.lockA.name;
@@ -68514,10 +68546,9 @@ function drawHud() {
         far.push([lock ? -1 : rng, (lock ? lockName + ' ' : '') + (rng / 1000).toFixed(1).replace('.', ',') + ' km', s.x, s.y + (lock ? 23 : 16)]);
       } else tri(s.x, s.y - 16, Math.PI / 2, 6, FRIEND);
       if (q.pid) txt(q.name, s.x, s.y - 26 - 12 * u, 12 * u, foe ? FOE : FRIEND, 'center');
-    } else if (foe) {
+    } else if (foe) {   // off the screen: an arrow toward it on a ring round the aim (ARRW), clear of the panels in the corners (P25)
       let dx = s.x - cw / 2, dy = s.y - ch / 2; if (!s.front) { dx = -dx; dy = -dy; }
-      const k = Math.min((cw / 2 - 22) / (Math.abs(dx) || 1), (ch / 2 - 22) / (Math.abs(dy) || 1));
-      tri(cw / 2 + dx * k, ch / 2 + dy * k, Math.atan2(dy, dx), 9, FOE);
+      const [x, y, a] = arrowAt(dx, dy); tri(x, y, a, 9, FOE);
     }
   }
   far.sort((a, b) => a[0] - b[0]); for (const l of far) tagTxt(l[1], l[2], l[3], 11 * u, FOE, 'center');
@@ -69376,7 +69407,7 @@ function lockPtr() {
 }
 
 function startDemo() {
-  genOpen(false); $('#specEnd').hidden = true; playMode = 'demo'; paused = false; overShown = false; $('#btnInv').hidden = false;
+  genOpen(false); $('#specEnd').hidden = true; playMode = 'demo'; paused = false; overShown = false; invChip();
   if (document.pointerLockElement) document.exitPointerLock();
   newState(era, null, { N: nSides() });
   for (let i = 0; i < 240; i++) step(1 / 30);
@@ -69709,7 +69740,7 @@ function buildHangar() {
   const lg = (LEGEND[k] || LEGEND.plane)(d, o);
   for (const [key, v] of lg.concat(lg.some(r => r && r[0] === 'M') ? [] : [o.map], d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], k === 'inf' ? psqKeys() : [], skyKeys(), helpKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
   $('#briefing').textContent = $('#briefing').title = text.slice(0, cut); $('#mission').textContent = text.trim() + ' ' + CQBRIEF(pvp, ECO.on);   // the whole briefing: on the desktop home only Controles shows it
-  $('#btnInv').textContent = (k === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa'); ffChip();
+  invChip(); ffChip();
   for (const b of document.querySelectorAll('#ctrls .tab')) b.lastChild.textContent = CTRLTXT[k === 'heli' ? 1 : 0][b.dataset.ctrl === 'mouse' ? 1 : 0];
   susFill(); if (!(Date.now() - (Net.susAt || 0) < 2000)) susPoll();
 }
@@ -69843,7 +69874,7 @@ function launch(again) {
   if (re) { for (const g of Net.ghosts.values()) g.gone = true; Net.ghosts.clear(); Net.ai.clear(); Net.msl.clear(); Net.oq = []; Net.oh.clear(); }   // a new match in the same room: nothing of the old world is kept
   genOpen(false);
   newState(era, id, { net, cls: k, mouse: mouseAim(), host: net && Net.host === Net.id, len: matchLen, sky: skyPre, wx: wxPre, N: nSides() }); S.invert = invertY; buildWorld(); playMode = 'play'; paused = false; overShown = false;
-  hangar.hidden = true; overEl.hidden = true; $('#btnInv').hidden = false; $('#btnPause').hidden = net; $('#btnLeave').hidden = !net; $('#btnCam').hidden = false; $('#btnSwap').hidden = false; $('#btnPause').textContent = 'Pausar';
+  hangar.hidden = true; overEl.hidden = true; invChip(); $('#btnPause').hidden = net; $('#btnLeave').hidden = !net; $('#btnCam').hidden = false; $('#btnSwap').hidden = false; $('#btnPause').textContent = 'Pausar';
   if (re) { S.banner = { text: 'Nova partida', sub: 'Mesma sala, mesmos lados, tudo de volta ao começo', life: 4 }; Net.roll(); }
   lockPtr();
   touchEl.hidden = !coarse;
@@ -70253,9 +70284,9 @@ function hudCq(P, u, ink, acc, disp, blink, mapV) {
     x += w + g;
   }
   let xt = x + 5 * u;
-  const sn = t => { const n = S.E.sides[S.fac[t]].name.toUpperCase(); return n.length > 6 ? n.slice(0, 3) + '.' : n; };   // with three sides, whose points each number is: the side's name under it ("1944 1944" side by side said nothing)
-  if (many) txt(sn(me), x0 + tw, y0 + h + 7 * u, 9 * u, FRIEND, 'right');
-  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); if (many) txt(sn(t), xt, y0 + h + 7 * u, 9 * u, cqCol(t), 'left'); xt += tw + 8 * u; }
+  const sn = t => { const n = S.E.sides[S.fac[t]].name.toUpperCase(); return n.length > 6 ? n.slice(0, 3) + '.' : n; };   // whose points each number is: the side's name under it ("1944 1944" side by side said nothing), with two sides too (P20, cf-pol2-fase1: "5 … 5" had no word)
+  txt(sn(me), x0 + tw, y0 + h + 7 * u, 9 * u, FRIEND, 'right');
+  for (const t of foes) { txt(tkS(t), xt, y0, 17 * u, cqCol(t), 'left', disp); txt(sn(t), xt, y0 + h + 7 * u, 9 * u, cqCol(t), 'left'); xt += tw + 8 * u; }
   txt(mmss(Q.T), x0 + W / 2, y0 + h + 7 * u, 12 * u, Q.T < 120 && blink ? FOE : ink, 'center');
   if (inc) txt(inc, x0 + W / 2, y0 + h + (S.sky ? 36 : 20) * u, 9 * u, ink, 'center');   // under the clock, and under skyHud's line (50u) when it shows
   let y = y0 + h + 26 * u + (S.sky ? 12 * u : 0) + (inc ? 14 * u : 0);   // under the clock's line (skyHud: the hour, day or night, the weather) when it shows: the point's name was written over it (cf-pol-fluxos)
@@ -70444,6 +70475,18 @@ $('#btnFF').addEventListener('click', () => {
   if (S && S.net && Net.host === Net.id) Net.ffSend();
   ffChip();
 });
+/* P21 (cf-pol2-fase1): the stick's chip ("Manche: S puxa", "Cíclico: S puxa") only where there is a stick: a plane or a helicopter picked
+   in the hangar, or flown in play (a soldier or a crew that changes to one gets it, and loses it out of it); the soldier, the ground
+   vehicles and the spectator have none. invAir: the stick it names ('plane', 'heli') or ''; invChip writes the chip only when that changes */
+function invAir() {
+  if (playMode === 'watch') return '';
+  if (playMode === 'play') { const P = S && S.my; return P && !P.man && !P.kind ? (P.heli ? 'heli' : 'plane') : ''; }
+  const k = klass(); return k === 'plane' || k === 'heli' ? k : '';
+}
+function invChip() {   // the last state written in invChip.k (a property: buildHangar may call it before this line has run)
+  const a = invAir(), key = a + invertY; if (key === invChip.k) return; invChip.k = key;
+  const b = $('#btnInv'); b.hidden = !a; if (a) b.textContent = (a === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa');
+}
 $('#btnInv').addEventListener('click', () => {
   invertY = !invertY; if (S) S.invert = invertY;
   try { localStorage.setItem('ceu-de-ferro-3d-inverter', invertY ? '1' : '0'); } catch (e) {}
@@ -71178,7 +71221,7 @@ $('#genAgain').addEventListener('click', () => { genOpen(false); Net.close(); st
 $('#genHome').addEventListener('click', () => { genOpen(false); Net.close(); buildHangar(); startDemo(); });
 /* a match with no player: two commanders, and the general's view over it */
 function startWatch() {
-  playMode = 'watch'; paused = false; overShown = false; GV.spd = 1; $('#btnInv').hidden = true;   // no stick to invert while watching SPC.mode = 'auto'; SPC.tgt = null; SPC.init = false; $('#specEnd').hidden = true;
+  playMode = 'watch'; paused = false; overShown = false; GV.spd = 1; invChip();   // no stick to invert while watching SPC.mode = 'auto'; SPC.tgt = null; SPC.init = false; $('#specEnd').hidden = true;
   if (document.pointerLockElement) document.exitPointerLock();
   newState(era, null, { watch: 1, len: matchLen, sky: skyPre, wx: wxPre, N: nSides() });
   for (let i = 0; i < 240; i++) step(1 / 30);
@@ -71196,7 +71239,7 @@ function specLocal(msg) {
 }
 function startSpec(again) {
   genOpen(false); Net.wantSpec = false;
-  playMode = 'watch'; paused = false; overShown = false; GV.spd = 1; $('#btnInv').hidden = true;   // no stick to invert while watching
+  playMode = 'watch'; paused = false; overShown = false; GV.spd = 1; invChip();   // no stick to invert while watching
   if (document.pointerLockElement) document.exitPointerLock();
   if (again) { for (const g of Net.ghosts.values()) g.gone = true; Net.ghosts.clear(); Net.ai.clear(); Net.msl.clear(); Net.oq = []; Net.oh.clear(); }   // a new match in the same room: nothing of the old world is kept
   newState(era, null, { net: true, watch: 1, spec: 1, len: matchLen, N: nSides() });
@@ -75313,8 +75356,9 @@ const VMH = {
 };
 /* the arms (cf-armas-fp): each from its shoulder, fixed in the eye's frame (the left one forward, the torso turned to the weapon), to its
    hand on the weapon, the elbow bent toward pole (two bones, up and fore m long): the hands stay on the weapon in every pose and the arms
-   follow it, where they were two stiff rods hung from the weapon. Out of reach, the arm goes straight and stretches to the hand */
-const VMS = { R: [.19, -.24, .1], L: [-.14, -.25, -.02], up: .3, fore: .29, t: [.075, .085], pole: { R: [.8, -1, .2], L: [-.5, -1, .2] } };
+   follow it, where they were two stiff rods hung from the weapon. Out of reach, the arm goes straight and stretches to the hand. The left
+   shoulder sits low and near the middle (P8: at [-.14, -.25, -.02] the upper arm rose from the bottom middle of the screen to the handguard) */
+const VMS = { R: [.19, -.24, .1], L: [-.08, -.38, .02], up: .3, fore: .29, t: [.075, .085], pole: { R: [.8, -1, .2], L: [-.5, -1, .2] } };
 /* a reload's left hand (VMR.path: [the reload's progress, where]: 0 its hold, 1 the magazine, 2 drop below the magazine, toward the body),
    and the bolt worked after a shot (VMR.bolt: from s, for s): the hand to the handle, pulled back pull m and pushed home, then to the grip */
 const VMR = { path: [[0, 0], [.14, 1], [.34, 1], [.48, 2], [.6, 1], [.8, 1], [.95, 0]], drop: [-.04, -.16, -.06], bolt: [.06, .55], pull: .07 };
@@ -75348,8 +75392,10 @@ function vmHandPose(A, rl, tb) {
 const VMP = { rifle: [[.15, -.16, -.3], [0, 0, -.2]], pistol: [[.13, -.13, -.36], [0, 0, -.38]], tube: [[.19, -.1, -.22], [0, 0, -.12]], mort: [[.1, -.36, -.55], [.1, -.36, -.55]] };
 /* where the right hand holds a rifle or a pistol from the hip, in the eye's frame (cf-armas-fp): the same place whichever the model (the
    pack's pivot sits 12 cm ahead of the M4's grip and 6 cm behind the SMG's), low and away from the eye, so both hands and the whole weapon
-   are in view (it was 8 cm nearer and 7 cm higher: the weapon took the lower right quarter of the screen) */
-const VMPOS = { rifle: [.17, -.23, -.34], pistol: [.15, -.17, -.4] };
+   are in view (it was 8 cm nearer and 7 cm higher: the weapon took the lower right quarter of the screen). P8 (cf-pol2-fase1): a rifle's
+   grip went 7 cm further right, 9 cm lower and 8 cm further out ([.17, -.23, -.34] still took a quarter of a 1280 × 800 screen, its
+   stock to the bottom edge and the left forearm across the middle): now the weapon sits in the lower right corner, the middle stays clear */
+const VMPOS = { rifle: [.24, -.32, -.42], pistol: [.15, -.17, -.4] };
 const VM = { fov: 54, M: new Map(), on: false, f: -1, t: 0, rn: 0, sx: 0, sy: 0, ph: null, pp: 0, sc: null, cam: null, hemi: null, sun: null, lsc: null, L: [], box: null, off: false };
 try { VM.off = /[?&]vm=0/.test(location.search) || localStorage.getItem('cf-vm') === '0'; } catch (e) {}
 const vmOk = () => !VM.off && typeof PACK !== 'undefined' && PACK.on && PACK.lvl() > 0;

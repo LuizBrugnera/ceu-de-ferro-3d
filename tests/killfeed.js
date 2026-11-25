@@ -28,10 +28,10 @@ console.log('-- the rows: whose deaths are listed --');
   ok(W.kf.length === 1 && W.kf[0].v === u.name && !W.kf[0].k, 'an enemy ' + u.kind + ' lost 600 m from the player, nobody\'s credit: "✕ ' + u.name + '"');
   if (uf) { P.x = uf.x + KF.r + 200; P.z = uf.z; uf.inv = 0; C.ruin(uf, 1e6, null); ok(W.kf.length === 1, '  one ' + (KF.r + 200) + ' m away: not listed'); }
   const pal = C.addMan('blueRifle', 0, P.x + 10, P.z, 0), sq = C.addMan('blueRifle', 0, P.x + 20, P.z, 0), f2 = C.addMan('redRifle', 1, P.x + 40, P.z, 0);
-  sq.psq = 1; C.killMan(f2, sq); ok(W.kf.length === 2 && W.kf[1].k === sq.name && W.kf[1].mine, 'a soldier of the player\'s squad (psq) kills one: listed as the player\'s own');
+  sq.psq = 1; sq.own = $('Net').id; C.killMan(f2, sq); ok(W.kf.length === 2 && W.kf[1].k === sq.name && W.kf[1].mine, 'a soldier of the player\'s squad (psq) kills one: listed as the player\'s own');
   const f3 = C.addMan('redRifle', 1, P.x + 50, P.z, 0); C.killMan(P, f3);
   const d = W.kf[W.kf.length - 1]; ok(d.v === 'Você' && d.vme && d.k === f3.name, 'the player killed: "' + d.k + ' ▸ Você"');
-  for (let i = 0; i < 8; i++) { const x = C.addMan('redRifle', 1, P.x + 30, P.z, 0); C.killMan(x, pal); pal.psq = 1; }
+  for (let i = 0; i < 8; i++) { const x = C.addMan('redRifle', 1, P.x + 30, P.z, 0); C.killMan(x, pal); pal.psq = 1; pal.own = $('Net').id; }
   ok(W.kf.length === KF.n, 'never more than ' + KF.n + ' rows');
   const ff = C.addMan('blueRifle', 0, P.x + 5, P.z, 0); C.killMan(ff, sq); ok(W.kf[W.kf.length - 1].ff, 'a friend killed by a friend: marked (ff)');
   const t0 = W.t; W.t += KF.life + .1; const l1 = $('kfLive')(); W.t = t0 + KF.mine + .1; const l2 = $('kfLive')();

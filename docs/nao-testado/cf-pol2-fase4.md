@@ -18,3 +18,24 @@ O que é: no alto à direita, sob o mapa, o feed de abates (`KF`, `kfNote`, `kfD
 ### Como testar
 
 `node server.js`, entrar como Fuzileiro e abater alguém: a linha aparece sob o mapa. Segurar Tab: o placar; soltar: some. Tocar Tab: a Visão de General. Com dois navegadores na mesma sala: o abate de um aparece no feed do outro, e o placar lista os dois.
+
+## P10: a esquadra do jogador (D4: 3 soldados da IA, 3 ordens)
+
+O que é: quem entra a pé (Infantaria) vem com 3 soldados da IA do seu lado (`PSQ`, `psqSpawn`, `psqStep`, `psqOrder`): um fuzileiro, um metralhador e um antitanque, fora de qualquer esquadrão e das ordens do general. Vírgula: sigam-me; ponto: segurem aqui; / (no teclado brasileiro, ;): ataquem onde a mira toca o chão. Com um inimigo perto de onde devem estar, lutam de onde estão. A cada nova vida a pé a esquadra é refeita: os mortos são repostos e quem ficou a mais de 400 m é liberado. Jogador morto ou num veículo: a esquadra segura onde está. Online o anfitrião cria e comanda a esquadra de cada convidado (`psq`, `psql`); se o anfitrião sai, o novo mantém as esquadras dos jogadores fora dos esquadrões da IA (`psqAdopt`).
+
+### Testado
+
+- `tests/esquadra.js`: a esquadra entra com o jogador (os 3 kits, do lado dele, fora de esquadrão); segue, segura e ataca; recusa ordem inválida; luta com um inimigo a 40 m; o abate dela entra no feed como do jogador; nova vida repõe o morto e libera o que ficou longe; morto, ela não corre até o corpo; a esquadra de um convidado feita pelo anfitrião; a ordem do convidado chega; o anfitrião diz de quem é cada soldado (`psql`); o convidado sai e a esquadra é liberada; o novo anfitrião mantém a esquadra fora dos esquadrões da IA.
+- `tests/esquadra-online.js`: anfitrião e convidado a pé pelo servidor de verdade; a esquadra de cada um; a ordem do convidado obedecida pelos soldados do anfitrião.
+- No Chromium sem tela com GPU, 1280 × 800 e 1920 × 1080, sala de um jogador como Fuzileiro (EUA): a linha ESQUADRA sobre o painel ESTADO, as setas sobre os 3 soldados, o losango SEGURAR e ATACAR. Sem erro de JS.
+
+### Não testado
+
+- Um convidado num navegador de verdade dando ordens (o teste online roda as duas pontas sem tela).
+- A tecla / num teclado brasileiro físico (ABNT2): no navegador sem tela a tecla é mandada pelo código `Slash`.
+- Partida de 1944 e o lado Insurgente: os kits saem de `INF[era][facção]`, índices 0, 1 e 2; não olhei na tela que soldados são.
+- Partida longa com muitos jogadores a pé: cada um põe até 3 soldados acima do teto da IA (até 12 a mais no total, `PSQ.over`).
+
+### Como testar
+
+`node server.js`, entrar como Fuzileiro: três soldados aparecem atrás de você e a linha "ESQUADRA 3/3 · SEGUINDO" sobre o painel ESTADO. Andar: eles seguem. Ponto: seguram onde você estava (losango SEGURAR). Mirar no chão e /: vão até lá (losango ATACAR). Vírgula: voltam a seguir.

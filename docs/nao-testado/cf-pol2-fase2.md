@@ -45,3 +45,14 @@ Falta:
 - Online: no navegador de teste a sala do servidor local não mandou `swap: 1` (`Net.can` falso), e nesse caso a tela de troca não abre e o soldado volta sozinho; para ver a tela forcei `Net.can = true`. Numa sala de verdade, com outro jogador como matador, não foi testado (o nome vem do que o jogo local sabe de quem atirou).
 - Morte por artilharia, mina ou avião fora da vista: `dnSee` só vira a câmera para quem está a menos de `DN.far` (2,5 km) e não sumiu; longe disso só o texto aparece. Não testado no navegador.
 - A volta ficou 2,6 s mais longa (a tela tem os mesmos 3 s de antes, contados depois da câmera). Não avaliado em partida.
+
+## P22 e P23 — menu de pausa e opções
+
+Testado: `tests/pausa.js` (`setPause` não desiste mais online e abre o menu; o menu não para a sala; continuar, opções, controles e sair; com ele aberto, só P e Esc chegam ao jogo, pelo filtro na fase de captura; Esc solta o mouse e isso abre o menu; a sensibilidade vale na mira e o som começa no volume escolhido; o que foi guardado volta, com a sensibilidade presa entre 0,25× e 3×; os controles deslizantes gravam; `sndGain` fica no bloco do som, que `tests/som.js` roda sozinho) e no navegador (Chromium sem janela, GPU real): o menu abre com a batalha andando (3,5 s em 3,5 s), W e 6 não fazem nada com ele aberto, Opções e Controles abrem dentro dele, os deslizantes gravam no `localStorage`, Continuar fecha; o chip Opções do hangar abre o mesmo painel.
+
+Falta:
+- Pointer lock real: no Chromium sem janela, uma tecla não solta o mouse; o menu foi aberto por `setPause(true)`, o caminho que o `pointerlockchange` chama.
+- O volume e o som ouvidos: o navegador de teste não tem áudio.
+- "Sair da partida" não foi clicado no navegador; o teste só confere que o botão existe no menu.
+- Controle físico: o botão de pausa do perfil.
+- A qualidade dos gráficos escolhida no menu vale a partir da próxima partida, como no hangar; não foi trocada durante uma partida.

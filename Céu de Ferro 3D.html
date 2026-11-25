@@ -252,6 +252,11 @@ body[data-era="modern"] .hg::before{background:radial-gradient(70% 60% at 88% 0,
 .pick p.hint{font-family:var(--f-data);font-size:12px;color:var(--mute)}
 .pick p[data-no]{color:var(--foe)}
 .pick .swap-dn{margin:0;font-size:15px;color:var(--foe);font-weight:600;letter-spacing:.02em} .pick .swap-dn[data-ff]{color:#ffd24a}
+.pm .pick-in{width:min(620px,100%)} .pm-acts{flex-wrap:wrap} .pm-keys{max-height:46vh;overflow-y:auto}
+.opt{display:flex;flex-direction:column;gap:10px} .opt .hg-setl{margin:4px 0 0;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.08em}
+.opt-r{display:grid;grid-template-columns:minmax(9ch,auto) 1fr 6ch;align-items:center;gap:10px;font-size:15px} .opt-r input{width:100%;accent-color:var(--accent)} .opt-r output{font-family:var(--f-data);font-size:13px;color:var(--accent);text-align:right}
+.opt-c{display:flex;align-items:center;gap:8px;font-size:15px} .opt-c input{width:18px;height:18px;accent-color:var(--accent)} .opt-n{margin:0;color:var(--mute);font-size:13px}
+.opt .seg .tab{flex:1 1 0}
 .pick .cls{justify-content:flex-start;justify-self:start;align-self:flex-start;background:none;border:0;padding:0}
 .pick .cl{min-width:58px;padding:3px 8px 4px;font-size:11px}
 .pick .cl svg{width:24px;height:24px}
@@ -773,6 +778,7 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
           </div>
         </div>
         <button class="chip" id="btnKeys" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="keysPanel">Controles</button>
+        <button class="chip" id="btnOpt" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="optPanel" title="Mouse, som e gráficos">Opções</button>
         </div>
       </div>
       <div class="hg-mid">
@@ -795,6 +801,10 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
         <button class="chip" id="btnWatch" type="button" title="Assistir: ver a batalha da sala sem entrar com um veículo; sem ninguém na sala, IA × IA neste computador">Assistir</button>
         <button class="chip" id="btnPast" type="button" title="Partidas anteriores: a revisão pós-batalha das partidas guardadas neste computador e no servidor">Partidas anteriores</button></div>
       </div>
+      <aside class="kp" id="optPanel" role="dialog" aria-labelledby="optTitle" hidden>
+        <div class="kp-head"><h2 id="optTitle">Opções</h2><button class="ghost" id="optClose" type="button">Fechar (Esc)</button></div>
+        <div class="kp-body" id="optHome"></div>
+      </aside>
       <aside class="kp" id="keysPanel" role="dialog" aria-labelledby="keysTitle" hidden>
         <div class="kp-head"><h2 id="keysTitle">Controles</h2><button class="ghost" id="keysClose" type="button">Fechar (Esc)</button></div>
         <div class="kp-body">
@@ -844,6 +854,20 @@ body[data-era="modern"] #hangar .hg-fx .fx-b{background:radial-gradient(130% 100
           <button class="ghost" id="swapNo" type="button">Fechar (Esc)</button>
         </div>
         <p class="hint" id="swapKeys"></p>
+      </div>
+    </section>
+    <section class="pick pm" id="pauseMenu" role="dialog" aria-labelledby="pmTitle" hidden>
+      <div class="pick-in">
+        <h2 id="pmTitle">Pausa</h2>
+        <p id="pmNote"></p>
+        <div class="row pm-acts">
+          <button class="launch" id="pmGo" type="button">Continuar (Esc)</button>
+          <button class="ghost" id="pmOptB" type="button" aria-expanded="false" aria-controls="pmOpt">Opções</button>
+          <button class="ghost" id="pmKeysB" type="button" aria-expanded="false" aria-controls="pmKeys">Controles</button>
+          <button class="ghost" id="pmLeave" type="button">Sair da partida</button>
+        </div>
+        <div class="pm-opt" id="pmOpt" hidden></div>
+        <dl class="keys pm-keys" id="pmKeys" hidden></dl>
       </div>
     </section>
 
@@ -31299,7 +31323,7 @@ function kfPush(r) {
 }
 function kfNote(o, by) {
   if (!o || S.demo) return false;
-  const P = S.my, own = e => !!e && (e === P || !!e.me || !!e.psq), k = by && by !== o ? by : null, mine = own(o) || own(k);
+  const P = S.my, own = e => !!e && (e === P || !!e.me || (!!e.psq && e.own === Net.id)), k = by && by !== o ? by : null, mine = own(o) || own(k);
   if (!(mine || o.pid || (k && k.pid) || (!o.man && P && hdist(o, P) < KF.r))) return false;
   return kfPush({ o, k: kfName(k), kt: k ? k.team : -1, kme: !!k && (k === P || !!k.me), v: kfName(o), vt: o.team, vme: o === P || !!o.me, w: kfWpn(k), d: k ? Math.round(hdist(k, o)) : 0, ff: !!k && k.team === o.team, mine });
 }
@@ -35538,6 +35562,7 @@ function step(dt) {
   fortMen(dt);
   bldMen(dt);
   civStep(dt);
+  psqStep(dt);
   LO.step(dt);
   a0 = AIB.now();
   for (let _i = 0, _l = S.squads, q = _l[0]; _i < _l.length; q = _l[++_i]) if (!q.net && (q.think -= dt) <= 0) { q.think = IAI.think; squadThink(q); }
@@ -36383,7 +36408,8 @@ const Net = {
       if (!g.net) continue;
       if (!g.kind && g.dead) { g.gone = true; continue; }
       g.net = false;
-      if (g.man) {   // a soldier goes back to its squad, which is found again by the number its rows carried
+      if (g.man && g.psq) psqAdopt(g);   // a soldier of a player's squad stays his, in no squad (PSQ)
+      else if (g.man) {   // a soldier goes back to its squad, which is found again by the number its rows carried
         let q = S.squads.find(o => o.id === g.sid && o.team === g.team);
         if (!q) { const p = railOf(g.x, g.z); q = { team: g.team, men: [], n0: SQUAD[S.era].length, live: 0, ri: p.ri, s: p.s, s0: p.s, ds: g.team ? 1 : -1, fixed: false, state: 0, think: rand(0, IAI.think), fd: 1e9, id: g.sid, job: 'held', jk: 0, pd: 1, ord: { k: 'hold', ri: p.ri, s: p.s, x: g.x, z: g.z, R: 6 } }; S.squads.push(q); }   // it holds where it stands, and the planner fills the posts again
         g.ai = manBrain(q.men.length); g.ai.gx = g.x; g.ai.gz = g.z; g.sq = q; q.men.push(g); q.live++; g.ctl.fire = false;
@@ -37001,6 +37027,91 @@ function civStep(dt) {
   civLook(dt); civSays();
   if (S.net && S.host && Net.civ) civSend(dt);
 }
+/* ---------- the player's squad (PSQ, cf-pol2 P10, D4) ----------
+   A player on foot comes in with a squad of his own: one soldier of each of kits (indexes in INF: a rifleman, a machine gunner, an
+   anti-tank man), AI soldiers like any other, but his (psq, own: his player id, as the militia's) and outside every squad and every order
+   of the general. Three orders, his alone (S.pso by owner): seg, follow me (a loose wedge behind him, ring m out); pos, hold here (round
+   the spot he stood on, gap m apart); atk, attack where I aim (round the ground his aim meets, out to aim m, where they go running). With
+   an enemy in sight within leash m of where they are to be they fight from where they are, as the militia does. A new life on foot makes
+   the squad up again: a man farther than far m from him is let go (a soldier of the side where he stands) and the dead are made up for.
+   With the player dead or aboard a vehicle the squad holds where it stands. It runs where the AI runs (solo, or the host for everyone in
+   the room; the squads may take the field over IAI.cap by up to over soldiers, as it is full most of the match): a guest asks with psq (k 0 his soldier came in, 1 seg, 2 pos, 3 atk, p the place), the host tells the room every net s whose
+   soldiers are whose (psql, pairs of aid and owner). Off with on 0 ---------- */
+const PSQ = { on: 1, kits: [0, 1, 2], over: 12, ring: 6, leash: 45, far: 400, aim: 350, gap: 4, every: .5, net: 2, wait: 10, k: ['seg', 'pos', 'atk'] };
+const psqOf = id => S.men.filter(m => m.psq && m.own === id && !m.dead);
+const psqWho = id => (id === Net.id ? S.my : Net.ghosts.get(id) || null);
+/* the squad of player id round o, his soldier: made up to its kits; the number that came in */
+function psqSpawn(o, id) {
+  if (!PSQ.on || S.demo || !o || !o.man || o.dead || (S.net && !S.host)) return 0;
+  const E = INF[S.era][S.fac[o.team]]; if (!E) return 0;
+  for (const m of psqOf(id)) if (hdist(m, o) > PSQ.far) { m.psq = 0; m.own = undefined; }
+  const L = psqOf(id); let n = 0;
+  (S.pso || (S.pso = {}))[id] = { k: 'seg', x: o.x, z: o.z, t: S.t };
+  PSQ.kits.forEach((k, i) => {
+    if (!E[k] || L.some(m => m.psqk === i) || S.men.length >= IAI.cap + PSQ.over) return;   // the field is usually full (IAI.cap): the players' squads come over it, up to over more
+    const a = o.h + Math.PI + (i - 1) * .7, c = clearOf(o.x + Math.cos(a) * PSQ.ring, o.z - Math.sin(a) * PSQ.ring, 1, {}), m = addMan(E[k], o.team, c.x, c.z, o.h);
+    m.ai = manBrain(i); m.ai.gx = m.x; m.ai.gz = m.z; m.psq = 1; m.psqk = i; m.own = id; m.inv = o.inv || 0;
+    if (S.host) Net.own(m);
+    n++;
+  });
+  return n;
+}
+/* an order of player id's: k one of PSQ.k, x z the place (hold: where he stands; attack: where he aims) */
+function psqOrder(id, k, x, z) {
+  const o = psqWho(id);
+  if (!PSQ.k.includes(k) || !o || o.dead || !Number.isFinite(x) || !Number.isFinite(z)) return false;
+  (S.pso || (S.pso = {}))[id] = { k, x: clamp(x, 0, S.W), z: clamp(z, -S.HW, S.HW), t: S.t };
+  if (!S.net || S.host) { S.psqT = 0; for (const m of psqOf(id)) if (m.ai) m.ai.think = 0; }
+  return true;
+}
+/* a new host takes ghost g of a player's squad: his again, with an AI and the slot of its kit, still in no squad */
+function psqAdopt(g) {
+  const E = INF[S.era][S.fac[g.team]] || [], i = Math.max(0, PSQ.kits.findIndex(k => E[k] === g.id));
+  g.psqk = i; g.ai = manBrain(i); g.ai.gx = g.x; g.ai.gz = g.z; g.sq = null; g.ctl.fire = false;
+  for (const a of g.arms) { a.mag = a.d.mag || 1; a.cool = rand(.5, 2); }
+}
+/* where the aim of soldier P meets the ground, out to PSQ.aim m */
+function psqAim(P, d) {
+  const e = manEye(P);
+  for (let r = 4; r < PSQ.aim; r += 4) { const x = e.x + d.x * r, z = e.z + d.z * r; if (e.y + d.y * r <= hgt(x, z)) return { x, z }; }
+  return { x: e.x + d.x * PSQ.aim, z: e.z + d.z * PSQ.aim };
+}
+/* each every s where the AI runs: where each man of every player's squad is to be */
+function psqStep(dt) {
+  if (!PSQ.on || (S.net && !S.host)) return;
+  if (S.psqP) for (const [id, t] of S.psqP) { const g = Net.ghosts.get(id); if (g && g.man && !g.dead) { psqSpawn(g, id); S.psqP.delete(id); } else if (S.t - t > PSQ.wait) S.psqP.delete(id); }   // a guest's soldier, once his ghost is here
+  if ((S.psqT = (S.psqT || 0) - dt) > 0) return;
+  S.psqT = PSQ.every;
+  for (const m of S.men) {
+    if (!m.psq || m.dead || !m.ai || m.net || m.in) continue;
+    const o = psqWho(m.own);
+    if (!o) { if (m.own !== Net.id && !Net.players.has(m.own)) { m.psq = 0; m.own = undefined; } continue; }   // his player left the room
+    if (o.dead || !o.man || o.in) continue;   // down, or aboard: they hold where they are
+    const O = (S.pso && S.pso[m.own]) || { k: 'seg' }, i = m.psqk | 0, A = m.ai, seg = O.k === 'seg', at = seg ? o : O;
+    const a = seg ? o.h + Math.PI + (i - 1) * .7 : i * TAU / PSQ.kits.length + .5, r = seg ? PSQ.ring + 2 * (i % 2) : PSQ.gap, c = { x: at.x + Math.cos(a) * r, z: at.z - Math.sin(a) * r };
+    if (A.tgt && !A.tgt.dead && hdist(m, at) < PSQ.leash) continue;   // in a fight, near where they are to be
+    if (hdist(m, c) > (seg ? 3 : 2) || A.tgt) { const p = clearOf(c.x, c.z, 1, {}); A.gx = p.x; A.gz = p.z; }
+  }
+  if (S.net && S.host && Net.psq && (S.psqN = (S.psqN || 0) - PSQ.every) <= 0) {
+    S.psqN = PSQ.net; const l = [];
+    for (const m of S.men) if (m.psq && m.aid && !m.dead && m.own !== undefined) l.push(m.aid, m.own);
+    for (let j = 0; j < l.length; j += 96) Net.send('psql', { e: l.slice(j, j + 96) });
+  }
+}
+Net.psq = false;
+Net.rx.welcome = (old => m => { Net.psq = m.psq === 1; old(m); })(Net.rx.welcome);
+Net.rx.psq = m => {
+  if (!S.net || !S.host || !Number.isInteger(m.from)) return;
+  if (m.k === 0) (S.psqP || (S.psqP = new Map())).set(m.from, S.t);
+  else if (Array.isArray(m.p)) psqOrder(m.from, PSQ.k[m.k - 1], +m.p[0], +m.p[1]);
+};
+Net.rx.psql = m => { if (!S.net || S.host || !Array.isArray(m.e)) return; for (let i = 0; i + 1 < m.e.length; i += 2) { const g = Net.ai.get(m.e[i]); if (g && g.man) { g.psq = 1; g.own = m.e[i + 1]; } } };
+/* the player: his squad comes in with his soldier, made where the AI runs or asked of the host */
+spawnPlayer = (f => () => {
+  const p = f();
+  if (p.man && !p.in && S.cls === 'inf') { if (!S.net || S.host) psqSpawn(p, Net.id); else if (Net.psq) Net.send('psq', { k: 0 }); }
+  return p;
+})(spawnPlayer);
 /* ---- the laws of war (W14): the civilians a side killed, a town that turns, evacuation, and the AI's rules of engagement (rage, evac, roe) ----
    S.civD, the match's record of it: n civilians killed by each side, dead all of them (by nobody's fire too), foe the
    towns that turned (index in S.T.burgs: bits of the sides), hits the deaths by side in each town, say what the feed has yet to tell by side, mil the
@@ -68235,6 +68346,37 @@ addEventListener('keydown', e => { if (e.code === 'Digit5' && !e.repeat && playM
 addEventListener('keydown', e => { if (e.code === 'KeyI' && !e.repeat && !GV.on && S && S.my && S.my.kind && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.fixPri = S.fixPri ? 0 : 1; });
 const BWHY = { unit: 'Há um veículo aí', map: 'Fora do mapa', water: 'Na água', steep: 'Terreno inclinado demais', road: 'Perto demais da estrada: a base fica a uns 7 m da beira', obj: 'Encostado em casa, árvore ou destroço', base: 'Perto demais de outra base', foe: 'Perto demais do inimigo',
   cap: 'Seu lado já tem o máximo de bases (cresce com os pontos tomados e a economia)', cost: 'Seu lado não tem a energia e o metal desta obra', kit: 'Sem kit de construção: pegue outro em uma base', server: 'O servidor desta sala ainda não conhece bases de suprimento: precisa ser reiniciado', wait: 'Aguardando o anfitrião' };
+/* ---------- the player's squad on the screen and on the keys (PSQ, cf-pol2 P10) ----------
+   A line over the soldier's ESTADO panel: how many of the squad are alive, the order and how far its place is, and the keys; a small
+   chevron of the friend's colour over each of them in sight, and a diamond where they hold or attack. Comma follows, Period holds here,
+   Slash (the key right of the full stop: ; on a Brazilian keyboard) attacks where the aim meets the ground. The radio says it in the feed */
+const PSQUI = { keys: { Comma: 'seg', Period: 'pos', Slash: 'atk' }, name: { seg: 'seguindo', pos: 'segurando', atk: 'atacando' }, say: { seg: 'Esquadra, comigo!', pos: 'Esquadra, segurem aqui!', atk: 'Esquadra, atacar ali!' } };
+const psqKeys = () => [[', · . · /', 'Sua esquadra (3 soldados que entram com você): vírgula, sigam-me; ponto, segurem aqui; / (no teclado brasileiro, ;), ataquem onde a mira toca o chão']];
+function psqHud(P, u, ink, acc) {
+  const id = Net.id, L = psqOf(id), O = S.pso && S.pso[id];
+  if (!O && !L.length) return;
+  const k = O ? O.k : 'seg', y = (hudLow || ch - 110 * u) - 36 * u, far = k !== 'seg' && O ? Math.round(hdist(O, P)) : 0;
+  txt('ESQUADRA ' + L.length + '/' + PSQ.kits.length + ' · ' + PSQUI.name[k].toUpperCase() + (far > 15 ? ' · ' + far + ' m' : ''), 14, y, 12.5 * u, L.length ? ink : FOE);
+  txt(', seguir   . segurar aqui   / atacar onde mira', 14, y + 16 * u, 11 * u, 'rgba(158,170,162,.95)');
+  for (const m of L) { const s = proj(m.x, m.y + 2.4 * MAN.sc, m.z); if (onScr(s) && hdist(m, P) > 2) { tri(s.x, s.y - 4 * u, Math.PI / 2, 5.5 * u, 'rgba(8,12,13,.8)'); tri(s.x, s.y - 4 * u, Math.PI / 2, 4 * u, FRIEND); } }
+  if (k !== 'seg' && O) {
+    const s = proj(O.x, hgt(O.x, O.z) + 1.5, O.z), r = 7 * u;
+    if (onScr(s)) { hx.beginPath(); hx.moveTo(s.x, s.y - r); hx.lineTo(s.x + r, s.y); hx.lineTo(s.x, s.y + r); hx.lineTo(s.x - r, s.y); hx.closePath(); hx.lineWidth = 3; hx.strokeStyle = 'rgba(8,12,13,.8)'; hx.stroke(); hx.lineWidth = 1.5; hx.strokeStyle = k === 'atk' ? FOE : FRIEND; hx.stroke(); txt(k === 'atk' ? 'ATACAR' : 'SEGURAR', s.x, s.y + r + 3 * u, 10.5 * u, k === 'atk' ? FOE : FRIEND, 'center'); }
+  }
+}
+hudMan = (g => (P, u, ink, acc, disp, blink, seat) => { g(P, u, ink, acc, disp, blink, seat); if (!P.dead) psqHud(P, u, ink, acc); })(hudMan);
+addEventListener('keydown', e => {
+  const k = PSQUI.keys[e.code];
+  if (!k || e.repeat || e.ctrlKey || e.altKey || e.metaKey || playMode !== 'play' || sw.on || GV.on || !S || !S.my || S.my.dead || !S.my.man || S.my.in || /INPUT|TEXTAREA/.test((e.target && e.target.tagName) || '')) return;
+  const P = S.my, guest = S.net && !S.host;
+  e.preventDefault();
+  if (guest && !Net.psq) { S.banner = { text: 'Sem esquadra nesta sala', sub: 'O servidor desta sala é antigo', life: 2 }; return; }
+  if (!psqOf(Net.id).length) { S.banner = { text: 'Sua esquadra caiu', sub: 'Outra vem com você quando entrar de novo a pé', life: 2 }; return; }
+  const p = k === 'atk' ? psqAim(P, S.aim ? S.aim.d : P.f) : P;
+  psqOrder(Net.id, k, p.x, p.z);
+  if (guest) Net.send('psq', { k: PSQ.k.indexOf(k) + 1, p: [Math.round(p.x), Math.round(p.z)] });
+  S.feed.push({ text: 'Rádio: ' + PSQUI.say[k], life: 3, team: P.team }); if (S.feed.length > 4) S.feed.shift();
+});
 /* ---------- the kill feed and the scoreboard (cf-pol2 P27) ----------
    kfDraw: the rows of KF at the top right, under the map, newest last: who ▸ whom · with what · how far. A side's colour on each name
    (the player is "Você", in white), the arrow amber for a friend's kill; the player's own rows on a darker band with a bar of the era's
@@ -68499,7 +68641,7 @@ function drawHud() {
   }
   S.feed.forEach((f, i) => { hx.globalAlpha = clamp(f.life, 0, 1); txt(f.text, cw / 2, wy + i * 19 * u, 14 * u, f.team === undefined ? ink : f.team === me ? FRIEND : FOE, 'center'); });
   hx.globalAlpha = 1;
-  if (paused) txt('PAUSADO', cw / 2, ch * .45, 36 * u, ink, 'center', disp);
+  if (paused && !S.net) txt('PAUSADO', cw / 2, ch * .45, 36 * u, ink, 'center', disp);
 }
 
 /* ---------- transport: the models, the views and the hangar's data ----------
@@ -68969,13 +69111,15 @@ const SND = {
   hand: { out: [[0, .035, .07, 2800, 2], [.07, .05, .05, 900, 1.2]], in: [[0, .03, .09, 2400, 2], [.15, .04, .08, 3600, 3]], bolt: [[.38, .04, .07, 2200, 2], [.55, .035, .08, 3000, 2]],
     dry: [[0, .02, .06, 3800, 4]], swap: [[0, .12, .035, 700, .7], [.1, .025, .05, 2600, 2]], tube: [[0, .08, .06, 600, 1.5], [.25, .05, .07, 1800, 2]] }
 };
-const A = { ctx: null, on: true, lm: -9, oq: [], ck: -9, beep: 0, h: null };
+const A = { ctx: null, on: true, vol: 1, lm: -9, oq: [], ck: -9, beep: 0, h: null };
+/* the master's gain: .6 at full volume (A.vol, 0..1, which the options set and keep: cf-pol2 P23), 0 with the sound off */
+function sndGain() { return A.on ? .6 * A.vol : 0; }
 function audioInit() {
   if (A.ctx) { if (A.ctx.state === 'suspended') A.ctx.resume(); return; }
   try {
     const AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     const c = A.ctx = new AC();
-    A.master = c.createGain(); A.master.gain.value = A.on ? .6 : 0;
+    A.master = c.createGain(); A.master.gain.value = sndGain();
     const ear = A.ear = c.createBiquadFilter(); ear.type = 'lowpass'; ear.frequency.value = SND.deaf.f[1]; A.master.connect(ear);   // the ear: open, until a burst close by deafens it (SND.deaf)
     if (c.createDynamicsCompressor) { const k = A.comp = c.createDynamicsCompressor(); k.threshold.value = -14; k.knee.value = 12; k.ratio.value = 4; k.attack.value = .003; k.release.value = .25; ear.connect(k); k.connect(c.destination); }
     else ear.connect(c.destination);
@@ -69565,7 +69709,7 @@ function buildHangar() {
     spc: ['Assistir', 'Assistir sem veículo: com gente na sala você a observa como espectador, com os dois generais à vista (Tab ou M abre o mapa, V mostra tudo); sem ninguém, IA × IA neste computador. Câmera: F alterna automática, seguir e livre; [ ] trocam o alvo; W A S D e Q E movem a câmera livre, arrastar o mouse gira, a roda muda a velocidade, Shift acelera'] };
   const dl = $('#keys'), text = (BRIEF[k] || BRIEF.plane)(d, o), cut = text.indexOf('. ') + 1 || text.length; dl.textContent = '';
   const lg = (LEGEND[k] || LEGEND.plane)(d, o);
-  for (const [key, v] of lg.concat(lg.some(r => r && r[0] === 'M') ? [] : [o.map], d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], skyKeys(), helpKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
+  for (const [key, v] of lg.concat(lg.some(r => r && r[0] === 'M') ? [] : [o.map], d.rad ? [o.rad] : [], k === 'inf' || k === 'trn' ? [o.req] : [], k === 'inf' ? psqKeys() : [], skyKeys(), helpKeys(), [o.gen, o.spc])) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = key; dd.textContent = v; dl.append(dt, dd); }
   $('#briefing').textContent = $('#briefing').title = text.slice(0, cut); $('#mission').textContent = text.trim() + ' ' + CQBRIEF(pvp, ECO.on);   // the whole briefing: on the desktop home only Controles shows it
   $('#btnInv').textContent = (k === 'heli' ? 'Cíclico' : 'Manche') + (invertY ? ': W puxa' : ': S puxa'); ffChip();
   for (const b of document.querySelectorAll('#ctrls .tab')) b.lastChild.textContent = CTRLTXT[k === 'heli' ? 1 : 0][b.dataset.ctrl === 'mouse' ? 1 : 0];
@@ -70030,7 +70174,11 @@ $('#aarBack').addEventListener('click', aarPast);
    needed the focus inside: the item of the list that gave way to the review, or a click on its text, left the focus on the page, and Esc did
    nothing while the review covered the hangar (cf-pol-fluxos) */
 addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#aar').hidden) { e.stopPropagation(); e.preventDefault(); aarClose(); } }, true);
-function setPause(v) { if (playMode !== 'play' || S.over || S.net) return; paused = v; $('#btnPause').textContent = v ? 'Continuar' : 'Pausar'; if (!v) lockPtr(); }
+function setPause(v) {
+  if (playMode !== 'play' || S.over || (v && (sw.on || GV.on || BM.on))) return;
+  paused = v; $('#btnPause').textContent = v ? 'Continuar' : 'Pausar'; pauseMenu(v);
+  if (!v) lockPtr();
+}
 
 /* the command network in the review (CN): each side's orders by radio, how late they came, what was lost, the time without an HQ and the fixes */
 aarShow = (f => (R, sub) => {
@@ -70219,6 +70367,7 @@ addEventListener('keydown', e => {
   if (genKey(e)) return;
   if (playMode !== 'play') return;
   if (sw.on && swapKey(e)) return;
+  if (paused) { if ((e.code === 'KeyP' && !/INPUT|SELECT/.test(e.target.tagName || '')) || e.code === 'Escape') { if (!e.repeat) setPause(false); } return; }   // the pause menu has the keys (cf-pol2 P22)
   if (e.code === 'KeyH') { if (!e.repeat) openSwap(); return; }
   if (e.code === 'KeyU') { if (!e.repeat) openReq(); return; }
   if (e.code === 'KeyP' || e.code === 'Escape') { setPause(!paused); return; }
@@ -70230,6 +70379,10 @@ addEventListener('keydown', e => {
   S.input[k] = true; e.preventDefault();
 });
 addEventListener('keyup', e => { if (e.code === 'Space' && S && S.spJ) { S.input.jump = S.spJ = false; return; } const k = KEYS[e.code]; if (k && S) S.input[k] = false; });   // a Space that jumped lets go of the jump, not of the left button's fire
+/* the pause menu has the keys (cf-pol2 P22): before any other listener, while it is open in a match only P and Esc go on (to close it);
+   the rest (radio 8 9, night vision 6, flare 7, recruit I, the scoreboard's Tab, the camera's `...) waits, and the menu's own buttons and
+   sliders keep the browser's keys (Tab, Enter, Space, arrows) */
+addEventListener('keydown', e => { if (paused && playMode === 'play' && e.code !== 'KeyP' && e.code !== 'Escape') e.stopPropagation(); }, true);
 addEventListener('keydown', e => { if (e.code === 'KeyI' && playMode === 'play' && !GV.on && S && S.my && S.my.man && !/INPUT|TEXTAREA/.test(e.target.tagName || '')) S.input.recruit = true; });   // hold I beside a civilian to recruit him
 addEventListener('keyup', e => { if (e.code === 'KeyI' && S) S.input.recruit = false; });
 addEventListener('blur', () => { if (S) { S.input = {}; S.spJ = false; } });
@@ -70244,7 +70397,7 @@ addEventListener('mouseup', e => { if (!S || !S.aim) return; if (e.button === 0)
 cv.addEventListener('contextmenu', e => { if (S && S.aim) e.preventDefault(); });
 document.addEventListener('mousemove', e => {
   if (document.pointerLockElement !== cv || !S.aim || paused || GV.on) return;
-  S.input.mx = (S.input.mx || 0) + e.movementX * camSt.sens; S.input.my = (S.input.my || 0) + e.movementY * camSt.sens;
+  S.input.mx = (S.input.mx || 0) + e.movementX * camSt.sens * OPT.sens; S.input.my = (S.input.my || 0) + e.movementY * camSt.sens * OPT.sens;   // OPT.sens: the player's (cf-pol2 P23)
 });
 addEventListener('wheel', e => { if (playMode !== 'play' || GV.on || BM.on || paused || !e.deltaY || e.timeStamp - camSt.zt < 160) return; camSt.zt = e.timeStamp; zoomBy(e.deltaY < 0 ? 1 : -1); }, { passive: true });
 document.addEventListener('pointerlockchange', () => {
@@ -70296,9 +70449,75 @@ $('#btnInv').addEventListener('click', () => {
   try { localStorage.setItem('ceu-de-ferro-3d-inverter', invertY ? '1' : '0'); } catch (e) {}
   buildHangar();
 });
-$('#btnSound').addEventListener('click', () => {
-  A.on = !A.on; $('#btnSound').textContent = A.on ? 'Som ligado' : 'Som desligado';
-  if (A.ctx) A.master.gain.value = A.on ? .6 : 0; else if (A.on && playMode === 'play') audioInit();
+$('#btnSound').addEventListener('click', () => sndSet(!A.on));
+/* ---------- cf-pol2 P22 and P23: the pause menu and the options ----------
+   P, or Esc (the mouse let go), in a match: the menu (#pauseMenu): continue, the options, the controls of what the player is in, leave. A
+   match is always a room on the server (launch: net), so the world goes on behind it; before, setPause gave up online and P and Esc showed
+   nothing. Meanwhile the keys and the mouse are the menu's.
+   OPT: the player's own settings, kept in this browser (OPT.key): sens, the mouse's sensitivity (x over the view's camSt.sens); vol, the
+   volume (0..1, the master's .6 at 1); snd, the sound on (A.on; it was not kept). The options box (#optBox: these, and the graphics'
+   quality, which was hidden in Partida) is one element, shown by the hangar's Opções chip and in the pause menu */
+const OPT = { key: 'ceu-de-ferro-3d-opcoes', sens: 1, vol: 1, snd: true, lim: [.25, 3] };
+try { const o = JSON.parse(localStorage.getItem(OPT.key) || '{}'); if (o.sens > 0) OPT.sens = clamp(+o.sens, OPT.lim[0], OPT.lim[1]); if (o.vol >= 0) OPT.vol = clamp(+o.vol, 0, 1); if (o.snd === false) OPT.snd = false; } catch (e) {}
+A.on = OPT.snd; A.vol = OPT.vol;
+function optSave() { try { localStorage.setItem(OPT.key, JSON.stringify({ sens: OPT.sens, vol: OPT.vol, snd: OPT.snd })); } catch (e) {} }
+function sndSet(on) {
+  A.on = OPT.snd = !!on; optSave(); optSync();
+  if (A.ctx) A.master.gain.value = sndGain(); else if (A.on && playMode === 'play') audioInit();
+}
+const optBox = (() => {
+  const b = document.createElement('div'); b.className = 'opt'; b.id = 'optBox';
+  b.innerHTML = '<p class="hg-setl">Mouse</p><label class="opt-r"><span>Sensibilidade</span><input type="range" id="optSens" min="' + OPT.lim[0] + '" max="' + OPT.lim[1] + '" step="0.05"><output id="optSensV"></output></label>'
+    + '<p class="hg-setl">Som</p><label class="opt-c"><input type="checkbox" id="optSnd"><span>Som ligado</span></label><label class="opt-r"><span>Volume</span><input type="range" id="optVol" min="0" max="100" step="5"><output id="optVolV"></output></label>'
+    + '<p class="hg-setl">Gráficos</p><p class="opt-n" id="optGfxN"></p>';
+  return b;
+})();
+function optSync() {
+  const n2 = v => v.toFixed(2).replace('.', ',');
+  optBox.querySelector('#optSens').value = OPT.sens; optBox.querySelector('#optSensV').textContent = n2(OPT.sens) + '×';
+  optBox.querySelector('#optVol').value = Math.round(OPT.vol * 100); optBox.querySelector('#optVolV').textContent = Math.round(OPT.vol * 100) + '%';
+  optBox.querySelector('#optVol').disabled = !A.on; optBox.querySelector('#optSnd').checked = A.on;
+  $('#btnSound').textContent = A.on ? 'Som ligado' : 'Som desligado';
+  optBox.querySelector('#optGfxN').textContent = playMode === 'play' ? 'A qualidade escolhida vale a partir da próxima partida.' : 'Placa de vídeo integrada: baixa. Placa dedicada: alta.';
+}
+optBox.querySelector('#optSens').addEventListener('input', e => { OPT.sens = clamp(+e.target.value || 1, OPT.lim[0], OPT.lim[1]); optSave(); optSync(); });
+optBox.querySelector('#optVol').addEventListener('input', e => { A.vol = OPT.vol = clamp((+e.target.value || 0) / 100, 0, 1); optSave(); optSync(); if (A.ctx) A.master.gain.value = sndGain(); });
+optBox.querySelector('#optSnd').addEventListener('change', e => sndSet(e.target.checked));
+$('#optHome').append(optBox); optSync();
+/* the hangar's Opções panel, as the Controles one: its chip, its button, Esc */
+function optPanel(v) {
+  const p = $('#optPanel'), b = $('#btnOpt');
+  if (v) { keysPanel(false); $('#optHome').append(optBox); optSync(); }
+  p.hidden = !v; b.setAttribute('aria-expanded', String(v));
+  if (v) $('#optClose').focus(); else if (p.contains(document.activeElement) || document.activeElement === document.body) b.focus();
+}
+$('#btnOpt').addEventListener('click', () => optPanel($('#optPanel').hidden));
+$('#optClose').addEventListener('click', () => optPanel(false));
+hangar.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#optPanel').hidden) { e.stopPropagation(); optPanel(false); } });
+/* the pause menu: opened and closed by setPause; Opções takes the options box in, Controles lists the keys of what the player is in */
+function pauseMenu(v) {
+  const m = $('#pauseMenu'); if (!m) return;
+  if (!v) { m.hidden = true; $('#optHome').append(optBox); return; }
+  if (S) S.input = {};
+  if (document.pointerLockElement) document.exitPointerLock();
+  $('#pmNote').textContent = S && S.net ? 'A batalha continua enquanto este menu está aberto: a partida é uma sala do servidor.' : 'Jogo pausado.';
+  $('#pmOpt').hidden = true; $('#pmKeys').hidden = true; $('#pmOptB').setAttribute('aria-expanded', 'false'); $('#pmKeysB').setAttribute('aria-expanded', 'false');
+  m.hidden = false; $('#pmGo').focus();
+}
+$('#pmGo').addEventListener('click', () => setPause(false));
+$('#pmLeave').addEventListener('click', () => { setPause(false); if (S && S.net) $('#btnLeave').click(); else $('#btnHangar').click(); });
+$('#pmOptB').addEventListener('click', () => {
+  const o = $('#pmOpt'), on = o.hidden; o.hidden = !on; $('#pmOptB').setAttribute('aria-expanded', String(on));
+  if (on) { o.append(optBox); optSync(); $('#pmKeys').hidden = true; $('#pmKeysB').setAttribute('aria-expanded', 'false'); }
+});
+$('#pmKeysB').addEventListener('click', () => {
+  const dl = $('#pmKeys'), on = dl.hidden; dl.hidden = !on; $('#pmKeysB').setAttribute('aria-expanded', String(on));
+  if (!on) return;
+  $('#pmOpt').hidden = true; $('#pmOptB').setAttribute('aria-expanded', 'false');
+  dl.textContent = '';
+  const P = S && S.my, k = S ? S.cls : 'plane', d = P ? (P.def.base || P.def) : null; if (!d) return;
+  let rows = []; try { rows = (LEGEND[k] || LEGEND.plane)(d, {}) || []; } catch (e) { rows = []; }
+  for (const r of rows) { if (!r) continue; const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = r[0]; dd.textContent = r[1]; dl.append(dt, dd); }
 });
 
 /* ---------- the general's view: the map table, the panels and the keys (GV) ----------
@@ -73414,7 +73633,7 @@ function gfxSet(q) {
     const t = document.createElement('b'), s = document.createElement('span'); t.textContent = g.nm; s.textContent = 'gráficos ' + g.sub; b.append(t, s);
     b.addEventListener('click', () => gfxSet(g.k)); seg.append(b);
   }
-  const w = document.getElementById('wxs'); if (w && w.parentNode) w.parentNode.insertBefore(seg, w.nextSibling); else { const h = document.querySelector('.hg-top'); if (h) h.append(seg); }
+  const o = document.getElementById('optGfxN'); if (o && o.parentNode) o.parentNode.insertBefore(seg, o); else { const h = document.querySelector('.hg-top'); if (h) h.append(seg); }   // in Opções (cf-pol2 P23: it was hidden in Partida)
 })();
 /* the HUD: the hour, the light and the weather, under the match's bar, and what the keys 6 and 7 give */
 const SKYTXT = { pre: { dia: ['Dia', 'começa às 9 h'], tarde: ['Entardecer', 'anoitece na partida'], noite: ['Noite', 'começa às 23 h'], ciclo: ['Ciclo', 'um dia por hora'] },
@@ -73817,7 +74036,7 @@ function frame(now) {
   S.gv = (seat && seat.eye) || null; S.mpp = seat && seat.map && !S.my.dead && S.fcp ? mapMpp(S.my) : 0;
   if (fl !== camSt.filter) cv.style.filter = camSt.filter = fl;
   tickSwap();
-  if (!(paused || sw.freeze || (S.demo && !S.watch && reduced))) {
+  if (!((paused && !(playMode === 'play' && S.net)) || sw.freeze || (S.demo && !S.watch && reduced))) {   // a match is a room: the pause menu does not stop it (cf-pol2 P22)
     let gdt = dt;   // the battle's time this frame (CLK)
     if (playMode === 'play' && S.over) { if (!overShown) showOver(); else overTick(); overStep(Math.min(1, rt || .016)); }   // the real seconds: the countdown keeps the wall clock at any frame rate
     else { const c = CLK.plan(rt, playMode === 'watch' ? GV.spd : 1), t0 = performance.now(); for (let i = 0; i < c.n; i++) step(c.d); CLK.cost(performance.now() - t0, c.n); gdt = c.g; }

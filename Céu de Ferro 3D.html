@@ -69279,6 +69279,32 @@ function sndHands(P) {
   if (P.swT !== H.sw && P.swT > S.t) clack('swap');
   H.a = a; H.rl = rl; H.fire = !!P.ctl.fire; H.sw = P.swT; H.t = a.t;
 }
+/* P7 (cf-pol2-fase1): no footsteps were heard; the legs' swing (m.step, the rig's phase ph = m.step * STEPS.ph) moved and nothing read it for
+   sound. stepFall(m): a foot came down since the last look (each half swing, m.sfk the half swing last heard; a soldier standing still,
+   aboard, dead or under a canopy makes none). stepVol(m, d): how loud, d m away: a run louder than a walk, crouched and prone quieter,
+   falling to nothing at STEPS.r m. sndSteps: the player's own soldier's steps, and those of the STEPS.n nearest other soldiers within r m
+   (a foe's too: they are heard before they are seen), each a short thud of noise through a low band with a little scuff over it */
+const STEPS = { ph: 2.3, mv: .4, vol: [.045, .08], st: [1, .55, .3], r: 30, n: 4, f: [380, 1500], dur: [.07, .03], far: 180 };
+function stepFall(m) {
+  if (m.dead || m.in || m.para || !m.v || Math.hypot(m.v.x, m.v.z) < STEPS.mv) { m.sfk = undefined; return false; }
+  const k = Math.floor((m.step || 0) * STEPS.ph / Math.PI), was = m.sfk; m.sfk = k;
+  return was !== undefined && k !== was;
+}
+function stepVol(m, d) { const f = Math.max(0, 1 - d / STEPS.r); return STEPS.vol[m.run ? 1 : 0] * STEPS.st[m.st | 0] * f * f; }
+function sndSteps(P) {
+  const now = A.ctx.currentTime, one = (m, d) => {
+    const v = stepVol(m, d) * (.85 + Math.random() * .3); if (v <= .002) return;
+    burst(STEPS.dur[0], v, Math.max(140, STEPS.f[0] - d * 4) * (.9 + Math.random() * .2), 'lowpass', now);
+    burst(STEPS.dur[1], v * .5, Math.max(400, STEPS.f[1] - d * STEPS.far / STEPS.r * 4), 'bandpass', now + .01, 1.5);
+  };
+  if (stepFall(P)) one(P, 0);
+  let n = 0;
+  for (const m of S.men || []) {
+    if (m === P || m.dead || m.gone || Math.abs(m.x - P.x) > STEPS.r || Math.abs(m.z - P.z) > STEPS.r) continue;
+    const d = Math.hypot(m.x - P.x, m.z - P.z); if (d > STEPS.r || !stepFall(m)) continue;
+    one(m, d); if (++n >= STEPS.n) break;
+  }
+}
 /* a foe's round passing within SND.crack.r m of the soldier's head this frame: its snap, louder the nearer, once a round */
 function sndCrack(P, dt) {
   const C = SND.crack, now = A.ctx.currentTime; if (now - A.ck < C.gap) return;
@@ -69375,7 +69401,7 @@ function audioTick(dt) {
   sndNear(live && A.on ? P : null, dt, set, now);
   if (!live) { set(A.prop.g, 0); set(A.jet.g, 0); set(A.siren.g, 0); return; }
   const k = P.kind ? 0 : P.V / P.def.vmax, th = P.ctl.thr;
-  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); } }
+  if (P.man) { set(A.prop.g, 0); set(A.jet.g, .004); if (A.on) { sndHands(P); sndCrack(P, dt); sndSteps(P); } }
   else if (P.kind) { set(A.prop.g, 0); sndVeh(P, dt, set, now); }
   else if (P.def.prop) { A.prop.o.frequency.setTargetAtTime(52 + th * 38 + k * 26, now, .1); set(A.prop.g, .03 + th * .03); set(A.jet.g, .01 + k * .03); A.jet.bp.frequency.setTargetAtTime(300 + k * 500, now, .1); }
   else { A.jet.bp.frequency.setTargetAtTime(450 + th * 700 + k * 500, now, .1); set(A.jet.g, .05 + th * .08 + (P.ab ? .07 : 0)); set(A.prop.g, 0); }

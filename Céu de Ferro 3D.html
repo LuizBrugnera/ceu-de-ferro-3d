@@ -31141,7 +31141,10 @@ function gpMeter() {
   if (k2 === k) return;
   S.popK = k2;
   const ms = v => (+v.toFixed(2)).toString().replace('.', ','), why = 'IA do anfitrião em ' + ms(st.avg) + ' ms por quadro em média nos últimos ' + Math.round(st.s) + ' s (orçamento ' + ms(AIB.avg) + ' ms; pior quadro ' + ms(st.worst) + ' ms, comandante ' + ms(st.gen) + ' ms)';
-  for (const t of SIDES()) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: ' + why);   // every step in the log (one a period at most), the last one too
+  /* P28 (cf-pol2-fase1): the diary said "IA do anfitrião em 21,23 ms por quadro…", a measurement for whoever tunes the game, not for the
+     general. It says what the cut means; the numbers stay on the entry (e.d) */
+  const say = k2 < k ? 'o computador do anfitrião não dá conta de tanta IA, menos tropas em campo até ele folgar' : k2 < 1 ? 'o computador do anfitrião folgou um pouco' : 'o computador do anfitrião folgou, tropas de volta ao normal';
+  for (const t of SIDES()) gLog(t, 'eco', 'Teto de população ' + (k2 < k ? 'reduzido' : 'ampliado') + ' a ' + Math.round(k2 * 100) + '%: ' + say, null, null, null, why);   // every step in the log (one a period at most), the last one too
 }
 /* the missions a Dispatch order fielded (its id) take what the order says beyond the birth: latitude, ROE, break-off, H-hour */
 function gpMis(id, c) {
@@ -33585,6 +33588,8 @@ function manSpread(m, a) {
   const w = a.d, c = m.ctl, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
   return (w.sp * STANCE[m.st].sp * (c.ads ? MAN.ads.sp : 1) * (moving ? MAN.move : 1) * (1 + m.wa * MAN.shake) * (1 + bloomNow(a)) + (c.sp || 0)) * (m.sup > S.t ? SUP.sp : 1);
 }
+/* a rifle round starts on the eye's line (cf-tiro-origem: it started a metre along the aim, past whatever stood within it, a wall pressed
+   against or a man touching; stepShots tests the whole of its first hop from there). The shooter is never struck by his own (safe) */
 function manFire(m, a) {
   const w = a.d, c = m.ctl, e = manEye(m), f = m.f, moving = m.v.x * m.v.x + m.v.z * m.v.z > .3;
   if (w.k) {
@@ -33599,7 +33604,7 @@ function manFire(m, a) {
   if (w.snp) return snipe(m, a);
   const s = manSpread(m, a); a.bl = Math.min(MAN.bloom.max, bloomNow(a) + MAN.bloom.k * (w.auto ? 1 : .5));
   a.mag--; a.cool = w.rate; a.t = m.shotT = S.t; a.tn = (a.tn || 0) + 1;
-  S.bullets.push({ x: e.x + f.x, y: e.y + f.y - .12, z: e.z + f.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: w.lmg && a.tn % TRC.lmg === 0 ? 1 : 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
+  S.bullets.push({ x: e.x, y: e.y - .12, z: e.z, vx: (f.x + rand(-s, s)) * w.spd, vy: (f.y + rand(-s, s)) * w.spd, vz: (f.z + rand(-s, s)) * w.spd, life: 1.3, team: m.team, dmg: w.dmg, ap: 0, sa: 1, by: m, tr: w.lmg && a.tn % TRC.lmg === 0 ? 1 : 0, cal: calOf(w) });   // cal: a post's heavy gun can strike a missile (MINT)
   fx.shot(m === S.my, m, w);
 }
 /* a hand grenade (k 1) or a smoke grenade (2), thrown along the aim and a little up */
@@ -34547,10 +34552,38 @@ const ahead = (u, o) => { const p = routeAt(S.T.routes[u.ri], u.s); return ((o.x
    throws a grenade, smoke (G) a smoke one, ordA (right button) sights; those that act once
    are taken on the press.
    S.lockGnd or S.lockAir is what a guided special has in its sight, and S.lockOk says the lock is ready */
+/* the player's aim on foot (cf-tiro-origem): the third-person eye looks along S.aim.d from S.aim.o (the view writes it each frame: over the
+   right shoulder, 1.7 m aside and .9 m above the soldier's eye), and the round leaves the soldier's eye, so along S.aim.d it went by a line
+   beside the cross and missed whatever was close under it. It goes to what the cross is on instead: the first of the ground, a wall, a
+   vehicle or a soldier along the camera's line, past the soldier and within far m; nothing there, the point far m out. Without the view
+   (the harness) or from the eye (first person, the sights) it is S.aim.d */
+const AIMC = { far: 600, near: .3 };
+function aimConv(P, a) {
+  const o = a.o, d = a.d;
+  if (!o) return d;
+  const e = manEye(P), ex = e.x - o.x, ey = e.y - .12 - o.y, ez = e.z - o.z, s0 = Math.max(0, ex * d.x + ey * d.y + ez * d.z);
+  if (Math.hypot(ex - d.x * s0, ey - d.y * s0, ez - d.z * s0) < AIMC.near) return d;
+  let D = AIMC.far;
+  for (let s = s0; s < D; s += Math.max(.5, s * .03)) if (o.y + d.y * s < hgt(o.x + d.x * s, o.z + d.z * s)) { D = s; break; }
+  if (ray(o.x + d.x * s0, o.y + d.y * s0, o.z + d.z * s0, o.x + d.x * D, o.y + d.y * D, o.z + d.z * D, 0)) D = s0 + (D - s0) * RAY.t;
+  for (const u of S.units) {
+    if (u.dead || Math.abs(u.x - o.x) > D + 15 || Math.abs(u.z - o.z) > D + 15) continue;
+    const T = segBox(u, o.x + d.x * s0, o.y + d.y * s0, o.z + d.z * s0, d.x * (D - s0), d.y * (D - s0), d.z * (D - s0));
+    if (T <= 1) D = s0 + (D - s0) * T;
+  }
+  const hh = d.x * d.x + d.z * d.z || 1e-9;
+  for (const m of S.men) {
+    if (m === P || m.dead || m.in || Math.abs(m.x - o.x) > D + 2 || Math.abs(m.z - o.z) > D + 2) continue;
+    const rx = m.x - o.x, rz = m.z - o.z, s = clamp((rx * d.x + rz * d.z) / hh, s0, D), y = o.y + d.y * s - m.y;
+    if (Math.hypot(rx - d.x * s, rz - d.z * s) < MAN.r * MAN.sc && y > -.3 && y < STANCE[m.st].h * MAN.sc) D = s;
+  }
+  const v = { x: o.x + d.x * D - e.x, y: o.y + d.y * D - (e.y - .12), z: o.z + d.z * D - e.z };
+  return v.x * d.x + v.y * d.y + v.z * d.z > AIMC.near ? vnorm(v) : d;
+}
 function walk(P, I, dt) {
   const c = P.ctl, a = S.aim, ch = Math.cos(a.h), sh = Math.sin(a.h), fw = (I.up ? 1 : 0) - (I.down ? 1 : 0), sd = (I.right ? 1 : 0) - (I.left ? 1 : 0), kd = P.kd || (P.kd = {});
   const hit = k => { const v = !!I[k], e = v && !kd[k]; kd[k] = v; return e; };
-  c.mx = ch * fw + sh * sd; c.mz = -sh * fw + ch * sd; c.run = !!I.thrUp && fw > 0; c.aim = a.d; c.fire = !!I.fire; c.ads = !!I.ordA && !c.run; c.rl = !!I.reload;
+  c.mx = ch * fw + sh * sd; c.mz = -sh * fw + ch * sd; c.run = !!I.thrUp && fw > 0; c.aim = aimConv(P, a); c.fire = !!I.fire; c.ads = !!I.ordA && !c.run; c.rl = !!I.reload;
   if (hit('brake')) { P.xP = c.st === 2; P.xT = 0; c.st = c.st === 1 ? 0 : 1; }
   if (I.brake && !P.xP && (P.xT += dt) >= MAN.xHold) { c.st = 2; P.xP = true; }   // a pad has one stance button: held, it lies down
   if (hit('thrDown')) c.st = c.st === 2 ? 0 : 2;
@@ -35232,29 +35265,42 @@ function stepShots(dt) {
     }
     if (b.gone) continue;
     if (b.y < 400) {
-      const g = hgt(b.x, b.z), wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null, back = wo ? dt * RAY.t : dt, an = RAY.ax, sg = RAY.sg, we = wo && wo.B ? RAY.e : -1;
+      const g = hgt(b.x, b.z), wo = b.y < g + OBJS.air ? ray(x0, y0, z0, b.x, b.y, b.z, 0) : null, an = RAY.ax, sg = RAY.sg, we = wo && wo.B ? RAY.e : -1;
+      let back = wo ? dt * RAY.t : dt, gnd = false, hu = null, ht = 0;
       if (wo) { b.x = x0 + (b.x - x0) * RAY.t; b.y = y0 + (b.y - y0) * RAY.t; b.z = z0 + (b.z - z0) * RAY.t; }   // it stops at the wall, unless something stood in front of it
-      if (b.y < g + (S.cbup ? OBJS.air : 6) || wo) {
+      const g1 = wo ? hgt(b.x, b.z) : g;
+      if (b.y <= g1) {   // into the ground: it stops where it met it (cf-tiro-origem: what stood past that point was struck, and the dust rose there, a whole hop on)
+        const a0 = y0 - hgt(x0, z0), k = a0 <= 0 ? 0 : a0 / (a0 - (b.y - g1));
+        b.x = x0 + (b.x - x0) * k; b.y = y0 + (b.y - y0) * k; b.z = z0 + (b.z - z0) * k; back *= k; gnd = true;
+      }
+      if (b.y < g + (S.cbup ? OBJS.air : 6) || wo || gnd) {
         for (let _i = 0, _l = S.units, u = _l[0]; _i < _l.length; u = _l[++_i]) {
           if (u.dead || safe(u, b)) continue;
+          if (b.sa) {   // a small-arms round: the vehicle's box over the whole hop, the nearest struck (cf-tiro-origem: only where the hop ended, 13 m on, so a truck a few metres off was never hit)
+            if (Math.abs(u.x - b.x) > 30 || Math.abs(u.z - b.z) > 30) continue;
+            const T = segBox(u, b.x - b.vx * back, b.y - b.vy * back, b.z - b.vz * back, b.vx * back, b.vy * back, b.vz * back);
+            if (T <= 1 && (!hu || -back * (1 - T) < ht)) { hu = u; ht = -back * (1 - T); }
+            continue;
+          }
           const t = wo ? clamp(((u.x - b.x) * b.vx + (u.z - b.z) * b.vz) / (b.vx * b.vx + b.vz * b.vz || 1), -back, 0) : 0, x = b.x + b.vx * t, y = b.y + b.vy * t, z = b.z + b.vz * t;
           if (Math.abs(x - u.x) > 5.5 || Math.abs(z - u.z) > 5.5 || y > u.y + 6.5) continue;
-          impact(u, HK.bullet, b.dmg, b.by, x, y, z, b.vx, b.vy, b.vz, b.sa ? -1 : b.ap); puff(x, y, z, 'spark', .5); b.gone = true; break;
+          impact(u, HK.bullet, b.dmg, b.by, x, y, z, b.vx, b.vy, b.vz, b.ap); puff(x, y, z, 'spark', .5); b.gone = true; break;
         }
         if (!b.gone) for (let _i = 0, _l = S.men, m = _l[0]; _i < _l.length; m = _l[++_i]) {   // a soldier: where the round passed nearest in this step; a near miss pins an AI one
           const rx = m.x - b.x, rz = m.z - b.z;
           if (m.dead || rx * rx + rz * rz > 900 || safe(m, b)) continue;   // the 30 m first: safe() only reads (team, shooter, FF), so the order is free, and it was called for every soldier on the map, ~45 000 times a step in a fight (cf-lag-3)
           const t = clamp((rx * b.vx + rz * b.vz) / (b.vx * b.vx + b.vz * b.vz || 1), -back, 0), d = Math.hypot(rx - b.vx * t, rz - b.vz * t), y = b.y + b.vy * t - m.y, H = STANCE[m.st].h * MAN.sc;
-          if (d < MAN.r * MAN.sc && y > -.3 && y < H) { impact(m, HK.bullet, b.dmg, b.by, b.x + b.vx * t, b.y + b.vy * t, b.z + b.vz * t, b.vx, b.vy, b.vz); b.gone = true; break; }
+          if (d < MAN.r * MAN.sc && y > -.3 && y < H && (!hu || t <= ht)) { impact(m, HK.bullet, b.dmg, b.by, b.x + b.vx * t, b.y + b.vy * t, b.z + b.vz * t, b.vx, b.vy, b.vz); b.gone = true; break; }   // a soldier in front of the vehicle takes it first
           if (d < SUP.r && y < H + SUP.r && m.ai && !m.net) { if (!(m.sq && m.sq.ord && m.sq.ord.k === 'assault' && b.by && hdist(b.by, m) > IAI.fire)) m.sup = S.t + SUP.t; drInc(m, b.by, b.vx, b.vz, 1); }   // an assault is not pinned by fire from beyond a rifle's reach; its squad still hears it (its drill wants more of it)
         }
+        if (!b.gone && hu) { const x = b.x + b.vx * ht, y = b.y + b.vy * ht, z = b.z + b.vz * ht; impact(hu, HK.bullet, b.dmg, b.by, x, y, z, b.vx, b.vy, b.vz, -1); puff(x, y, z, 'spark', .5); b.gone = true; }
         if (!b.gone && S.civs && civBullet(b, back)) b.gone = true;
-        if (!b.gone && wo) {   // a wall: struck, and gone through when the round has the power for it (bThru)
+        if (!b.gone && wo && !gnd) {   // a wall: struck, and gone through when the round has the power for it (bThru)
           RAY.o = wo; RAY.e = we; RAY.ax = an; RAY.sg = sg; shotObj(wo, b, b.dmg * (b.sa ? OBJD.sa : OBJD.gun[0] + OBJD.gun[1] * Math.min(1, b.ap || 0)) * wo.K.take[0], b.x, b.y, b.z, b.vx, b.vy, b.vz);
           if (Math.random() < .5) puff(OUT.x, OUT.y, OUT.z, 'dust', .8);
           if (!(we >= 0 && S.os[wo.id] < 2 && bThru(b, wo, we, an))) b.gone = true;
         }
-        if (!b.gone && b.y <= g) { b.gone = true; if (Math.random() < .5) puff(b.x, g + .5, b.z, 'dust', .8); }
+        if (!b.gone && (gnd || b.y <= g)) { b.gone = true; if (Math.random() < .5) puff(b.x, hgt(b.x, b.z) + .5, b.z, 'dust', .8); }
         if (b.gone) { if (b.fr) explode(b.x, Math.max(b.y, g + .3), b.z, b.fr[0], b.fr[1], b.by, b.team); continue; }   // a fragmenting round bursts where it stops
       }
     }
@@ -46087,13 +46133,14 @@ function gName(O) {
 /* side t's commander writes down what it decided: at, tg anything with x z, or nothing */
 /* the log of every side, one list and one key map each (S.glog), made or widened to the match's sides */
 const glogAll = () => { const L = S.glog || (S.glog = { l: [], k: [] }); for (const t of lsN()) { L.l[t] = L.l[t] || []; L.k[t] = L.k[t] || {}; } return L; };
-function gLog(t, k, s, at, key, tg) {
+function gLog(t, k, s, at, key, tg, d) {   // d: the numbers behind the line, kept on the entry (e.d) for the analysis and the MCP, not shown
   if (!GEN.log || !S || !lsSide(t) || (S.net && !S.host && Net.gen)) return;   // a guest's log is the host's, as glog brings it
   const L = glogAll(), K = L.k[t];
   if (key) { if (K[key] !== undefined && S.t - K[key] < GEN.dup) return; K[key] = S.t; }
   const e = { t: S.t, k, side: t, s };
   if (at && at.x !== undefined) { e.x = at.x; e.z = at.z; }
   if (tg && tg.x !== undefined) e.tg = { x: tg.x, z: tg.z };
+  if (d) e.d = d;
   L.l[t].push(e); if (L.l[t].length > GEN.log) L.l[t].shift();
 }
 /* the points each side holds now and then, for the panel's trend (called each frame; one comparison when it is not time) */
@@ -50299,9 +50346,9 @@ cqFlip = (f => (p, was) => {
   f(p, was);
   if (live) anaPush({ k: 'pt', t: anaR(S.t), i: p.i, L: p.L, from: was, to: p.hold });
 })(cqFlip);
-gLog = (f => (t, k, s, at, key, tg) => {
+gLog = (f => (t, k, s, at, key, tg, ...r) => {
   const L = S && S.glog && S.glog.l[t], b = L && L[L.length - 1];
-  f(t, k, s, at, key, tg);
+  f(t, k, s, at, key, tg, ...r);
   const M = S && S.glog && S.glog.l[t], e = M && M[M.length - 1];
   if (e && e !== b && anaLive() && ANA.S === S) anaPush(Object.assign({ k: 'lg', t: anaR(e.t), s: t, c: e.k, x: e.s }, e.x !== undefined && { px: Math.round(e.x), pz: Math.round(e.z) }));
 })(gLog);
@@ -54910,18 +54957,6 @@ bmrLine = (g => t => {
   const f = S.eco && S.eco.d[t] && S.eco.d[t].afd, w = A && A.save;
   return s + ' · cúpulas antifoguete ' + up + '/' + D.cap + (n.length > up ? ' (' + (n.length - up) + ' em obra)' : '') + (A && A.dmw ? ': ' + A.dmw : '') + (f && w ? ' (poupado ' + Math.round(f.en) + '/' + Math.round(w.en) + ' energia e ' + Math.round(f.mt) + '/' + Math.round(w.mt) + ' metal)' : '');
 })(bmrLine);
-/* the HUD's lines under the supply bases: the general's stock with what comes in a minute, the crates, what the works cost */
-function bmrHud(t, R, y, u, ink) {
-  const d = S.eco && S.eco.d[t]; if (!d || t < 0 || S.demo && !S.watch) return y;
-  const n = v => Math.round(v), w = bmrView(t), s = w.spentLastMinute, inc = d.inc || { en: 0, mt: 0 }, use = d.use || { en: 0, mt: 0 };
-  y += 6 * u; txt('GENERAL · SUPRIMENTOS', R, y, 11 * u, ink, 'right'); y += 15 * u;
-  const out = v => (n(v) > 0 ? ' −' + n(v) : '');   // what goes out a minute, left out when nothing does (no "−0")
-  txt('ENERGIA ' + n(d.en) + '  +' + n(inc.en) + out(use.en + s.en) + '/min', R, y, 12.5 * u, d.en < 60 ? FOE : ink, 'right'); y += 15 * u;
-  txt('METAL ' + n(d.mt) + '  +' + n(inc.mt) + out(use.mt + s.mt) + '/min', R, y, 12.5 * u, d.mt < 60 ? FOE : ink, 'right'); y += 15 * u;
-  const ob = [n(s.en) > 0 && out(s.en) + ' ENERGIA', n(s.mt) > 0 && out(s.mt) + ' METAL'].filter(Boolean), obs = ob.length ? 'OBRAS' + ob.join(' ·') + '/min' : 'SEM OBRAS NO ÚLTIMO MINUTO';
-  txt((w.crates >= 0 ? 'CAIXAS ' + w.crates + ' · ' : '') + obs, R, y, 11 * u, ink, 'right'); y += 15 * u;
-  return y;
-}
 /* ---------- the general's builders (CGN, não testado): why the AI's works were ordered and never built, and the fixes ----------
    What went wrong (read in the code, cf-construir-general):
    - a squad sent to build stood in the houses or the trenches near the place (postPts: windows within R + CITY.ai.near m, a finished work
@@ -61346,8 +61381,8 @@ function ringsW() {
   for (const f of S.forts) if (f.ring && !f.gone && f.k !== 1) { let r = M.get(f.ring.key); if (!r) M.set(f.ring.key, (r = Object.assign({ w: [] }, f.ring))); r.rb = f.ring.rb; r.w.push(f.o); }
   const l = [...M.values()]; l.n = S.fn; return (S.ringW = l);
 }
-/* a segment against a work's box, d m wider */
-function segBox(o, ax, az, bx, bz, d) {
+/* a segment against a work's box, d m wider (wkSeg: it was a second segBox, which took the place of the 3D one against a vehicle's box that sweeps and stepSlugs call; cf-tiro-origem) */
+function wkSeg(o, ax, az, bx, bz, d) {
   const L = (x, z) => [(x - o.x) * o.c - (z - o.z) * o.s, (x - o.x) * o.s + (z - o.z) * o.c], [px, pz] = L(ax, az), [qx, qz] = L(bx, bz), hw = o.hw + d, hd = o.hd + d;
   let t0 = 0, t1 = 1;
   for (const [p, q, h] of [[px, qx, hw], [pz, qz, hd]]) {
@@ -61364,7 +61399,7 @@ function enpWay(x, z, gx, gz, r) {
   for (const R of l) {
     const dc = Math.hypot(x - R.x, z - R.z), dg = Math.hypot(gx - R.x, gz - R.z);
     if (dc > R.R + RINGW.near + 30 && dg > R.R + RINGW.near + 30) { const vx = gx - x, vz = gz - z, L2 = vx * vx + vz * vz || 1, t = clamp(((R.x - x) * vx + (R.z - z) * vz) / L2, 0, 1); if (Math.hypot(x + vx * t - R.x, z + vz * t - R.z) > R.R + RINGW.near) continue; }
-    if (!R.w.some(o => S.os[o.id] < 2 && segBox(o, x, z, gx, gz, r))) continue;
+    if (!R.w.some(o => S.os[o.id] < 2 && wkSeg(o, x, z, gx, gz, r))) continue;
     const at = (b, d) => ({ x: R.x + Math.cos(b) * d, z: R.z - Math.sin(b) * d });
     if (dc < R.R) return at(R.rb, R.R + RINGW.out);   // inside: out by the open rear
     const bc = Math.atan2(-(z - R.z), x - R.x), to = dg < R.R ? R.rb : Math.atan2(-(gz - R.z), gx - R.x), dd = wrap(to - bc);
@@ -66648,6 +66683,7 @@ function updateCamera(dt) {
   fortCam(p);
   bldCam(p);
   camClip(p, seat, dt);
+  if (S.aim) S.aim.o = p === S.my && p.man && !p.dead && !seat ? { x: cp.x, y: cp.y, z: cp.z } : null;   // where the cross looks from, for the round on foot (aimConv)
   camera.updateProjectionMatrix(); camera.updateMatrixWorld();
   skyDome.position.copy(cp);
   S.ear.x = cp.x; S.ear.y = cp.y; S.ear.z = cp.z;
@@ -68593,7 +68629,8 @@ function drawHud() {
     y += 6 * u; txt('BASES DE SUPRIMENTO ' + sups.length + '/' + supCap(me), R, y, 11 * u, ink, 'right'); y += 15 * u;
     sups.forEach((b, i) => { const d = hdist(b, P); txt((i + 1) + ' · ' + (b.prog < 1 ? 'obra ' + Math.round(b.prog * 100) + '%' : spawnWhy(b, me) ? 'inimigo perto' : S.os[b.id] ? 'danificada' : 'pronta') + ' · ' + (d < 1000 ? Math.round(d) + ' m' : (d / 1000).toFixed(1).replace('.', ',') + ' km'), R, y, 12.5 * u, b.prog < 1 ? ink : S.os[b.id] || spawnWhy(b, me) ? FOE : FRIEND, 'right'); y += 15 * u; });
   }
-  if (!mapV) y = bmrHud(me, R, y, u, ink);   // the general's stock, income, crates and what the works cost (BMR)
+  // the general's stock, income, crates and works a minute (BMR) are not on the soldier's or the crew's screen (P19, D6 = A): the side's stock
+  // shows in the build mode under the bar (obrStock) and on the General's view (ecoVM, bmrLine)
   if (!P.dead && P.kind && !P.man && S.dep && !mapV) {   // a ground vehicle at a base
     if (S.rearm > 0) { txt('REABASTECENDO', cw / 2, ch * .7, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
     else if (S.dep === 2) txt('BASE DE SUPRIMENTO: ABASTECIDO', cw / 2, ch * .7, 11 * u, ink, 'center');

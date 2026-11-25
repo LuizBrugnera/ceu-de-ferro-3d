@@ -68079,6 +68079,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
       if (q && q.front) { if (S.lockOk || blink) bracket(q.x, q.y, S.lockOk ? 17 : 24, S.lockOk ? FOE : acc); if (near) txt('PERTO DEMAIS', q.x, q.y + 27, 11 * u, FOE, 'center'); }   // cf-miras-impl: locking blinks, locked holds; only the warning is words
       else if (!t) txt(a.mag ? 'SEM ALVO NA MIRA' : a.rl > 0 ? 'RECARREGANDO' : 'SEM MUNIÇÃO', cw / 2, ch * .5 + 44 * u, 12 * u, ink, 'center');
     } else if (!a.mag && !(a.rl > 0)) txt(a.res ? 'R: RECARREGAR' : 'SEM MUNIÇÃO', cw / 2, ch * .5 + 44 * u, 12 * u, FOE, 'center');
+    else if (!(P.sl && P.sl.n >= 3) && magLow(a) === 1) txt(a.res ? 'PENTE BAIXO  ·  R: RECARREGAR' : 'ÚLTIMO PENTE', cw / 2, ch * .5 + 44 * u, 12 * u, acc, 'center');   // P9
     if (S.rearm > 0) { txt(S.dep === 2 ? 'REABASTECENDO' : 'REMUNICIANDO', cw / 2, ch * .7, 13 * u, ink, 'center'); bar(cw / 2 - 70 * u, ch * .7 + 18 * u, 140 * u, 6 * u, S.rearm, acc); }
     if (w.k === 'mort' && !(seat && seat.map)) {
       const sol = S.sol, set = P.swT - S.t, n1 = v => v.toFixed(2).replace('.', ',');
@@ -68099,6 +68100,7 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
     hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(cw / 2 - 62 * k, cy - 3 * u, 124 * k, 22 * u);
     for (let d = 0; d < 360; d += 15) { const e = ((d - b + 540) % 360) - 180; if (Math.abs(e) > 58) continue; const x = cw / 2 + e * k; if (d % 90) { hx.fillStyle = dim; hx.fillRect(x, cy + 4 * u, 1, (d % 45 ? 5 : 9) * u); } else txt('NLSO'[d / 90], x, cy, 13 * u, d ? ink : acc, 'center'); }
     tri(cw / 2, cy - 7 * u, Math.PI / 2, 4, acc); txt(String(Math.round(b)).padStart(3, '0') + '°', cw / 2 + 66 * k, cy + 1 * u, 12 * u, ink);
+    if (!(P.sl && P.sl.n >= 3) && !(seat && seat.map)) ammoHud(a, u, ink, acc, dim, disp);
   }
   txt(P.def.name, L, y, 17 * u, acc, 'left', disp); y += 23 * u;
   txt('SAÚDE', L, y, 11 * u, ink); bar(L + 52 * u, y + 2 * u, 106 * u, 7 * u, P.hp / P.max, P.hp < P.max * .45 ? FOE : ink); y += 15 * u;
@@ -68123,6 +68125,27 @@ function hudMan(P, u, ink, acc, disp, blink, seat) {
   for (const [s, c] of woundLines(P, hs, ls, as)) line(s, DCOL[c]);
   if (C.p) line(C.all ? 'coberto pela mata' : P.st ? 'coberto pela parede' : 'agache para se cobrir na parede', acc);
   if (S.t - P.hitT < 2.5) txt(blink ? 'SOB FOGO' : '', lx, y0 + H - 16 * u, 10 * u, FOE);
+}
+/* P9 (cf-pol2-fase1): the ammunition of the weapon in hand was only a line of 12 px in the list at the top left, and nothing said a magazine
+   was running low. magLow(m): 0 enough, 1 low (MAGLOW of a magazine or less, at least the last round), 2 empty, for a weapon that loads
+   magazines (not one counted in units, d.k: grenades, launchers, the mortar). ammoHud: the weapon in hand at the bottom right, its rounds
+   in the magazine large and the magazines left, in the accent while low and red when empty; under the aim, PENTE BAIXO (or ÚLTIMO PENTE
+   with none left) while low, as R: RECARREGAR said once it was empty */
+const MAGLOW = .25;
+function magLow(m) {
+  const d = m.d; if (d.k || !(d.mag > 1)) return 0;
+  return m.mag <= 0 ? 2 : m.mag <= Math.max(1, Math.floor(d.mag * MAGLOW)) ? 1 : 0;
+}
+function ammoHud(m, u, ink, acc, dim, disp) {
+  const d = m.d, R = cw - 16, y = ch - 16 - 42 * u, lo = magLow(m), col = lo === 2 || !(m.mag + m.res) ? FOE : lo ? acc : ink;
+  hx.fillStyle = 'rgba(8,12,13,.45)'; hx.fillRect(R - 168 * u, y - 6 * u, 168 * u + 8, 54 * u);
+  txt(d.name.toUpperCase(), R, y, 11 * u, dim, 'right');
+  if (d.k) { txt('×' + (m.mag + m.res), R, y + 15 * u, 24 * u, col, 'right', disp); return; }
+  const rs = '  ' + m.res + (d.lmg && d.mag > 40 ? (m.res === 1 ? ' cinta' : ' cintas') : m.res === 1 ? ' pente' : ' pentes');
+  hx.font = 12 * u + "px 'Share Tech Mono', ui-monospace, monospace"; const rw = hx.measureText(rs).width;
+  txt(rs, R, y + 25 * u, 12 * u, m.res ? ink : FOE, 'right');
+  txt(String(m.mag), R - rw, y + 15 * u, 24 * u, col, 'right', disp);
+  if (m.rl > 0) bar(R - 160 * u, y + 43 * u, 160 * u, 3 * u, 1 - m.rl / d.rl, acc);
 }
 /* the ESTADO panel's wound lines, [text, DCOL index]: never "sem ferimentos" over a wound that bleeds or took health (P1, cf-pol2-fase1:
    a torso hit that left the soldier above DMG.st[0] said "sem ferimentos" and, under it, "sangrando") */

@@ -8,8 +8,8 @@ $('AIB').now = () => 0;
 const S = C.watch('modern', { len: 0, n: 2, min: 20 }), d = S.eco.d[0], escW = $('escW'), gpPlan = $('gpPlan');
 
 console.log('-- the squad\'s cost --');
-ok(J(ECO.unit.squad) === J([40, 30, 25, 'inf']), 'a squad costs 40 energy and 30 metal, 25 s (' + J(ECO.unit.squad) + ')');
-ok(J(C.ecoView(0).costs.squad) === J([40, 30, 25, 'inf']), 'the view shows that cost (the panel\'s button and the MCP read it)');
+ok(J(ECO.unit.squad) === J([50, 20, 25, 'inf']), 'a squad costs 50 energy and 20 metal, 25 s (' + J(ECO.unit.squad) + ')');
+ok(J(C.ecoView(0).costs.squad) === J([50, 20, 25, 'inf']), 'the view shows that cost (the panel\'s button and the MCP read it)');
 
 console.log('-- the wealth level --');
 ok(escW(0) === 0, 'at the start: 0');
@@ -59,7 +59,7 @@ const r = C.ecoCmd(0, { c: 'make', k: 'squad', n: 1 }, 'me');
 ok(r.ok, 'the make order goes (' + J(r) + ')');
 const q = d.q[0]; for (let i = 0; i < 80 && d.q.includes(q); i++) $('ecoStep')(.5);
 ok(!d.q.includes(q) && d.res.squad.length === 1, 'built: a squad in the reserve');
-ok(Math.abs(q.paid.en - 40) < .01 && Math.abs(q.paid.mt - 30) < .01, 'paid 40 energy and 30 metal (' + q.paid.en.toFixed(1) + ', ' + q.paid.mt.toFixed(1) + ')');
+ok(Math.abs(q.paid.en - 50) < .01 && Math.abs(q.paid.mt - 20) < .01, 'paid 50 energy and 20 metal (' + q.paid.en.toFixed(1) + ', ' + q.paid.mt.toFixed(1) + ')');
 
 console.log('-- three sides --');
 { const C3 = H.load({ seed: 7, eco: 1, mapv: 11 }); C3.$('AIB').now = () => 0; const S3 = C3.watch('modern', { len: 0, n: 3, min: 20 }), d2 = S3.eco.d[2];

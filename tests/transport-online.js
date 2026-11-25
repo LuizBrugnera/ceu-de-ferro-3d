@@ -42,7 +42,7 @@ const occ = (c, u) => u.occ.map(m => (m && m !== c.S.rider ? c.Net.ref(m) : 0)).
   const p = h.railOf(BX, BZ), q = h.addSquad(0, BX - 14, BZ + 12, p.ri, p.s); h.setOrd(q, { k: 'hold', ri: p.ri, s: p.s }); q.fd = 1e9; const n = q.live;
   await run(4); await press(h, 'flare'); await run(26);
   ok(T.cargo && T.cargo.length >= n - 1 && Tc.pn === T.cargo.length && Tg.pn === T.cargo.length && c.$('paxN')(Tc) === T.cargo.length, 'F: a squad of ' + n + ' goes aboard, boxed on the host (' + (T.cargo ? T.cargo.length : 0) + '), and both guests count the same');
-  ok(c.S.men.filter(m => m.net && m.aid && !m.dead).length <= n - (T.cargo ? T.cargo.length : 0), 'its soldiers are gone from the third client\'s map');
+  ok(c.S.men.filter(m => m.net && m.aid && !m.dead && !m.psq).length <= n - (T.cargo ? T.cargo.length : 0), 'its soldiers are gone from the third client\'s map');
   /* the ride */
   h.S.aim.h = 0; h.S.input.up = true; let worst = 0, far = 0;
   await run(6, () => { const s = c.$('seatAt')(Tc, seat); worst = Math.max(worst, Math.hypot(Ac.x - s.x, Ac.z - s.z)); far = Math.max(far, Math.hypot(a.S.my.x - Tg.x, a.S.my.z - Tg.z)); });

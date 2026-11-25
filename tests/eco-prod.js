@@ -50,11 +50,11 @@ console.log('-- starved (side 1 loses its factories and income; ' + STARVE + ' s
   const d1 = S.eco.d[1]; d1.en = d1.mt = 0; d1.res = {};
   for (const e of S.eco.l.filter(e => e.team === 1 && !e.dead)) C.ecoDown(e, -1, true);
   C.run(1);
-  const base = J(P.made[1]); let missSeen = 0, whyBad = 0, nq = 0; const seen = {};
+  const base = J(P.made[1]); let missSeen = 0, whyBad = 0, nq = 0; const seen = {}, fresh = new Map();
   P.made[1] = {};
   C.run(STARVE, () => {
     if (Object.keys(d1.miss).some(k => d1.miss[k].length)) missSeen++;
-    for (const q of d1.q) { nq++; seen[q.why] = 1; if (!['none', 'en', 'mt'].includes(q.why) && q.p === 0) whyBad++; }
+    for (const q of d1.q) { nq++; if (!q.why && !fresh.has(q)) fresh.set(q, S.t); const age = S.t - (fresh.get(q) || S.t); if (q.why || age > ECO.dt) seen[q.why] = 1; if (!['none', 'en', 'mt'].includes(q.why) && q.p === 0 && age > ECO.dt) whyBad++; }   // an order just queued says why only at the economy's next step (ECO.dt)
   });
   const m = P.made[1], bad = Object.keys(m).filter(k => /^(tank|aa|art)$/.test(k) || /^plane:/.test(k) || k === 'heli');
   ok(bad.length === 0, 'side 1 fielded no tank, aa, art or plane while starved: ' + J(m));

@@ -74,8 +74,8 @@ fresh('ww2');
   m.ctl.st = 0; run(1); const plunge = volley(m, Math.PI / 2, 60, N, 1.0, 1.2, .004), plungeX = volley(m, 0, 60, N, .5, 1.2, .004), close = volley(m, 0, 25, N), closeO = volley(o, 0, 25, N);
   console.log('   ' + N + ' rifle rounds from 120 m, aimed: in the open ' + open.hits + ' hits (' + open.dmg.toFixed(0) + ' damage); standing in the trench ' + res.map(([n, r]) => n + ' ' + r.hits + ' (' + r.dmg.toFixed(0) + ')').join(', ') + '; crouched ' + duck.hits + ' (open, crouched: ' + openC.hits + '), prone ' + prone.hits);
   console.log('   from 25 m: ' + close.hits + ' hits (' + close.dmg.toFixed(0) + '), in the open, crouched ' + closeO.hits + ' (' + closeO.dmg.toFixed(0) + '); aimed at the body, plunging at 57 deg along the trench from 60 m: ' + plunge.hits + ' hits, ' + plunge.low + ' below the ground; at 29 deg across it: ' + plungeX.hits + ' hits, ' + plungeX.low + ' below the ground');
-  ok(open.hits > N * .25 && res.every(([n, r]) => r.hits > 2 && r.hits < open.hits * .3 && r.low === 0) && res.every(([n, r]) => r.dmg < open.dmg * .6), 'standing in a trench a soldier is hit far less often than in the open, from every side, and only in what shows');
-  ok(duck.hits === 0 && prone.hits === 0 && openC.hits > N * .15, 'crouched or prone in it no level fire reaches it');
+  ok(open.hits > N * .15 && res.every(([n, r]) => r.hits > 2 && r.hits < open.hits * .3 && r.low === 0) && res.every(([n, r]) => r.dmg < open.dmg * .6), 'standing in a trench a soldier is hit far less often than in the open, from every side, and only in what shows');   // in the open a share of the volley as wide as his body drawn (cf-hitbox: half the old cylinder's 1.4 m, it was over N * .25)
+  ok(duck.hits === 0 && prone.hits === 0 && openC.hits > N * .08, 'crouched or prone in it no level fire reaches it');
   ok(close.hits > 10 && plunge.low > 10 && plungeX.hits === 0, 'it can be hit from close by; fire plunging in along the trench reaches the body, fire coming down across it stops in the edge');
 }
 

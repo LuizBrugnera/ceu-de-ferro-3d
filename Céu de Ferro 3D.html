@@ -42468,21 +42468,19 @@ function cmdObj(C) {
    assault slot; an assault into an empty point (a walk) goes at once, without forming up, and without bounds.
    aim: s the side's first aim (cqAim's first) is kept while it may still be taken, so that its assault squads (push), which wait where the
    assault on it will form up, do not walk back and forth (hysteresis). lost: a point the side lost within lost.t s goes lost.w places up
-   the list: it is taken back while the enemy there is thin.
+   the list, and becomes the aim at once: it is taken back while the enemy there is thin.
    rear: a squad holding a point no enemy can take (every point linked to it the side's, and tied to its base), with no enemy known within rear.r m
    for rear.calm s, joins the assault squads; rear.n a plan.
-   pull: the whole map's idle squads for an assault that has too few in reach. When the side's aims are all short of squads (cmdAttack's
-   'pool') for pull.wait s, the nearest quiet squad of the whole map that holds or patrols (pull.jobs; quiet as a post that lends one, apLend's
-   AP.lend.calm, and the floor of its road or point kept, apFloor) within pull.r m (farther, the walk outlasts the aim) becomes an assault squad and walks to where the assault will form up; one
-   every pull.every s, while fewer than pull.max are on their way. The field's rides (trnPlan's fetch) take the squads on their way to an
+   gsPull (a quiet post's squad to the forming-up place when the side has no strength to attack) may also take a squad holding a point
+   that another squad holds with it. The field's rides (trnPlan's fetch) take the squads on their way to an
    assault (push, or forming up) first */
-const MNV = { on: 1, won: 20, aim: 60, lost: { t: 240, w: 1.5 }, rear: { r: 1200, calm: 60, n: 1 }, pull: { wait: 20, every: 30, max: 2, fresh: 8, r: 3500, jobs: { held: 1, road: 1, wood: 1, line: 1, fpost: 1 } } };
+const MNV = { on: 1, won: 20, aim: 150, lost: { t: 240, w: 1.5 }, rear: { r: 1200, calm: 60, n: 1 } };
 cqAim = (g => C => {
   let L = g(C); if (!MNV.on || !L.length) return L;
   const t = C.t, lt = p => p.lostT && S.t - (p.lostT[t] ?? -1e9) < MNV.lost.t;
   if (L.length > 1 && L.some(lt)) L = L.map((p, i) => [i - (lt(p) ? MNV.lost.w : 0), p]).sort((a, b) => a[0] - b[0]).map(e => e[1]);
   const k = C.aimK, i = k ? L.indexOf(k) : -1;
-  if (i > 0 && S.t - C.aimT < MNV.aim) { L = L.slice(); L.splice(i, 1); L.unshift(k); }
+  if (i > 0 && S.t - C.aimT < MNV.aim && !lt(L[0])) { L = L.slice(); L.splice(i, 1); L.unshift(k); }   // a point just lost is not waited for
   else if (L[0] !== k) { C.aimK = L[0]; C.aimT = S.t; }
   return L;
 })(cqAim);
@@ -42501,30 +42499,6 @@ function mnvRear(C, sq) {
     n++; q.job = 'push'; q.jk = 0; q.back = null; setOrd(q, Pu);
     gLog(t, 'atk', 'Esquadra de ' + gName(p) + ' (retaguarda, sem inimigo perto) vai reforçar o assalto', p);
   }
-}
-function mnvPull(C, sq) {
-  if (!MNV.on || !S.cq || genBy(C.t, 'atk') !== 'ai') return;
-  const t = C.t, G = MNV.pull, ev = C.ev && S.t - C.evT < G.fresh ? C.ev : null;   // the plan is a job, a piece a step: cmdAttack's look of a few s ago
-  const short = !C.gate && ev && ev.length && !ev.some(e => e.why === 'go') && ev.some(e => e.why === 'pool');
-  if (!short) { C.mnvPT = null; return; }
-  if (C.mnvPT == null) C.mnvPT = S.t;
-  if (S.t - C.mnvPT < G.wait || S.t < (C.mnvPN || 0)) return;
-  const Pu = post(t, 'push', 0); if (!Pu || Pu.x === undefined) return;
-  if (sq.filter(q => q.mnvP && q.job === 'push' && !q.op && q.live > 0 && (L => L && hdist(L, Pu) > INC.op.ready * 2)(q.men.find(m => !m.dead))).length >= G.max) return;   // enough already on their way
-  const c = [];
-  for (const q of sq) {
-    if (!G.jobs[q.job] || q.op || q.state || q.lift || q.live < 3 || q.para || q.help || q.mil || q.ord.b || q.ord.T || q.ord.es || q.ord.res || q.ord.wd || q.ord.k === 'supply' || q.ord.k === 'build' || q.ord.k === 'withdraw' || q.ord.k === 'assault') continue;
-    if (q.apK === undefined || S.t - q.apK < AP.lend.calm) continue;   // quiet as a post that lends a squad (apQuiet keeps q.apK; a held or patrolling one from now on)
-    if (q.ord.tw ? !sq.some(o => o !== q && !o.op && o.live > 0 && o.ord.tw === q.ord.tw) : q.job !== 'held' && !apFloor(sq, q, [])) continue;   // the floor of its point or road stays
-    const L = q.men.find(m => !m.dead), d = L ? hdist(L, Pu) : 1e9; if (d < G.r) c.push([q, d]);
-  }
-  c.sort((a, b) => a[1] - b[1]);
-  const net = S.T.mv >= 4, R = S.T.routes, f = c.slice(0, 3).find(([q]) => Pu.ri === q.ri || (net && (!!swNear(q.ri, q.s, Pu.ri) || !!tripSq(q, Pu))) || Math.min(q.s, R[q.ri].len - q.s) < 2000);   // one setOrd can move there (pushFrom's test)
-  if (!f) return;
-  const [best, bd] = f;
-  C.mnvPN = S.t + G.every;
-  const was = best.job; best.job = 'push'; best.jk = 0; best.back = null; best.mnvP = 1; setOrd(best, Pu);
-  gLog(t, 'atk', 'Poucas esquadras perto de ' + gName(cmdObj(C)) + ': ' + helpWho(best).replace(/ \(.*\)$/, '') + ' (' + was + ', a ' + gN(bd / 1000) + ' km) vem para o assalto', Pu);
 }
 /* the assault a side would make now, with the free squads of that road. What it may go for, in this order: its objective from the side
    of its own base, a town also from the other side, then the enemy's line on the other roads; the first for which two squads at least
@@ -44172,7 +44146,7 @@ function* planJob(t) {
   yield* apWork(C);   // M2: the approaches cmdAttack asked for
   live();
   yield* cmdManJob(C, sq);
-  live(); campTick(C); cmdDefend(C, sq); cmdPoints(C, sq); mnvRear(C, sq); mnvPull(C, sq); cmdColumns(C, sq); thbTick(C); cmdFires(C);
+  live(); campTick(C); cmdDefend(C, sq); cmdPoints(C, sq); mnvRear(C, sq); cmdColumns(C, sq); thbTick(C); cmdFires(C);
   yield; live();
   trnPlan(t, sq);
   planSup(t, sq, F);
@@ -53727,7 +53701,7 @@ function apWay(pl, a, x, z) {
 /* the quiet of the posts that may lend a squad: q.apK, when an enemy was last known within AP.lend.r m of it or it was last hit */
 function apQuiet(C, sq) {
   for (const q of sq) {
-    if (!AP.lend.jobs[q.job] && !(MNV.on && MNV.pull.jobs[q.job])) continue;   // cf-general-manobra: the held and patrolling squads too, for mnvPull
+    if (!AP.lend.jobs[q.job]) continue;
     const L = q.men.find(m => !m.dead); if (q.apK === undefined) q.apK = S.t;
     if (L && (cmdKnown(C, L.x, L.z, AP.lend.r) > 0 || q.men.some(m => !m.dead && m.hitT >= 0 && S.t - m.hitT < AP.lend.hit))) q.apK = S.t;
   }
@@ -62157,13 +62131,14 @@ function gsPull(C, sq) {
   if (sq.filter(q => q.job === 'push' && !q.op && q.live > 0).length >= G.max) return;   // enough wait at the forming-up place already
   const O = post(t, 'push', 0); if (!O) return;
   const R = S.T.routes, p = O.x !== undefined ? O : routeAt(R[O.ri], clamp(O.s, 0, R[O.ri].len)), lead = q => q.men.find(m => !m.dead), d = q => { const L = lead(q); return L ? hdist(L, p) : 1e9; };
-  const ok = q => G.jobs.includes(q.job) && !q.op && !q.para && !q.lift && !q.state && !q.net && q.live >= 3 && q.ord && (q.ord.k === 'hold' || q.ord.k === 'observe' || q.ord.k === 'patrol') && !q.ord.b && !q.ord.es && !q.ord.T && !q.ord.tw && !q.ord.res
+  const ok = q => G.jobs.includes(q.job) && !q.op && !q.para && !q.lift && !q.state && !q.net && q.live >= 3 && q.ord && (q.ord.k === 'hold' || q.ord.k === 'observe' || q.ord.k === 'patrol') && !q.ord.b && !q.ord.es && !q.ord.T && !q.ord.res
+    && (!q.ord.tw || (MNV.on && sq.some(o => o !== q && !o.op && o.live >= 3 && o.ord && o.ord.tw === q.ord.tw)))   // cf-general-manobra: a point's holder when another stays in it
     && (L => !!L && cmdKnown(C, L.x, L.z, G.q) === 0)(lead(q)) && (q.job !== 'line' || sq.some(o => o !== q && o.job === 'line' && o.ri === q.ri && o.live >= 3));
   const go = q => { const e = Math.min(q.s, R[q.ri].len - q.s), net = S.T.mv >= 4; return O.ri === q.ri || (net && (!!swNear(q.ri, q.s, O.ri) || !!tripSq(q, O))) || e < 2000; };
   const took = [];
   for (const q of sq.filter(q => ok(q) && d(q) < G.r).sort((a, b) => d(a) - d(b)).slice(0, 6)) {   // within a walk of the forming-up place: from farther they never got to it before the assault had to go
     if (took.length >= G.n) break;
-    if (!go(q)) continue;
+    if ((MNV.on && !ok(q)) || !go(q)) continue;   // cf-general-manobra: asked again, as the one taken before may have been its point's other holder
     const n = Array.from({ length: D.push }, (_, k) => k).map(k => [k, sq.filter(o => o.job === 'push' && o.jk === k).length]).sort((a, b) => a[1] - b[1])[0], k = n ? n[0] : 0, Ok = post(t, 'push', k) || O;
     took.push(GEN.job[q.job] || q.job); q.job = 'push'; q.jk = k; q.col = false; setOrd(q, Ok);
   }

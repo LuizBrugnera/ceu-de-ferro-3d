@@ -1,8 +1,8 @@
 'use strict';
 /* the tempo of the AI general's assaults and where its idle squads go (cf-general-manobra, MNV): an assault into an empty point does not
    form up, it goes; a point being consolidated holds no assault slot; the side's first aim is kept MNV.aim s (no back and forth) and a point it
-   just lost goes up the list; the holders of a rear point no enemy can take, and quiet squads of the whole map when every aim is short of
-   squads, become assault squads. A real modern AI × AI match on map 11, 40 s in, then each piece driven by hand (~1 min) */
+   just lost goes up the list; the holders of a rear point no enemy can take become assault squads, and with no strength to attack
+   (gsPull) one of two holders of a point goes to the forming-up place. A real modern AI × AI match on map 11, 40 s in, then each piece driven by hand (~1 min) */
 const H = require('./harness'), ok = H.ok;
 const C = H.load({ seed: 3, mapv: 11 }), $ = C.$;
 $('AIB').now = () => 0;
@@ -61,7 +61,9 @@ const hide = () => { for (const g of S.men.concat(S.units)) if (g.team !== t) g.
     const last = L[L.length - 1], i0 = L.indexOf(last); (last.lostT || (last.lostT = {}))[t] = S.t; Cc.aimT = -1e9;
     const i1 = $('cqAim')(Cc).indexOf(last);
     ok(i1 < i0 || i0 === 0, 'a point the side lost a moment ago goes up the list (' + i0 + ' → ' + i1 + ')');
-    last.lostT[t] = -1e9; Cc.aimK = null;
+    Cc.aimK = L[0]; Cc.aimT = S.t; (L[1].lostT || (L[1].lostT = {}))[t] = S.t;
+    ok($('cqAim')(Cc)[0] === L[1], 'and the aim held a moment ago gives way at once to a point just lost');
+    L[1].lostT[t] = -1e9; last.lostT[t] = -1e9; Cc.aimK = null;
   }
 }
 
@@ -88,28 +90,25 @@ const hide = () => { for (const g of S.men.concat(S.units)) if (g.team !== t) g.
   }
 }
 
-/* 5. every aim short of squads: a quiet squad of the whole map comes to where the assault will form up */
+/* 5. no strength to attack (gsPull): a squad holding a point another squad holds with it may go to the forming-up place; a point's only holder stays */
 {
   hide();
-  const sq = () => S.squads.filter(o => o.team === t && o.live > 0 && !o.net);
-  const c = free().filter(q => ({ held: 1, road: 1, wood: 1 })[q.job] && q.ord.k !== 'withdraw' && q.ord.k !== 'assault');
-  if (ok(c.length > 0, 'a held, road or wood squad to take (' + c.length + ')')) {
-    for (const q of sq()) q.apK = S.t - 1e4;
-    const short = () => { Cc.gate = ''; Cc.ev = [{ why: 'pool' }]; Cc.evT = S.t; };
-    short(); Cc.mnvPT = null; Cc.mnvPN = 0; $('mnvPull')(Cc, sq());
-    const n0 = sq().filter(q => q.mnvP).length;
-    ok(n0 === 0, 'not at once: the aims must be short MNV.pull.wait s');
-    later(MNV.pull.wait + 1); const r0 = MNV.pull.r; MNV.pull.r = 10; short(); $('mnvPull')(Cc, sq());
-    ok(sq().filter(q => q.mnvP).length === 0, 'none within MNV.pull.r m (10 here): nobody is pulled');
-    MNV.pull.r = 1e5; Cc.mnvPN = 0; short(); $('mnvPull')(Cc, sq());   // the map's squads stand where the match put them: any distance here
-    const got = sq().filter(q => q.mnvP);
-    ok(got.length === 1 && got[0].job === 'push', 'short for ' + MNV.pull.wait + ' s: one squad comes for the assault (' + got.map(q => $('helpWho')(q)).join(', ') + ')');
-    later(1); short(); $('mnvPull')(Cc, sq());
-    ok(sq().filter(q => q.mnvP).length === 1, 'the next only after MNV.pull.every s');
-    later(MNV.pull.every); Cc.ev = [{ why: 'go' }]; Cc.evT = S.t; $('mnvPull')(Cc, sq());
-    ok(sq().filter(q => q.mnvP).length === 1, 'an aim with squads enough: nobody more is pulled');
-    ok((S.glog ? S.glog.l[t] : []).some(e => /vem para o assalto/.test(e.s)), 'the general\'s log says it');
-    MNV.pull.r = r0;
+  const G = $('GSM').pull, j0 = G.jobs, m0 = G.max, r0 = G.r, all = S.squads.filter(o => o.team === t && o.live > 0 && !o.net), sq = () => all.filter(o => o.live > 0);
+  const own = P.filter(p => p.hold === t && p.base < 0), p = own[0], c = free().slice(0, 2);
+  if (ok(!!p && c.length === 2, 'a point of side 0 and two free squads to hold it')) {
+    const keep = new Map(all.map(o => [o, o.job]));
+    for (const o of all) if (o.job === 'held') o.job = 'heldx';   // only the two of this case may be taken
+    G.jobs = ['held']; G.max = 99; G.r = 1e5;
+    const hold = q => { q.job = 'held'; q.jk = 0; $('setOrd')(q, { k: 'hold', ri: p.ri, s: p.s, x: p.x, z: p.z, tw: p, R: 0 }); };
+    hold(c[0]); c[1].job = 'heldx';
+    Cc.gsPT = 0; $('gsPull')(Cc, sq());
+    ok(c[0].job === 'held' && c[0].ord.tw === p, 'the only holder of ' + $('gName')(p) + ' is not taken');
+    hold(c[1]); Cc.gsPT = 0; $('gsPull')(Cc, sq());
+    const n = c.filter(q => q.job === 'push').length;
+    ok(n === 1 && c.some(q => q.job === 'held' && q.ord.tw === p), 'with two holders one goes to the forming-up place and one stays (' + c.map(q => q.job).join(', ') + ')');
+    MNV.on = 0; for (const q of c) hold(q); Cc.gsPT = 0; $('gsPull')(Cc, sq()); MNV.on = 1;
+    ok(c.every(q => q.job === 'held'), 'without MNV a point\'s holders are never taken (as before)');
+    G.jobs = j0; G.max = m0; G.r = r0; for (const [o, j] of keep) if (!c.includes(o)) o.job = j;
   }
 }
 

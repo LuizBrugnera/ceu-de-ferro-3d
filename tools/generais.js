@@ -18,7 +18,7 @@
               (ataque, manter, defesa) as a share of the match
      log      the general's own log lines, by kind and by template (numbers and names stripped)
      man      how fast its assaults go (cf-general-manobra): each assault's timeline (opened, every stage, first squad at the objective,
-              the point taken, ended and how) with its losses; the squads the general pulled to its assaults from the whole map (pull) and
+              the point taken, ended and how) with its losses; the squads gsPull sent to the forming-up place (pull) and
               from rear points (rear); how long a point was the side's first aim before an assault on it opened
               (lag); how often the first aim changed (sw) and the assaults that ended before reaching their objective (drop); what held
               the next assault back (gate: cool, max, ap, pool, weak..., as a share of the match); the points taken in or out of an assault
@@ -123,7 +123,7 @@ function one(m) {
   $('genCmd = (g => function (t, c, by) { const r = g.apply(this, arguments); try { globalThis.__gc(t, c || {}, r, by || "ai"); } catch (e) {} return r; })(genCmd)');
   /* the general's log, each line once (gLog drops repeats within GEN.dup s itself) */
   const tpl = s => String(s).replace(/[A-Z]\s·\s[^:,;—(]+/g, '◦').replace(/-?\d+([.,]\d+)?/g, '#').split(/\s+/).slice(0, 7).join(' ');
-  C.__gl = (t, k, s) => { if (!SD[t]) return; add(SD[t].log.k, k); add(SD[t].log.tpl, tpl(s)); if (/vem para o assalto$/.test(s)) add(SD[t].man, 'pull'); else if (/\(retaguarda, sem inimigo perto\)/.test(s)) add(SD[t].man, 'rear'); };
+  C.__gl = (t, k, s) => { if (!SD[t]) return; add(SD[t].log.k, k); add(SD[t].log.tpl, tpl(s)); if (/de postos quietos/.test(s)) add(SD[t].man, 'pull'); else if (/\(retaguarda, sem inimigo perto\)/.test(s)) add(SD[t].man, 'rear'); };
   $('gLog = (g => function (t, k, s) { const L = S.glog && S.glog.l && S.glog.l[t], e0 = L && L[L.length - 1]; g.apply(this, arguments); const L2 = S.glog && S.glog.l && S.glog.l[t]; if (L2 && L2.length && L2[L2.length - 1] !== e0) try { globalThis.__gl(t, k, s); } catch (e) {} })(gLog)');
 
   /* every 2 s: operations, the threat board, drops, points, squads */

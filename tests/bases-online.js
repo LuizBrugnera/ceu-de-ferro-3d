@@ -82,6 +82,7 @@ const tap = async (c, k) => { c.S.input[k] = true; await run(.06); c.S.input[k] 
   ok(n1.prog >= 1 && e2.prog >= 1 && g3.S.sup.find(b => b.id === es.id).prog >= 1, 'construction went on under it and finished for everyone');
 
   console.log('-- a guest destroys a base --');
+  for (const m of g1.S.men) if (m.psq && !m.dead) g1.killMan(m, null);   // the players' own squads (PSQ) would fight at the base too: only the charges here
   const tg = g1.S.sup.find(b => b.id === b1.id); put(g2, tg.x + 8.5, tg.z); await run(2.5);
   g2.S.my.chg = 2; await tap(g2, 'build'); await run(BLD.charge.fuse + .6); const st1 = g1.S.os[tg.id], hp1 = g1.S.oh[tg.id], g3b = g3.S.sup.find(b => b.id === tg.id), st3 = g3.S.os[tg.id];
   ok(st1 === 1 && Math.abs(hp1 - (HP - BLD.charge.dmg)) < 1 && st3 === 1 && g2.S.my.chg === 1, 'its first charge leaves the base damaged on the host (' + Math.round(hp1) + ' hp) and for the others');
